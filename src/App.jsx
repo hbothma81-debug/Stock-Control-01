@@ -580,12 +580,6 @@ export default function StockControl() {
     await supabase.auth.signOut();
   }
 
-  useEffect(() => {
-    if (isAdmin && showManager && people === null) {
-      loadPeople();
-    }
-  }, [isAdmin, showManager]);
-
   async function loadPeople() {
     if (!supabase) return;
     const { data } = await supabase.from("profiles").select("*").order("created_at");
@@ -670,6 +664,12 @@ export default function StockControl() {
 
   const isAdmin = !!profile?.isAdmin;
   const currentUser = session?.user || null;
+
+  useEffect(() => {
+    if (isAdmin && showManager && people === null) {
+      loadPeople();
+    }
+  }, [isAdmin, showManager, people]);
 
   function canView(section) {
     if (isAdmin) return true;
