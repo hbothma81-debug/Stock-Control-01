@@ -406,6 +406,8 @@ export default function StockControl() {
   const [usageDateFrom, setUsageDateFrom] = useState("");
   const [usageDateTo, setUsageDateTo] = useState("");
   const [usageSearchQuery, setUsageSearchQuery] = useState("");
+  const [usageViewMode, setUsageViewMode] = useState("log"); // "log" | "jobCosting"
+  const [jobCostQuery, setJobCostQuery] = useState("");
   const [session, setSession] = useState(undefined); // undefined = still checking, null = signed out
   const [authLoading, setAuthLoading] = useState(true);
   const [profile, setProfile] = useState(null);
@@ -1156,6 +1158,24 @@ export default function StockControl() {
     setUsageModal(null);
   }
 
+  // Snapshotted at the moment stock is used, so job costing reflects what
+  // things actually cost then — not whatever the price happens to be if
+  // someone looks the job up again after a rate change.
+  function resolveUsageLineCost(item, qty) {
+    if (!item) return 0;
+    if (item.mainCat === "plate") {
+      const w = plateWeight(item);
+      const pricePerKg = findPrice("grades", item.grade);
+      return w ? qty * w.perSheet * pricePerKg : 0;
+    }
+    if (item.mainCat === "structural") {
+      const pricePerM = findPrice("sections", item.name);
+      const metresPerPiece = item.trackLength ? Number(item.length || 0) : 1;
+      return qty * metresPerPiece * pricePerM;
+    }
+    return qty * Number(item.value || 0);
+  }
+
   function submitUsageModal(e) {
     e.preventDefault();
     const qty = parseFloat(usageModal.qty);
@@ -1163,6 +1183,7 @@ export default function StockControl() {
     if (usageModal.direction === "use" && !usageModal.jobNumber.trim() && !usageModal.customer.trim()) return;
     const delta = usageModal.direction === "add" ? qty : -qty;
     const itemId = usageModal.item.id;
+    const lineCost = usageModal.direction === "use" ? resolveUsageLineCost(usageModal.item, qty) : 0;
     setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, qty: Math.max(0, Number(it.qty) + delta) } : it)));
     if (delta > 0) closeOutRequisitionsForItem(itemId);
     setUsageLog((prev) => [
@@ -1178,6 +1199,7 @@ export default function StockControl() {
         jobNumber: usageModal.jobNumber.trim(),
         customer: usageModal.customer.trim(),
         note: usageModal.note.trim(),
+        lineCost,
         timestamp: new Date().toISOString(),
       },
     ]);
@@ -2444,6 +2466,70 @@ export default function StockControl() {
         </div>
       ) : tab === "usageLog" ? (
         <div style={S.list}>
+          <div style={S.segRow}>
+            {[
+              { key: "log", label: "Usage Log" },
+              { key: "jobCosting", label: "Job Costing" },
+            ].map((m) => (
+              <button
+                type="button"
+                key={m.key}
+                className="stk-btn"
+                onClick={() => setUsageViewMode(m.key)}
+                style={{
+                  ...S.segBtn,
+                  ...(usageViewMode === m.key ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          {usageViewMode === "jobCosting" ? (
+            <div style={{ marginTop: 12 }}>
+              <input
+                style={S.input}
+                value={jobCostQuery}
+                onChange={(e) => setJobCostQuery(e.target.value)}
+                placeholder="Type a job number or customer name…"
+              />
+              {jobCostQuery.trim() && (() => {
+                const q = jobCostQuery.trim().toLowerCase();
+                const matches = usageLog
+                  .filter((u) => u.direction === "use")
+                  .filter((u) => (u.jobNumber || "").toLowerCase().includes(q) || (u.customer || "").toLowerCase().includes(q))
+                  .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                const total = matches.reduce((sum, u) => sum + (u.lineCost || 0), 0);
+                return (
+                  <div style={{ marginTop: 12 }}>
+                    {matches.length === 0 && <div style={S.empty}>No material logged against that job or customer yet.</div>}
+                    <div style={S.gradeItems}>
+                      {matches.map((u) => (
+                        <div key={u.id} style={S.reqCard}>
+                          <div style={S.reqCardTop}>
+                            <span style={S.itemName}>{u.itemName}</span>
+                            {canSeeValue && <span style={S.itemName}>R{(u.lineCost || 0).toFixed(2)}</span>}
+                          </div>
+                          <div style={S.rowMeta}>
+                            <span>Qty: {u.qty}</span>
+                            <span>By {u.by}</span>
+                            <span>{new Date(u.timestamp).toLocaleDateString()}</span>
+                            {u.jobNumber && <span>Job: {u.jobNumber}</span>}
+                            {u.customer && <span>Customer: {u.customer}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {canSeeValue && matches.length > 0 && (
+                      <div style={S.poTotalRow}>Total material cost: R{total.toFixed(2)}</div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          ) : (
+            <>
           <div style={S.filterBar}>
             <div>
               <label style={S.label}>Type</label>
@@ -2515,6 +2601,8 @@ export default function StockControl() {
               ))}
             {usageLog.length === 0 && <div style={S.empty}>No usage recorded yet.</div>}
           </div>
+            </>
+          )}
         </div>
       ) : (
         <>
