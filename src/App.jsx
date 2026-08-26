@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, Fragment } from "react";
 import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import { supabase } from "./lib/supabaseClient.js";
 import {
   Plus, Minus, Search, Trash2, PackagePlus, AlertTriangle, X,
@@ -21,7 +23,7 @@ const TABS = [
 // TABS above stays as the four physical stock divisions (used by the Add
 // form, exports, etc). NAV_TABS adds Requisitions on top of that just for
 // the main tab bar, since requisitions aren't a stock division themselves.
-const NAV_TABS = [...TABS, { key: "requisitions", label: "Requisitions" }];
+const NAV_TABS = [...TABS, { key: "requisitions", label: "Requisitions" }, { key: "purchaseOrders", label: "Purchase Orders" }];
 
 const SECTIONS = ["plate", "structural", "custom", "stores"];
 
@@ -37,6 +39,7 @@ const MANAGER_TABS = [
   { key: "suppliers", label: "Suppliers" },
   { key: "sheetNames", label: "Sheet Names" },
   { key: "storesCatalog", label: "Stores Catalog" },
+  { key: "companyDetails", label: "Company Details" },
   { key: "departments", label: "User Management" },
 ];
 
@@ -54,6 +57,14 @@ function blankPermissions() {
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
+}
+
+function formatToolNumber(n) {
+  return "ERT-" + String(n).padStart(4, "0");
+}
+
+function formatPoNumber(n) {
+  return "PO-" + String(n).padStart(4, "0");
 }
 
 function plateName(size, thickness) {
@@ -182,7 +193,10 @@ const DEFAULT_MASTER = {
   customers: ["HPE", "BPW"],
   stockCodes: [],
   storeCategories: ["Electrical", "CNC Tooling", "Fasteners", "Welding Consumables", "PPE"],
+  nextToolNumber: 1,
+  nextPoNumber: 1,
   suppliers: [],
+  companyDetails: { name: "East Rand Supplies", address: "", phone: "", email: "" },
   sheetNames: [],
   storesCatalog: [
     { id: "sc1", name: "M6 Hex Bolt", category: "Fasteners", price: 0 },
@@ -286,6 +300,7 @@ const emptyForm = {
   stockType: "full",
   offcutLength: "",
   offcutWidth: "",
+  storesKind: "consumable",
 };
 
 function LibraryField({ label, options, value, onChange, customValue, onCustomChange, placeholder, showComment, comment, onCommentChange, allowNone }) {
@@ -368,6 +383,9 @@ export default function StockControl() {
   const [items, setItems] = useState(null);
   const [master, setMaster] = useState(null);
   const [requisitions, setRequisitions] = useState(null);
+  const [purchaseOrders, setPurchaseOrders] = useState(null);
+  const [poBuilder, setPoBuilder] = useState(null); // { supplierId, lineItems: [...], linkedRequisitionIds: [...], notes }
+  const [selectedReqIds, setSelectedReqIds] = useState([]);
   const [requisitionTarget, setRequisitionTarget] = useState(null);
   const [requisitionQty, setRequisitionQty] = useState("");
   const [requisitionNotes, setRequisitionNotes] = useState("");
@@ -404,6 +422,7 @@ export default function StockControl() {
   const [scForm, setScForm] = useState({ stockCode: "", description: "", price: "", recommendedStock: "", customer: "" });
   const [scCatalogForm, setScCatalogForm] = useState({ name: "", category: "", price: "" });
   const [storesCatalogQuery, setStoresCatalogQuery] = useState("");
+  const [newSupplierName, setNewSupplierName] = useState("");
   const [importFileLabel, setImportFileLabel] = useState("");
   const [importCustomer, setImportCustomer] = useState("");
 
@@ -449,6 +468,17 @@ export default function StockControl() {
             }),
           };
         }
+        // Migration: suppliers used to be a plain list of names before they
+        // gained email/phone/address (for Purchase Orders) — upgrade any
+        // bare strings into proper entries instead of losing them.
+        if (loaded.suppliers) {
+          loaded = {
+            ...loaded,
+            suppliers: loaded.suppliers.map((s) =>
+              typeof s === "string" ? { id: uid(), name: s, email: "", phone: "", address: "" } : s
+            ),
+          };
+        }
         setMaster(loaded);
       } catch {
         setMaster(DEFAULT_MASTER);
@@ -458,6 +488,12 @@ export default function StockControl() {
         setRequisitions(res && res.value ? JSON.parse(res.value) : []);
       } catch {
         setRequisitions([]);
+      }
+      try {
+        const res = await window.storage.get("stock-purchase-orders-v1", true);
+        setPurchaseOrders(res && res.value ? JSON.parse(res.value) : []);
+      } catch {
+        setPurchaseOrders([]);
       }
     })();
   }, []);
@@ -507,6 +543,7 @@ export default function StockControl() {
                 canSeeValue: !!data.can_see_value,
                 canAccessStockManager: !!data.can_access_stock_manager,
                 canManageRequisitions: !!data.can_manage_requisitions,
+                canRaisePO: !!data.can_raise_po,
               }
             : null
         );
@@ -545,6 +582,14 @@ export default function StockControl() {
     }, 300);
     return () => clearTimeout(t);
   }, [requisitions]);
+
+  useEffect(() => {
+    if (purchaseOrders === null) return;
+    const t = setTimeout(() => {
+      window.storage.set("stock-purchase-orders-v1", JSON.stringify(purchaseOrders), true).catch(() => {});
+    }, 300);
+    return () => clearTimeout(t);
+  }, [purchaseOrders]);
 
   async function signUp(e) {
     e.preventDefault();
@@ -597,6 +642,7 @@ export default function StockControl() {
         canSeeValue: !!d.can_see_value,
         canAccessStockManager: !!d.can_access_stock_manager,
         canManageRequisitions: !!d.can_manage_requisitions,
+        canRaisePO: !!d.can_raise_po,
       }))
     );
   }
@@ -610,6 +656,7 @@ export default function StockControl() {
     canSeeValue: "can_see_value",
     canAccessStockManager: "can_access_stock_manager",
     canManageRequisitions: "can_manage_requisitions",
+    canRaisePO: "can_raise_po",
   };
 
   async function updatePersonField(id, field, value) {
@@ -642,6 +689,7 @@ export default function StockControl() {
               canSeeValue: false,
               canAccessStockManager: false,
               canManageRequisitions: false,
+              canRaisePO: false,
             }
           : p
       )
@@ -658,6 +706,7 @@ export default function StockControl() {
         can_see_value: false,
         can_access_stock_manager: false,
         can_manage_requisitions: false,
+        can_raise_po: false,
       })
       .eq("id", id);
   }
@@ -674,6 +723,7 @@ export default function StockControl() {
   function canView(section) {
     if (isAdmin) return true;
     if (section === "requisitions") return !!profile?.canRequisition || !!profile?.canManageRequisitions;
+    if (section === "purchaseOrders") return !!profile?.canManageRequisitions || !!profile?.canRaisePO;
     return profile ? !!profile.permissions?.[section]?.view : false;
   }
 
@@ -690,6 +740,7 @@ export default function StockControl() {
   const canMarkReceivedPerm = isAdmin || !!profile?.canMarkReceived;
   const canManageRequisitions = isAdmin || !!profile?.canManageRequisitions;
   const canAccessStockManager = isAdmin || !!profile?.canAccessStockManager;
+  const canRaisePO = isAdmin || !!profile?.canRaisePO;
   const hasAnyAccess = isAdmin || (!!profile && (canAccessStockManager || NAV_TABS.some((t) => canView(t.key))));
 
   const visibleTabs = useMemo(() => {
@@ -970,6 +1021,17 @@ export default function StockControl() {
     });
   }
 
+  // Suppliers hold more than a name (email, phone, address, logo — for
+  // Purchase Orders), so a quick "+ Add new" from a picker just creates a
+  // bare-minimum entry; an admin fills in the rest later in Stock Manager.
+  function ensureSupplierEntry(name) {
+    setMaster((prev) => {
+      const list = prev.suppliers || [];
+      if (list.some((s) => s.name.toLowerCase() === name.toLowerCase())) return prev;
+      return { ...prev, suppliers: [...list, { id: uid(), name, email: "", phone: "", address: "" }] };
+    });
+  }
+
   function ensureFactorEntry(listKey, name, defaultFactor, sectionType) {
     setMaster((prev) => {
       const list = prev[listKey] || [];
@@ -1142,6 +1204,177 @@ export default function StockControl() {
 
   function cancelRequisition(id) {
     updateRequisition(id, { status: "cancelled" });
+  }
+
+  // ---- Purchase Orders ----
+
+  function generatePoPdf(po) {
+    const doc = new jsPDF();
+    const company = master.companyDetails || {};
+    const supplier = master.suppliers.find((s) => s.id === po.supplierId);
+    const leftX = 14;
+
+    let headerY = 18;
+    let textX = leftX;
+    if (company.logo) {
+      try {
+        doc.addImage(company.logo, "JPEG", leftX, headerY - 6, 22, 22);
+        textX = leftX + 28;
+      } catch {
+        // bad image data — just skip it rather than fail the whole PDF
+      }
+    }
+    doc.setFontSize(14);
+    doc.setFont(undefined, "bold");
+    doc.text(company.name || "Purchase Order", textX, headerY);
+    doc.setFontSize(9);
+    doc.setFont(undefined, "normal");
+    let compY = headerY + 6;
+    [company.address, company.phone, company.email].filter(Boolean).forEach((line) => {
+      doc.text(line, textX, compY);
+      compY += 5;
+    });
+
+    doc.setFontSize(16);
+    doc.setFont(undefined, "bold");
+    doc.text("PURCHASE ORDER", 196, 16, { align: "right" });
+    doc.setFontSize(10);
+    doc.setFont(undefined, "normal");
+    doc.text(po.poNumber, 196, 23, { align: "right" });
+    doc.text(new Date(po.dateCreated).toLocaleDateString(), 196, 29, { align: "right" });
+
+    let y = Math.max(compY, 40) + 8;
+
+    let supX = leftX;
+    if (supplier?.logo) {
+      try {
+        doc.addImage(supplier.logo, "JPEG", leftX, y, 18, 18);
+        supX = leftX + 24;
+      } catch {
+        // skip on bad image data
+      }
+    }
+    doc.setFontSize(10);
+    doc.setFont(undefined, "bold");
+    doc.text("Supplier", supX, y + 4);
+    doc.setFont(undefined, "normal");
+    let supY = y + 10;
+    doc.text(supplier?.name || po.supplierName || "—", supX, supY);
+    supY += 5;
+    [supplier?.email, supplier?.phone, supplier?.address].filter(Boolean).forEach((line) => {
+      doc.text(line, supX, supY);
+      supY += 5;
+    });
+
+    y = Math.max(supY, y + 22) + 6;
+
+    autoTable(doc, {
+      startY: y,
+      head: [["Description", "Qty", "Unit Price", "Total"]],
+      body: po.lineItems.map((li) => [
+        li.description,
+        String(li.qty),
+        `R ${Number(li.unitPrice).toFixed(2)}`,
+        `R ${(Number(li.qty) * Number(li.unitPrice)).toFixed(2)}`,
+      ]),
+      foot: [["", "", "Total", `R ${po.totalValue.toFixed(2)}`]],
+      theme: "grid",
+      headStyles: { fillColor: [27, 29, 31] },
+      footStyles: { fillColor: [242, 169, 0], textColor: [27, 29, 31], fontStyle: "bold" },
+    });
+
+    if (po.notes) {
+      const finalY = (doc.lastAutoTable?.finalY || y + 20) + 10;
+      doc.setFontSize(9);
+      doc.text(`Notes: ${po.notes}`, leftX, finalY);
+    }
+
+    doc.save(`${po.poNumber}.pdf`);
+  }
+
+  function openPoBuilder(linkedRequisitionIds = [], prefillSupplierId = "", prefillLineItems = []) {
+    setPoBuilder({
+      supplierId: prefillSupplierId,
+      lineItems: prefillLineItems.length ? prefillLineItems : [{ description: "", qty: "", unitPrice: "" }],
+      notes: "",
+      linkedRequisitionIds,
+    });
+  }
+
+  function closePoBuilder() {
+    setPoBuilder(null);
+  }
+
+  function addPoLineItem() {
+    setPoBuilder((b) => ({ ...b, lineItems: [...b.lineItems, { description: "", qty: "", unitPrice: "" }] }));
+  }
+
+  function updatePoLineItem(idx, field, value) {
+    setPoBuilder((b) => ({
+      ...b,
+      lineItems: b.lineItems.map((li, i) => (i === idx ? { ...li, [field]: value } : li)),
+    }));
+  }
+
+  function removePoLineItem(idx) {
+    setPoBuilder((b) => ({ ...b, lineItems: b.lineItems.filter((_, i) => i !== idx) }));
+  }
+
+  // Selecting requisitions on the Buyer page to bundle into one PO — reused
+  // by the checkbox flow on each pending requisition card.
+  function toggleReqSelection(id) {
+    setSelectedReqIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  function raisePoFromSelected() {
+    const selected = requisitions.filter((r) => selectedReqIds.includes(r.id));
+    if (selected.length === 0) return;
+    const lineItems = selected.map((r) => ({
+      description: r.itemLabel,
+      qty: r.qty,
+      unitPrice: resolveReqPrice(r),
+    }));
+    // If every selected requisition already has the same supplier text set,
+    // try to match it to a real supplier record to prefill the picker.
+    const supplierNames = [...new Set(selected.map((r) => r.supplier).filter(Boolean))];
+    const matched = supplierNames.length === 1 ? master.suppliers.find((s) => s.name === supplierNames[0]) : null;
+    openPoBuilder(selected.map((r) => r.id), matched?.id || "", lineItems);
+  }
+
+  function submitPurchaseOrder(e) {
+    e.preventDefault();
+    if (!poBuilder.supplierId) return;
+    const validLines = poBuilder.lineItems.filter((li) => li.description.trim() && Number(li.qty) > 0);
+    if (validLines.length === 0) return;
+    const totalValue = validLines.reduce((sum, li) => sum + Number(li.qty) * Number(li.unitPrice || 0), 0);
+    const po = {
+      id: uid(),
+      poNumber: formatPoNumber(master.nextPoNumber),
+      supplierId: poBuilder.supplierId,
+      supplierName: master.suppliers.find((s) => s.id === poBuilder.supplierId)?.name || "",
+      dateCreated: new Date().toISOString(),
+      createdBy: roleLabel,
+      lineItems: validLines.map((li) => ({ ...li, qty: Number(li.qty), unitPrice: Number(li.unitPrice) || 0 })),
+      totalValue,
+      notes: poBuilder.notes.trim(),
+      linkedRequisitionIds: poBuilder.linkedRequisitionIds,
+    };
+    setPurchaseOrders((prev) => [...prev, po]);
+    setMaster((prev) => ({ ...prev, nextPoNumber: (prev.nextPoNumber || 1) + 1 }));
+    // Bundling requisitions into a PO is the "ordering" step — move them on
+    // the same way markOrdered does, and remember which PO they belong to.
+    if (poBuilder.linkedRequisitionIds.length) {
+      setRequisitions((prev) =>
+        prev.map((r) =>
+          poBuilder.linkedRequisitionIds.includes(r.id)
+            ? { ...r, status: "ordered", dateOrdered: new Date().toISOString(), orderedBy: roleLabel, poNumber: po.poNumber }
+            : r
+        )
+      );
+      setSelectedReqIds([]);
+    }
+    generatePoPdf(po);
+    closePoBuilder();
   }
 
   // Requisitions are never deleted from here — completed ones (received,
@@ -1323,7 +1556,7 @@ export default function StockControl() {
     if (form.section === CUSTOM && effectiveSection) ensureFactorEntry("sections", effectiveSection, 0, effectiveSectionType);
     if (form.customer === CUSTOM && effectiveCustomer) ensureStringEntry("customers", effectiveCustomer);
     if (form.salesPerson === CUSTOM && effectiveSalesPerson) ensureStringEntry("salesPeople", effectiveSalesPerson);
-    if (form.supplier === CUSTOM && effectiveSupplier) ensureStringEntry("suppliers", effectiveSupplier);
+    if (form.supplier === CUSTOM && effectiveSupplier) ensureSupplierEntry(effectiveSupplier);
     if (form.sheetName === CUSTOM && effectiveSheetName) ensureStringEntry("sheetNames", effectiveSheetName);
 
     const base = {
@@ -1368,13 +1601,16 @@ export default function StockControl() {
         qty: Number(form.qty) || 0,
       };
     } else {
-      // Customer Stock requires a part number; Stores items don't have to.
+      // Customer Stock requires a part number; Stores items don't have to —
+      // except Tools, which get one assigned automatically.
+      const isNewTool = form.mainCat === "stores" && form.storesKind === "tool" && !editingId;
+      const assignedPartNumber = isNewTool ? formatToolNumber(master.nextToolNumber) : form.partNumber.trim();
       if (!effectiveCustomer || !form.name.trim() || (form.mainCat === "custom" && !form.partNumber.trim())) return;
       payload = {
         ...base,
         mainCat: form.mainCat,
         grade: "",
-        partNumber: form.partNumber.trim(),
+        partNumber: assignedPartNumber,
         name: form.name.trim(),
         value: Number(form.value) || 0,
         comment: "",
@@ -1384,7 +1620,11 @@ export default function StockControl() {
         qty: Number(form.qty) || 0,
         attachmentType: form.attachmentType || "",
         attachmentName: form.attachmentName || "",
+        storesKind: form.mainCat === "stores" ? form.storesKind : undefined,
       };
+      if (isNewTool) {
+        setMaster((prev) => ({ ...prev, nextToolNumber: (prev.nextToolNumber || 1) + 1 }));
+      }
     }
 
     if (editingId) {
@@ -1426,7 +1666,7 @@ export default function StockControl() {
     const grade = resolveField(master.grades.map((g) => g.name), it.grade);
     const sp = resolveField(master.salesPeople, it.salesPerson);
     const cust = resolveField(master.customers, it.customer);
-    const sup = resolveField(master.suppliers, it.supplier);
+    const sup = resolveField(master.suppliers.map((s) => s.name), it.supplier);
     if (it.mainCat === "plate") {
       const stockType = it.stockType || "full";
       const sheet = resolveField(master.sheetNames, it.sheetName);
@@ -1476,11 +1716,14 @@ export default function StockControl() {
     return {
       ...base,
       customer: cust.field, customCustomer: cust.custom,
-      partNumber: it.partNumber || "",
+      // Duplicating a Tool should get its own fresh number, not reuse the
+      // original — clear the part number so the auto-assign logic kicks in.
+      partNumber: duplicate && it.storesKind === "tool" ? "" : it.partNumber || "",
       name: it.name || "",
       value: String(it.value || ""),
       salesPerson: sp.field, customSalesPerson: sp.custom,
       supplier: sup.field, customSupplier: sup.custom,
+      storesKind: it.storesKind || "consumable",
       attachmentType: duplicate ? "" : it.attachmentType || "",
       attachmentName: duplicate ? "" : it.attachmentName || "",
     };
@@ -1630,6 +1873,61 @@ export default function StockControl() {
     });
   }
 
+  function addSupplierRow() {
+    if (!newSupplierName.trim()) return;
+    setMaster((prev) => ({
+      ...prev,
+      suppliers: [...prev.suppliers, { id: uid(), name: newSupplierName.trim(), email: "", phone: "", address: "", logo: "" }],
+    }));
+    setNewSupplierName("");
+  }
+
+  function updateSupplierField(id, field, value) {
+    setMaster((prev) => ({ ...prev, suppliers: prev.suppliers.map((s) => (s.id === id ? { ...s, [field]: value } : s)) }));
+  }
+
+  function removeSupplierRow(id) {
+    setMaster((prev) => ({ ...prev, suppliers: prev.suppliers.filter((s) => s.id !== id) }));
+  }
+
+  async function handleSupplierLogoSelect(id, e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Please choose a JPEG or PNG image.");
+      e.target.value = "";
+      return;
+    }
+    try {
+      const dataUrl = await compressImage(file, 400, 0.85);
+      updateSupplierField(id, "logo", dataUrl);
+    } catch {
+      alert("Couldn't process that image.");
+    }
+    e.target.value = "";
+  }
+
+  function updateCompanyDetail(field, value) {
+    setMaster((prev) => ({ ...prev, companyDetails: { ...prev.companyDetails, [field]: value } }));
+  }
+
+  async function handleCompanyLogoSelect(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Please choose a JPEG or PNG image.");
+      e.target.value = "";
+      return;
+    }
+    try {
+      const dataUrl = await compressImage(file, 400, 0.85);
+      updateCompanyDetail("logo", dataUrl);
+    } catch {
+      alert("Couldn't process that image.");
+    }
+    e.target.value = "";
+  }
+
   function addStoresCatalogRow() {
     if (!scCatalogForm.name.trim()) return;
     setMaster((prev) => ({
@@ -1683,7 +1981,7 @@ export default function StockControl() {
     e.target.value = "";
   }
 
-  if (items === null || master === null || requisitions === null) {
+  if (items === null || master === null || requisitions === null || purchaseOrders === null) {
     return (
       <div style={{ ...S.page, display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ fontFamily: F.mono, color: C.muted, letterSpacing: "0.08em" }}>LOADING STOCK…</div>
@@ -1927,6 +2225,12 @@ export default function StockControl() {
                         )}
                         {canManageRequisitions && r.status === "pending" && (
                           <div style={S.reqActions}>
+                            {canRaisePO && (
+                              <label style={S.reqSelectLabel}>
+                                <input type="checkbox" checked={selectedReqIds.includes(r.id)} onChange={() => toggleReqSelection(r.id)} />
+                                Add to PO
+                              </label>
+                            )}
                             <input
                               style={{ ...S.input, flex: 1 }}
                               placeholder="Supplier (optional)"
@@ -1955,6 +2259,20 @@ export default function StockControl() {
               </div>
             );
           })}
+
+          {canRaisePO && selectedReqIds.length > 0 && (
+            <div style={S.poSelectBar}>
+              <span>{selectedReqIds.length} selected for a Purchase Order</span>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => setSelectedReqIds([])}>
+                  Clear
+                </button>
+                <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={raisePoFromSelected}>
+                  <FileText size={13} /> Raise Purchase Order
+                </button>
+              </div>
+            </div>
+          )}
 
           {canManageRequisitions && (
             <div style={S.gradeBlock}>
@@ -2017,6 +2335,38 @@ export default function StockControl() {
               )}
             </div>
           )}
+        </div>
+      ) : tab === "purchaseOrders" ? (
+        <div style={S.list}>
+          {canRaisePO && (
+            <button type="button" className="stk-btn" style={S.addBtn} onClick={() => openPoBuilder()}>
+              <Plus size={15} strokeWidth={2.5} /> Raise Purchase Order
+            </button>
+          )}
+          {purchaseOrders.length === 0 && <div style={S.empty}>No Purchase Orders yet.</div>}
+          <div style={{ ...S.gradeItems, marginTop: 10 }}>
+            {[...purchaseOrders]
+              .sort((a, b) => new Date(b.dateCreated) - new Date(a.dateCreated))
+              .map((po) => (
+                <div key={po.id} style={S.reqCard}>
+                  <div style={S.reqCardTop}>
+                    <span style={S.itemName}>{po.poNumber} — {po.supplierName || "No supplier"}</span>
+                    <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>R{po.totalValue.toFixed(2)}</span>
+                  </div>
+                  <div style={S.rowMeta}>
+                    <span>Raised by {po.createdBy}</span>
+                    <span>{new Date(po.dateCreated).toLocaleDateString()}</span>
+                    <span>{po.lineItems.length} line{po.lineItems.length === 1 ? "" : "s"}</span>
+                  </div>
+                  {po.notes && <div style={S.itemComment}>{po.notes}</div>}
+                  <div style={S.reqActions}>
+                    <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => generatePoPdf(po)}>
+                      <FileText size={13} /> Download PDF
+                    </button>
+                  </div>
+                </div>
+              ))}
+          </div>
         </div>
       ) : (
         <>
@@ -2265,6 +2615,10 @@ export default function StockControl() {
                             {(tab === "plate" || tab === "structural") && it.stockType === "offcut" && (
                               <span style={S.offcutTag}>Offcut</span>
                             )}
+                            {tab === "stores" && it.storesKind === "tool" && <span style={S.offcutTag}>Tool</span>}
+                            {tab === "stores" && it.storesKind === "toolConsumable" && (
+                              <span style={S.offcutTag}>Tool Consumable</span>
+                            )}
                             {pw && <span>{pw.perSheet.toFixed(1)}kg/sheet · {pw.total.toFixed(1)}kg total</span>}
                             {sw && <span>{sw.perM.toFixed(2)}kg/m · {sw.total.toFixed(1)}kg total</span>}
                             {it.trackLength && it.length > 0 && (
@@ -2388,6 +2742,31 @@ export default function StockControl() {
                   onCustomChange={(v) => setForm({ ...form, customCustomer: v })}
                   placeholder={form.mainCat === "stores" ? "e.g. Hand Tools" : "e.g. New Customer Pty Ltd"}
                 />
+                {form.mainCat === "stores" && (
+                  <div style={{ marginTop: 10 }}>
+                    <label style={S.label}>Type</label>
+                    <div style={S.segRow}>
+                      {[
+                        { key: "tool", label: "Tool" },
+                        { key: "consumable", label: "Consumable" },
+                        { key: "toolConsumable", label: "Tool Consumable" },
+                      ].map((t) => (
+                        <button
+                          type="button"
+                          key={t.key}
+                          className="stk-btn"
+                          onClick={() => setForm({ ...form, storesKind: t.key, partNumber: t.key === "tool" ? "" : form.partNumber })}
+                          style={{
+                            ...S.segBtn,
+                            ...(form.storesKind === t.key ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                          }}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {form.mainCat === "custom" && master.stockCodes.length > 0 && (
                   <div style={{ marginTop: 10 }}>
                     <label style={S.label}>Fill from Stock Codes (optional)</label>
@@ -2445,13 +2824,40 @@ export default function StockControl() {
                   </div>
                 )}
                 <div style={{ marginTop: 10 }}>
-                  <label style={S.label}>Part number {form.mainCat === "stores" ? "(optional)" : ""}</label>
-                  <input
-                    style={S.input}
-                    value={form.partNumber}
-                    onChange={(e) => setForm({ ...form, partNumber: e.target.value })}
-                    placeholder={form.mainCat === "stores" ? "e.g. supplier SKU, if any" : "e.g. HPE-4471"}
-                  />
+                  <label style={S.label}>
+                    {form.mainCat === "stores" && form.storesKind === "tool"
+                      ? "Part number"
+                      : form.mainCat === "stores" && form.storesKind === "toolConsumable"
+                      ? "Supplier part code (optional)"
+                      : `Part number ${form.mainCat === "stores" ? "(optional)" : ""}`}
+                  </label>
+                  {form.mainCat === "stores" && form.storesKind === "tool" ? (
+                    <div style={S.roleHint}>
+                      {editingId ? (
+                        <>
+                          This tool's number: <strong style={{ color: C.accentRaw }}>{form.partNumber || "—"}</strong> (doesn't change when editing)
+                        </>
+                      ) : (
+                        <>
+                          Assigned automatically when you save — will be{" "}
+                          <strong style={{ color: C.accentRaw }}>{formatToolNumber(master.nextToolNumber)}</strong>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <input
+                      style={S.input}
+                      value={form.partNumber}
+                      onChange={(e) => setForm({ ...form, partNumber: e.target.value })}
+                      placeholder={
+                        form.mainCat === "stores" && form.storesKind === "toolConsumable"
+                          ? "e.g. CCMT09T304-M"
+                          : form.mainCat === "stores"
+                          ? "e.g. supplier SKU, if any"
+                          : "e.g. HPE-4471"
+                      }
+                    />
+                  )}
                 </div>
                 <div style={{ marginTop: 10 }}>
                   <label style={S.label}>Description</label>
@@ -2765,7 +3171,7 @@ export default function StockControl() {
             <div style={{ marginTop: 10 }}>
               <LibraryField
                 label="Supplier"
-                options={master.suppliers}
+                options={master.suppliers.map((s) => s.name)}
                 value={form.supplier}
                 onChange={(v) => setForm({ ...form, supplier: v })}
                 customValue={form.customSupplier}
@@ -3023,6 +3429,123 @@ export default function StockControl() {
                   {(master.storesCatalog || []).length === 0 && <div style={S.empty}>Nothing here yet — add one above.</div>}
                 </div>
               </>
+            ) : managerTab === "suppliers" ? (
+              <>
+                <div style={S.roleHint}>
+                  Add a logo and contact details for any supplier you'll be raising Purchase Orders to — these appear on the
+                  PO document. Suppliers with no email or logo still work fine everywhere else in the app.
+                </div>
+                <div style={{ ...S.managerAddRow, marginTop: 10 }}>
+                  <input
+                    style={{ ...S.input, flex: 1 }}
+                    value={newSupplierName}
+                    onChange={(e) => setNewSupplierName(e.target.value)}
+                    placeholder="New supplier name…"
+                  />
+                  <button type="button" className="stk-btn" style={S.addBtn} onClick={addSupplierRow}>
+                    <Plus size={15} strokeWidth={2.5} />
+                    Add
+                  </button>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
+                  {master.suppliers.map((s) => (
+                    <div key={s.id} style={S.deptCard}>
+                      <div style={S.deptCardHead}>
+                        {s.logo ? (
+                          <img src={s.logo} alt="" style={S.supplierLogoPreview} />
+                        ) : (
+                          <div style={S.supplierLogoPlaceholder}>
+                            <ImageIcon size={16} color={C.muted} />
+                          </div>
+                        )}
+                        <EditableName value={s.name} onCommit={(v) => updateSupplierField(s.id, "name", v)} style={{ fontWeight: 600, fontSize: 14 }} />
+                        <label className="stk-btn" style={S.managerDelete} title="Upload logo">
+                          <Paperclip size={13} />
+                          <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleSupplierLogoSelect(s.id, e)} />
+                        </label>
+                        <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeSupplierRow(s.id)}>
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                      <div style={S.formGrid}>
+                        <input
+                          style={S.input}
+                          type="email"
+                          value={s.email}
+                          onChange={(e) => updateSupplierField(s.id, "email", e.target.value)}
+                          placeholder="Email"
+                        />
+                        <input
+                          style={S.input}
+                          value={s.phone}
+                          onChange={(e) => updateSupplierField(s.id, "phone", e.target.value)}
+                          placeholder="Phone"
+                        />
+                      </div>
+                      <input
+                        style={{ ...S.input, marginTop: 8 }}
+                        value={s.address}
+                        onChange={(e) => updateSupplierField(s.id, "address", e.target.value)}
+                        placeholder="Address"
+                      />
+                    </div>
+                  ))}
+                  {master.suppliers.length === 0 && <div style={S.empty}>No suppliers yet — add one above.</div>}
+                </div>
+              </>
+            ) : managerTab === "companyDetails" ? (
+              <>
+                <div style={S.roleHint}>This is your own letterhead — it appears at the top of every Purchase Order.</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+                  {master.companyDetails.logo ? (
+                    <img src={master.companyDetails.logo} alt="" style={S.supplierLogoPreview} />
+                  ) : (
+                    <div style={S.supplierLogoPlaceholder}>
+                      <ImageIcon size={16} color={C.muted} />
+                    </div>
+                  )}
+                  <label className="stk-btn" style={{ ...S.addBtn, cursor: "pointer" }}>
+                    <Paperclip size={14} />
+                    Upload logo
+                    <input type="file" accept="image/*" style={{ display: "none" }} onChange={handleCompanyLogoSelect} />
+                  </label>
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <label style={S.label}>Company name</label>
+                  <input
+                    style={S.input}
+                    value={master.companyDetails.name}
+                    onChange={(e) => updateCompanyDetail("name", e.target.value)}
+                  />
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <label style={S.label}>Address</label>
+                  <input
+                    style={S.input}
+                    value={master.companyDetails.address}
+                    onChange={(e) => updateCompanyDetail("address", e.target.value)}
+                  />
+                </div>
+                <div style={S.formGrid}>
+                  <div>
+                    <label style={S.label}>Phone</label>
+                    <input
+                      style={S.input}
+                      value={master.companyDetails.phone}
+                      onChange={(e) => updateCompanyDetail("phone", e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label style={S.label}>Email</label>
+                    <input
+                      style={S.input}
+                      type="email"
+                      value={master.companyDetails.email}
+                      onChange={(e) => updateCompanyDetail("email", e.target.value)}
+                    />
+                  </div>
+                </div>
+              </>
             ) : managerTab === "departments" && isAdmin ? (
               <>
                 <div style={S.roleHint}>
@@ -3124,6 +3647,14 @@ export default function StockControl() {
                                 onChange={(e) => updatePersonField(p.id, "canManageRequisitions", e.target.checked)}
                               />
                               Can manage requisitions (full buyer powers)
+                            </label>
+                            <label style={S.deptToggleItem}>
+                              <input
+                                type="checkbox"
+                                checked={!!p.canRaisePO}
+                                onChange={(e) => updatePersonField(p.id, "canRaisePO", e.target.checked)}
+                              />
+                              Can raise Purchase Orders
                             </label>
                           </div>
                         </>
@@ -3274,6 +3805,95 @@ export default function StockControl() {
               </>
             )}
           </div>
+        </div>
+      )}
+
+      {poBuilder && (
+        <div style={S.modalOverlay} onClick={closePoBuilder}>
+          <form style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()} onSubmit={submitPurchaseOrder}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Raise Purchase Order</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={closePoBuilder}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <label style={S.label}>Supplier</label>
+            <select
+              style={S.input}
+              value={poBuilder.supplierId}
+              onChange={(e) => setPoBuilder((b) => ({ ...b, supplierId: e.target.value }))}
+              required
+            >
+              <option value="">Select a supplier…</option>
+              {master.suppliers.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+            {master.suppliers.length === 0 && (
+              <div style={{ ...S.roleHint, marginTop: 6 }}>
+                No suppliers set up yet — add one in Stock Manager → Suppliers first.
+              </div>
+            )}
+
+            <div style={{ marginTop: 12 }}>
+              <label style={S.label}>Line items</label>
+              {poBuilder.lineItems.map((li, idx) => (
+                <div key={idx} style={S.poLineRow}>
+                  <input
+                    style={{ ...S.input, flex: 3 }}
+                    value={li.description}
+                    onChange={(e) => updatePoLineItem(idx, "description", e.target.value)}
+                    placeholder="Description"
+                  />
+                  <input
+                    style={{ ...S.input, flex: 1 }}
+                    type="number"
+                    min="0"
+                    value={li.qty}
+                    onChange={(e) => updatePoLineItem(idx, "qty", e.target.value)}
+                    placeholder="Qty"
+                  />
+                  <input
+                    style={{ ...S.input, flex: 1 }}
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={li.unitPrice}
+                    onChange={(e) => updatePoLineItem(idx, "unitPrice", e.target.value)}
+                    placeholder="R each"
+                  />
+                  <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removePoLineItem(idx)}>
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+              <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 6 }} onClick={addPoLineItem}>
+                <Plus size={13} /> Add line
+              </button>
+            </div>
+
+            <div style={S.poTotalRow}>
+              Total: R
+              {poBuilder.lineItems
+                .reduce((sum, li) => sum + (Number(li.qty) || 0) * (Number(li.unitPrice) || 0), 0)
+                .toFixed(2)}
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Notes (optional)</label>
+              <input
+                style={S.input}
+                value={poBuilder.notes}
+                onChange={(e) => setPoBuilder((b) => ({ ...b, notes: e.target.value }))}
+                placeholder="e.g. delivery instructions"
+              />
+            </div>
+
+            <button type="submit" style={S.submitBtn} className="stk-btn">
+              Generate PDF & Save
+            </button>
+          </form>
         </div>
       )}
 
@@ -4208,6 +4828,43 @@ const S = {
     fontSize: 12,
     fontFamily: F.mono,
   },
+  poSelectBar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    background: C.accentTint,
+    border: `1px solid ${C.accentRaw}55`,
+    borderRadius: 8,
+    padding: "10px 14px",
+    fontSize: 13,
+    color: C.accentRaw,
+    fontWeight: 500,
+  },
+  reqSelectLabel: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    fontSize: 12,
+    color: C.muted,
+    whiteSpace: "nowrap",
+  },
+  poLineRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 6,
+  },
+  poTotalRow: {
+    fontFamily: F.mono,
+    fontSize: 15,
+    fontWeight: 600,
+    color: C.accentRaw,
+    textAlign: "right",
+    marginTop: 10,
+    paddingTop: 10,
+    borderTop: `1px solid ${C.border}`,
+  },
   reqActions: {
     display: "flex",
     alignItems: "center",
@@ -4303,6 +4960,26 @@ const S = {
     borderRadius: 4,
     padding: "2px 6px",
     textTransform: "uppercase",
+    flexShrink: 0,
+  },
+  supplierLogoPreview: {
+    width: 34,
+    height: 34,
+    borderRadius: 6,
+    objectFit: "contain",
+    background: C.bg,
+    border: `1px solid ${C.border}`,
+    flexShrink: 0,
+  },
+  supplierLogoPlaceholder: {
+    width: 34,
+    height: 34,
+    borderRadius: 6,
+    background: C.bg,
+    border: `1px solid ${C.border}`,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
     flexShrink: 0,
   },
   deptToggleGrid: {
