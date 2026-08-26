@@ -16,13 +16,14 @@ import {
 const TABS = [
   { key: "plate", label: "Plate & Sheet" },
   { key: "structural", label: "Structural Steel" },
+  { key: "cncBar", label: "CNC Bar" },
   { key: "custom", label: "Customer Stock" },
   { key: "stores", label: "Stores" },
 ];
 
-// TABS above stays as the four physical stock divisions (used by the Add
-// form, exports, etc). NAV_TABS adds Requisitions on top of that just for
-// the main tab bar, since requisitions aren't a stock division themselves.
+// TABS above stays as the physical stock divisions (used by the Add form,
+// exports, etc). NAV_TABS adds Requisitions on top of that just for the
+// main tab bar, since requisitions aren't a stock division themselves.
 const NAV_TABS = [
   ...TABS,
   { key: "requisitions", label: "Requisitions" },
@@ -30,13 +31,14 @@ const NAV_TABS = [
   { key: "usageLog", label: "Usage Log" },
 ];
 
-const SECTIONS = ["plate", "structural", "custom", "stores"];
+const SECTIONS = ["plate", "structural", "cncBar", "custom", "stores"];
 
 const MANAGER_TABS = [
   { key: "sizes", label: "Sheet Sizes" },
   { key: "sections", label: "Sections" },
   { key: "sectionTypes", label: "Section Types" },
   { key: "grades", label: "Material Types" },
+  { key: "cncGrades", label: "CNC Bar Grades" },
   { key: "salesPeople", label: "Sales People" },
   { key: "customers", label: "Customers" },
   { key: "stockCodes", label: "Stock Codes" },
@@ -48,7 +50,7 @@ const MANAGER_TABS = [
   { key: "departments", label: "User Management" },
 ];
 
-const FACTOR_TABLES = ["grades", "sections"];
+const FACTOR_TABLES = ["grades", "sections", "cncGrades"];
 
 const CUSTOM = "__custom__";
 
@@ -194,6 +196,19 @@ const DEFAULT_MASTER = {
     { name: "DOMEX 700", factor: 7.85, price: 0 },
     { name: "Aluminium", factor: 2.71, price: 0 },
   ],
+  // Density (g/cm³) — CNC bar is priced per kg like Plate, but stocked and
+  // ordered per millimetre, since it's round stock cut to length on the lathe.
+  cncGrades: [
+    { name: "EN8", factor: 7.85, price: 0 },
+    { name: "EN9", factor: 7.85, price: 0 },
+    { name: "EN19", factor: 7.85, price: 0 },
+    { name: "EN21", factor: 7.85, price: 0 },
+    { name: "EN1A Leaded", factor: 7.85, price: 0 },
+    { name: "BMS (Bright Mild Steel)", factor: 7.85, price: 0 },
+    { name: "Brass", factor: 8.50, price: 0 },
+    { name: "Stainless 304", factor: 7.93, price: 0 },
+    { name: "Stainless 316", factor: 7.98, price: 0 },
+  ],
   salesPeople: [],
   customers: ["HPE", "BPW"],
   stockCodes: [],
@@ -306,6 +321,7 @@ const emptyForm = {
   offcutLength: "",
   offcutWidth: "",
   storesKind: "consumable",
+  diameter: "",
 };
 
 function LibraryField({ label, options, value, onChange, customValue, onCustomChange, placeholder, showComment, comment, onCommentChange, allowNone }) {
@@ -983,10 +999,31 @@ export default function StockControl() {
     return { total: totalM * pricePerM };
   }
 
+  // Round bar's weight comes straight from geometry (density × cross-section
+  // area × length), not a lookup table of named profiles — this is the same
+  // reason Plate can calculate weight directly instead of needing a Sections
+  // table. kg/m = (π/4000) × diameter(mm)² × density(g/cm³).
+  function cncBarWeight(it) {
+    const d = parseFloat(it.diameter);
+    const density = findFactor("cncGrades", it.grade);
+    if (!d || density == null) return null;
+    const perM = (Math.PI / 4000) * d * d * density;
+    const totalM = (Number(it.length || 0) / 1000) * Number(it.qty || 0);
+    return { perM, total: perM * totalM };
+  }
+
+  function cncBarValue(it) {
+    const w = cncBarWeight(it);
+    if (!w) return null;
+    const pricePerKg = findPrice("cncGrades", it.grade);
+    return { total: w.total * pricePerKg };
+  }
+
   const tabWeightTotal = useMemo(() => {
     if (!master) return null;
     if (tab === "plate") return tabItems.reduce((sum, it) => sum + (plateWeight(it)?.total || 0), 0);
     if (tab === "structural") return tabItems.reduce((sum, it) => sum + (structuralWeight(it)?.total || 0), 0);
+    if (tab === "cncBar") return tabItems.reduce((sum, it) => sum + (cncBarWeight(it)?.total || 0), 0);
     return null;
   }, [tabItems, tab, master]);
 
@@ -995,6 +1032,7 @@ export default function StockControl() {
     if (tab === "custom" || tab === "stores") return tabItems.reduce((sum, it) => sum + Number(it.value || 0) * Number(it.qty || 0), 0);
     if (tab === "plate") return tabItems.reduce((sum, it) => sum + (plateValue(it)?.total || 0), 0);
     if (tab === "structural") return tabItems.reduce((sum, it) => sum + (structuralValue(it)?.total || 0), 0);
+    if (tab === "cncBar") return tabItems.reduce((sum, it) => sum + (cncBarValue(it)?.total || 0), 0);
     return null;
   }, [tabItems, tab, master]);
 
@@ -1004,6 +1042,7 @@ export default function StockControl() {
     return items.reduce((sum, it) => {
       if (it.mainCat === "plate") return sum + (plateValue(it)?.total || 0);
       if (it.mainCat === "structural") return sum + (structuralValue(it)?.total || 0);
+      if (it.mainCat === "cncBar") return sum + (cncBarValue(it)?.total || 0);
       if (it.mainCat === "custom" || it.mainCat === "stores") return sum + Number(it.value || 0) * Number(it.qty || 0);
       return sum;
     }, 0);
@@ -1039,6 +1078,19 @@ export default function StockControl() {
           Number(it.length || 0) === formLen
       );
     }
+    if (form.mainCat === "cncBar") {
+      if (!form.diameter.trim()) return null;
+      // Same idea as structural offcuts — a given grade/diameter at one
+      // length is a different stock line than the same grade/diameter at
+      // another length, since you can't always substitute one for the other.
+      const formLen = Number(form.length) || 0;
+      return catalog.find(
+        (it) =>
+          it.grade.trim().toLowerCase() === g &&
+          Number(it.diameter) === Number(form.diameter) &&
+          Number(it.length || 0) === formLen
+      );
+    }
     if (form.mainCat === "custom") {
       if (!effectiveCustomer || !form.partNumber.trim()) return null;
       return catalog.find(
@@ -1056,7 +1108,7 @@ export default function StockControl() {
       );
     }
     return null;
-  }, [specCatalog, editingId, effectiveGrade, effectiveSize, effectiveSection, effectiveCustomer, form.thickness, form.partNumber, form.name, form.mainCat, form.length, form.trackLength, form.stockType, master]);
+  }, [specCatalog, editingId, effectiveGrade, effectiveSize, effectiveSection, effectiveCustomer, form.thickness, form.partNumber, form.name, form.mainCat, form.length, form.trackLength, form.stockType, form.diameter, master]);
 
   function ensureStringEntry(listKey, value) {
     setMaster((prev) => {
@@ -1646,7 +1698,9 @@ export default function StockControl() {
     e.preventDefault();
     if (matchedExisting && !allowDuplicate) return;
 
-    if (form.grade === CUSTOM && effectiveGrade) ensureFactorEntry("grades", effectiveGrade, 7.85);
+    if (form.grade === CUSTOM && effectiveGrade) {
+      ensureFactorEntry(form.mainCat === "cncBar" ? "cncGrades" : "grades", effectiveGrade, 7.85);
+    }
     if (form.size === CUSTOM && effectiveSize) ensureStringEntry("sizes", effectiveSize);
     if (form.sectionType === CUSTOM && effectiveSectionType) ensureStringEntry("sectionTypes", effectiveSectionType);
     if (form.section === CUSTOM && effectiveSection) ensureFactorEntry("sections", effectiveSection, 0, effectiveSectionType);
@@ -1694,6 +1748,20 @@ export default function StockControl() {
         trackLength: form.trackLength,
         length: form.trackLength ? Number(form.length) || 0 : 0,
         unit: form.trackLength ? "m" : "ea",
+        qty: Number(form.qty) || 0,
+      };
+    } else if (form.mainCat === "cncBar") {
+      if (!form.diameter.trim()) return;
+      payload = {
+        ...base,
+        mainCat: "cncBar",
+        grade: effectiveGrade || "Ungraded",
+        name: `${effectiveGrade} ⌀${form.diameter}mm`,
+        diameter: Number(form.diameter) || 0,
+        comment: "",
+        trackLength: true,
+        length: Number(form.length) || 0,
+        unit: "mm",
         qty: Number(form.qty) || 0,
       };
     } else {
@@ -1804,6 +1872,18 @@ export default function StockControl() {
         section: section.field, customSection: section.custom,
         stockType: it.stockType || "full",
         trackLength: it.trackLength, length: String(it.length || ""),
+        salesPerson: sp.field, customSalesPerson: sp.custom,
+        customer: cust.field, customCustomer: cust.custom,
+        supplier: sup.field, customSupplier: sup.custom,
+      };
+    }
+    if (it.mainCat === "cncBar") {
+      const cncGrade = resolveField(master.cncGrades.map((g) => g.name), it.grade);
+      return {
+        ...base,
+        grade: cncGrade.field, customGrade: cncGrade.custom,
+        diameter: String(it.diameter || ""),
+        length: String(it.length || ""),
         salesPerson: sp.field, customSalesPerson: sp.custom,
         customer: cust.field, customCustomer: cust.custom,
         supplier: sup.field, customSupplier: sup.custom,
@@ -2662,7 +2742,7 @@ export default function StockControl() {
             <label style={S.label}>Material</label>
             <select style={S.input} value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)}>
               <option value="">All materials</option>
-              {master.grades.map((g) => (
+              {(tab === "cncBar" ? master.cncGrades : master.grades).map((g) => (
                 <option key={g.name} value={g.name}>{g.name}</option>
               ))}
             </select>
@@ -2812,6 +2892,7 @@ export default function StockControl() {
                     const low = isLowStock(it);
                     const pw = tab === "plate" ? plateWeight(it) : null;
                     const sw = tab === "structural" ? structuralWeight(it) : null;
+                    const cw = tab === "cncBar" ? cncBarWeight(it) : null;
                     const linkedReq = tab !== "custom" ? activeRequisitionForItem(it.id) : null;
                     return (
                       <div
@@ -2857,7 +2938,9 @@ export default function StockControl() {
                             )}
                             {pw && <span>{pw.perSheet.toFixed(1)}kg/sheet · {pw.total.toFixed(1)}kg total</span>}
                             {sw && <span>{sw.perM.toFixed(2)}kg/m · {sw.total.toFixed(1)}kg total</span>}
-                            {it.trackLength && it.length > 0 && (
+                            {cw && <span>{cw.perM.toFixed(2)}kg/m · {cw.total.toFixed(1)}kg total</span>}
+                            {tab === "cncBar" && <span>⌀{it.diameter}mm × {it.length}mm</span>}
+                            {tab === "structural" && it.trackLength && it.length > 0 && (
                               <span>{it.length}m lengths</span>
                             )}
                             {it.loc && <span>{it.loc}</span>}
@@ -2872,6 +2955,9 @@ export default function StockControl() {
                             )}
                             {tab === "structural" && canSeeValue && sw && (
                               <span>R{(structuralValue(it)?.total || 0).toFixed(2)} value</span>
+                            )}
+                            {tab === "cncBar" && canSeeValue && cw && (
+                              <span>R{(cncBarValue(it)?.total || 0).toFixed(2)} value</span>
                             )}
                             {low && (
                               <span style={S.lowTag}>
@@ -3286,6 +3372,94 @@ export default function StockControl() {
                       />
                     </div>
                   </div>
+                ) : form.mainCat === "cncBar" ? (
+                  <div style={{ marginTop: 10 }}>
+                    <LibraryField
+                      label="Grade"
+                      options={master.cncGrades.map((g) => g.name)}
+                      value={form.grade}
+                      onChange={(v) => setForm({ ...form, grade: v })}
+                      customValue={form.customGrade}
+                      onCustomChange={(v) => setForm({ ...form, customGrade: v })}
+                      placeholder="e.g. EN8"
+                    />
+                    <div style={{ marginTop: 10 }}>
+                      <label style={S.label}>Diameter (mm)</label>
+                      <input
+                        style={S.input}
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        value={form.diameter}
+                        onChange={(e) => setForm({ ...form, diameter: e.target.value })}
+                        placeholder="e.g. 25"
+                      />
+                    </div>
+                    <div style={{ marginTop: 10 }}>
+                      <label style={S.label}>Length per piece (mm)</label>
+                      <input
+                        style={S.input}
+                        type="number"
+                        min="0"
+                        value={form.length}
+                        onChange={(e) => setForm({ ...form, length: e.target.value })}
+                        placeholder="e.g. 3000"
+                      />
+                    </div>
+                    {effectiveGrade && form.diameter.trim() && (
+                      <div style={{ marginTop: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <label style={S.label}>Price</label>
+                          <div style={S.segRow}>
+                            {[
+                              { key: "perUnit", label: "R/m" },
+                              { key: "perKg", label: "R/kg" },
+                            ].map((m) => (
+                              <button
+                                type="button"
+                                key={m.key}
+                                className="stk-btn"
+                                onClick={() => setPriceUnitMode(m.key)}
+                                style={{
+                                  ...S.segBtn,
+                                  ...(priceUnitMode === m.key ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                                }}
+                              >
+                                {m.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        {(() => {
+                          const d = parseFloat(form.diameter) || 0;
+                          const perM = d ? (Math.PI / 4000) * d * d * findFactor("cncGrades", effectiveGrade) : 0;
+                          const currentPerKg = findPrice("cncGrades", effectiveGrade);
+                          const displayValue = priceUnitMode === "perKg" ? currentPerKg : currentPerKg * perM;
+                          return (
+                            <>
+                              <input
+                                type="number"
+                                step="0.01"
+                                style={S.input}
+                                value={displayValue === 0 ? "" : displayValue}
+                                placeholder="0"
+                                onChange={(e) => {
+                                  const v = parseFloat(e.target.value) || 0;
+                                  const newPerKg = priceUnitMode === "perKg" ? v : perM > 0 ? v / perM : 0;
+                                  setMaterialPrice("cncGrades", effectiveGrade, newPerKg);
+                                }}
+                              />
+                              <div style={S.roleHint}>
+                                {perM > 0
+                                  ? `${perM.toFixed(2)}kg per metre — this updates the ${effectiveGrade} rate everywhere it's used.`
+                                  : "Enter a diameter to calculate weight."}
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
+                  </div>
                 ) : effectiveSectionType ? (
                   <div style={{ marginTop: 10 }}>
                     <LibraryField
@@ -3451,6 +3625,18 @@ export default function StockControl() {
             ) : form.mainCat === "structural" && form.trackLength ? (
               <div style={{ marginTop: 10 }}>
                 <label style={S.label}>Pieces on hand</label>
+                <input
+                  style={S.input}
+                  type="number"
+                  min="0"
+                  value={form.qty}
+                  onChange={(e) => setForm({ ...form, qty: e.target.value })}
+                  placeholder="0"
+                />
+              </div>
+            ) : form.mainCat === "cncBar" ? (
+              <div style={{ marginTop: 10 }}>
+                <label style={S.label}>Pieces on hand (at this length)</label>
                 <input
                   style={S.input}
                   type="number"
