@@ -510,6 +510,15 @@ export default function StockControl() {
             ),
           };
         }
+        // Fix-up: a bug briefly let bare strings get added to cncGrades
+        // (which needs {name, factor, price} objects like Material Types) —
+        // upgrade any stragglers instead of leaving them broken.
+        if (loaded.cncGrades) {
+          loaded = {
+            ...loaded,
+            cncGrades: loaded.cncGrades.map((g) => (typeof g === "string" ? { name: g, factor: 0, price: 0 } : g)),
+          };
+        }
         setMaster(loaded);
       } catch {
         setMaster(DEFAULT_MASTER);
@@ -1946,7 +1955,7 @@ export default function StockControl() {
     setQuery(it.mainCat === "custom" || it.mainCat === "stores" ? (it.partNumber || it.name) : it.name);
   }
 
-  const managerIsFactorTable = managerTab === "grades" || managerTab === "sections";
+  const managerIsFactorTable = FACTOR_TABLES.includes(managerTab);
 
   function addMasterEntry() {
     const val = managerInput.trim();
@@ -4220,7 +4229,7 @@ export default function StockControl() {
                         step="0.01"
                         value={managerFactor}
                         onChange={(e) => setManagerFactor(e.target.value)}
-                        placeholder={managerTab === "grades" ? "Density g/cm³" : "kg/m"}
+                        placeholder={managerTab !== "sections" ? "Density g/cm³" : "kg/m"}
                       />
                       <input
                         style={{ ...S.input, flex: 1 }}
@@ -4228,7 +4237,7 @@ export default function StockControl() {
                         step="0.01"
                         value={managerPrice}
                         onChange={(e) => setManagerPrice(e.target.value)}
-                        placeholder={managerTab === "grades" ? "R/kg" : "R/m"}
+                        placeholder={managerTab !== "sections" ? "R/kg" : "R/m"}
                       />
                     </>
                   )}
@@ -4273,7 +4282,7 @@ export default function StockControl() {
                                 placeholder="0"
                                 onChange={(e) => updateFactorField(entry.name, "factor", e.target.value)}
                                 style={S.managerFactorInput}
-                                title={managerTab === "grades" ? "Density g/cm³" : "kg/m"}
+                                title={managerTab !== "sections" ? "Density g/cm³" : "kg/m"}
                               />
                               <input
                                 type="number"
@@ -4282,7 +4291,7 @@ export default function StockControl() {
                                 placeholder="0"
                                 onChange={(e) => updateFactorField(entry.name, "price", e.target.value)}
                                 style={S.managerFactorInput}
-                                title={managerTab === "grades" ? "R/kg" : "R/m"}
+                                title={managerTab !== "sections" ? "R/kg" : "R/m"}
                               />
                               {managerTab === "sections" && (
                                 <select
