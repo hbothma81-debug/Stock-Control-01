@@ -19,6 +19,7 @@ const TABS = [
   { key: "cncBar", label: "CNC Bar" },
   { key: "custom", label: "Customer Stock" },
   { key: "stores", label: "Stores" },
+  { key: "assets", label: "Assets" },
 ];
 
 // TABS above stays as the physical stock divisions (used by the Add form,
@@ -31,7 +32,7 @@ const NAV_TABS = [
   { key: "usageLog", label: "Usage Log" },
 ];
 
-const SECTIONS = ["plate", "structural", "cncBar", "custom", "stores"];
+const SECTIONS = ["plate", "structural", "cncBar", "custom", "stores", "assets"];
 
 const MANAGER_TABS = [
   { key: "sizes", label: "Sheet Sizes" },
@@ -322,6 +323,9 @@ const emptyForm = {
   offcutWidth: "",
   storesKind: "consumable",
   diameter: "",
+  manufacturer: "",
+  serialNumber: "",
+  purchaseDate: "",
 };
 
 function LibraryField({ label, options, value, onChange, customValue, onCustomChange, placeholder, showComment, comment, onCommentChange, allowNone }) {
@@ -407,6 +411,8 @@ export default function StockControl() {
   const [purchaseOrders, setPurchaseOrders] = useState(null);
   const [usageLog, setUsageLog] = useState(null);
   const [usageModal, setUsageModal] = useState(null); // { item, direction: "add" | "use", qty, jobNumber, customer, note }
+  const [assetRemoveModal, setAssetRemoveModal] = useState(null); // { item, reason, date }
+  const [showAssetArchive, setShowAssetArchive] = useState(false);
   const [poBuilder, setPoBuilder] = useState(null); // { supplierId, lineItems: [...], linkedRequisitionIds: [...], notes }
   const [selectedReqIds, setSelectedReqIds] = useState([]);
   const [requisitionTarget, setRequisitionTarget] = useState(null);
@@ -449,6 +455,10 @@ export default function StockControl() {
   const [managerPrice, setManagerPrice] = useState("");
   const [managerType, setManagerType] = useState("");
   const [stockCodeQuery, setStockCodeQuery] = useState("");
+  const [stockCodeCustomerFilter, setStockCodeCustomerFilter] = useState("");
+  const [storesCatalogCategoryFilter, setStoresCatalogCategoryFilter] = useState("");
+  const [managerSearchQuery, setManagerSearchQuery] = useState("");
+  const [sectionTypeFilterInManager, setSectionTypeFilterInManager] = useState("");
   const [scForm, setScForm] = useState({ stockCode: "", description: "", price: "", recommendedStock: "", customer: "" });
   const [scCatalogForm, setScCatalogForm] = useState({ name: "", category: "", price: "" });
   const [storesCatalogQuery, setStoresCatalogQuery] = useState("");
@@ -479,7 +489,26 @@ export default function StockControl() {
     (async () => {
       try {
         const res = await window.storage.get("stock-items-v3", true);
-        setItems(res && res.value ? JSON.parse(res.value) : seed);
+        let loadedItems = res && res.value ? JSON.parse(res.value) : seed;
+        // Migration: Tools used to live in Stores as a "storesKind" — they
+        // now have their own Assets category with different fields
+        // (manufacturer, serial number, purchase date, one-at-a-time
+        // tracking). Move any existing ones over automatically.
+        loadedItems = loadedItems.map((it) =>
+          it.mainCat === "stores" && it.storesKind === "tool"
+            ? {
+                ...it,
+                mainCat: "assets",
+                storesKind: undefined,
+                manufacturer: it.manufacturer || "",
+                serialNumber: it.serialNumber || "",
+                purchaseDate: it.purchaseDate || "",
+                status: it.status || "active",
+                qty: 1,
+              }
+            : it
+        );
+        setItems(loadedItems);
       } catch {
         setItems(seed);
       }
@@ -817,6 +846,7 @@ export default function StockControl() {
     if (!items) return [];
     return items
       .filter((it) => it.mainCat === tab)
+      .filter((it) => tab !== "assets" || it.status !== "removed")
       // Home page normally hides zero-stock items — except when there's an
       // active requisition tracking it, so the red/orange/green flag stays
       // visible until the order is actually fulfilled.
@@ -896,7 +926,7 @@ export default function StockControl() {
     const map = {};
     const isGrouped = tab === "custom" || tab === "stores";
     tabItems.forEach((it) => {
-      const g = isGrouped ? it.customer || "Unassigned" : it.grade || "Ungraded";
+      const g = isGrouped ? it.customer || "Unassigned" : tab === "assets" ? it.manufacturer || "Other" : it.grade || "Ungraded";
       if (!map[g]) map[g] = [];
       map[g].push(it);
     });
@@ -1265,6 +1295,34 @@ export default function StockControl() {
       },
     ]);
     closeUsageModal();
+  }
+
+  function openAssetRemoveModal(item) {
+    setAssetRemoveModal({ item, reason: "", date: new Date().toISOString().slice(0, 10) });
+  }
+
+  function closeAssetRemoveModal() {
+    setAssetRemoveModal(null);
+  }
+
+  function submitAssetRemoveModal(e) {
+    e.preventDefault();
+    if (!assetRemoveModal.reason.trim()) return;
+    const itemId = assetRemoveModal.item.id;
+    setItems((prev) =>
+      prev.map((it) =>
+        it.id === itemId
+          ? {
+              ...it,
+              status: "removed",
+              removedReason: assetRemoveModal.reason.trim(),
+              removedDate: assetRemoveModal.date,
+              removedBy: roleLabel,
+            }
+          : it
+      )
+    );
+    closeAssetRemoveModal();
   }
 
   function removeItem(id) {
@@ -1773,17 +1831,38 @@ export default function StockControl() {
         unit: "mm",
         qty: Number(form.qty) || 0,
       };
+    } else if (form.mainCat === "assets") {
+      if (!form.name.trim()) return;
+      const isNewAsset = !editingId;
+      const assignedPartNumber = isNewAsset ? formatToolNumber(master.nextToolNumber) : form.partNumber.trim();
+      payload = {
+        ...base,
+        mainCat: "assets",
+        grade: "",
+        partNumber: assignedPartNumber,
+        name: form.name.trim(),
+        manufacturer: form.manufacturer.trim(),
+        serialNumber: form.serialNumber.trim(),
+        purchaseDate: form.purchaseDate,
+        value: Number(form.value) || 0,
+        comment: "",
+        trackLength: false,
+        length: 0,
+        unit: "ea",
+        qty: 1,
+        ...(isNewAsset ? { status: "active" } : {}),
+      };
+      if (isNewAsset) {
+        setMaster((prev) => ({ ...prev, nextToolNumber: (prev.nextToolNumber || 1) + 1 }));
+      }
     } else {
-      // Customer Stock requires a part number; Stores items don't have to —
-      // except Tools, which get one assigned automatically.
-      const isNewTool = form.mainCat === "stores" && form.storesKind === "tool" && !editingId;
-      const assignedPartNumber = isNewTool ? formatToolNumber(master.nextToolNumber) : form.partNumber.trim();
+      // Customer Stock requires a part number; Stores items don't have to.
       if (!effectiveCustomer || !form.name.trim() || (form.mainCat === "custom" && !form.partNumber.trim())) return;
       payload = {
         ...base,
         mainCat: form.mainCat,
         grade: "",
-        partNumber: assignedPartNumber,
+        partNumber: form.partNumber.trim(),
         name: form.name.trim(),
         value: Number(form.value) || 0,
         comment: "",
@@ -1795,14 +1874,11 @@ export default function StockControl() {
         attachmentName: form.attachmentName || "",
         storesKind: form.mainCat === "stores" ? form.storesKind : undefined,
       };
-      if (isNewTool) {
-        setMaster((prev) => ({ ...prev, nextToolNumber: (prev.nextToolNumber || 1) + 1 }));
-      }
     }
 
     if (editingId) {
       const before = items.find((it) => it.id === editingId);
-      setItems((prev) => prev.map((it) => (it.id === editingId ? { ...payload, id: editingId } : it)));
+      setItems((prev) => prev.map((it) => (it.id === editingId ? { ...before, ...payload, id: editingId } : it)));
       if (before && Number(payload.qty) > Number(before.qty)) {
         closeOutRequisitionsForItem(editingId);
       }
@@ -1898,12 +1974,25 @@ export default function StockControl() {
         supplier: sup.field, customSupplier: sup.custom,
       };
     }
+    if (it.mainCat === "assets") {
+      return {
+        ...base,
+        // Duplicating an asset (e.g. buying another identical machine) should
+        // get its own fresh number and a blank serial — it's a distinct unit.
+        partNumber: duplicate ? "" : it.partNumber || "",
+        name: it.name || "",
+        manufacturer: it.manufacturer || "",
+        serialNumber: duplicate ? "" : it.serialNumber || "",
+        purchaseDate: duplicate ? "" : it.purchaseDate || "",
+        value: String(it.value || ""),
+        salesPerson: sp.field, customSalesPerson: sp.custom,
+        supplier: sup.field, customSupplier: sup.custom,
+      };
+    }
     return {
       ...base,
       customer: cust.field, customCustomer: cust.custom,
-      // Duplicating a Tool should get its own fresh number, not reuse the
-      // original — clear the part number so the auto-assign logic kicks in.
-      partNumber: duplicate && it.storesKind === "tool" ? "" : it.partNumber || "",
+      partNumber: it.partNumber || "",
       name: it.name || "",
       value: String(it.value || ""),
       salesPerson: sp.field, customSalesPerson: sp.custom,
@@ -2416,12 +2505,16 @@ export default function StockControl() {
                                 Add to PO
                               </label>
                             )}
-                            <input
+                            <select
                               style={{ ...S.input, flex: 1 }}
-                              placeholder="Supplier (optional)"
                               value={r.supplier}
                               onChange={(e) => updateRequisition(r.id, { supplier: e.target.value })}
-                            />
+                            >
+                              <option value="">Supplier (optional)</option>
+                              {master.suppliers.map((s) => (
+                                <option key={s.id} value={s.name}>{s.name}</option>
+                              ))}
+                            </select>
                             <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => markOrdered(r.id)}>
                               <ShoppingCart size={13} /> Mark ordered
                             </button>
@@ -2913,7 +3006,7 @@ export default function StockControl() {
                         }}
                       >
                         <div style={S.rowMain}>
-                          {tab === "custom" || tab === "stores" ? (
+                          {tab === "custom" || tab === "stores" || tab === "assets" ? (
                             <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                               {it.partNumber && <span style={S.partTag}>{it.partNumber}</span>}
                               <span style={S.itemName}>{it.name}</span>
@@ -2941,7 +3034,6 @@ export default function StockControl() {
                             {(tab === "plate" || tab === "structural") && it.stockType === "offcut" && (
                               <span style={S.offcutTag}>Offcut</span>
                             )}
-                            {tab === "stores" && it.storesKind === "tool" && <span style={S.offcutTag}>Tool</span>}
                             {tab === "stores" && it.storesKind === "toolConsumable" && (
                               <span style={S.offcutTag}>Tool Consumable</span>
                             )}
@@ -2952,13 +3044,17 @@ export default function StockControl() {
                             {tab === "structural" && it.trackLength && it.length > 0 && (
                               <span>{it.length}m lengths</span>
                             )}
+                            {tab === "assets" && it.manufacturer && <span>{it.manufacturer}</span>}
+                            {tab === "assets" && it.serialNumber && <span>SN: {it.serialNumber}</span>}
+                            {tab === "assets" && it.purchaseDate && <span>Bought {new Date(it.purchaseDate).toLocaleDateString()}</span>}
                             {it.loc && <span>{it.loc}</span>}
                             {it.salesPerson && <span>Sales: {it.salesPerson}</span>}
                             {it.supplier && <span>Supplier: {it.supplier}</span>}
-                            {tab !== "custom" && tab !== "stores" && it.customer && <span>Customer: {it.customer}</span>}
+                            {tab !== "custom" && tab !== "stores" && tab !== "assets" && it.customer && <span>Customer: {it.customer}</span>}
                             {(tab === "custom" || tab === "stores") && canSeeValue && (
                               <span>R{Number(it.value || 0).toFixed(2)} ea · R{(Number(it.value || 0) * Number(it.qty || 0)).toFixed(2)} total</span>
                             )}
+                            {tab === "assets" && canSeeValue && Number(it.value || 0) > 0 && <span>R{Number(it.value).toFixed(2)}</span>}
                             {tab === "plate" && canSeeValue && pw && (
                               <span>R{(plateValue(it)?.total || 0).toFixed(2)} value</span>
                             )}
@@ -2976,6 +3072,13 @@ export default function StockControl() {
                           </div>
                         </div>
                         <div style={S.rowControls}>
+                          {tab === "assets" ? (
+                            canEditQty("assets") && (
+                              <button className="stk-btn" style={S.usageBtnUse} onClick={() => openAssetRemoveModal(it)}>
+                                Remove
+                              </button>
+                            )
+                          ) : (
                           <div style={S.qtyBlock}>
                             {canEditQty(tab) && (
                               <button className="stk-btn" style={S.usageBtnUse} onClick={() => openUsageModal(it, "use")}>
@@ -2992,6 +3095,7 @@ export default function StockControl() {
                               </button>
                             )}
                           </div>
+                          )}
                           <div style={S.rowActionIcons}>
                             {canRequisition && tab !== "custom" && (
                               <button className="stk-btn" style={S.iconRowBtn} onClick={() => openRequisition(it)} title="Request stock for this item">
@@ -3023,6 +3127,43 @@ export default function StockControl() {
             </div>
           );
         })}
+
+        {tab === "assets" && (
+          <div style={S.gradeBlock}>
+            <button className="stk-grade" style={S.gradeHeader} onClick={() => setShowAssetArchive((v) => !v)}>
+              <ChevronDown size={15} style={{ transform: showAssetArchive ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
+              <span style={S.gradeTitle}>Removed / Archive</span>
+              <span style={S.gradeCount}>{items.filter((it) => it.mainCat === "assets" && it.status === "removed").length}</span>
+            </button>
+            {showAssetArchive && (
+              <div style={S.gradeItems}>
+                {items
+                  .filter((it) => it.mainCat === "assets" && it.status === "removed")
+                  .sort((a, b) => new Date(b.removedDate || 0) - new Date(a.removedDate || 0))
+                  .map((it) => (
+                    <div key={it.id} style={S.reqCard}>
+                      <div style={S.reqCardTop}>
+                        <span style={S.itemName}>
+                          {it.partNumber ? `${it.partNumber} — ` : ""}
+                          {it.name}
+                        </span>
+                        <span style={{ ...S.reqStatusTag, ...S.reqStatus_cancelled }}>{it.removedReason}</span>
+                      </div>
+                      <div style={S.rowMeta}>
+                        {it.manufacturer && <span>{it.manufacturer}</span>}
+                        {it.serialNumber && <span>SN: {it.serialNumber}</span>}
+                        <span>Removed by {it.removedBy}</span>
+                        {it.removedDate && <span>{new Date(it.removedDate).toLocaleDateString()}</span>}
+                      </div>
+                    </div>
+                  ))}
+                {items.filter((it) => it.mainCat === "assets" && it.status === "removed").length === 0 && (
+                  <div style={S.empty}>Nothing removed yet.</div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
         </>
       )}
@@ -3030,7 +3171,7 @@ export default function StockControl() {
       )}
 
       {showAdd && (canAdd || canEditItems) && (
-        <div style={S.modalOverlay} onClick={closeAdd}>
+        <div style={S.modalOverlay}>
           <form style={S.modal} onClick={(e) => e.stopPropagation()} onSubmit={addItem}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>{editingId ? "Edit stock item" : allowDuplicate ? "Duplicate stock item" : "New stock item"}</span>
@@ -3062,7 +3203,86 @@ export default function StockControl() {
               <div style={S.roleHint}>Category is locked while {editingId ? "editing" : "duplicating"} — remove and re-add to change it.</div>
             )}
 
-            {form.mainCat === "custom" || form.mainCat === "stores" ? (
+            {form.mainCat === "assets" ? (
+              <>
+                <div style={{ marginTop: 10 }}>
+                  <label style={S.label}>Description</label>
+                  <input
+                    style={S.input}
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    placeholder="e.g. Angle Grinder 230mm"
+                  />
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <label style={S.label}>Part number</label>
+                  <div style={S.roleHint}>
+                    {editingId ? (
+                      <>This asset's number: <strong style={{ color: C.accentRaw }}>{form.partNumber || "—"}</strong> (doesn't change when editing)</>
+                    ) : (
+                      <>Assigned automatically when you save — will be <strong style={{ color: C.accentRaw }}>{formatToolNumber(master.nextToolNumber)}</strong></>
+                    )}
+                  </div>
+                </div>
+                <div style={S.formGrid}>
+                  <div>
+                    <label style={S.label}>Manufacturer (optional)</label>
+                    <input
+                      style={S.input}
+                      value={form.manufacturer}
+                      onChange={(e) => setForm({ ...form, manufacturer: e.target.value })}
+                      placeholder="e.g. Makita"
+                    />
+                  </div>
+                  <div>
+                    <label style={S.label}>Serial number (optional)</label>
+                    <input
+                      style={S.input}
+                      value={form.serialNumber}
+                      onChange={(e) => setForm({ ...form, serialNumber: e.target.value })}
+                      placeholder="e.g. SN-88213"
+                    />
+                  </div>
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <label style={S.label}>Purchase date (optional)</label>
+                  <input
+                    style={S.input}
+                    type="date"
+                    value={form.purchaseDate}
+                    onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })}
+                  />
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <LibraryField
+                    label="Supplier"
+                    options={master.suppliers.map((s) => s.name)}
+                    value={form.supplier}
+                    onChange={(v) => setForm({ ...form, supplier: v })}
+                    customValue={form.customSupplier}
+                    onCustomChange={(v) => setForm({ ...form, customSupplier: v })}
+                    placeholder="e.g. Macsteel"
+                    allowNone
+                  />
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <label style={S.label}>Value (R, optional)</label>
+                  <input
+                    style={S.input}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.value}
+                    onChange={(e) => setForm({ ...form, value: e.target.value })}
+                    placeholder="0.00"
+                  />
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <label style={S.label}>Location</label>
+                  <input style={S.input} value={form.loc} onChange={(e) => setForm({ ...form, loc: e.target.value })} placeholder="e.g. Tool crib" />
+                </div>
+              </>
+            ) : form.mainCat === "custom" || form.mainCat === "stores" ? (
               <>
                 <LibraryField
                   label={form.mainCat === "stores" ? "Category" : "Customer"}
@@ -3078,7 +3298,6 @@ export default function StockControl() {
                     <label style={S.label}>Type</label>
                     <div style={S.segRow}>
                       {[
-                        { key: "tool", label: "Tool" },
                         { key: "consumable", label: "Consumable" },
                         { key: "toolConsumable", label: "Tool Consumable" },
                       ].map((t) => (
@@ -3086,7 +3305,7 @@ export default function StockControl() {
                           type="button"
                           key={t.key}
                           className="stk-btn"
-                          onClick={() => setForm({ ...form, storesKind: t.key, partNumber: t.key === "tool" ? "" : form.partNumber })}
+                          onClick={() => setForm({ ...form, storesKind: t.key })}
                           style={{
                             ...S.segBtn,
                             ...(form.storesKind === t.key ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
@@ -3156,39 +3375,22 @@ export default function StockControl() {
                 )}
                 <div style={{ marginTop: 10 }}>
                   <label style={S.label}>
-                    {form.mainCat === "stores" && form.storesKind === "tool"
-                      ? "Part number"
-                      : form.mainCat === "stores" && form.storesKind === "toolConsumable"
+                    {form.mainCat === "stores" && form.storesKind === "toolConsumable"
                       ? "Supplier part code (optional)"
                       : `Part number ${form.mainCat === "stores" ? "(optional)" : ""}`}
                   </label>
-                  {form.mainCat === "stores" && form.storesKind === "tool" ? (
-                    <div style={S.roleHint}>
-                      {editingId ? (
-                        <>
-                          This tool's number: <strong style={{ color: C.accentRaw }}>{form.partNumber || "—"}</strong> (doesn't change when editing)
-                        </>
-                      ) : (
-                        <>
-                          Assigned automatically when you save — will be{" "}
-                          <strong style={{ color: C.accentRaw }}>{formatToolNumber(master.nextToolNumber)}</strong>
-                        </>
-                      )}
-                    </div>
-                  ) : (
-                    <input
-                      style={S.input}
-                      value={form.partNumber}
-                      onChange={(e) => setForm({ ...form, partNumber: e.target.value })}
-                      placeholder={
-                        form.mainCat === "stores" && form.storesKind === "toolConsumable"
-                          ? "e.g. CCMT09T304-M"
-                          : form.mainCat === "stores"
-                          ? "e.g. supplier SKU, if any"
-                          : "e.g. HPE-4471"
-                      }
-                    />
-                  )}
+                  <input
+                    style={S.input}
+                    value={form.partNumber}
+                    onChange={(e) => setForm({ ...form, partNumber: e.target.value })}
+                    placeholder={
+                      form.mainCat === "stores" && form.storesKind === "toolConsumable"
+                        ? "e.g. CCMT09T304-M"
+                        : form.mainCat === "stores"
+                        ? "e.g. supplier SKU, if any"
+                        : "e.g. HPE-4471"
+                    }
+                  />
                 </div>
                 <div style={{ marginTop: 10 }}>
                   <label style={S.label}>Description</label>
@@ -3607,7 +3809,7 @@ export default function StockControl() {
               </div>
             )}
 
-            {form.mainCat === "custom" || form.mainCat === "stores" ? (
+            {form.mainCat === "assets" ? null : form.mainCat === "custom" || form.mainCat === "stores" ? (
               <div style={S.formGrid}>
                 <div>
                   <label style={S.label}>Quantity</label>
@@ -3671,68 +3873,72 @@ export default function StockControl() {
               </div>
             )}
 
-            <div style={S.formGrid}>
-              <div>
-                <label style={S.label}>Low-stock alert at</label>
-                <input
-                  style={S.input}
-                  type="number"
-                  min="0"
-                  value={form.low}
-                  onChange={(e) => setForm({ ...form, low: e.target.value })}
-                  placeholder="0"
-                />
-              </div>
-              <div>
-                <label style={S.label}>Location</label>
-                <input
-                  style={S.input}
-                  value={form.loc}
-                  onChange={(e) => setForm({ ...form, loc: e.target.value })}
-                  placeholder="e.g. Rack A2"
-                />
-              </div>
-            </div>
+            {form.mainCat !== "assets" && (
+              <>
+                <div style={S.formGrid}>
+                  <div>
+                    <label style={S.label}>Low-stock alert at</label>
+                    <input
+                      style={S.input}
+                      type="number"
+                      min="0"
+                      value={form.low}
+                      onChange={(e) => setForm({ ...form, low: e.target.value })}
+                      placeholder="0"
+                    />
+                  </div>
+                  <div>
+                    <label style={S.label}>Location</label>
+                    <input
+                      style={S.input}
+                      value={form.loc}
+                      onChange={(e) => setForm({ ...form, loc: e.target.value })}
+                      placeholder="e.g. Rack A2"
+                    />
+                  </div>
+                </div>
 
-            <div style={{ marginTop: 10 }}>
-              <LibraryField
-                label="Sales person"
-                options={master.salesPeople}
-                value={form.salesPerson}
-                onChange={(v) => setForm({ ...form, salesPerson: v })}
-                customValue={form.customSalesPerson}
-                onCustomChange={(v) => setForm({ ...form, customSalesPerson: v })}
-                placeholder="e.g. Sipho M"
-                allowNone
-              />
-            </div>
+                <div style={{ marginTop: 10 }}>
+                  <LibraryField
+                    label="Sales person"
+                    options={master.salesPeople}
+                    value={form.salesPerson}
+                    onChange={(v) => setForm({ ...form, salesPerson: v })}
+                    customValue={form.customSalesPerson}
+                    onCustomChange={(v) => setForm({ ...form, customSalesPerson: v })}
+                    placeholder="e.g. Sipho M"
+                    allowNone
+                  />
+                </div>
 
-            <div style={{ marginTop: 10 }}>
-              <LibraryField
-                label="Supplier"
-                options={master.suppliers.map((s) => s.name)}
-                value={form.supplier}
-                onChange={(v) => setForm({ ...form, supplier: v })}
-                customValue={form.customSupplier}
-                onCustomChange={(v) => setForm({ ...form, customSupplier: v })}
-                placeholder="e.g. Macsteel"
-                allowNone
-              />
-            </div>
+                <div style={{ marginTop: 10 }}>
+                  <LibraryField
+                    label="Supplier"
+                    options={master.suppliers.map((s) => s.name)}
+                    value={form.supplier}
+                    onChange={(v) => setForm({ ...form, supplier: v })}
+                    customValue={form.customSupplier}
+                    onCustomChange={(v) => setForm({ ...form, customSupplier: v })}
+                    placeholder="e.g. Macsteel"
+                    allowNone
+                  />
+                </div>
 
-            {form.mainCat !== "custom" && form.mainCat !== "stores" && (
-              <div style={{ marginTop: 10 }}>
-                <LibraryField
-                  label="Customer"
-                  options={master.customers}
-                  value={form.customer}
-                  onChange={(v) => setForm({ ...form, customer: v })}
-                  customValue={form.customCustomer}
-                  onCustomChange={(v) => setForm({ ...form, customCustomer: v })}
-                  placeholder="e.g. New Customer Pty Ltd"
-                  allowNone
-                />
-              </div>
+                {form.mainCat !== "custom" && form.mainCat !== "stores" && (
+                  <div style={{ marginTop: 10 }}>
+                    <LibraryField
+                      label="Customer"
+                      options={master.customers}
+                      value={form.customer}
+                      onChange={(v) => setForm({ ...form, customer: v })}
+                      customValue={form.customCustomer}
+                      onCustomChange={(v) => setForm({ ...form, customCustomer: v })}
+                      placeholder="e.g. New Customer Pty Ltd"
+                      allowNone
+                    />
+                  </div>
+                )}
+              </>
             )}
 
             <button
@@ -3767,6 +3973,8 @@ export default function StockControl() {
                     setManagerTab(t.key);
                     setManagerInput("");
                     setManagerFactor("");
+                    setManagerSearchQuery("");
+                    setSectionTypeFilterInManager("");
                   }}
                   style={{ ...S.managerTab, ...(managerTab === t.key ? S.managerTabActive : {}) }}
                 >
@@ -3824,16 +4032,29 @@ export default function StockControl() {
                   </button>
                 </div>
 
-                <input
-                  style={{ ...S.input, marginTop: 12, marginBottom: 10 }}
-                  value={stockCodeQuery}
-                  onChange={(e) => setStockCodeQuery(e.target.value)}
-                  placeholder="Search stock code or description…"
-                />
+                <div style={{ ...S.managerAddRow, marginTop: 12 }}>
+                  <input
+                    style={{ ...S.input, flex: 2 }}
+                    value={stockCodeQuery}
+                    onChange={(e) => setStockCodeQuery(e.target.value)}
+                    placeholder="Search stock code or description…"
+                  />
+                  <select
+                    style={{ ...S.input, flex: 1 }}
+                    value={stockCodeCustomerFilter}
+                    onChange={(e) => setStockCodeCustomerFilter(e.target.value)}
+                  >
+                    <option value="">All customers</option>
+                    {master.customers.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
 
                 <div style={S.managerList}>
                   {(master.stockCodes || [])
                     .filter((r) => (r.stockCode + " " + r.description).toLowerCase().includes(stockCodeQuery.toLowerCase()))
+                    .filter((r) => !stockCodeCustomerFilter || r.customer === stockCodeCustomerFilter)
                     .map((r) => (
                       <div key={r.id} style={S.managerRow}>
                         <EditableName value={r.stockCode} onCommit={(v) => updateStockCodeRow(r.id, "stockCode", v)} style={{ maxWidth: 110 }} />
@@ -3913,17 +4134,30 @@ export default function StockControl() {
                   </button>
                 </div>
 
-                <input
-                  style={{ ...S.input, marginTop: 12, marginBottom: 10 }}
-                  value={storesCatalogQuery}
-                  onChange={(e) => setStoresCatalogQuery(e.target.value)}
-                  placeholder="Search the catalog…"
-                />
+                <div style={{ ...S.managerAddRow, marginTop: 12 }}>
+                  <input
+                    style={{ ...S.input, flex: 2 }}
+                    value={storesCatalogQuery}
+                    onChange={(e) => setStoresCatalogQuery(e.target.value)}
+                    placeholder="Search the catalog…"
+                  />
+                  <select
+                    style={{ ...S.input, flex: 1 }}
+                    value={storesCatalogCategoryFilter}
+                    onChange={(e) => setStoresCatalogCategoryFilter(e.target.value)}
+                  >
+                    <option value="">All categories</option>
+                    {master.storeCategories.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
 
                 <div style={S.managerList}>
                   {Object.entries(
                     (master.storesCatalog || [])
                       .filter((r) => (r.name + " " + r.category).toLowerCase().includes(storesCatalogQuery.toLowerCase()))
+                      .filter((r) => !storesCatalogCategoryFilter || r.category === storesCatalogCategoryFilter)
                       .reduce((acc, r) => {
                         const k = r.category || "Uncategorised";
                         (acc[k] = acc[k] || []).push(r);
@@ -3933,7 +4167,19 @@ export default function StockControl() {
                     .sort((a, b) => a[0].localeCompare(b[0]))
                     .map(([cat, list]) => (
                       <div key={cat}>
-                        <div style={S.managerGroupHeader}>{cat} · {list.length}</div>
+                        <button
+                          type="button"
+                          className="stk-btn"
+                          style={{
+                            ...S.managerGroupHeader,
+                            ...S.managerGroupHeaderBtn,
+                            ...(storesCatalogCategoryFilter === cat ? S.managerGroupHeaderActive : {}),
+                          }}
+                          onClick={() => setStoresCatalogCategoryFilter((prev) => (prev === cat ? "" : cat))}
+                          title={storesCatalogCategoryFilter === cat ? "Showing only this category — tap to show all" : "Tap to show only this category"}
+                        >
+                          {cat} · {list.length}
+                        </button>
                         {list.map((r) => (
                           <div key={r.id} style={S.managerRow}>
                             <EditableName value={r.name} onCommit={(v) => updateStoresCatalogRow(r.id, "name", v)} />
@@ -4259,21 +4505,47 @@ export default function StockControl() {
                   </div>
                 )}
 
+                {master[managerTab].length > 8 && (
+                  <input
+                    style={{ ...S.input, marginTop: 10 }}
+                    value={managerSearchQuery}
+                    onChange={(e) => setManagerSearchQuery(e.target.value)}
+                    placeholder={`Search ${MANAGER_TABS.find((t) => t.key === managerTab).label.toLowerCase()}…`}
+                  />
+                )}
+
                 <div style={S.managerList}>
                   {master[managerTab].length === 0 && <div style={S.empty}>Nothing here yet — add one above.</div>}
                   {managerIsFactorTable
                     ? (managerTab === "sections"
                         ? Object.entries(
-                            master.sections.reduce((acc, s) => {
+                            master.sections
+                              .filter((s) => s.name.toLowerCase().includes(managerSearchQuery.toLowerCase()))
+                              .filter((s) => !sectionTypeFilterInManager || (s.type || "Ungrouped") === sectionTypeFilterInManager)
+                              .reduce((acc, s) => {
                               const k = s.type || "Ungrouped";
                               (acc[k] = acc[k] || []).push(s);
                               return acc;
                             }, {})
                           ).sort((a, b) => a[0].localeCompare(b[0]))
-                        : [[null, master[managerTab]]]
+                        : [[null, master[managerTab].filter((e) => e.name.toLowerCase().includes(managerSearchQuery.toLowerCase()))]]
                       ).map(([groupName, list]) => (
                         <div key={groupName || "flat"}>
-                          {groupName && <div style={S.managerGroupHeader}>{groupName} · {list.length}</div>}
+                          {groupName && (
+                            <button
+                              type="button"
+                              className="stk-btn"
+                              style={{
+                                ...S.managerGroupHeader,
+                                ...S.managerGroupHeaderBtn,
+                                ...(sectionTypeFilterInManager === groupName ? S.managerGroupHeaderActive : {}),
+                              }}
+                              onClick={() => setSectionTypeFilterInManager((prev) => (prev === groupName ? "" : groupName))}
+                              title={sectionTypeFilterInManager === groupName ? "Showing only this type — tap to show all" : "Tap to show only this type"}
+                            >
+                              {groupName} · {list.length}
+                            </button>
+                          )}
                           {list.map((entry) => (
                             <div key={entry.name} style={S.managerRow}>
                               <EditableName value={entry.name} onCommit={(v) => renameMasterEntry(managerTab, entry.name, v)} />
@@ -4314,7 +4586,9 @@ export default function StockControl() {
                           ))}
                         </div>
                       ))
-                    : master[managerTab].map((entry) => (
+                    : master[managerTab]
+                        .filter((entry) => entry.toLowerCase().includes(managerSearchQuery.toLowerCase()))
+                        .map((entry) => (
                         <div key={entry} style={S.managerRow}>
                           <EditableName value={entry} onCommit={(v) => renameMasterEntry(managerTab, entry, v)} />
                           <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeMasterEntry(entry)}>
@@ -4352,6 +4626,45 @@ export default function StockControl() {
               </>
             )}
           </div>
+        </div>
+      )}
+
+      {assetRemoveModal && (
+        <div style={S.modalOverlay} onClick={closeAssetRemoveModal}>
+          <form style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()} onSubmit={submitAssetRemoveModal}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Remove asset</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeAssetRemoveModal}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={S.roleHint}>
+              {assetRemoveModal.item.partNumber ? `${assetRemoveModal.item.partNumber} — ` : ""}
+              {assetRemoveModal.item.name}
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Reason (required)</label>
+              <input
+                autoFocus
+                style={S.input}
+                value={assetRemoveModal.reason}
+                onChange={(e) => setAssetRemoveModal((m) => ({ ...m, reason: e.target.value }))}
+                placeholder="e.g. Broken, Stolen, Sold, Scrapped"
+              />
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Date</label>
+              <input
+                type="date"
+                style={S.input}
+                value={assetRemoveModal.date}
+                onChange={(e) => setAssetRemoveModal((m) => ({ ...m, date: e.target.value }))}
+              />
+            </div>
+            <button type="submit" style={{ ...S.submitBtn, background: C.danger }} className="stk-btn">
+              Confirm removal
+            </button>
+          </form>
         </div>
       )}
 
@@ -4727,6 +5040,7 @@ const S = {
   },
   mainTabs: {
     display: "flex",
+    flexWrap: "wrap",
     gap: 4,
     background: C.surface,
     border: `1px solid ${C.border}`,
@@ -4735,7 +5049,7 @@ const S = {
     marginBottom: 10,
   },
   mainTab: {
-    flex: 1,
+    flex: "0 1 auto",
     background: "transparent",
     border: "none",
     color: C.muted,
@@ -5040,6 +5354,7 @@ const S = {
   },
   qtyBlock: {
     display: "flex",
+    flexWrap: "wrap",
     alignItems: "center",
     gap: 8,
   },
@@ -5153,8 +5468,8 @@ const S = {
     borderRadius: 10,
     padding: 18,
     width: "100%",
-    maxWidth: 460,
-    maxHeight: "88vh",
+    maxWidth: 820,
+    maxHeight: "92vh",
     overflowY: "auto",
     display: "flex",
     flexDirection: "column",
@@ -5230,6 +5545,7 @@ const S = {
   },
   warnBox: {
     display: "flex",
+    flexWrap: "wrap",
     alignItems: "center",
     gap: 8,
     background: C.dangerTint,
@@ -5309,6 +5625,7 @@ const S = {
     display: "flex",
     gap: 8,
     marginBottom: 12,
+    flexWrap: "wrap",
   },
   managerList: {
     display: "flex",
@@ -5361,6 +5678,21 @@ const S = {
     textTransform: "uppercase",
     padding: "8px 2px 4px",
   },
+  managerGroupHeaderBtn: {
+    display: "block",
+    width: "100%",
+    textAlign: "left",
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    borderRadius: 4,
+  },
+  managerGroupHeaderActive: {
+    color: C.bg,
+    background: C.accentRaw,
+    padding: "8px 6px 4px",
+    marginBottom: 2,
+  },
   reqCard: {
     background: C.surface,
     border: `1px solid ${C.border}`,
@@ -5372,6 +5704,7 @@ const S = {
   },
   reqCardTop: {
     display: "flex",
+    flexWrap: "wrap",
     justifyContent: "space-between",
     alignItems: "center",
     gap: 8,
@@ -5458,6 +5791,7 @@ const S = {
     alignItems: "center",
     justifyContent: "space-between",
     gap: 10,
+    flexWrap: "wrap",
     background: C.accentTint,
     border: `1px solid ${C.accentRaw}55`,
     borderRadius: 8,
@@ -5479,6 +5813,7 @@ const S = {
     alignItems: "center",
     gap: 6,
     marginTop: 6,
+    flexWrap: "wrap",
   },
   poTotalRow: {
     fontFamily: F.mono,
@@ -5533,6 +5868,7 @@ const S = {
     alignItems: "center",
     gap: 8,
     marginBottom: 10,
+    flexWrap: "wrap",
   },
   deptPinRow: {
     display: "flex",
@@ -5625,6 +5961,7 @@ const S = {
   },
   managerRow: {
     display: "flex",
+    flexWrap: "wrap",
     justifyContent: "space-between",
     alignItems: "center",
     gap: 8,
