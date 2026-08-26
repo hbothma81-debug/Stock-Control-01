@@ -3232,17 +3232,19 @@ export default function StockControl() {
                   />
                 )}
 
-                <div style={{ marginTop: form.mainCat === "structural" ? 10 : 0 }}>
-                  <LibraryField
-                    label="Material grade"
-                    options={master.grades.map((g) => g.name)}
-                    value={form.grade}
-                    onChange={(v) => setForm({ ...form, grade: v })}
-                    customValue={form.customGrade}
-                    onCustomChange={(v) => setForm({ ...form, customGrade: v })}
-                    placeholder="e.g. Duplex 2205"
-                  />
-                </div>
+                {form.mainCat !== "cncBar" && (
+                  <div style={{ marginTop: form.mainCat === "structural" ? 10 : 0 }}>
+                    <LibraryField
+                      label="Material grade"
+                      options={master.grades.map((g) => g.name)}
+                      value={form.grade}
+                      onChange={(v) => setForm({ ...form, grade: v })}
+                      customValue={form.customGrade}
+                      onCustomChange={(v) => setForm({ ...form, customGrade: v })}
+                      placeholder="e.g. Duplex 2205"
+                    />
+                  </div>
+                )}
 
                 {form.mainCat === "plate" ? (
                   <div style={{ marginTop: 10 }}>
