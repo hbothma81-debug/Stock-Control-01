@@ -23,7 +23,12 @@ const TABS = [
 // TABS above stays as the four physical stock divisions (used by the Add
 // form, exports, etc). NAV_TABS adds Requisitions on top of that just for
 // the main tab bar, since requisitions aren't a stock division themselves.
-const NAV_TABS = [...TABS, { key: "requisitions", label: "Requisitions" }, { key: "purchaseOrders", label: "Purchase Orders" }];
+const NAV_TABS = [
+  ...TABS,
+  { key: "requisitions", label: "Requisitions" },
+  { key: "purchaseOrders", label: "Purchase Orders" },
+  { key: "usageLog", label: "Usage Log" },
+];
 
 const SECTIONS = ["plate", "structural", "custom", "stores"];
 
@@ -384,6 +389,8 @@ export default function StockControl() {
   const [master, setMaster] = useState(null);
   const [requisitions, setRequisitions] = useState(null);
   const [purchaseOrders, setPurchaseOrders] = useState(null);
+  const [usageLog, setUsageLog] = useState(null);
+  const [usageModal, setUsageModal] = useState(null); // { item, direction: "add" | "use", qty, jobNumber, customer, note }
   const [poBuilder, setPoBuilder] = useState(null); // { supplierId, lineItems: [...], linkedRequisitionIds: [...], notes }
   const [selectedReqIds, setSelectedReqIds] = useState([]);
   const [requisitionTarget, setRequisitionTarget] = useState(null);
@@ -394,6 +401,13 @@ export default function StockControl() {
   const [archiveTypeFilter, setArchiveTypeFilter] = useState("");
   const [archiveDateFrom, setArchiveDateFrom] = useState("");
   const [archiveDateTo, setArchiveDateTo] = useState("");
+  const [usageTypeFilter, setUsageTypeFilter] = useState("");
+  const [usageDirectionFilter, setUsageDirectionFilter] = useState("");
+  const [usageDateFrom, setUsageDateFrom] = useState("");
+  const [usageDateTo, setUsageDateTo] = useState("");
+  const [usageSearchQuery, setUsageSearchQuery] = useState("");
+  const [usageViewMode, setUsageViewMode] = useState("log"); // "log" | "jobCosting"
+  const [jobCostQuery, setJobCostQuery] = useState("");
   const [session, setSession] = useState(undefined); // undefined = still checking, null = signed out
   const [authLoading, setAuthLoading] = useState(true);
   const [profile, setProfile] = useState(null);
@@ -431,6 +445,7 @@ export default function StockControl() {
   const [previewData, setPreviewData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [allowDuplicate, setAllowDuplicate] = useState(false);
+  const [priceUnitMode, setPriceUnitMode] = useState("perUnit"); // "perUnit" (sheet/metre) or "perKg"
 
   const [showFilters, setShowFilters] = useState(false);
   const [filterGrade, setFilterGrade] = useState("");
@@ -495,6 +510,12 @@ export default function StockControl() {
       } catch {
         setPurchaseOrders([]);
       }
+      try {
+        const res = await window.storage.get("stock-usage-log-v1", true);
+        setUsageLog(res && res.value ? JSON.parse(res.value) : []);
+      } catch {
+        setUsageLog([]);
+      }
     })();
   }, []);
 
@@ -544,6 +565,7 @@ export default function StockControl() {
                 canAccessStockManager: !!data.can_access_stock_manager,
                 canManageRequisitions: !!data.can_manage_requisitions,
                 canRaisePO: !!data.can_raise_po,
+                canViewUsageLog: !!data.can_view_usage_log,
               }
             : null
         );
@@ -590,6 +612,14 @@ export default function StockControl() {
     }, 300);
     return () => clearTimeout(t);
   }, [purchaseOrders]);
+
+  useEffect(() => {
+    if (usageLog === null) return;
+    const t = setTimeout(() => {
+      window.storage.set("stock-usage-log-v1", JSON.stringify(usageLog), true).catch(() => {});
+    }, 300);
+    return () => clearTimeout(t);
+  }, [usageLog]);
 
   async function signUp(e) {
     e.preventDefault();
@@ -643,6 +673,7 @@ export default function StockControl() {
         canAccessStockManager: !!d.can_access_stock_manager,
         canManageRequisitions: !!d.can_manage_requisitions,
         canRaisePO: !!d.can_raise_po,
+        canViewUsageLog: !!d.can_view_usage_log,
       }))
     );
   }
@@ -657,6 +688,7 @@ export default function StockControl() {
     canAccessStockManager: "can_access_stock_manager",
     canManageRequisitions: "can_manage_requisitions",
     canRaisePO: "can_raise_po",
+    canViewUsageLog: "can_view_usage_log",
   };
 
   async function updatePersonField(id, field, value) {
@@ -690,6 +722,7 @@ export default function StockControl() {
               canAccessStockManager: false,
               canManageRequisitions: false,
               canRaisePO: false,
+              canViewUsageLog: false,
             }
           : p
       )
@@ -707,6 +740,7 @@ export default function StockControl() {
         can_access_stock_manager: false,
         can_manage_requisitions: false,
         can_raise_po: false,
+        can_view_usage_log: false,
       })
       .eq("id", id);
   }
@@ -724,6 +758,7 @@ export default function StockControl() {
     if (isAdmin) return true;
     if (section === "requisitions") return !!profile?.canRequisition || !!profile?.canManageRequisitions;
     if (section === "purchaseOrders") return !!profile?.canManageRequisitions || !!profile?.canRaisePO;
+    if (section === "usageLog") return !!profile?.canViewUsageLog;
     return profile ? !!profile.permissions?.[section]?.view : false;
   }
 
@@ -894,6 +929,16 @@ export default function StockControl() {
     if (!master) return 0;
     const hit = (master[listKey] || []).find((e) => e.name.toLowerCase() === (name || "").toLowerCase());
     return hit ? hit.price || 0 : 0;
+  }
+
+  // Used by the R/unit ⇄ R/kg price toggle on the Add/Edit form — writes
+  // straight back to the shared grade or section price, same underlying
+  // value Requisitions and Stock Manager already read from.
+  function setMaterialPrice(listKey, name, price) {
+    setMaster((prev) => ({
+      ...prev,
+      [listKey]: (prev[listKey] || []).map((x) => (x.name.toLowerCase() === (name || "").toLowerCase() ? { ...x, price } : x)),
+    }));
   }
 
   function findSectionType(name) {
@@ -1105,9 +1150,60 @@ export default function StockControl() {
     );
   }
 
-  function adjust(id, delta) {
-    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, qty: Math.max(0, Number(it.qty) + delta) } : it)));
-    if (delta > 0) closeOutRequisitionsForItem(id);
+  function openUsageModal(item, direction) {
+    setUsageModal({ item, direction, qty: "", jobNumber: "", customer: "", note: "" });
+  }
+
+  function closeUsageModal() {
+    setUsageModal(null);
+  }
+
+  // Snapshotted at the moment stock is used, so job costing reflects what
+  // things actually cost then — not whatever the price happens to be if
+  // someone looks the job up again after a rate change.
+  function resolveUsageLineCost(item, qty) {
+    if (!item) return 0;
+    if (item.mainCat === "plate") {
+      const w = plateWeight(item);
+      const pricePerKg = findPrice("grades", item.grade);
+      return w ? qty * w.perSheet * pricePerKg : 0;
+    }
+    if (item.mainCat === "structural") {
+      const pricePerM = findPrice("sections", item.name);
+      const metresPerPiece = item.trackLength ? Number(item.length || 0) : 1;
+      return qty * metresPerPiece * pricePerM;
+    }
+    return qty * Number(item.value || 0);
+  }
+
+  function submitUsageModal(e) {
+    e.preventDefault();
+    const qty = parseFloat(usageModal.qty);
+    if (!qty || qty <= 0) return;
+    if (usageModal.direction === "use" && !usageModal.jobNumber.trim() && !usageModal.customer.trim()) return;
+    const delta = usageModal.direction === "add" ? qty : -qty;
+    const itemId = usageModal.item.id;
+    const lineCost = usageModal.direction === "use" ? resolveUsageLineCost(usageModal.item, qty) : 0;
+    setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, qty: Math.max(0, Number(it.qty) + delta) } : it)));
+    if (delta > 0) closeOutRequisitionsForItem(itemId);
+    setUsageLog((prev) => [
+      ...prev,
+      {
+        id: uid(),
+        itemId,
+        itemName: usageModal.item.name,
+        mainCat: usageModal.item.mainCat,
+        qty,
+        direction: usageModal.direction,
+        by: roleLabel,
+        jobNumber: usageModal.jobNumber.trim(),
+        customer: usageModal.customer.trim(),
+        note: usageModal.note.trim(),
+        lineCost,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+    closeUsageModal();
   }
 
   function removeItem(id) {
@@ -1981,7 +2077,7 @@ export default function StockControl() {
     e.target.value = "";
   }
 
-  if (items === null || master === null || requisitions === null || purchaseOrders === null) {
+  if (items === null || master === null || requisitions === null || purchaseOrders === null || usageLog === null) {
     return (
       <div style={{ ...S.page, display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ fontFamily: F.mono, color: C.muted, letterSpacing: "0.08em" }}>LOADING STOCK…</div>
@@ -2368,6 +2464,146 @@ export default function StockControl() {
               ))}
           </div>
         </div>
+      ) : tab === "usageLog" ? (
+        <div style={S.list}>
+          <div style={S.segRow}>
+            {[
+              { key: "log", label: "Usage Log" },
+              { key: "jobCosting", label: "Job Costing" },
+            ].map((m) => (
+              <button
+                type="button"
+                key={m.key}
+                className="stk-btn"
+                onClick={() => setUsageViewMode(m.key)}
+                style={{
+                  ...S.segBtn,
+                  ...(usageViewMode === m.key ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          {usageViewMode === "jobCosting" ? (
+            <div style={{ marginTop: 12 }}>
+              <input
+                style={S.input}
+                value={jobCostQuery}
+                onChange={(e) => setJobCostQuery(e.target.value)}
+                placeholder="Type a job number or customer name…"
+              />
+              {jobCostQuery.trim() && (() => {
+                const q = jobCostQuery.trim().toLowerCase();
+                const matches = usageLog
+                  .filter((u) => u.direction === "use")
+                  .filter((u) => (u.jobNumber || "").toLowerCase().includes(q) || (u.customer || "").toLowerCase().includes(q))
+                  .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                const total = matches.reduce((sum, u) => sum + (u.lineCost || 0), 0);
+                return (
+                  <div style={{ marginTop: 12 }}>
+                    {matches.length === 0 && <div style={S.empty}>No material logged against that job or customer yet.</div>}
+                    <div style={S.gradeItems}>
+                      {matches.map((u) => (
+                        <div key={u.id} style={S.reqCard}>
+                          <div style={S.reqCardTop}>
+                            <span style={S.itemName}>{u.itemName}</span>
+                            {canSeeValue && <span style={S.itemName}>R{(u.lineCost || 0).toFixed(2)}</span>}
+                          </div>
+                          <div style={S.rowMeta}>
+                            <span>Qty: {u.qty}</span>
+                            <span>By {u.by}</span>
+                            <span>{new Date(u.timestamp).toLocaleDateString()}</span>
+                            {u.jobNumber && <span>Job: {u.jobNumber}</span>}
+                            {u.customer && <span>Customer: {u.customer}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {canSeeValue && matches.length > 0 && (
+                      <div style={S.poTotalRow}>Total material cost: R{total.toFixed(2)}</div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          ) : (
+            <>
+          <div style={S.filterBar}>
+            <div>
+              <label style={S.label}>Type</label>
+              <select style={S.input} value={usageTypeFilter} onChange={(e) => setUsageTypeFilter(e.target.value)}>
+                <option value="">All types</option>
+                {TABS.map((t) => (
+                  <option key={t.key} value={t.key}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={S.label}>Direction</label>
+              <select style={S.input} value={usageDirectionFilter} onChange={(e) => setUsageDirectionFilter(e.target.value)}>
+                <option value="">Used & Added</option>
+                <option value="use">Used only</option>
+                <option value="add">Added only</option>
+              </select>
+            </div>
+            <div style={S.formGrid}>
+              <div>
+                <label style={S.label}>From</label>
+                <input type="date" style={S.input} value={usageDateFrom} onChange={(e) => setUsageDateFrom(e.target.value)} />
+              </div>
+              <div>
+                <label style={S.label}>To</label>
+                <input type="date" style={S.input} value={usageDateTo} onChange={(e) => setUsageDateTo(e.target.value)} />
+              </div>
+            </div>
+            <input
+              style={S.input}
+              value={usageSearchQuery}
+              onChange={(e) => setUsageSearchQuery(e.target.value)}
+              placeholder="Search item, job number, customer, or person…"
+            />
+          </div>
+          <div style={{ ...S.gradeItems, marginTop: 10 }}>
+            {[...usageLog]
+              .filter((u) => !usageTypeFilter || u.mainCat === usageTypeFilter)
+              .filter((u) => !usageDirectionFilter || u.direction === usageDirectionFilter)
+              .filter((u) => !usageDateFrom || new Date(u.timestamp) >= new Date(usageDateFrom))
+              .filter((u) => !usageDateTo || new Date(u.timestamp) <= new Date(usageDateTo + "T23:59:59"))
+              .filter((u) => {
+                if (!usageSearchQuery.trim()) return true;
+                const q = usageSearchQuery.toLowerCase();
+                return (
+                  u.itemName.toLowerCase().includes(q) ||
+                  (u.jobNumber || "").toLowerCase().includes(q) ||
+                  (u.customer || "").toLowerCase().includes(q) ||
+                  (u.by || "").toLowerCase().includes(q)
+                );
+              })
+              .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+              .map((u) => (
+                <div key={u.id} style={S.reqCard}>
+                  <div style={S.reqCardTop}>
+                    <span style={S.itemName}>{u.itemName}</span>
+                    <span style={{ ...S.reqStatusTag, ...(u.direction === "use" ? S.reqStatus_cancelled : S.reqStatus_ordered) }}>
+                      {u.direction === "use" ? "Used" : "Added"} {u.qty}
+                    </span>
+                  </div>
+                  <div style={S.rowMeta}>
+                    <span>By {u.by}</span>
+                    <span>{new Date(u.timestamp).toLocaleString()}</span>
+                    {u.jobNumber && <span>Job: {u.jobNumber}</span>}
+                    {u.customer && <span>Customer: {u.customer}</span>}
+                  </div>
+                  {u.note && <div style={S.itemComment}>{u.note}</div>}
+                </div>
+              ))}
+            {usageLog.length === 0 && <div style={S.empty}>No usage recorded yet.</div>}
+          </div>
+            </>
+          )}
+        </div>
       ) : (
         <>
 
@@ -2647,8 +2883,8 @@ export default function StockControl() {
                         <div style={S.rowControls}>
                           <div style={S.qtyBlock}>
                             {canEditQty(tab) && (
-                              <button className="stk-btn" style={S.qtyBtn} onClick={() => adjust(it.id, -1)}>
-                                <Minus size={15} strokeWidth={2.5} />
+                              <button className="stk-btn" style={S.usageBtnUse} onClick={() => openUsageModal(it, "use")}>
+                                Use
                               </button>
                             )}
                             <div style={S.qtyDisplay}>
@@ -2656,8 +2892,8 @@ export default function StockControl() {
                               <span style={S.qtyUnit}>{it.trackLength ? "pcs" : it.unit}</span>
                             </div>
                             {canEditQty(tab) && (
-                              <button className="stk-btn" style={S.qtyBtn} onClick={() => adjust(it.id, 1)}>
-                                <Plus size={15} strokeWidth={2.5} />
+                              <button className="stk-btn" style={S.usageBtnAdd} onClick={() => openUsageModal(it, "add")}>
+                                Add
                               </button>
                             )}
                           </div>
@@ -2984,6 +3220,59 @@ export default function StockControl() {
                         placeholder="e.g. 3mm"
                       />
                     </div>
+                    {effectiveGrade && form.thickness.trim() && effectiveSize && (
+                      <div style={{ marginTop: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <label style={S.label}>Price</label>
+                          <div style={S.segRow}>
+                            {[
+                              { key: "perUnit", label: "R/sheet" },
+                              { key: "perKg", label: "R/kg" },
+                            ].map((m) => (
+                              <button
+                                type="button"
+                                key={m.key}
+                                className="stk-btn"
+                                onClick={() => setPriceUnitMode(m.key)}
+                                style={{
+                                  ...S.segBtn,
+                                  ...(priceUnitMode === m.key ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                                }}
+                              >
+                                {m.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        {(() => {
+                          const weight = plateWeight({ size: effectiveSize, thickness: form.thickness, grade: effectiveGrade, qty: 1 });
+                          const perSheetWeight = weight?.perSheet || 0;
+                          const currentPerKg = findPrice("grades", effectiveGrade);
+                          const displayValue = priceUnitMode === "perKg" ? currentPerKg : currentPerKg * perSheetWeight;
+                          return (
+                            <>
+                              <input
+                                type="number"
+                                step="0.01"
+                                style={S.input}
+                                value={displayValue === 0 ? "" : displayValue}
+                                placeholder="0"
+                                onChange={(e) => {
+                                  const v = parseFloat(e.target.value) || 0;
+                                  const newPerKg = priceUnitMode === "perKg" ? v : perSheetWeight > 0 ? v / perSheetWeight : 0;
+                                  setMaterialPrice("grades", effectiveGrade, newPerKg);
+                                }}
+                              />
+                              <div style={S.roleHint}>
+                                {perSheetWeight > 0
+                                  ? `${perSheetWeight.toFixed(1)}kg per sheet — this updates the ${effectiveGrade} rate everywhere it's used.`
+                                  : "Enter a valid size and thickness to calculate weight."}
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
                     <div style={{ marginTop: 10 }}>
                       <LibraryField
                         label="Sheet name (optional)"
@@ -3008,6 +3297,59 @@ export default function StockControl() {
                       onCustomChange={(v) => setForm({ ...form, customSection: v })}
                       placeholder="e.g. 50x50x5mm"
                     />
+                    {effectiveSection && (
+                      <div style={{ marginTop: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <label style={S.label}>Price</label>
+                          <div style={S.segRow}>
+                            {[
+                              { key: "perUnit", label: "R/m" },
+                              { key: "perKg", label: "R/kg" },
+                            ].map((m) => (
+                              <button
+                                type="button"
+                                key={m.key}
+                                className="stk-btn"
+                                onClick={() => setPriceUnitMode(m.key)}
+                                style={{
+                                  ...S.segBtn,
+                                  ...(priceUnitMode === m.key ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                                }}
+                              >
+                                {m.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        {(() => {
+                          const kgPerM = findFactor("sections", effectiveSection);
+                          const currentPerM = findPrice("sections", effectiveSection);
+                          const currentPerKg = kgPerM ? currentPerM / kgPerM : 0;
+                          const displayValue = priceUnitMode === "perKg" ? currentPerKg : currentPerM;
+                          return (
+                            <>
+                              <input
+                                type="number"
+                                step="0.01"
+                                style={S.input}
+                                value={displayValue === 0 ? "" : displayValue}
+                                placeholder="0"
+                                onChange={(e) => {
+                                  const v = parseFloat(e.target.value) || 0;
+                                  const newPerM = priceUnitMode === "perKg" ? v * (kgPerM || 0) : v;
+                                  setMaterialPrice("sections", effectiveSection, newPerM);
+                                }}
+                              />
+                              <div style={S.roleHint}>
+                                {kgPerM
+                                  ? `${kgPerM.toFixed(2)}kg per metre — this updates the ${effectiveSection} rate everywhere it's used.`
+                                  : "This section has no kg/m set yet in Stock Manager."}
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
                     <div style={{ marginTop: 10 }}>
                       <label style={S.checkRow}>
                         <input
@@ -3656,6 +3998,14 @@ export default function StockControl() {
                               />
                               Can raise Purchase Orders
                             </label>
+                            <label style={S.deptToggleItem}>
+                              <input
+                                type="checkbox"
+                                checked={!!p.canViewUsageLog}
+                                onChange={(e) => updatePersonField(p.id, "canViewUsageLog", e.target.checked)}
+                              />
+                              Can view Usage Log
+                            </label>
                           </div>
                         </>
                       )}
@@ -3808,6 +4158,76 @@ export default function StockControl() {
         </div>
       )}
 
+      {usageModal && (
+        <div style={S.modalOverlay} onClick={closeUsageModal}>
+          <form style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()} onSubmit={submitUsageModal}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>{usageModal.direction === "use" ? "Use stock" : "Add stock"}</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeUsageModal}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={S.roleHint}>{usageModal.item.name}</div>
+
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Quantity</label>
+              <input
+                autoFocus
+                type="number"
+                step="any"
+                min="0"
+                style={S.input}
+                value={usageModal.qty}
+                onChange={(e) => setUsageModal((m) => ({ ...m, qty: e.target.value }))}
+                placeholder="e.g. 10"
+              />
+            </div>
+
+            {usageModal.direction === "use" ? (
+              <>
+                <div style={{ marginTop: 10 }}>
+                  <label style={S.label}>Job number</label>
+                  <input
+                    style={S.input}
+                    value={usageModal.jobNumber}
+                    onChange={(e) => setUsageModal((m) => ({ ...m, jobNumber: e.target.value }))}
+                    placeholder="e.g. 4471"
+                  />
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <label style={S.label}>Customer</label>
+                  <input
+                    style={S.input}
+                    value={usageModal.customer}
+                    onChange={(e) => setUsageModal((m) => ({ ...m, customer: e.target.value }))}
+                    placeholder="e.g. HPE"
+                  />
+                </div>
+                <div style={{ ...S.roleHint, marginTop: 6 }}>Job number or customer — at least one is required.</div>
+              </>
+            ) : (
+              <div style={{ marginTop: 10 }}>
+                <label style={S.label}>Note (optional)</label>
+                <input
+                  style={S.input}
+                  value={usageModal.note}
+                  onChange={(e) => setUsageModal((m) => ({ ...m, note: e.target.value }))}
+                  placeholder="e.g. stocktake correction"
+                />
+              </div>
+            )}
+
+            <button
+              type="submit"
+              style={{ ...S.submitBtn, ...(usageModal.direction === "use" ? { background: C.danger } : {}) }}
+              className="stk-btn"
+            >
+              {usageModal.direction === "use" ? "Confirm use" : "Confirm add"}
+            </button>
+          </form>
+        </div>
+      )}
+
       {poBuilder && (
         <div style={S.modalOverlay} onClick={closePoBuilder}>
           <form style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()} onSubmit={submitPurchaseOrder}>
@@ -3931,31 +4351,17 @@ export default function StockControl() {
                             <div style={S.lowStockThreshold}>min {it.low}</div>
                           </button>
                           {canEditQty(it.mainCat) ? (
-                            <div style={S.qtyBlock}>
-                              <button
-                                type="button"
-                                className="stk-btn"
-                                style={S.qtyBtn}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  adjust(it.id, -1);
-                                }}
-                              >
-                                <Minus size={13} strokeWidth={2.5} />
-                              </button>
-                              <span style={{ ...S.qtyNum, fontSize: 14, color: C.danger, minWidth: 22, textAlign: "center" }}>{it.qty}</span>
-                              <button
-                                type="button"
-                                className="stk-btn"
-                                style={S.qtyBtn}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  adjust(it.id, 1);
-                                }}
-                              >
-                                <Plus size={13} strokeWidth={2.5} />
-                              </button>
-                            </div>
+                            <button
+                              type="button"
+                              className="stk-btn"
+                              style={S.usageBtnAdd}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openUsageModal(it, "add");
+                              }}
+                            >
+                              Add stock
+                            </button>
                           ) : (
                             <span style={{ ...S.qtyNum, fontSize: 14, color: C.danger }}>{it.qty}</span>
                           )}
@@ -4456,6 +4862,28 @@ const S = {
   qtyDisplay: { display: "flex", flexDirection: "column", alignItems: "center", minWidth: 40 },
   qtyNum: { fontFamily: F.mono, fontSize: 17, fontWeight: 600, lineHeight: 1 },
   qtyUnit: { fontFamily: F.mono, fontSize: 10, color: C.muted, marginTop: 2 },
+  usageBtnUse: {
+    padding: "8px 14px",
+    borderRadius: 7,
+    border: `1px solid ${C.danger}55`,
+    background: C.dangerTint,
+    color: C.danger,
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+    flexShrink: 0,
+  },
+  usageBtnAdd: {
+    padding: "8px 14px",
+    borderRadius: 7,
+    border: `1px solid ${C.accentFinished}55`,
+    background: "#16302C",
+    color: C.accentFinished,
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+    flexShrink: 0,
+  },
   rowActionIcons: {
     display: "flex",
     alignItems: "center",
