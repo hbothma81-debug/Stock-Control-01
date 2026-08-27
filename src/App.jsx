@@ -7,7 +7,7 @@ import {
   Plus, Minus, Search, Trash2, PackagePlus, AlertTriangle, X,
   ChevronDown, User, UserCheck, ShieldCheck, Lock, Database,
   Download, Pencil, Copy, Filter as FilterIcon, Paperclip, FileText, Image as ImageIcon,
-  Wrench, Users, Eye, EyeOff, ShoppingCart, ClipboardList, Check, Package,
+  Wrench, Users, Eye, EyeOff, ShoppingCart, ClipboardList, Check, Package, Upload,
 } from "lucide-react";
 
 // window.storage is installed in main.jsx before this component ever
@@ -1775,6 +1775,68 @@ export default function StockControl() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Stock Codes");
     XLSX.writeFile(wb, `Stock-Codes-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }
+
+  // A full, one-click copy of everything — items, the whole master library,
+  // requisitions, purchase orders, and the usage log — as one downloadable
+  // file. Nothing fancy, just a real, in-your-hands safety net.
+  function exportBackup() {
+    const backup = {
+      exportedAt: new Date().toISOString(),
+      exportedBy: roleLabel,
+      items,
+      master,
+      requisitions,
+      purchaseOrders,
+      usageLog,
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `stock-control-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function importBackup(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      let data;
+      try {
+        data = JSON.parse(ev.target.result);
+      } catch {
+        alert("That doesn't look like a valid backup file.");
+        e.target.value = "";
+        return;
+      }
+      if (!data.items || !data.master) {
+        alert("That file doesn't look like a Stock Control backup — missing items or master data.");
+        e.target.value = "";
+        return;
+      }
+      const ok = window.confirm(
+        `This will REPLACE everything currently in the system with the contents of this backup (from ${
+          data.exportedAt ? new Date(data.exportedAt).toLocaleString() : "an unknown date"
+        }). This can't be undone. Are you sure?`
+      );
+      if (!ok) {
+        e.target.value = "";
+        return;
+      }
+      setItems(data.items);
+      setMaster({ ...DEFAULT_MASTER, ...data.master });
+      setRequisitions(data.requisitions || []);
+      setPurchaseOrders(data.purchaseOrders || []);
+      setUsageLog(data.usageLog || []);
+      alert("Backup restored.");
+      e.target.value = "";
+    };
+    reader.readAsText(file);
   }
 
   function toggleGrade(key) {
@@ -3983,6 +4045,18 @@ export default function StockControl() {
               </button>
             </div>
 
+            {isAdmin && (
+              <div style={S.backupRow}>
+                <button type="button" className="stk-btn" style={S.backupBtn} onClick={exportBackup}>
+                  <Download size={13} /> Download backup
+                </button>
+                <label className="stk-btn" style={S.backupBtn}>
+                  <Upload size={13} /> Restore from backup
+                  <input type="file" accept="application/json" style={{ display: "none" }} onChange={importBackup} />
+                </label>
+              </div>
+            )}
+
             <div style={S.managerTabs}>
               {MANAGER_TABS.filter((t) => t.key !== "departments" || isAdmin).map((t) => (
                 <button
@@ -5613,6 +5687,24 @@ const S = {
     fontFamily: F.mono,
     fontSize: 11,
     color: C.danger,
+  },
+  backupRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 10,
+  },
+  backupBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    background: C.bg,
+    border: `1px solid ${C.border}`,
+    borderRadius: 6,
+    padding: "7px 12px",
+    fontSize: 12,
+    color: C.text,
+    cursor: "pointer",
   },
   managerTabs: {
     display: "flex",
