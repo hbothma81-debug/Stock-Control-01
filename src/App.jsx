@@ -903,7 +903,7 @@ export default function StockControl() {
       if (error) throw error;
       const map = {};
       (data || []).forEach((d) => {
-        map[d.part_number] = { id: d.id, description: d.description };
+        map[d.part_number.trim()] = { id: d.id, description: d.description };
       });
       setDrawingLookup(map);
     } catch (err) {
@@ -917,7 +917,7 @@ export default function StockControl() {
       const { data, error } = await supabase
         .from("drawings")
         .select("*")
-        .eq("part_number", partNumber)
+        .eq("part_number", partNumber.trim())
         .eq("status", "current")
         .maybeSingle();
       if (error) throw error;
@@ -3923,11 +3923,11 @@ export default function StockControl() {
                           </div>
                           )}
                           <div style={S.rowActionIcons}>
-                            {it.partNumber && drawingLookup[it.partNumber] && (
+                            {it.partNumber && drawingLookup[it.partNumber.trim()] && (
                               <button
                                 className="stk-btn"
                                 style={S.iconRowBtn}
-                                onClick={() => openDrawingPreviewByPartNumber(it.partNumber)}
+                                onClick={() => openDrawingPreviewByPartNumber(it.partNumber.trim())}
                                 title="View drawing on file for this part"
                               >
                                 <FileText size={14} color={C.accentFinished} />
