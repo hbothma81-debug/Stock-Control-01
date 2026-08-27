@@ -420,6 +420,7 @@ export default function StockControl() {
   const [showPoReport, setShowPoReport] = useState(false);
   const [drawingSearchQuery, setDrawingSearchQuery] = useState("");
   const [drawingSearchResults, setDrawingSearchResults] = useState(null);
+  const [drawingCustomerFilter, setDrawingCustomerFilter] = useState("");
   const [drawingSearchLoading, setDrawingSearchLoading] = useState(false);
   const [expandedDrawingHistory, setExpandedDrawingHistory] = useState({});
   const [showDrawingUpload, setShowDrawingUpload] = useState(false);
@@ -683,6 +684,15 @@ export default function StockControl() {
     window.storage.set("stock-usage-log-v1", JSON.stringify(usageLog), true).catch(() => {});
   }, [usageLog]);
 
+  // Drawings live in their own real table, not window.storage — load the
+  // first time the tab is opened so browsing works without typing anything,
+  // rather than only showing results once you start a search.
+  useEffect(() => {
+    if (tab === "drawings" && drawingSearchResults === null) {
+      refreshDrawings(drawingSearchQuery, drawingCustomerFilter);
+    }
+  }, [tab]);
+
   // Belt-and-suspenders on top of the immediate saves above: the moment this
   // tab/app gets backgrounded or closed — phone locking, switching apps,
   // closing the tab — re-fire every save with whatever's current right then.
@@ -838,19 +848,18 @@ export default function StockControl() {
 
   // ---- Drawings tab: search, view, and bulk upload ----
 
-  async function searchDrawings(query) {
-    if (!supabase || !query.trim()) {
-      setDrawingSearchResults(null);
+  async function refreshDrawings(query, customer) {
+    if (!supabase) {
+      setDrawingSearchResults([]);
       return;
     }
     setDrawingSearchLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("drawings")
-        .select("*")
-        .ilike("part_number", `%${query.trim()}%`)
-        .order("part_number")
-        .order("internal_revision", { ascending: false });
+      let q = supabase.from("drawings").select("*").order("part_number").order("internal_revision", { ascending: false });
+      if (query && query.trim()) q = q.ilike("part_number", `%${query.trim()}%`);
+      if (customer === "__internal__") q = q.is("customer", null);
+      else if (customer) q = q.eq("customer", customer);
+      const { data, error } = await q;
       if (error) throw error;
       // Group by part number so each part shows its current revision plus
       // any older ones tucked away in a collapsible history.
@@ -861,14 +870,14 @@ export default function StockControl() {
       });
       setDrawingSearchResults(Object.entries(grouped));
     } catch (err) {
-      console.error("Drawing search failed:", err);
+      console.error("Loading drawings failed:", err);
       setDrawingSearchResults([]);
     }
     setDrawingSearchLoading(false);
   }
 
   async function openDrawingPreview(drawing) {
-    setPreviewItem({ id: drawing.id, attachmentType: "pdf", attachmentName: drawing.file_name });
+    setPreviewItem({ id: drawing.id, attachmentType: "pdf", attachmentName: drawing.file_name, restrictDownload: true });
     setPreviewData(null);
     setPreviewLoading(true);
     try {
@@ -3228,23 +3237,43 @@ export default function StockControl() {
               <Upload size={15} strokeWidth={2.5} /> Upload Drawings
             </button>
           )}
-          <div style={{ marginTop: 10 }}>
-            <input
-              style={S.input}
-              value={drawingSearchQuery}
-              onChange={(e) => {
-                setDrawingSearchQuery(e.target.value);
-                searchDrawings(e.target.value);
-              }}
-              placeholder="Type a part number…"
-            />
+          <div style={S.formGrid}>
+            <div>
+              <label style={S.label}>Search part number</label>
+              <input
+                style={S.input}
+                value={drawingSearchQuery}
+                onChange={(e) => {
+                  setDrawingSearchQuery(e.target.value);
+                  refreshDrawings(e.target.value, drawingCustomerFilter);
+                }}
+                placeholder="Type a part number…"
+              />
+            </div>
+            <div>
+              <label style={S.label}>Customer</label>
+              <select
+                style={S.input}
+                value={drawingCustomerFilter}
+                onChange={(e) => {
+                  setDrawingCustomerFilter(e.target.value);
+                  refreshDrawings(drawingSearchQuery, e.target.value);
+                }}
+              >
+                <option value="">All customers</option>
+                <option value="__internal__">Internal (no customer)</option>
+                {master.customers.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          {drawingSearchLoading && <div style={{ ...S.empty, marginTop: 10 }}>Searching…</div>}
+          {drawingSearchLoading && <div style={{ ...S.empty, marginTop: 10 }}>Loading…</div>}
 
           {!drawingSearchLoading && drawingSearchResults !== null && (
             <div style={{ ...S.gradeItems, marginTop: 12 }}>
-              {drawingSearchResults.length === 0 && <div style={S.empty}>No drawings found for that part number.</div>}
+              {drawingSearchResults.length === 0 && <div style={S.empty}>No drawings yet — upload some to get started.</div>}
               {drawingSearchResults.map(([partNumber, revisions]) => {
                 const current = revisions.find((r) => r.status === "current") || revisions[0];
                 const history = revisions.filter((r) => r.id !== current.id);
@@ -5160,9 +5189,16 @@ export default function StockControl() {
             {!previewLoading && previewData && previewItem.attachmentType === "pdf" && (
               <>
                 <embed src={previewData} type="application/pdf" style={S.previewPdf} />
-                <a href={previewData} download={previewItem.attachmentName || "drawing.pdf"} style={S.previewDownload}>
-                  Download PDF
-                </a>
+                {(!previewItem.restrictDownload || isAdmin) && (
+                  <a href={previewData} download={previewItem.attachmentName || "drawing.pdf"} style={S.previewDownload}>
+                    Download PDF
+                  </a>
+                )}
+                {previewItem.restrictDownload && !isAdmin && (
+                  <div style={{ ...S.roleHint, textAlign: "center", marginTop: 8 }}>
+                    Downloading this drawing is restricted to Admin.
+                  </div>
+                )}
               </>
             )}
           </div>
