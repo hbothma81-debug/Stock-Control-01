@@ -414,6 +414,11 @@ export default function StockControl() {
   const [assetRemoveModal, setAssetRemoveModal] = useState(null); // { item, reason, date }
   const [showAssetArchive, setShowAssetArchive] = useState(false);
   const [poBuilder, setPoBuilder] = useState(null); // { supplierId, lineItems: [...], linkedRequisitionIds: [...], notes }
+  const [poSupplierFilter, setPoSupplierFilter] = useState("");
+  const [showPoReport, setShowPoReport] = useState(false);
+  const [poReportFrom, setPoReportFrom] = useState("");
+  const [poReportTo, setPoReportTo] = useState("");
+  const [poReportSupplier, setPoReportSupplier] = useState("");
   const [selectedReqIds, setSelectedReqIds] = useState([]);
   const [requisitionTarget, setRequisitionTarget] = useState(null);
   const [requisitionQty, setRequisitionQty] = useState("");
@@ -1443,7 +1448,7 @@ export default function StockControl() {
 
   // ---- Purchase Orders ----
 
-  function generatePoPdf(po) {
+  function buildPoDoc(po) {
     const doc = new jsPDF();
     const company = master.companyDetails || {};
     const supplier = master.suppliers.find((s) => s.id === po.supplierId);
@@ -1524,7 +1529,67 @@ export default function StockControl() {
       doc.text(`Notes: ${po.notes}`, leftX, finalY);
     }
 
-    doc.save(`${po.poNumber}.pdf`);
+    return doc;
+  }
+
+  function downloadPoPdf(po) {
+    buildPoDoc(po).save(`${po.poNumber}.pdf`);
+  }
+
+  // Opens the PO in the same inline viewer already used for drawing/photo
+  // attachments — no forced download just to look at something.
+  function viewPoPdf(po) {
+    const doc = buildPoDoc(po);
+    setPreviewItem({ id: po.id, attachmentType: "pdf", attachmentName: `${po.poNumber}.pdf` });
+    setPreviewData(doc.output("datauristring"));
+    setPreviewLoading(false);
+  }
+
+  // A summary-table report across many POs at once — for spend review, not
+  // for sending to a supplier, so this is a plain table, not a letterhead.
+  function generatePoReport() {
+    const matches = purchaseOrders
+      .filter((po) => !poReportSupplier || po.supplierId === poReportSupplier)
+      .filter((po) => !poReportFrom || new Date(po.dateCreated) >= new Date(poReportFrom))
+      .filter((po) => !poReportTo || new Date(po.dateCreated) <= new Date(poReportTo + "T23:59:59"))
+      .sort((a, b) => new Date(a.dateCreated) - new Date(b.dateCreated));
+
+    if (matches.length === 0) {
+      alert("No Purchase Orders match that date range/supplier.");
+      return;
+    }
+
+    const doc = new jsPDF();
+    const company = master.companyDetails || {};
+    doc.setFontSize(14);
+    doc.setFont(undefined, "bold");
+    doc.text(`${company.name || "Purchase Order Report"}`, 14, 18);
+    doc.setFontSize(10);
+    doc.setFont(undefined, "normal");
+    const supplierLabel = poReportSupplier ? master.suppliers.find((s) => s.id === poReportSupplier)?.name || "" : "All suppliers";
+    const rangeLabel = `${poReportFrom || "earliest"} to ${poReportTo || "latest"}`;
+    doc.text(`${supplierLabel} · ${rangeLabel}`, 14, 25);
+
+    const total = matches.reduce((sum, po) => sum + po.totalValue, 0);
+
+    autoTable(doc, {
+      startY: 32,
+      head: [["PO Number", "Date", "Supplier", "Lines", "Total"]],
+      body: matches.map((po) => [
+        po.poNumber,
+        new Date(po.dateCreated).toLocaleDateString(),
+        po.supplierName || "—",
+        String(po.lineItems.length),
+        `R ${po.totalValue.toFixed(2)}`,
+      ]),
+      foot: [["", "", "", "Grand total", `R ${total.toFixed(2)}`]],
+      theme: "grid",
+      headStyles: { fillColor: [27, 29, 31] },
+      footStyles: { fillColor: [242, 169, 0], textColor: [27, 29, 31], fontStyle: "bold" },
+    });
+
+    doc.save(`PO-Report-${new Date().toISOString().slice(0, 10)}.pdf`);
+    setShowPoReport(false);
   }
 
   function openPoBuilder(linkedRequisitionIds = [], prefillSupplierId = "", prefillLineItems = []) {
@@ -1608,7 +1673,7 @@ export default function StockControl() {
       );
       setSelectedReqIds([]);
     }
-    generatePoPdf(po);
+    viewPoPdf(po);
     closePoBuilder();
   }
 
@@ -2698,14 +2763,35 @@ export default function StockControl() {
         </div>
       ) : tab === "purchaseOrders" ? (
         <div style={S.list}>
-          {canRaisePO && (
-            <button type="button" className="stk-btn" style={S.addBtn} onClick={() => openPoBuilder()}>
-              <Plus size={15} strokeWidth={2.5} /> Raise Purchase Order
-            </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {canRaisePO && (
+              <button type="button" className="stk-btn" style={S.addBtn} onClick={() => openPoBuilder()}>
+                <Plus size={15} strokeWidth={2.5} /> Raise Purchase Order
+              </button>
+            )}
+            {canManageRequisitions && (
+              <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => setShowPoReport(true)}>
+                <FileText size={13} /> Generate Report
+              </button>
+            )}
+          </div>
+
+          {purchaseOrders.length > 5 && (
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Supplier</label>
+              <select style={S.input} value={poSupplierFilter} onChange={(e) => setPoSupplierFilter(e.target.value)}>
+                <option value="">All suppliers</option>
+                {master.suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
           )}
+
           {purchaseOrders.length === 0 && <div style={S.empty}>No Purchase Orders yet.</div>}
           <div style={{ ...S.gradeItems, marginTop: 10 }}>
             {[...purchaseOrders]
+              .filter((po) => !poSupplierFilter || po.supplierId === poSupplierFilter)
               .sort((a, b) => new Date(b.dateCreated) - new Date(a.dateCreated))
               .map((po) => (
                 <div key={po.id} style={S.reqCard}>
@@ -2720,8 +2806,11 @@ export default function StockControl() {
                   </div>
                   {po.notes && <div style={S.itemComment}>{po.notes}</div>}
                   <div style={S.reqActions}>
-                    <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => generatePoPdf(po)}>
-                      <FileText size={13} /> Download PDF
+                    <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => viewPoPdf(po)}>
+                      <FileText size={13} /> View PDF
+                    </button>
+                    <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => downloadPoPdf(po)}>
+                      <Download size={13} /> Download
                     </button>
                   </div>
                 </div>
@@ -3110,6 +3199,14 @@ export default function StockControl() {
                               {linkedReq && <ReqFlag req={linkedReq} onClick={() => handleFlagClick(linkedReq)} />}
                             </div>
                           )}
+                          {(it.customer || it.salesPerson) && (
+                            <div style={S.customerSalesRow}>
+                              {tab !== "custom" && tab !== "stores" && tab !== "assets" && it.customer && (
+                                <span style={S.customerTag}>{it.customer}</span>
+                              )}
+                              {it.salesPerson && <span style={S.salesTag}>{it.salesPerson}</span>}
+                            </div>
+                          )}
                           {it.comment && <div style={S.itemComment}>{it.comment}</div>}
                           <div style={S.rowMeta}>
                             {tab === "plate" && it.sheetName && <span>{it.sheetName}</span>}
@@ -3130,9 +3227,7 @@ export default function StockControl() {
                             {tab === "assets" && it.serialNumber && <span>SN: {it.serialNumber}</span>}
                             {tab === "assets" && it.purchaseDate && <span>Bought {new Date(it.purchaseDate).toLocaleDateString()}</span>}
                             {it.loc && <span>{it.loc}</span>}
-                            {it.salesPerson && <span>Sales: {it.salesPerson}</span>}
                             {it.supplier && <span>Supplier: {it.supplier}</span>}
-                            {tab !== "custom" && tab !== "stores" && tab !== "assets" && it.customer && <span>Customer: {it.customer}</span>}
                             {(tab === "custom" || tab === "stores") && canSeeValue && (
                               <span>R{Number(it.value || 0).toFixed(2)} ea · R{(Number(it.value || 0) * Number(it.qty || 0)).toFixed(2)} total</span>
                             )}
@@ -4832,6 +4927,42 @@ export default function StockControl() {
         </div>
       )}
 
+      {showPoReport && (
+        <div style={S.modalOverlay} onClick={() => setShowPoReport(false)}>
+          <div style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Generate PO Report</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setShowPoReport(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={S.roleHint}>A summary table of Purchase Orders for the range and supplier you choose — one PDF, ready to download.</div>
+            <div style={S.formGrid}>
+              <div>
+                <label style={S.label}>From</label>
+                <input type="date" style={S.input} value={poReportFrom} onChange={(e) => setPoReportFrom(e.target.value)} />
+              </div>
+              <div>
+                <label style={S.label}>To</label>
+                <input type="date" style={S.input} value={poReportTo} onChange={(e) => setPoReportTo(e.target.value)} />
+              </div>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Supplier</label>
+              <select style={S.input} value={poReportSupplier} onChange={(e) => setPoReportSupplier(e.target.value)}>
+                <option value="">All suppliers</option>
+                {master.suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+            <button type="button" className="stk-btn" style={S.submitBtn} onClick={generatePoReport}>
+              Generate report
+            </button>
+          </div>
+        </div>
+      )}
+
       {poBuilder && (
         <div style={S.modalOverlay} onClick={closePoBuilder}>
           <form style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()} onSubmit={submitPurchaseOrder}>
@@ -5420,10 +5551,38 @@ const S = {
     display: "flex",
     gap: 12,
     marginTop: 5,
-    fontSize: 12,
+    fontSize: 11,
     color: C.muted,
     fontFamily: F.mono,
     flexWrap: "wrap",
+  },
+  customerSalesRow: {
+    display: "flex",
+    gap: 6,
+    marginTop: 4,
+    flexWrap: "wrap",
+  },
+  customerTag: {
+    display: "inline-flex",
+    alignItems: "center",
+    fontSize: 12.5,
+    fontWeight: 700,
+    color: C.accentRaw,
+    background: C.accentTint,
+    border: `1px solid ${C.accentRaw}66`,
+    borderRadius: 5,
+    padding: "3px 8px",
+  },
+  salesTag: {
+    display: "inline-flex",
+    alignItems: "center",
+    fontSize: 12.5,
+    fontWeight: 600,
+    color: C.accentFinished,
+    background: "#16302C",
+    border: `1px solid ${C.accentFinished}55`,
+    borderRadius: 5,
+    padding: "3px 8px",
   },
   lowTag: { display: "flex", alignItems: "center", gap: 4, color: C.danger },
   offcutTag: {
