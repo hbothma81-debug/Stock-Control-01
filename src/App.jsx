@@ -30,9 +30,10 @@ const NAV_TABS = [
   { key: "requisitions", label: "Requisitions" },
   { key: "purchaseOrders", label: "Purchase Orders" },
   { key: "usageLog", label: "Usage Log" },
+  { key: "drawings", label: "Drawings" },
 ];
 
-const SECTIONS = ["plate", "structural", "cncBar", "custom", "stores", "assets"];
+const SECTIONS = ["plate", "structural", "cncBar", "custom", "stores", "assets", "drawings"];
 
 const MANAGER_TABS = [
   { key: "sizes", label: "Sheet Sizes" },
@@ -417,6 +418,15 @@ export default function StockControl() {
   const [poBuilder, setPoBuilder] = useState(null); // { supplierId, lineItems: [...], linkedRequisitionIds: [...], notes }
   const [poSupplierFilter, setPoSupplierFilter] = useState("");
   const [showPoReport, setShowPoReport] = useState(false);
+  const [drawingSearchQuery, setDrawingSearchQuery] = useState("");
+  const [drawingSearchResults, setDrawingSearchResults] = useState(null);
+  const [drawingSearchLoading, setDrawingSearchLoading] = useState(false);
+  const [expandedDrawingHistory, setExpandedDrawingHistory] = useState({});
+  const [showDrawingUpload, setShowDrawingUpload] = useState(false);
+  const [drawingUploadCustomer, setDrawingUploadCustomer] = useState("");
+  const [drawingUploadFiles, setDrawingUploadFiles] = useState([]); // [{file, partNumber, skip}]
+  const [drawingUploadBusy, setDrawingUploadBusy] = useState(false);
+  const [drawingUploadResult, setDrawingUploadResult] = useState(null);
   const [poReportFrom, setPoReportFrom] = useState("");
   const [poReportTo, setPoReportTo] = useState("");
   const [poReportSupplier, setPoReportSupplier] = useState("");
@@ -471,6 +481,7 @@ export default function StockControl() {
   const [newSupplierName, setNewSupplierName] = useState("");
   const [importFileLabel, setImportFileLabel] = useState("");
   const [importCustomer, setImportCustomer] = useState("");
+  const [importReplaceAll, setImportReplaceAll] = useState(false);
 
   const [editingId, setEditingId] = useState(null);
   const [previewItem, setPreviewItem] = useState(null);
@@ -823,6 +834,104 @@ export default function StockControl() {
       .single();
     if (error) throw error;
     return data;
+  }
+
+  // ---- Drawings tab: search, view, and bulk upload ----
+
+  async function searchDrawings(query) {
+    if (!supabase || !query.trim()) {
+      setDrawingSearchResults(null);
+      return;
+    }
+    setDrawingSearchLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("drawings")
+        .select("*")
+        .ilike("part_number", `%${query.trim()}%`)
+        .order("part_number")
+        .order("internal_revision", { ascending: false });
+      if (error) throw error;
+      // Group by part number so each part shows its current revision plus
+      // any older ones tucked away in a collapsible history.
+      const grouped = {};
+      (data || []).forEach((d) => {
+        if (!grouped[d.part_number]) grouped[d.part_number] = [];
+        grouped[d.part_number].push(d);
+      });
+      setDrawingSearchResults(Object.entries(grouped));
+    } catch (err) {
+      console.error("Drawing search failed:", err);
+      setDrawingSearchResults([]);
+    }
+    setDrawingSearchLoading(false);
+  }
+
+  async function openDrawingPreview(drawing) {
+    setPreviewItem({ id: drawing.id, attachmentType: "pdf", attachmentName: drawing.file_name });
+    setPreviewData(null);
+    setPreviewLoading(true);
+    try {
+      const url = await getDrawingSignedUrl(drawing.storage_path);
+      setPreviewData(url);
+    } catch (err) {
+      console.error("Couldn't open drawing:", err);
+      setPreviewData(null);
+    }
+    setPreviewLoading(false);
+  }
+
+  function handleDrawingFilesSelected(e) {
+    const files = Array.from(e.target.files || []);
+    const entries = files
+      .filter((f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"))
+      .map((f) => ({
+        file: f,
+        partNumber: f.name.replace(/\.pdf$/i, "").trim(),
+        skip: false,
+      }));
+    setDrawingUploadFiles(entries);
+    setDrawingUploadResult(null);
+    e.target.value = "";
+  }
+
+  function removeDrawingUploadFile(idx) {
+    setDrawingUploadFiles((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  async function submitDrawingUpload() {
+    const validFiles = drawingUploadFiles.filter((f) => f.partNumber && !f.skip);
+    if (validFiles.length === 0) return;
+    setDrawingUploadBusy(true);
+    let succeeded = 0;
+    let failed = 0;
+    for (const entry of validFiles) {
+      try {
+        const nextRevision = await getNextInternalRevision(entry.partNumber);
+        const path = await uploadDrawingFile(entry.file, entry.partNumber, nextRevision);
+        await insertDrawingRecord({
+          partNumber: entry.partNumber,
+          customer: drawingUploadCustomer || null,
+          customerRevision: null,
+          storagePath: path,
+          fileName: entry.file.name,
+        });
+        succeeded++;
+      } catch (err) {
+        console.error(`Failed to upload drawing for ${entry.partNumber}:`, err);
+        failed++;
+      }
+    }
+    setDrawingUploadBusy(false);
+    setDrawingUploadResult({ succeeded, failed });
+    setDrawingUploadFiles([]);
+  }
+
+  function closeDrawingUpload() {
+    setShowDrawingUpload(false);
+    setDrawingUploadFiles([]);
+    setDrawingUploadResult(null);
+    setDrawingUploadCustomer("");
   }
 
   async function loadPeople() {
@@ -2349,20 +2458,42 @@ export default function StockControl() {
 
   function addStockCodeRow() {
     if (!scForm.stockCode.trim()) return;
-    setMaster((prev) => ({
-      ...prev,
-      stockCodes: [
-        ...(prev.stockCodes || []),
-        {
-          id: uid(),
-          stockCode: scForm.stockCode.trim(),
-          description: scForm.description.trim(),
-          price: parseFloat(scForm.price) || 0,
-          recommendedStock: parseFloat(scForm.recommendedStock) || 0,
-          customer: scForm.customer,
-        },
-      ],
-    }));
+    const code = scForm.stockCode.trim();
+    setMaster((prev) => {
+      const existing = (prev.stockCodes || []).find((r) => r.stockCode.toLowerCase() === code.toLowerCase());
+      if (existing) {
+        // Same stock code already exists — update it in place rather than
+        // creating a second entry for the same part.
+        return {
+          ...prev,
+          stockCodes: prev.stockCodes.map((r) =>
+            r.id === existing.id
+              ? {
+                  ...r,
+                  description: scForm.description.trim() || r.description,
+                  price: parseFloat(scForm.price) || r.price,
+                  recommendedStock: parseFloat(scForm.recommendedStock) || r.recommendedStock,
+                  customer: scForm.customer || r.customer,
+                }
+              : r
+          ),
+        };
+      }
+      return {
+        ...prev,
+        stockCodes: [
+          ...(prev.stockCodes || []),
+          {
+            id: uid(),
+            stockCode: code,
+            description: scForm.description.trim(),
+            price: parseFloat(scForm.price) || 0,
+            recommendedStock: parseFloat(scForm.recommendedStock) || 0,
+            customer: scForm.customer,
+          },
+        ],
+      };
+    });
     setScForm({ stockCode: "", description: "", price: "", recommendedStock: "", customer: "" });
   }
 
@@ -2481,10 +2612,32 @@ export default function StockControl() {
             customer: importCustomer,
           }))
           .filter((r) => r.stockCode);
-        setMaster((prev) => ({ ...prev, stockCodes: [...(prev.stockCodes || []), ...newRows] }));
-        alert(
-          `Imported ${newRows.length} rows${importCustomer ? ` for ${importCustomer}` : ""}. Check a few entries below to confirm the columns mapped correctly — rename this section's columns in your file and re-import if anything looks off.`
-        );
+
+        if (importReplaceAll) {
+          setMaster((prev) => ({ ...prev, stockCodes: newRows }));
+          alert(`Replaced the whole Stock Codes list with ${newRows.length} rows${importCustomer ? ` for ${importCustomer}` : ""}.`);
+        } else {
+          // Merge by stock code — update anything that already exists
+          // instead of creating a duplicate row for the same part.
+          setMaster((prev) => {
+            const existing = [...(prev.stockCodes || [])];
+            let updated = 0;
+            newRows.forEach((row) => {
+              const idx = existing.findIndex((r) => r.stockCode.toLowerCase() === row.stockCode.toLowerCase());
+              if (idx >= 0) {
+                existing[idx] = { ...existing[idx], ...row, id: existing[idx].id };
+                updated++;
+              } else {
+                existing.push(row);
+              }
+            });
+            return { ...prev, stockCodes: existing };
+          });
+          const addedCount = newRows.length;
+          alert(
+            `Processed ${addedCount} rows${importCustomer ? ` for ${importCustomer}` : ""} — existing stock codes were updated in place, new ones added. Check a few entries below to confirm the columns mapped correctly.`
+          );
+        }
       } catch (err) {
         alert("Couldn't read that file — make sure it's a .xlsx, .xls, or .csv export.");
       }
@@ -3066,6 +3219,82 @@ export default function StockControl() {
             {usageLog.length === 0 && <div style={S.empty}>No usage recorded yet.</div>}
           </div>
             </>
+          )}
+        </div>
+      ) : tab === "drawings" ? (
+        <div style={S.list}>
+          {canEditQty("drawings") && (
+            <button type="button" className="stk-btn" style={S.addBtn} onClick={() => setShowDrawingUpload(true)}>
+              <Upload size={15} strokeWidth={2.5} /> Upload Drawings
+            </button>
+          )}
+          <div style={{ marginTop: 10 }}>
+            <input
+              style={S.input}
+              value={drawingSearchQuery}
+              onChange={(e) => {
+                setDrawingSearchQuery(e.target.value);
+                searchDrawings(e.target.value);
+              }}
+              placeholder="Type a part number…"
+            />
+          </div>
+
+          {drawingSearchLoading && <div style={{ ...S.empty, marginTop: 10 }}>Searching…</div>}
+
+          {!drawingSearchLoading && drawingSearchResults !== null && (
+            <div style={{ ...S.gradeItems, marginTop: 12 }}>
+              {drawingSearchResults.length === 0 && <div style={S.empty}>No drawings found for that part number.</div>}
+              {drawingSearchResults.map(([partNumber, revisions]) => {
+                const current = revisions.find((r) => r.status === "current") || revisions[0];
+                const history = revisions.filter((r) => r.id !== current.id);
+                return (
+                  <div key={partNumber} style={S.reqCard}>
+                    <div style={S.reqCardTop}>
+                      <span style={S.itemName}>{partNumber}</span>
+                      <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>
+                        {current.customer_revision ? `Rev ${current.customer_revision}` : `Rev ${current.internal_revision}`}
+                      </span>
+                    </div>
+                    <div style={S.rowMeta}>
+                      {current.customer && <span>Customer: {current.customer}</span>}
+                      <span>Uploaded by {current.uploaded_by}</span>
+                      <span>{new Date(current.created_at).toLocaleDateString()}</span>
+                    </div>
+                    <div style={S.reqActions}>
+                      <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => openDrawingPreview(current)}>
+                        <FileText size={13} /> View drawing
+                      </button>
+                      {history.length > 0 && (
+                        <button
+                          type="button"
+                          className="stk-btn"
+                          style={S.reqActionBtnMuted}
+                          onClick={() => setExpandedDrawingHistory((prev) => ({ ...prev, [partNumber]: !prev[partNumber] }))}
+                        >
+                          {expandedDrawingHistory[partNumber] ? "Hide" : "Show"} {history.length} older revision{history.length === 1 ? "" : "s"}
+                        </button>
+                      )}
+                    </div>
+                    {expandedDrawingHistory[partNumber] && (
+                      <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                        {history.map((rev) => (
+                          <div key={rev.id} style={S.managerRow}>
+                            <span style={{ fontSize: 12, color: C.muted }}>
+                              {rev.customer_revision ? `Rev ${rev.customer_revision}` : `Rev ${rev.internal_revision}`} —{" "}
+                              {new Date(rev.created_at).toLocaleDateString()} · {rev.uploaded_by}
+                            </span>
+                            <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => openDrawingPreview(rev)}>
+                              <FileText size={13} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       ) : (
@@ -4306,9 +4535,20 @@ export default function StockControl() {
                   </button>
                 </div>
                 {importFileLabel && <div style={{ fontFamily: F.mono, fontSize: 11, color: C.muted, marginTop: 4 }}>{importFileLabel}</div>}
+                <label style={{ ...S.checkRow, marginTop: 8 }}>
+                  <input type="checkbox" checked={importReplaceAll} onChange={(e) => setImportReplaceAll(e.target.checked)} />
+                  Replace the whole list with this file, instead of updating/adding
+                </label>
+                {importReplaceAll && (
+                  <div style={{ ...S.roleHint, color: C.danger }}>
+                    Every stock code not in this file will be deleted. Use this for a full refresh (e.g. re-uploading a
+                    supplier's updated pricing sheet) — not for adding a few extra items.
+                  </div>
+                )}
                 <div style={S.roleHint}>
                   Imports the first sheet, matching columns containing "stock code", "description", "price", and "recommended"/"reorder". Test with a
                   small file first and check a few rows below before importing the full 400. Leave the customer blank to import shared/general stock codes.
+                  {!importReplaceAll && " Existing stock codes with a matching code get updated, not duplicated."}
                 </div>
 
                 <div style={{ ...S.managerAddRow, marginTop: 12 }}>
@@ -4662,7 +4902,7 @@ export default function StockControl() {
                             <div style={S.deptPermHead}>Edit qty</div>
                             {SECTIONS.map((sec) => (
                               <Fragment key={sec}>
-                                <div style={S.deptPermLabel}>{TABS.find((t) => t.key === sec)?.label}</div>
+                                <div style={S.deptPermLabel}>{NAV_TABS.find((t) => t.key === sec)?.label}</div>
                                 <input
                                   type="checkbox"
                                   checked={!!p.permissions[sec]?.view}
@@ -5035,6 +5275,81 @@ export default function StockControl() {
               {usageModal.direction === "use" ? "Confirm use" : "Confirm add"}
             </button>
           </form>
+        </div>
+      )}
+
+      {showDrawingUpload && (
+        <div style={S.modalOverlay} onClick={drawingUploadBusy ? undefined : closeDrawingUpload}>
+          <div style={{ ...S.modal, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Upload Drawings</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeDrawingUpload} disabled={drawingUploadBusy}>
+                <X size={18} />
+              </button>
+            </div>
+
+            {drawingUploadResult ? (
+              <div>
+                <div style={S.roleHint}>
+                  Uploaded {drawingUploadResult.succeeded} drawing{drawingUploadResult.succeeded === 1 ? "" : "s"}
+                  {drawingUploadResult.failed > 0 ? `, ${drawingUploadResult.failed} failed — check your connection and try those again.` : "."}
+                </div>
+                <button type="button" className="stk-btn" style={S.submitBtn} onClick={closeDrawingUpload}>
+                  Done
+                </button>
+              </div>
+            ) : (
+              <>
+                <div style={{ marginTop: 10 }}>
+                  <label style={S.label}>Customer (optional — leave blank for your own design drawings)</label>
+                  <select style={S.input} value={drawingUploadCustomer} onChange={(e) => setDrawingUploadCustomer(e.target.value)}>
+                    <option value="">No customer — internal drawing</option>
+                    {master.customers.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ marginTop: 12 }}>
+                  <label className="stk-btn" style={{ ...S.addBtn, cursor: "pointer", width: "100%", justifyContent: "center" }}>
+                    <Upload size={14} /> Choose PDF files…
+                    <input type="file" accept="application/pdf" multiple style={{ display: "none" }} onChange={handleDrawingFilesSelected} />
+                  </label>
+                  <div style={{ ...S.roleHint, marginTop: 6 }}>
+                    Each file's name (minus .pdf) is used as the part number — re-uploading the same name later automatically
+                    files it as the next revision.
+                  </div>
+                </div>
+
+                {drawingUploadFiles.length > 0 && (
+                  <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6, maxHeight: 260, overflowY: "auto" }}>
+                    {drawingUploadFiles.map((entry, idx) => (
+                      <div key={idx} style={S.managerRow}>
+                        <span style={{ fontSize: 12, color: entry.partNumber ? C.text : C.danger }}>
+                          {entry.file.name} → <strong>{entry.partNumber || "no part number"}</strong>
+                        </span>
+                        <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeDrawingUploadFile(idx)}>
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={S.submitBtn}
+                  disabled={drawingUploadFiles.length === 0 || drawingUploadBusy}
+                  onClick={submitDrawingUpload}
+                >
+                  {drawingUploadBusy
+                    ? "Uploading…"
+                    : `Upload ${drawingUploadFiles.length} drawing${drawingUploadFiles.length === 1 ? "" : "s"}`}
+                </button>
+              </>
+            )}
+          </div>
         </div>
       )}
 
