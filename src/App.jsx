@@ -3848,12 +3848,22 @@ export default function StockControl() {
                               {linkedReq && <ReqFlag req={linkedReq} onClick={() => handleFlagClick(linkedReq)} />}
                             </div>
                           )}
-                          {(it.customer || it.salesPerson) && (
+                          {(it.customer || it.salesPerson || (it.partNumber && drawingLookup[it.partNumber.trim()])) && (
                             <div style={S.customerSalesRow}>
                               {tab !== "custom" && tab !== "stores" && tab !== "assets" && it.customer && (
                                 <span style={S.customerTag}>{it.customer}</span>
                               )}
                               {it.salesPerson && <span style={S.salesTag}>{it.salesPerson}</span>}
+                              {it.partNumber && drawingLookup[it.partNumber.trim()] && (
+                                <button
+                                  type="button"
+                                  className="stk-btn"
+                                  style={S.drawingTag}
+                                  onClick={() => openDrawingPreviewByPartNumber(it.partNumber.trim())}
+                                >
+                                  <FileText size={14} /> Drawing
+                                </button>
+                              )}
                             </div>
                           )}
                           {it.comment && <div style={S.itemComment}>{it.comment}</div>}
@@ -3923,16 +3933,6 @@ export default function StockControl() {
                           </div>
                           )}
                           <div style={S.rowActionIcons}>
-                            {it.partNumber && drawingLookup[it.partNumber.trim()] && (
-                              <button
-                                className="stk-btn"
-                                style={S.iconRowBtn}
-                                onClick={() => openDrawingPreviewByPartNumber(it.partNumber.trim())}
-                                title="View drawing on file for this part"
-                              >
-                                <FileText size={14} color={C.accentFinished} />
-                              </button>
-                            )}
                             {canRequisition && tab !== "custom" && (
                               <button className="stk-btn" style={S.iconRowBtn} onClick={() => openRequisition(it)} title="Request stock for this item">
                                 <ClipboardList size={14} />
@@ -6465,6 +6465,19 @@ const S = {
     border: `1px solid ${C.accentFinished}55`,
     borderRadius: 5,
     padding: "3px 8px",
+  },
+  drawingTag: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    fontSize: 12.5,
+    fontWeight: 700,
+    color: "#3B82F6",
+    background: "#1B2A4A",
+    border: "1px solid #3B82F655",
+    borderRadius: 5,
+    padding: "3px 8px",
+    cursor: "pointer",
   },
   lowTag: { display: "flex", alignItems: "center", gap: 4, color: C.danger },
   offcutTag: {
