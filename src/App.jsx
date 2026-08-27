@@ -406,6 +406,7 @@ function ReqFlag({ req, onClick }) {
 
 export default function StockControl() {
   const [items, setItems] = useState(null);
+  const [loadError, setLoadError] = useState({});
   const [master, setMaster] = useState(null);
   const [requisitions, setRequisitions] = useState(null);
   const [purchaseOrders, setPurchaseOrders] = useState(null);
@@ -514,8 +515,9 @@ export default function StockControl() {
             : it
         );
         setItems(loadedItems);
-      } catch {
-        setItems(seed);
+      } catch (err) {
+        console.error("Failed to load items:", err);
+        setLoadError((prev) => ({ ...prev, items: true }));
       }
       try {
         const res = await window.storage.get("stock-master-data-v2", true);
@@ -554,26 +556,30 @@ export default function StockControl() {
           };
         }
         setMaster(loaded);
-      } catch {
-        setMaster(DEFAULT_MASTER);
+      } catch (err) {
+        console.error("Failed to load master data:", err);
+        setLoadError((prev) => ({ ...prev, master: true }));
       }
       try {
         const res = await window.storage.get("stock-requisitions-v1", true);
         setRequisitions(res && res.value ? JSON.parse(res.value) : []);
-      } catch {
-        setRequisitions([]);
+      } catch (err) {
+        console.error("Failed to load requisitions:", err);
+        setLoadError((prev) => ({ ...prev, requisitions: true }));
       }
       try {
         const res = await window.storage.get("stock-purchase-orders-v1", true);
         setPurchaseOrders(res && res.value ? JSON.parse(res.value) : []);
-      } catch {
-        setPurchaseOrders([]);
+      } catch (err) {
+        console.error("Failed to load purchase orders:", err);
+        setLoadError((prev) => ({ ...prev, purchaseOrders: true }));
       }
       try {
         const res = await window.storage.get("stock-usage-log-v1", true);
         setUsageLog(res && res.value ? JSON.parse(res.value) : []);
-      } catch {
-        setUsageLog([]);
+      } catch (err) {
+        console.error("Failed to load usage log:", err);
+        setLoadError((prev) => ({ ...prev, usageLog: true }));
       }
     })();
   }, []);
@@ -732,6 +738,91 @@ export default function StockControl() {
 
   async function signOutUser() {
     await supabase.auth.signOut();
+  }
+
+  // ---- Drawing Management foundation ----
+  // A real Postgres table + Storage bucket, not the JSON-blob pattern the
+  // rest of the app uses — see setup-drawings.sql for why. Everything here
+  // is plumbing for the upload flows and viewer built in later phases;
+  // nothing calls these yet.
+
+  async function uploadDrawingFile(file, partNumber, revisionNumber) {
+    if (!supabase) return null;
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const path = `${partNumber}/rev${revisionNumber}-${safeName}`;
+    const { error } = await supabase.storage.from("drawings").upload(path, file, { upsert: true });
+    if (error) throw error;
+    return path;
+  }
+
+  async function getDrawingSignedUrl(storagePath) {
+    if (!supabase) return null;
+    // Valid for an hour — plenty for viewing one drawing, short enough that
+    // a link doesn't stay usable indefinitely if it ever leaked.
+    const { data, error } = await supabase.storage.from("drawings").createSignedUrl(storagePath, 3600);
+    if (error) throw error;
+    return data.signedUrl;
+  }
+
+  async function fetchDrawingsForPartNumber(partNumber) {
+    if (!supabase) return [];
+    const { data, error } = await supabase
+      .from("drawings")
+      .select("*")
+      .eq("part_number", partNumber)
+      .order("internal_revision", { ascending: false });
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function getNextInternalRevision(partNumber) {
+    if (!supabase) return 1;
+    const { data, error } = await supabase
+      .from("drawings")
+      .select("internal_revision")
+      .eq("part_number", partNumber)
+      .order("internal_revision", { ascending: false })
+      .limit(1);
+    if (error) throw error;
+    return data && data.length ? data[0].internal_revision + 1 : 1;
+  }
+
+  async function supersedeOldRevisions(partNumber) {
+    if (!supabase) return;
+    const { error } = await supabase
+      .from("drawings")
+      .update({ status: "superseded" })
+      .eq("part_number", partNumber)
+      .eq("status", "current");
+    if (error) throw error;
+  }
+
+  // The one function later phases actually call to record a new drawing —
+  // handles superseding the old "current" revision and working out the next
+  // internal revision number automatically, so callers don't have to.
+  async function insertDrawingRecord({ partNumber, customer, customerRevision, storagePath, fileName, linkedItemId, description, price }) {
+    if (!supabase) return null;
+    const nextRevision = await getNextInternalRevision(partNumber);
+    await supersedeOldRevisions(partNumber);
+    const { data, error } = await supabase
+      .from("drawings")
+      .insert({
+        part_number: partNumber,
+        customer: customer || null,
+        internal_revision: nextRevision,
+        customer_revision: customerRevision || null,
+        storage_path: storagePath,
+        file_name: fileName,
+        status: "current",
+        linked_item_id: linkedItemId || null,
+        description: description || null,
+        price: price != null ? price : null,
+        uploaded_by: roleLabel,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
   }
 
   async function loadPeople() {
@@ -2400,6 +2491,26 @@ export default function StockControl() {
     };
     reader.readAsArrayBuffer(file);
     e.target.value = "";
+  }
+
+  const hasLoadError = Object.values(loadError).some(Boolean);
+
+  if (hasLoadError) {
+    return (
+      <div style={{ ...S.page, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <div style={{ maxWidth: 380, textAlign: "center" }}>
+          <div style={{ fontFamily: F.mono, color: C.danger, fontSize: 14, marginBottom: 10 }}>
+            Couldn't load your data — stopped here rather than risk overwriting anything.
+          </div>
+          <div style={{ fontFamily: F.mono, color: C.muted, fontSize: 12, marginBottom: 16 }}>
+            This is usually a brief connection hiccup. Nothing has been changed or lost — refresh to try again.
+          </div>
+          <button className="stk-btn" style={S.addBtn} onClick={() => window.location.reload()}>
+            Refresh
+          </button>
+        </div>
+      </div>
+    );
   }
 
   if (items === null || master === null || requisitions === null || purchaseOrders === null || usageLog === null) {
