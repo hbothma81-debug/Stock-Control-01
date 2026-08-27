@@ -2751,6 +2751,23 @@ export default function StockControl() {
         );
         const recIdx = header.findIndex((h) => h.includes("recommend") || h.includes("reorder") || h.includes("par"));
         const revIdx = header.findIndex((h) => h.includes("rev") || h.includes("version"));
+
+        // Diagnostic — shows exactly what the importer saw, so a mismatch
+        // can be pinpointed instead of guessed at from a screenshot.
+        const colLabel = (idx) => (idx >= 0 ? `col ${idx + 1} ("${rows[0][idx]}")` : "NOT FOUND");
+        const sampleRow = rows[1] || [];
+        console.log("Stock Codes import diagnostic:", {
+          headerRow: rows[0],
+          detected: {
+            stockCode: colLabel(codeIdx),
+            description: colLabel(descIdx),
+            price: colLabel(priceIdx),
+            recommendedStock: colLabel(recIdx),
+            revision: colLabel(revIdx),
+          },
+          firstDataRow: sampleRow,
+        });
+
         const newRows = rows
           .slice(1)
           .filter((r) => r.length && r.some((c) => String(c).trim() !== ""))
@@ -2765,9 +2782,14 @@ export default function StockControl() {
           }))
           .filter((r) => r.stockCode);
 
+        const diagnosticSummary =
+          `Detected — Stock code: ${colLabel(codeIdx)}, Description: ${colLabel(descIdx)}, Price: ${colLabel(priceIdx)}, ` +
+          `Recommended: ${colLabel(recIdx)}, Revision: ${colLabel(revIdx)}.\n` +
+          `First data row read as: ${JSON.stringify(sampleRow)}`;
+
         if (importReplaceAll) {
           setMaster((prev) => ({ ...prev, stockCodes: newRows }));
-          alert(`Replaced the whole Stock Codes list with ${newRows.length} rows${importCustomer ? ` for ${importCustomer}` : ""}.`);
+          alert(`Replaced the whole Stock Codes list with ${newRows.length} rows${importCustomer ? ` for ${importCustomer}` : ""}.\n\n${diagnosticSummary}`);
         } else {
           // Merge by stock code — update anything that already exists
           // instead of creating a duplicate row for the same part.
@@ -2777,7 +2799,17 @@ export default function StockControl() {
             newRows.forEach((row) => {
               const idx = existing.findIndex((r) => r.stockCode.toLowerCase() === row.stockCode.toLowerCase());
               if (idx >= 0) {
-                existing[idx] = { ...existing[idx], ...row, id: existing[idx].id };
+                // Only overwrite a field if the import actually found a real
+                // value for it — a parsing miss shouldn't silently erase a
+                // price/revision that was already there from before.
+                existing[idx] = {
+                  ...existing[idx],
+                  description: row.description || existing[idx].description,
+                  price: row.price || existing[idx].price,
+                  recommendedStock: row.recommendedStock || existing[idx].recommendedStock,
+                  revision: row.revision || existing[idx].revision,
+                  customer: row.customer || existing[idx].customer,
+                };
                 updated++;
               } else {
                 existing.push(row);
@@ -2787,7 +2819,7 @@ export default function StockControl() {
           });
           const addedCount = newRows.length;
           alert(
-            `Processed ${addedCount} rows${importCustomer ? ` for ${importCustomer}` : ""} — existing stock codes were updated in place, new ones added. Check a few entries below to confirm the columns mapped correctly.`
+            `Processed ${addedCount} rows${importCustomer ? ` for ${importCustomer}` : ""}.\n\n${diagnosticSummary}`
           );
         }
       } catch (err) {
