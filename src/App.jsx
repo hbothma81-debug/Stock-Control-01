@@ -483,7 +483,7 @@ export default function StockControl() {
   const [storesCatalogCategoryFilter, setStoresCatalogCategoryFilter] = useState("");
   const [managerSearchQuery, setManagerSearchQuery] = useState("");
   const [sectionTypeFilterInManager, setSectionTypeFilterInManager] = useState("");
-  const [scForm, setScForm] = useState({ stockCode: "", description: "", price: "", recommendedStock: "", customer: "" });
+  const [scForm, setScForm] = useState({ stockCode: "", description: "", price: "", recommendedStock: "", customer: "", revision: "" });
   const [scCatalogForm, setScCatalogForm] = useState({ name: "", category: "", price: "" });
   const [storesCatalogQuery, setStoresCatalogQuery] = useState("");
   const [newSupplierName, setNewSupplierName] = useState("");
@@ -990,8 +990,11 @@ export default function StockControl() {
       const header = rows[0].map((h) => String(h).toLowerCase());
       const codeIdx = header.findIndex((h) => h.includes("stockcode") || h.includes("stock code") || h.includes("code"));
       const descIdx = header.findIndex((h) => h.includes("desc"));
-      const revIdx = header.findIndex((h) => h.includes("rev"));
-      const priceIdx = header.findIndex((h) => h.includes("price") || h.includes("cost") || h.includes("r/") || h.includes("rand"));
+      const revIdx = header.findIndex((h) => h.includes("rev") || h.includes("version"));
+      const priceIdx = header.findIndex(
+        (h) => h.includes("price") || h.includes("cost") || h.includes("value") || h.includes("r/") || h.includes("rand")
+      );
+      const recIdx = header.findIndex((h) => h.includes("recommend") || h.includes("reorder") || h.includes("par"));
 
       const parsedRows = rows
         .slice(1)
@@ -1001,6 +1004,7 @@ export default function StockControl() {
           description: descIdx >= 0 ? String(r[descIdx] || "").trim() : String(r[1] || "").trim(),
           revision: revIdx >= 0 ? String(r[revIdx] || "").trim() : "",
           price: priceIdx >= 0 ? parseFloat(String(r[priceIdx]).replace(/[^0-9.]/g, "")) || 0 : 0,
+          recommendedStock: recIdx >= 0 ? parseFloat(r[recIdx]) || 0 : 0,
         }))
         .filter((r) => r.stockCode);
 
@@ -1019,8 +1023,9 @@ export default function StockControl() {
           stockCode: row.stockCode,
           description: row.description,
           price: row.price,
-          recommendedStock: 0,
+          recommendedStock: row.recommendedStock,
           customer: pricingImportCustomer,
+          revision: row.revision,
         });
         const matchedPdf = pdfByCode[row.stockCode.toLowerCase()];
         if (matchedPdf) {
@@ -2615,6 +2620,7 @@ export default function StockControl() {
                   price: parseFloat(scForm.price) || r.price,
                   recommendedStock: parseFloat(scForm.recommendedStock) || r.recommendedStock,
                   customer: scForm.customer || r.customer,
+                  revision: scForm.revision.trim() || r.revision,
                 }
               : r
           ),
@@ -2631,6 +2637,7 @@ export default function StockControl() {
             price: parseFloat(scForm.price) || 0,
             recommendedStock: parseFloat(scForm.recommendedStock) || 0,
             customer: scForm.customer,
+            revision: scForm.revision.trim(),
           },
         ],
       };
@@ -2739,8 +2746,11 @@ export default function StockControl() {
         const header = rows[0].map((h) => String(h).toLowerCase());
         const codeIdx = header.findIndex((h) => h.includes("stockcode") || h.includes("stock code") || h.includes("code"));
         const descIdx = header.findIndex((h) => h.includes("desc"));
-        const priceIdx = header.findIndex((h) => h.includes("price") || h.includes("cost") || h.includes("r/") || h.includes("rand"));
+        const priceIdx = header.findIndex(
+          (h) => h.includes("price") || h.includes("cost") || h.includes("value") || h.includes("r/") || h.includes("rand")
+        );
         const recIdx = header.findIndex((h) => h.includes("recommend") || h.includes("reorder") || h.includes("par"));
+        const revIdx = header.findIndex((h) => h.includes("rev") || h.includes("version"));
         const newRows = rows
           .slice(1)
           .filter((r) => r.length && r.some((c) => String(c).trim() !== ""))
@@ -2750,6 +2760,7 @@ export default function StockControl() {
             description: descIdx >= 0 ? String(r[descIdx] || "").trim() : String(r[1] || "").trim(),
             price: priceIdx >= 0 ? parseFloat(String(r[priceIdx]).replace(/[^0-9.]/g, "")) || 0 : 0,
             recommendedStock: recIdx >= 0 ? parseFloat(r[recIdx]) || 0 : 0,
+            revision: revIdx >= 0 ? String(r[revIdx] || "").trim() : "",
             customer: importCustomer,
           }))
           .filter((r) => r.stockCode);
@@ -4728,6 +4739,7 @@ export default function StockControl() {
                 <div style={{ ...S.managerAddRow, marginTop: 6 }}>
                   <input style={{ ...S.input, flex: 1 }} type="number" step="0.01" value={scForm.price} onChange={(e) => setScForm({ ...scForm, price: e.target.value })} placeholder="Unit price (R)" />
                   <input style={{ ...S.input, flex: 1 }} type="number" value={scForm.recommendedStock} onChange={(e) => setScForm({ ...scForm, recommendedStock: e.target.value })} placeholder="Recommended stock" />
+                  <input style={{ ...S.input, flex: 1 }} value={scForm.revision} onChange={(e) => setScForm({ ...scForm, revision: e.target.value })} placeholder="Revision (e.g. A)" />
                 </div>
                 <div style={{ ...S.managerAddRow, marginTop: 6 }}>
                   <select style={{ ...S.input, flex: 1 }} value={scForm.customer} onChange={(e) => setScForm({ ...scForm, customer: e.target.value })}>
@@ -4761,6 +4773,14 @@ export default function StockControl() {
                   </select>
                 </div>
 
+                <div style={{ ...S.managerAddRow, marginTop: 12, marginBottom: 4, opacity: 0.7 }}>
+                  <span style={{ ...S.label, flex: "0 0 110px" }}>Stock code</span>
+                  <span style={{ ...S.label, flex: 1 }}>Description</span>
+                  <span style={{ ...S.label, flex: "0 0 70px" }}>Price (R)</span>
+                  <span style={{ ...S.label, flex: "0 0 70px" }}>Recomm.</span>
+                  <span style={{ ...S.label, flex: "0 0 60px" }}>Revision</span>
+                  <span style={{ ...S.label, flex: "0 0 110px" }}>Customer</span>
+                </div>
                 <div style={S.managerList}>
                   {(master.stockCodes || [])
                     .filter((r) => (r.stockCode + " " + r.description).toLowerCase().includes(stockCodeQuery.toLowerCase()))
@@ -4785,6 +4805,14 @@ export default function StockControl() {
                           onChange={(e) => updateStockCodeRow(r.id, "recommendedStock", e.target.value)}
                           style={S.managerFactorInput}
                           title="Recommended stock"
+                        />
+                        <input
+                          type="text"
+                          value={r.revision || ""}
+                          placeholder="—"
+                          onChange={(e) => updateStockCodeRow(r.id, "revision", e.target.value)}
+                          style={{ ...S.managerFactorInput, width: 50 }}
+                          title="Revision (customer's own, e.g. a letter or number)"
                         />
                         <select
                           value={r.customer || ""}
