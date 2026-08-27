@@ -421,6 +421,7 @@ export default function StockControl() {
   const [drawingSearchQuery, setDrawingSearchQuery] = useState("");
   const [drawingSearchResults, setDrawingSearchResults] = useState(null);
   const [drawingCustomerFilter, setDrawingCustomerFilter] = useState("");
+  const [drawingLookup, setDrawingLookup] = useState({}); // { [partNumber]: { id, description } } — current revisions only, loaded once for fast "does this part have a drawing" checks elsewhere in the app
   const [drawingSearchLoading, setDrawingSearchLoading] = useState(false);
   const [expandedDrawingHistory, setExpandedDrawingHistory] = useState({});
   const [showDrawingUpload, setShowDrawingUpload] = useState(false);
@@ -700,6 +701,12 @@ export default function StockControl() {
     }
   }, [tab]);
 
+  // The part-number → drawing lookup is used on Customer Stock rows and the
+  // Add form regardless of which tab is open, so load it once at startup.
+  useEffect(() => {
+    if (session?.user) loadDrawingLookup();
+  }, [session]);
+
   // Belt-and-suspenders on top of the immediate saves above: the moment this
   // tab/app gets backgrounded or closed — phone locking, switching apps,
   // closing the tab — re-fire every save with whatever's current right then.
@@ -863,7 +870,10 @@ export default function StockControl() {
     setDrawingSearchLoading(true);
     try {
       let q = supabase.from("drawings").select("*").order("part_number").order("internal_revision", { ascending: false });
-      if (query && query.trim()) q = q.ilike("part_number", `%${query.trim()}%`);
+      if (query && query.trim()) {
+        const term = query.trim().replace(/[%,]/g, "");
+        q = q.or(`part_number.ilike.%${term}%,description.ilike.%${term}%`);
+      }
       if (customer === "__internal__") q = q.is("customer", null);
       else if (customer) q = q.eq("customer", customer);
       const { data, error } = await q;
@@ -881,6 +891,40 @@ export default function StockControl() {
       setDrawingSearchResults([]);
     }
     setDrawingSearchLoading(false);
+  }
+
+  // A lightweight lookup of every current drawing's part number → description,
+  // loaded once so any item row anywhere can instantly check "does this part
+  // have a drawing on file" without a query per row.
+  async function loadDrawingLookup() {
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase.from("drawings").select("id, part_number, description").eq("status", "current");
+      if (error) throw error;
+      const map = {};
+      (data || []).forEach((d) => {
+        map[d.part_number] = { id: d.id, description: d.description };
+      });
+      setDrawingLookup(map);
+    } catch (err) {
+      console.error("Failed to load drawing lookup:", err);
+    }
+  }
+
+  async function openDrawingPreviewByPartNumber(partNumber) {
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase
+        .from("drawings")
+        .select("*")
+        .eq("part_number", partNumber)
+        .eq("status", "current")
+        .maybeSingle();
+      if (error) throw error;
+      if (data) openDrawingPreview(data);
+    } catch (err) {
+      console.error("Couldn't open drawing:", err);
+    }
   }
 
   async function deleteDrawing(drawing) {
@@ -3461,7 +3505,7 @@ export default function StockControl() {
           </div>
           <div style={S.formGrid}>
             <div>
-              <label style={S.label}>Search part number</label>
+              <label style={S.label}>Search part number or description</label>
               <input
                 style={S.input}
                 value={drawingSearchQuery}
@@ -3469,7 +3513,7 @@ export default function StockControl() {
                   setDrawingSearchQuery(e.target.value);
                   refreshDrawings(e.target.value, drawingCustomerFilter);
                 }}
-                placeholder="Type a part number…"
+                placeholder="Search part number or description…"
               />
             </div>
             <div>
@@ -3879,6 +3923,16 @@ export default function StockControl() {
                           </div>
                           )}
                           <div style={S.rowActionIcons}>
+                            {it.partNumber && drawingLookup[it.partNumber] && (
+                              <button
+                                className="stk-btn"
+                                style={S.iconRowBtn}
+                                onClick={() => openDrawingPreviewByPartNumber(it.partNumber)}
+                                title="View drawing on file for this part"
+                              >
+                                <FileText size={14} color={C.accentFinished} />
+                              </button>
+                            )}
                             {canRequisition && tab !== "custom" && (
                               <button className="stk-btn" style={S.iconRowBtn} onClick={() => openRequisition(it)} title="Request stock for this item">
                                 <ClipboardList size={14} />
@@ -4173,6 +4227,19 @@ export default function StockControl() {
                         : "e.g. HPE-4471"
                     }
                   />
+                  {form.partNumber.trim() && drawingLookup[form.partNumber.trim()] && (
+                    <div style={{ ...S.roleHint, color: C.accentFinished, marginTop: 4, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <Check size={13} /> Drawing on file — {drawingLookup[form.partNumber.trim()].description || "no description"}.{" "}
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={{ ...S.roleHint, color: C.accentFinished, textDecoration: "underline", padding: 0 }}
+                        onClick={() => openDrawingPreviewByPartNumber(form.partNumber.trim())}
+                      >
+                        Confirm it's the right part →
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div style={{ marginTop: 10 }}>
                   <label style={S.label}>Description</label>
