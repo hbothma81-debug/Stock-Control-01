@@ -987,7 +987,17 @@ export default function StockControl() {
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
       if (!rows.length) throw new Error("Empty spreadsheet");
-      const header = rows[0].map((h) => String(h).toLowerCase());
+
+      // Find the actual header row instead of assuming it's row 1 — real
+      // spreadsheets sometimes have a blank leading row or two.
+      const HEADER_HINTS = ["code", "desc", "price", "cost", "value", "rev", "version", "recommend"];
+      let headerRowIdx = rows.findIndex((r) => {
+        const cells = r.map((c) => String(c).toLowerCase());
+        return cells.filter((c) => HEADER_HINTS.some((h) => c.includes(h))).length >= 2;
+      });
+      if (headerRowIdx < 0) headerRowIdx = 0;
+
+      const header = rows[headerRowIdx].map((h) => String(h).toLowerCase());
       const codeIdx = header.findIndex((h) => h.includes("stockcode") || h.includes("stock code") || h.includes("code"));
       const descIdx = header.findIndex((h) => h.includes("desc"));
       const revIdx = header.findIndex((h) => h.includes("rev") || h.includes("version"));
@@ -997,7 +1007,7 @@ export default function StockControl() {
       const recIdx = header.findIndex((h) => h.includes("recommend") || h.includes("reorder") || h.includes("par"));
 
       const parsedRows = rows
-        .slice(1)
+        .slice(headerRowIdx + 1)
         .filter((r) => r.length && r.some((c) => String(c).trim() !== ""))
         .map((r) => ({
           stockCode: codeIdx >= 0 ? String(r[codeIdx] || "").trim() : String(r[0] || "").trim(),
@@ -2743,7 +2753,17 @@ export default function StockControl() {
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
         if (!rows.length) return;
-        const header = rows[0].map((h) => String(h).toLowerCase());
+
+        // Find the actual header row instead of assuming it's row 1 — real
+        // spreadsheets sometimes have a blank leading row or two.
+        const HEADER_HINTS = ["code", "desc", "price", "cost", "value", "rev", "version", "recommend"];
+        let headerRowIdx = rows.findIndex((r) => {
+          const cells = r.map((c) => String(c).toLowerCase());
+          return cells.filter((c) => HEADER_HINTS.some((h) => c.includes(h))).length >= 2;
+        });
+        if (headerRowIdx < 0) headerRowIdx = 0;
+
+        const header = rows[headerRowIdx].map((h) => String(h).toLowerCase());
         const codeIdx = header.findIndex((h) => h.includes("stockcode") || h.includes("stock code") || h.includes("code"));
         const descIdx = header.findIndex((h) => h.includes("desc"));
         const priceIdx = header.findIndex(
@@ -2754,10 +2774,11 @@ export default function StockControl() {
 
         // Diagnostic — shows exactly what the importer saw, so a mismatch
         // can be pinpointed instead of guessed at from a screenshot.
-        const colLabel = (idx) => (idx >= 0 ? `col ${idx + 1} ("${rows[0][idx]}")` : "NOT FOUND");
-        const sampleRow = rows[1] || [];
+        const colLabel = (idx) => (idx >= 0 ? `col ${idx + 1} ("${rows[headerRowIdx][idx]}")` : "NOT FOUND");
+        const sampleRow = rows[headerRowIdx + 1] || [];
         console.log("Stock Codes import diagnostic:", {
-          headerRow: rows[0],
+          headerRowUsed: `row ${headerRowIdx + 1}`,
+          headerRow: rows[headerRowIdx],
           detected: {
             stockCode: colLabel(codeIdx),
             description: colLabel(descIdx),
@@ -2769,7 +2790,7 @@ export default function StockControl() {
         });
 
         const newRows = rows
-          .slice(1)
+          .slice(headerRowIdx + 1)
           .filter((r) => r.length && r.some((c) => String(c).trim() !== ""))
           .map((r) => ({
             id: uid(),
