@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, Fragment } from "react";
+import { useState, useEffect, useMemo, useRef, Fragment } from "react";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -629,51 +629,71 @@ export default function StockControl() {
     };
   }, [session]);
 
+  // Saves happen immediately, not debounced — a delay here is exactly what
+  // can get lost if a phone locks or a tab gets backgrounded right after
+  // adding something. Immediate writes close that window entirely.
   useEffect(() => {
     if (items === null) return;
     setSaveState("saving");
-    const t = setTimeout(async () => {
-      try {
-        await window.storage.set("stock-items-v3", JSON.stringify(items), true);
-        setSaveState("saved");
-      } catch {
-        setSaveState("error");
-      }
-    }, 300);
-    return () => clearTimeout(t);
+    window.storage
+      .set("stock-items-v3", JSON.stringify(items), true)
+      .then(() => setSaveState("saved"))
+      .catch(() => setSaveState("error"));
   }, [items]);
 
   useEffect(() => {
     if (master === null) return;
-    const t = setTimeout(() => {
-      window.storage.set("stock-master-data-v2", JSON.stringify(master), true).catch(() => {});
-    }, 300);
-    return () => clearTimeout(t);
+    window.storage.set("stock-master-data-v2", JSON.stringify(master), true).catch(() => {});
   }, [master]);
 
   useEffect(() => {
     if (requisitions === null) return;
-    const t = setTimeout(() => {
-      window.storage.set("stock-requisitions-v1", JSON.stringify(requisitions), true).catch(() => {});
-    }, 300);
-    return () => clearTimeout(t);
+    window.storage.set("stock-requisitions-v1", JSON.stringify(requisitions), true).catch(() => {});
   }, [requisitions]);
 
   useEffect(() => {
     if (purchaseOrders === null) return;
-    const t = setTimeout(() => {
-      window.storage.set("stock-purchase-orders-v1", JSON.stringify(purchaseOrders), true).catch(() => {});
-    }, 300);
-    return () => clearTimeout(t);
+    window.storage.set("stock-purchase-orders-v1", JSON.stringify(purchaseOrders), true).catch(() => {});
   }, [purchaseOrders]);
 
   useEffect(() => {
     if (usageLog === null) return;
-    const t = setTimeout(() => {
-      window.storage.set("stock-usage-log-v1", JSON.stringify(usageLog), true).catch(() => {});
-    }, 300);
-    return () => clearTimeout(t);
+    window.storage.set("stock-usage-log-v1", JSON.stringify(usageLog), true).catch(() => {});
   }, [usageLog]);
+
+  // Belt-and-suspenders on top of the immediate saves above: the moment this
+  // tab/app gets backgrounded or closed — phone locking, switching apps,
+  // closing the tab — re-fire every save with whatever's current right then.
+  // Covers the (much smaller) remaining risk of a save being mid-flight
+  // right when that happens.
+  const itemsRef = useRef(items);
+  const masterRef = useRef(master);
+  const requisitionsRef = useRef(requisitions);
+  const purchaseOrdersRef = useRef(purchaseOrders);
+  const usageLogRef = useRef(usageLog);
+  itemsRef.current = items;
+  masterRef.current = master;
+  requisitionsRef.current = requisitions;
+  purchaseOrdersRef.current = purchaseOrders;
+  usageLogRef.current = usageLog;
+
+  useEffect(() => {
+    function flushAll() {
+      if (itemsRef.current !== null) window.storage.set("stock-items-v3", JSON.stringify(itemsRef.current), true).catch(() => {});
+      if (masterRef.current !== null) window.storage.set("stock-master-data-v2", JSON.stringify(masterRef.current), true).catch(() => {});
+      if (requisitionsRef.current !== null)
+        window.storage.set("stock-requisitions-v1", JSON.stringify(requisitionsRef.current), true).catch(() => {});
+      if (purchaseOrdersRef.current !== null)
+        window.storage.set("stock-purchase-orders-v1", JSON.stringify(purchaseOrdersRef.current), true).catch(() => {});
+      if (usageLogRef.current !== null) window.storage.set("stock-usage-log-v1", JSON.stringify(usageLogRef.current), true).catch(() => {});
+    }
+    document.addEventListener("visibilitychange", flushAll);
+    window.addEventListener("pagehide", flushAll);
+    return () => {
+      document.removeEventListener("visibilitychange", flushAll);
+      window.removeEventListener("pagehide", flushAll);
+    };
+  }, []);
 
   async function signUp(e) {
     e.preventDefault();
