@@ -883,6 +883,25 @@ export default function StockControl() {
     setDrawingSearchLoading(false);
   }
 
+  async function deleteDrawing(drawing) {
+    if (!supabase) return;
+    const ok = window.confirm(
+      `Delete this drawing permanently?\n\n${drawing.part_number} — ${
+        drawing.customer_revision ? `Rev ${drawing.customer_revision}` : `Rev ${drawing.internal_revision}`
+      }\n\nThis removes the actual file too — it can't be undone.`
+    );
+    if (!ok) return;
+    try {
+      await supabase.storage.from("drawings").remove([drawing.storage_path]);
+      const { error } = await supabase.from("drawings").delete().eq("id", drawing.id);
+      if (error) throw error;
+      refreshDrawings(drawingSearchQuery, drawingCustomerFilter);
+    } catch (err) {
+      console.error("Failed to delete drawing:", err);
+      alert("Couldn't delete that drawing — check your connection and try again.");
+    }
+  }
+
   async function openDrawingPreview(drawing) {
     setPreviewItem({ id: drawing.id, attachmentType: "pdf", attachmentName: drawing.file_name, restrictDownload: true });
     setPreviewData(null);
@@ -3509,6 +3528,11 @@ export default function StockControl() {
                           {expandedDrawingHistory[partNumber] ? "Hide" : "Show"} {history.length} older revision{history.length === 1 ? "" : "s"}
                         </button>
                       )}
+                      {isAdmin && (
+                        <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => deleteDrawing(current)} title="Delete this drawing">
+                          <Trash2 size={13} />
+                        </button>
+                      )}
                     </div>
                     {expandedDrawingHistory[partNumber] && (
                       <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
@@ -3518,9 +3542,16 @@ export default function StockControl() {
                               {rev.customer_revision ? `Rev ${rev.customer_revision}` : `Rev ${rev.internal_revision}`} —{" "}
                               {new Date(rev.created_at).toLocaleDateString()} · {rev.uploaded_by}
                             </span>
-                            <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => openDrawingPreview(rev)}>
-                              <FileText size={13} />
-                            </button>
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => openDrawingPreview(rev)}>
+                                <FileText size={13} />
+                              </button>
+                              {isAdmin && (
+                                <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => deleteDrawing(rev)} title="Delete this revision">
+                                  <Trash2 size={13} />
+                                </button>
+                              )}
+                            </div>
                           </div>
                         ))}
                       </div>
