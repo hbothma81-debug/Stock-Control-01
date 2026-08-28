@@ -222,6 +222,10 @@ const DEFAULT_MASTER = {
   ],
   salesPeople: [],
   customers: ["HPE", "BPW"],
+  // Contacts per customer, kept separate from the plain name list above so
+  // every existing place that treats customers as simple strings keeps
+  // working untouched — this is purely additive.
+  customerContacts: {},
   stockCodes: [],
   storeCategories: ["Electrical", "CNC Tooling", "Fasteners", "Welding Consumables", "PPE"],
   nextToolNumber: 1,
@@ -3278,7 +3282,7 @@ export default function StockControl() {
     if (!newSupplierName.trim()) return;
     setMaster((prev) => ({
       ...prev,
-      suppliers: [...prev.suppliers, { id: uid(), name: newSupplierName.trim(), email: "", phone: "", address: "", logo: "", vatNumber: "" }],
+      suppliers: [...prev.suppliers, { id: uid(), name: newSupplierName.trim(), email: "", phone: "", address: "", logo: "", vatNumber: "", contacts: [] }],
     }));
     setNewSupplierName("");
   }
@@ -3289,6 +3293,71 @@ export default function StockControl() {
 
   function removeSupplierRow(id) {
     setMaster((prev) => ({ ...prev, suppliers: prev.suppliers.filter((s) => s.id !== id) }));
+  }
+
+  // A supplier can have several contact people — sales rep, accounts,
+  // whoever — each stored right on that supplier's own record.
+  function addSupplierContact(supplierId) {
+    setMaster((prev) => ({
+      ...prev,
+      suppliers: prev.suppliers.map((s) =>
+        s.id === supplierId ? { ...s, contacts: [...(s.contacts || []), { id: uid(), name: "", email: "" }] } : s
+      ),
+    }));
+  }
+
+  function updateSupplierContact(supplierId, contactId, field, value) {
+    setMaster((prev) => ({
+      ...prev,
+      suppliers: prev.suppliers.map((s) =>
+        s.id === supplierId
+          ? { ...s, contacts: (s.contacts || []).map((c) => (c.id === contactId ? { ...c, [field]: value } : c)) }
+          : s
+      ),
+    }));
+  }
+
+  function removeSupplierContact(supplierId, contactId) {
+    setMaster((prev) => ({
+      ...prev,
+      suppliers: prev.suppliers.map((s) =>
+        s.id === supplierId ? { ...s, contacts: (s.contacts || []).filter((c) => c.id !== contactId) } : s
+      ),
+    }));
+  }
+
+  // Same idea for customers, keyed by customer name since customers are
+  // still just a plain name list everywhere else in the app.
+  function addCustomerContact(customerName) {
+    setMaster((prev) => ({
+      ...prev,
+      customerContacts: {
+        ...prev.customerContacts,
+        [customerName]: [...(prev.customerContacts?.[customerName] || []), { id: uid(), name: "", email: "" }],
+      },
+    }));
+  }
+
+  function updateCustomerContact(customerName, contactId, field, value) {
+    setMaster((prev) => ({
+      ...prev,
+      customerContacts: {
+        ...prev.customerContacts,
+        [customerName]: (prev.customerContacts?.[customerName] || []).map((c) =>
+          c.id === contactId ? { ...c, [field]: value } : c
+        ),
+      },
+    }));
+  }
+
+  function removeCustomerContact(customerName, contactId) {
+    setMaster((prev) => ({
+      ...prev,
+      customerContacts: {
+        ...prev.customerContacts,
+        [customerName]: (prev.customerContacts?.[customerName] || []).filter((c) => c.id !== contactId),
+      },
+    }));
   }
 
   async function handleSupplierLogoSelect(id, e) {
@@ -5879,6 +5948,67 @@ export default function StockControl() {
                   {(master.storesCatalog || []).length === 0 && <div style={S.empty}>Nothing here yet — add one above.</div>}
                 </div>
               </>
+            ) : managerTab === "customers" ? (
+              <>
+                <div style={{ ...S.managerAddRow, marginTop: 10 }}>
+                  <input
+                    style={{ ...S.input, flex: 1 }}
+                    value={managerInput}
+                    onChange={(e) => setManagerInput(e.target.value)}
+                    placeholder="New customer name…"
+                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addMasterEntry())}
+                  />
+                  <button type="button" className="stk-btn" style={S.addBtn} onClick={addMasterEntry}>
+                    <Plus size={15} strokeWidth={2.5} /> Add
+                  </button>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
+                  {master.customers.map((cust) => (
+                    <div key={cust} style={S.deptCard}>
+                      <div style={S.deptCardHead}>
+                        <EditableName value={cust} onCommit={(v) => renameMasterEntry("customers", cust, v)} style={{ fontWeight: 600, fontSize: 14 }} />
+                        <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeMasterEntry(cust)}>
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                      <div style={{ marginTop: 4 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <label style={S.label}>Contact people</label>
+                          <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => addCustomerContact(cust)}>
+                            <Plus size={12} /> Add contact
+                          </button>
+                        </div>
+                        {(master.customerContacts?.[cust] || []).map((c) => (
+                          <div key={c.id} style={{ ...S.formGrid, marginTop: 6 }}>
+                            <input
+                              style={S.input}
+                              value={c.name}
+                              onChange={(e) => updateCustomerContact(cust, c.id, "name", e.target.value)}
+                              placeholder="Contact name"
+                            />
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <input
+                                style={{ ...S.input, flex: 1 }}
+                                type="email"
+                                value={c.email}
+                                onChange={(e) => updateCustomerContact(cust, c.id, "email", e.target.value)}
+                                placeholder="Email"
+                              />
+                              <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeCustomerContact(cust, c.id)}>
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                        {(!master.customerContacts?.[cust] || master.customerContacts[cust].length === 0) && (
+                          <div style={{ ...S.roleHint, marginTop: 4 }}>No contacts added yet.</div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {master.customers.length === 0 && <div style={S.empty}>No customers yet — add one above.</div>}
+                </div>
+              </>
             ) : managerTab === "suppliers" ? (
               <>
                 <div style={S.roleHint}>
@@ -5944,6 +6074,37 @@ export default function StockControl() {
                         onChange={(e) => updateSupplierField(s.id, "vatNumber", e.target.value)}
                         placeholder="VAT number (optional)"
                       />
+                      <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <label style={S.label}>Contact people</label>
+                          <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => addSupplierContact(s.id)}>
+                            <Plus size={12} /> Add contact
+                          </button>
+                        </div>
+                        {(s.contacts || []).map((c) => (
+                          <div key={c.id} style={{ ...S.formGrid, marginTop: 6 }}>
+                            <input
+                              style={S.input}
+                              value={c.name}
+                              onChange={(e) => updateSupplierContact(s.id, c.id, "name", e.target.value)}
+                              placeholder="Contact name"
+                            />
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <input
+                                style={{ ...S.input, flex: 1 }}
+                                type="email"
+                                value={c.email}
+                                onChange={(e) => updateSupplierContact(s.id, c.id, "email", e.target.value)}
+                                placeholder="Email"
+                              />
+                              <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeSupplierContact(s.id, c.id)}>
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                        {(!s.contacts || s.contacts.length === 0) && <div style={{ ...S.roleHint, marginTop: 4 }}>No contacts added yet.</div>}
+                      </div>
                     </div>
                   ))}
                   {master.suppliers.length === 0 && <div style={S.empty}>No suppliers yet — add one above.</div>}
