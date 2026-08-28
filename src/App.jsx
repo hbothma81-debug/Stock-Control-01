@@ -30,11 +30,13 @@ const NAV_TABS = [
   { key: "requisitions", label: "Requisitions" },
   { key: "purchaseOrders", label: "Purchase Orders" },
   { key: "receiving", label: "Receiving" },
+  { key: "jobs", label: "Jobs" },
+  { key: "notifications", label: "Notifications" },
   { key: "usageLog", label: "Usage Log" },
   { key: "drawings", label: "Drawings" },
 ];
 
-const SECTIONS = ["plate", "structural", "cncBar", "custom", "stores", "assets", "drawings"];
+const SECTIONS = ["plate", "structural", "cncBar", "custom", "stores", "assets", "drawings", "jobs"];
 
 const MANAGER_TABS = [
   { key: "sizes", label: "Sheet Sizes" },
@@ -44,6 +46,7 @@ const MANAGER_TABS = [
   { key: "cncGrades", label: "CNC Bar Grades" },
   { key: "salesPeople", label: "Sales People" },
   { key: "staffDepartments", label: "Staff Departments" },
+  { key: "jobProcessTypes", label: "Job Process Types" },
   { key: "customers", label: "Customers" },
   { key: "stockCodes", label: "Stock Codes" },
   { key: "storeCategories", label: "Store Categories" },
@@ -71,6 +74,7 @@ function blankPermissions() {
     stores: noPerm(),
     assets: noPerm(),
     drawings: noPerm(),
+    jobs: noPerm(),
   };
 }
 
@@ -84,6 +88,10 @@ function formatToolNumber(n) {
 
 function formatPoNumber(n) {
   return "PO-" + String(n).padStart(4, "0");
+}
+
+function formatJobNumber(n) {
+  return "JOB-" + String(n).padStart(4, "0");
 }
 
 function plateName(size, thickness) {
@@ -228,6 +236,15 @@ const DEFAULT_MASTER = {
   // working untouched — this is purely additive.
   customerContacts: {},
   staffDepartments: ["Sales", "Floor Manager", "Laser", "CNC", "Welding", "Fabrication", "Finishing", "Office", "Dispatch"],
+  // Seeded straight from the actual paper job-process sheet, so nothing
+  // gets lost in translation — admin can add/retire types later.
+  jobProcessTypes: [
+    "Nesting", "Laser Operator", "Tube Laser Operator", "Packer", "Laser - External",
+    "Bending", "Rolling", "Cut To Size", "Machine/Drilling", "Machining - External",
+    "Welding", "Grinding/Polishing", "Wet Spray", "Powder Coating", "Galvanising",
+    "Plating", "Buy - out", "Assembly", "Quality Check", "Dispatch",
+  ],
+  nextJobNumber: 1,
   stockCodes: [],
   storeCategories: ["Electrical", "CNC Tooling", "Fasteners", "Welding Consumables", "PPE"],
   nextToolNumber: 1,
@@ -407,6 +424,13 @@ export default function StockControl() {
   const [assetHistoryFile, setAssetHistoryFile] = useState(null);
   const [assetHistoryReading, setAssetHistoryReading] = useState("");
   const [assetHistoryBusy, setAssetHistoryBusy] = useState(false);
+  const [jobsList, setJobsList] = useState(null);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobDetail, setJobDetail] = useState(null); // { job, processes, documents }
+  const [jobDetailLoading, setJobDetailLoading] = useState(false);
+  const [showNewJob, setShowNewJob] = useState(false);
+  const [newJobForm, setNewJobForm] = useState(null);
+  const [notificationsList, setNotificationsList] = useState(null);
   const [drawingSearchQuery, setDrawingSearchQuery] = useState("");
   const [drawingSearchResults, setDrawingSearchResults] = useState(null);
   const [drawingCustomerFilter, setDrawingCustomerFilter] = useState("");
@@ -753,6 +777,14 @@ export default function StockControl() {
     if (session?.user) loadDrawingLookup();
   }, [session]);
 
+  useEffect(() => {
+    if (tab === "jobs" && jobsList === null) fetchJobs();
+  }, [tab]);
+
+  useEffect(() => {
+    if (tab === "notifications" && notificationsList === null && profile?.isSalesPerson) fetchNotifications();
+  }, [tab, profile]);
+
   // Belt-and-suspenders on top of the immediate saves above: the moment this
   // tab/app gets backgrounded or closed — phone locking, switching apps,
   // closing the tab — re-fire every save with whatever's current right then.
@@ -1042,6 +1074,336 @@ export default function StockControl() {
       console.error("Failed to delete history entry:", err);
       alert("Couldn't delete that entry — check your connection and try again.");
       return false;
+    }
+  }
+
+  // ---- Jobs ----
+
+  async function fetchJobs() {
+    if (!supabase) return;
+    setJobsLoading(true);
+    try {
+      const { data, error } = await supabase.from("jobs").select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      setJobsList(data || []);
+    } catch (err) {
+      console.error("Failed to load jobs:", err);
+      setJobsList([]);
+    }
+    setJobsLoading(false);
+  }
+
+  function openNewJob() {
+    setNewJobForm({
+      customer: "",
+      qty: "",
+      dueDate: "",
+      jobLocation: "",
+      quoteReference: "",
+      laserJobReference: "",
+      material1Grade: "", material1Qty: "",
+      material2Grade: "", material2Qty: "",
+      material3Grade: "", material3Qty: "",
+      materialLocation: "",
+      buyOutNotes: "",
+      selectedProcesses: [],
+    });
+    setShowNewJob(true);
+  }
+
+  function closeNewJob() {
+    setShowNewJob(false);
+    setNewJobForm(null);
+  }
+
+  function toggleNewJobProcess(processName) {
+    setNewJobForm((f) => ({
+      ...f,
+      selectedProcesses: f.selectedProcesses.includes(processName)
+        ? f.selectedProcesses.filter((p) => p !== processName)
+        : [...f.selectedProcesses, processName],
+    }));
+  }
+
+  async function submitNewJob() {
+    if (!newJobForm.customer) {
+      alert("Pick a customer before creating the job.");
+      return;
+    }
+    if (newJobForm.selectedProcesses.length === 0) {
+      alert("Select at least one process this job needs.");
+      return;
+    }
+    try {
+      const jobNumber = formatJobNumber(master.nextJobNumber);
+      const { data: job, error } = await supabase
+        .from("jobs")
+        .insert({
+          job_number: jobNumber,
+          customer: newJobForm.customer,
+          status: "in_progress",
+          sales_rep: roleLabel,
+          qty: newJobForm.qty ? Number(newJobForm.qty) : null,
+          due_date: newJobForm.dueDate || null,
+          job_location: newJobForm.jobLocation,
+          quote_reference: newJobForm.quoteReference,
+          laser_job_reference: newJobForm.laserJobReference,
+          material_1_grade: newJobForm.material1Grade,
+          material_1_qty: newJobForm.material1Qty,
+          material_2_grade: newJobForm.material2Grade,
+          material_2_qty: newJobForm.material2Qty,
+          material_3_grade: newJobForm.material3Grade,
+          material_3_qty: newJobForm.material3Qty,
+          material_location: newJobForm.materialLocation,
+          buy_out_notes: newJobForm.buyOutNotes,
+          created_by: roleLabel,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+
+      const processRows = newJobForm.selectedProcesses.map((name, idx) => ({
+        job_id: job.id,
+        process_name: name,
+        sort_order: idx,
+      }));
+      const { error: procError } = await supabase.from("job_processes").insert(processRows);
+      if (procError) throw procError;
+
+      setMaster((prev) => ({ ...prev, nextJobNumber: (prev.nextJobNumber || 1) + 1 }));
+      closeNewJob();
+      fetchJobs();
+    } catch (err) {
+      console.error("Failed to create job:", err);
+      alert("Couldn't create that job — check your connection and try again.");
+    }
+  }
+
+  async function openJobDetail(job) {
+    setJobDetail({ job, processes: [], documents: [] });
+    setJobDetailLoading(true);
+    try {
+      const [{ data: processes, error: procError }, { data: documents, error: docError }] = await Promise.all([
+        supabase.from("job_processes").select("*").eq("job_id", job.id).order("sort_order"),
+        supabase.from("job_documents").select("*").eq("job_id", job.id).order("created_at", { ascending: false }),
+      ]);
+      if (procError) throw procError;
+      if (docError) throw docError;
+      setJobDetail({ job, processes: processes || [], documents: documents || [] });
+    } catch (err) {
+      console.error("Failed to load job detail:", err);
+    }
+    setJobDetailLoading(false);
+  }
+
+  function closeJobDetail() {
+    setJobDetail(null);
+  }
+
+  async function refreshJobDetail() {
+    if (!jobDetail) return;
+    await openJobDetail(jobDetail.job);
+  }
+
+  async function toggleJobProcessComplete(process) {
+    if (!supabase || !jobDetail) return;
+    const nowComplete = !process.is_complete;
+    try {
+      const { error } = await supabase
+        .from("job_processes")
+        .update({
+          is_complete: nowComplete,
+          completed_by: nowComplete ? roleLabel : null,
+          completed_at: nowComplete ? new Date().toISOString() : null,
+        })
+        .eq("id", process.id);
+      if (error) throw error;
+
+      // Notify whoever's running this job the moment a process wraps up —
+      // never on un-ticking, that's just a correction, not progress.
+      if (nowComplete && jobDetail.job.sales_rep) {
+        await supabase.from("job_notifications").insert({
+          job_id: jobDetail.job.id,
+          job_number: jobDetail.job.job_number,
+          sales_rep: jobDetail.job.sales_rep,
+          message: `${process.process_name} marked complete by ${roleLabel} on ${jobDetail.job.job_number} (${jobDetail.job.customer || "no customer"})`,
+        });
+      }
+      refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to update process:", err);
+      alert("Couldn't update that — check your connection and try again.");
+    }
+  }
+
+  async function updateJobProcessField(process, field, value) {
+    if (!supabase) return;
+    try {
+      const { error } = await supabase.from("job_processes").update({ [field]: value }).eq("id", process.id);
+      if (error) throw error;
+    } catch (err) {
+      console.error("Failed to update process field:", err);
+    }
+  }
+
+  async function uploadJobDocument(jobId, file) {
+    if (!supabase) return;
+    try {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `${jobId}/${Date.now()}-${safeName}`;
+      const { error: upError } = await supabase.storage.from("job-documents").upload(path, file);
+      if (upError) throw upError;
+      const { error } = await supabase.from("job_documents").insert({
+        job_id: jobId,
+        file_name: file.name,
+        storage_path: path,
+        uploaded_by: roleLabel,
+      });
+      if (error) throw error;
+      refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to upload document:", err);
+      alert("Couldn't upload that file — check your connection and try again.");
+    }
+  }
+
+  async function viewJobDocument(doc) {
+    try {
+      const { data, error } = await supabase.storage.from("job-documents").createSignedUrl(doc.storage_path, 3600);
+      if (error) throw error;
+      const lower = doc.file_name.toLowerCase();
+      const isPdf = lower.endsWith(".pdf");
+      setPreviewItem({ id: doc.id, attachmentType: isPdf ? "pdf" : "image", attachmentName: doc.file_name });
+      setPreviewData(data.signedUrl);
+      setPreviewLoading(false);
+      if (!isPdf && !lower.match(/\.(png|jpe?g|gif|webp)$/)) {
+        // Not something the preview modal can render (e.g. an .xlsm) —
+        // just download it directly instead.
+        window.open(data.signedUrl, "_blank");
+        setPreviewItem(null);
+      }
+    } catch (err) {
+      console.error("Couldn't open document:", err);
+    }
+  }
+
+  async function deleteJobDocument(doc) {
+    const ok = window.confirm(`Delete ${doc.file_name} permanently? This can't be undone.`);
+    if (!ok) return;
+    try {
+      await supabase.storage.from("job-documents").remove([doc.storage_path]);
+      const { error } = await supabase.from("job_documents").delete().eq("id", doc.id);
+      if (error) throw error;
+      refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to delete document:", err);
+      alert("Couldn't delete that file — check your connection and try again.");
+    }
+  }
+
+  // A printable job sheet — same purpose as the paper process sheet, but
+  // only ever shows the processes this job actually needs, not all twenty.
+  function printJobSheet(job, processes) {
+    const doc = new jsPDF();
+    const leftX = 14;
+    let y = 18;
+    doc.setFontSize(16);
+    doc.setFont(undefined, "bold");
+    doc.text(`Job ${job.job_number}`, leftX, y);
+    y += 8;
+    doc.setFontSize(10);
+    doc.setFont(undefined, "normal");
+    const infoLines = [
+      `Customer: ${job.customer || "—"}`,
+      `Sales rep: ${job.sales_rep || "—"}`,
+      job.due_date ? `Due date: ${new Date(job.due_date).toLocaleDateString()}` : null,
+      job.job_location ? `Job location: ${job.job_location}` : null,
+      job.quote_reference ? `Quote reference: ${job.quote_reference}` : null,
+      job.laser_job_reference ? `Laser job reference: ${job.laser_job_reference}` : null,
+      job.qty ? `Quantity: ${job.qty}` : null,
+    ].filter(Boolean);
+    infoLines.forEach((line) => {
+      doc.text(line, leftX, y);
+      y += 5;
+    });
+
+    const materials = [1, 2, 3]
+      .map((n) => ({ grade: job[`material_${n}_grade`], qty: job[`material_${n}_qty`] }))
+      .filter((m) => m.grade);
+    if (materials.length) {
+      y += 3;
+      doc.setFont(undefined, "bold");
+      doc.text("Materials:", leftX, y);
+      doc.setFont(undefined, "normal");
+      y += 5;
+      materials.forEach((m) => {
+        doc.text(`  ${m.grade}${m.qty ? ` — ${m.qty}` : ""}`, leftX, y);
+        y += 5;
+      });
+      if (job.material_location) {
+        doc.text(`  Location: ${job.material_location}`, leftX, y);
+        y += 5;
+      }
+    }
+
+    y += 5;
+    autoTable(doc, {
+      startY: y,
+      head: [["Process", "Operator/Supplier", "Complete", "Notes"]],
+      body: processes.map((p) => [
+        p.process_name,
+        p.operator || "",
+        p.is_complete ? `Yes — ${p.completed_by || ""}` : "",
+        p.notes || "",
+      ]),
+      theme: "grid",
+      headStyles: { fillColor: [27, 29, 31] },
+    });
+
+    if (job.buy_out_notes) {
+      const finalY = (doc.lastAutoTable?.finalY || y + 20) + 8;
+      doc.setFontSize(9);
+      doc.text(`Buy-out notes: ${job.buy_out_notes}`, leftX, finalY);
+    }
+
+    doc.save(`${job.job_number}.pdf`);
+  }
+
+  async function updateJobStatus(jobId, status) {
+    try {
+      const { error } = await supabase.from("jobs").update({ status }).eq("id", jobId);
+      if (error) throw error;
+      fetchJobs();
+      if (jobDetail?.job.id === jobId) refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to update job status:", err);
+    }
+  }
+
+  // ---- Notifications ----
+
+  async function fetchNotifications() {
+    if (!supabase || !profile?.isSalesPerson) return;
+    try {
+      const { data, error } = await supabase
+        .from("job_notifications")
+        .select("*")
+        .eq("sales_rep", roleLabel)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      setNotificationsList(data || []);
+    } catch (err) {
+      console.error("Failed to load notifications:", err);
+      setNotificationsList([]);
+    }
+  }
+
+  async function markNotificationRead(id) {
+    setNotificationsList((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
+    try {
+      await supabase.from("job_notifications").update({ is_read: true }).eq("id", id);
+    } catch (err) {
+      console.error("Failed to mark notification read:", err);
     }
   }
 
@@ -1411,6 +1773,7 @@ export default function StockControl() {
     if (section === "requisitions") return !!profile?.canRequisition || !!profile?.canManageRequisitions;
     if (section === "purchaseOrders") return !!profile?.canManageRequisitions || !!profile?.canRaisePO;
     if (section === "receiving") return !!profile?.canMarkReceived;
+    if (section === "notifications") return !!profile?.isSalesPerson;
     if (section === "usageLog") return !!profile?.canViewUsageLog;
     return profile ? !!profile.permissions?.[section]?.view : false;
   }
@@ -4054,6 +4417,65 @@ export default function StockControl() {
                   </div>
                 </div>
               ))}
+          </div>
+        </div>
+      ) : tab === "jobs" ? (
+        <div style={S.list}>
+          {canEditQty("jobs") && (
+            <button type="button" className="stk-btn" style={S.addBtn} onClick={openNewJob}>
+              <Plus size={15} strokeWidth={2.5} /> New Job
+            </button>
+          )}
+          {jobsLoading && <div style={{ ...S.empty, marginTop: 10 }}>Loading…</div>}
+          {!jobsLoading && jobsList?.length === 0 && <div style={S.empty}>No jobs yet.</div>}
+          <div style={{ ...S.gradeItems, marginTop: 10 }}>
+            {(jobsList || [])
+              .filter((j) => j.status !== "cancelled")
+              .map((job) => (
+                <div key={job.id} style={S.reqCard}>
+                  <div style={S.reqCardTop}>
+                    <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
+                    <span
+                      style={{
+                        ...S.reqStatusTag,
+                        ...(job.status === "complete" || job.status === "invoiced" ? S.reqStatus_received : S.reqStatus_ordered),
+                      }}
+                    >
+                      {job.status === "in_progress" ? "In Progress" : job.status === "complete" ? "Complete" : job.status === "invoiced" ? "Invoiced" : job.status}
+                    </span>
+                  </div>
+                  <div style={S.rowMeta}>
+                    <span>Sales rep: {job.sales_rep}</span>
+                    {job.due_date && <span>Due {new Date(job.due_date).toLocaleDateString()}</span>}
+                    {job.quote_reference && <span>Quote: {job.quote_reference}</span>}
+                    {job.laser_job_reference && <span>Laser: {job.laser_job_reference}</span>}
+                  </div>
+                  <div style={S.reqActions}>
+                    <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => openJobDetail(job)}>
+                      <ClipboardList size={13} /> Open
+                    </button>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      ) : tab === "notifications" ? (
+        <div style={S.list}>
+          {notificationsList === null && <div style={S.empty}>Loading…</div>}
+          {notificationsList?.length === 0 && <div style={S.empty}>Nothing yet — you'll see it here when a process wraps up on one of your jobs.</div>}
+          <div style={{ ...S.gradeItems, marginTop: 10 }}>
+            {(notificationsList || []).map((n) => (
+              <div
+                key={n.id}
+                style={{ ...S.reqCard, ...(n.is_read ? {} : { borderLeft: `3px solid ${C.accentRaw}` }) }}
+                onClick={() => !n.is_read && markNotificationRead(n.id)}
+              >
+                <div style={S.rowMeta}>
+                  <span>{new Date(n.created_at).toLocaleString()}</span>
+                </div>
+                <div style={{ ...S.itemName, fontSize: 13.5, marginTop: 2 }}>{n.message}</div>
+              </div>
+            ))}
           </div>
         </div>
       ) : tab === "usageLog" ? (
@@ -6877,6 +7299,267 @@ export default function StockControl() {
                 </button>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {jobDetail && (
+        <div style={S.modalOverlay} onClick={closeJobDetail}>
+          <div style={{ ...S.modal, maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>{jobDetail.job.job_number} — {jobDetail.job.customer || "No customer"}</span>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={S.iconBtn}
+                  onClick={() => printJobSheet(jobDetail.job, jobDetail.processes)}
+                  title="Print job sheet"
+                >
+                  <FileText size={18} />
+                </button>
+                <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeJobDetail}>
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div style={S.rowMeta}>
+              <span>Sales rep: {jobDetail.job.sales_rep}</span>
+              {jobDetail.job.due_date && <span>Due {new Date(jobDetail.job.due_date).toLocaleDateString()}</span>}
+              {jobDetail.job.job_location && <span>Location: {jobDetail.job.job_location}</span>}
+              {jobDetail.job.quote_reference && <span>Quote: {jobDetail.job.quote_reference}</span>}
+              {jobDetail.job.laser_job_reference && <span>Laser: {jobDetail.job.laser_job_reference}</span>}
+            </div>
+
+            {canEditQty("jobs") && (
+              <div style={{ marginTop: 8 }}>
+                <label style={S.label}>Status</label>
+                <select
+                  style={S.input}
+                  value={jobDetail.job.status}
+                  onChange={(e) => updateJobStatus(jobDetail.job.id, e.target.value)}
+                >
+                  <option value="in_progress">In Progress</option>
+                  <option value="complete">Complete</option>
+                  <option value="invoiced">Invoiced</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
+            )}
+
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+              <label style={S.label}>Process checklist</label>
+              {jobDetailLoading && <div style={S.empty}>Loading…</div>}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                {jobDetail.processes.map((p) => (
+                  <div key={p.id} style={{ ...S.managerRow, alignItems: "flex-start" }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ ...S.checkRow, fontWeight: 600 }}>
+                        <input
+                          type="checkbox"
+                          checked={p.is_complete}
+                          disabled={!canEditQty("jobs")}
+                          onChange={() => toggleJobProcessComplete(p)}
+                        />
+                        {p.process_name}
+                      </label>
+                      {p.is_complete && (
+                        <div style={{ ...S.roleHint, marginLeft: 22 }}>
+                          {p.completed_by} — {new Date(p.completed_at).toLocaleString()}
+                        </div>
+                      )}
+                      {canEditQty("jobs") && (
+                        <div style={{ display: "flex", gap: 6, marginTop: 4, marginLeft: 22 }}>
+                          <input
+                            style={{ ...S.input, fontSize: 12, padding: "5px 8px" }}
+                            defaultValue={p.operator || ""}
+                            onBlur={(e) => updateJobProcessField(p, "operator", e.target.value)}
+                            placeholder="Operator/Supplier"
+                          />
+                          <input
+                            style={{ ...S.input, fontSize: 12, padding: "5px 8px" }}
+                            defaultValue={p.notes || ""}
+                            onBlur={(e) => updateJobProcessField(p, "notes", e.target.value)}
+                            placeholder="Notes"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <label style={S.label}>Documents</label>
+                {canEditQty("jobs") && (
+                  <label className="stk-btn" style={{ ...S.reqActionBtnMuted, cursor: "pointer" }}>
+                    <Upload size={12} /> Upload
+                    <input
+                      type="file"
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        const file = e.target.files[0];
+                        if (file) uploadJobDocument(jobDetail.job.id, file);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                {jobDetail.documents.map((doc) => (
+                  <div key={doc.id} style={S.managerRow}>
+                    <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1, justifyContent: "flex-start" }} onClick={() => viewJobDocument(doc)}>
+                      <Paperclip size={13} /> {doc.file_name}
+                    </button>
+                    {isAdmin && (
+                      <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => deleteJobDocument(doc)}>
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {jobDetail.documents.length === 0 && <div style={S.empty}>No documents yet.</div>}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showNewJob && newJobForm && (
+        <div style={S.modalOverlay} onClick={closeNewJob}>
+          <div style={{ ...S.modal, maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>New Job</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeNewJob}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Customer</label>
+              <select style={S.input} value={newJobForm.customer} onChange={(e) => setNewJobForm((f) => ({ ...f, customer: e.target.value }))}>
+                <option value="">Select a customer…</option>
+                {master.customers.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={S.formGrid}>
+              <div>
+                <label style={S.label}>Quantity</label>
+                <input
+                  type="number"
+                  min="0"
+                  style={S.input}
+                  value={newJobForm.qty}
+                  onChange={(e) => setNewJobForm((f) => ({ ...f, qty: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label style={S.label}>Due date</label>
+                <input
+                  type="date"
+                  style={S.input}
+                  value={newJobForm.dueDate}
+                  onChange={(e) => setNewJobForm((f) => ({ ...f, dueDate: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Job location</label>
+              <input
+                style={S.input}
+                value={newJobForm.jobLocation}
+                onChange={(e) => setNewJobForm((f) => ({ ...f, jobLocation: e.target.value }))}
+                placeholder="e.g. Bay 3"
+              />
+            </div>
+
+            <div style={S.formGrid}>
+              <div>
+                <label style={S.label}>Quote reference (optional)</label>
+                <input
+                  style={S.input}
+                  value={newJobForm.quoteReference}
+                  onChange={(e) => setNewJobForm((f) => ({ ...f, quoteReference: e.target.value }))}
+                  placeholder="e.g. JOB-31513 or QU226331"
+                />
+              </div>
+              <div>
+                <label style={S.label}>Laser job reference (optional)</label>
+                <input
+                  style={S.input}
+                  value={newJobForm.laserJobReference}
+                  onChange={(e) => setNewJobForm((f) => ({ ...f, laserJobReference: e.target.value }))}
+                  placeholder="SigmaNest reference"
+                />
+              </div>
+            </div>
+
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+              <label style={S.label}>Materials</label>
+              {[1, 2, 3].map((n) => (
+                <div key={n} style={{ ...S.formGrid, marginTop: 6 }}>
+                  <input
+                    style={S.input}
+                    value={newJobForm[`material${n}Grade`]}
+                    onChange={(e) => setNewJobForm((f) => ({ ...f, [`material${n}Grade`]: e.target.value }))}
+                    placeholder={`Material ${n} grade`}
+                  />
+                  <input
+                    style={S.input}
+                    value={newJobForm[`material${n}Qty`]}
+                    onChange={(e) => setNewJobForm((f) => ({ ...f, [`material${n}Qty`]: e.target.value }))}
+                    placeholder="Qty"
+                  />
+                </div>
+              ))}
+              <input
+                style={{ ...S.input, marginTop: 6 }}
+                value={newJobForm.materialLocation}
+                onChange={(e) => setNewJobForm((f) => ({ ...f, materialLocation: e.target.value }))}
+                placeholder="Material location"
+              />
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Buy-out notes (optional)</label>
+              <input
+                style={S.input}
+                value={newJobForm.buyOutNotes}
+                onChange={(e) => setNewJobForm((f) => ({ ...f, buyOutNotes: e.target.value }))}
+              />
+            </div>
+
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+              <label style={S.label}>Which processes does this job need?</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                {master.jobProcessTypes.map((p) => (
+                  <button
+                    type="button"
+                    key={p}
+                    className="stk-btn"
+                    onClick={() => toggleNewJobProcess(p)}
+                    style={{
+                      ...S.segBtn,
+                      ...(newJobForm.selectedProcesses.includes(p) ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                    }}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button type="button" className="stk-btn" style={S.submitBtn} onClick={submitNewJob}>
+              Create Job
+            </button>
           </div>
         </div>
       )}
