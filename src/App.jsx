@@ -219,7 +219,7 @@ const DEFAULT_MASTER = {
   nextToolNumber: 1,
   nextPoNumber: 1,
   suppliers: [],
-  companyDetails: { name: "East Rand Supplies", address: "", phone: "", email: "" },
+  companyDetails: { name: "East Rand Supplies", address: "", phone: "", email: "", vatNumber: "", regNumber: "" },
   sheetNames: [],
   storesCatalog: [
     { id: "sc1", name: "M6 Hex Bolt", category: "Fasteners", price: 0 },
@@ -2188,7 +2188,9 @@ export default function StockControl() {
     const company = master.companyDetails || {};
     const supplier = master.suppliers.find((s) => s.id === po.supplierId);
     const leftX = 14;
+    const rightX = 196;
 
+    // ---- Header: logo + company block on the left, "Purchase Order" + metadata on the right ----
     let headerY = 18;
     let textX = leftX;
     if (company.logo) {
@@ -2199,27 +2201,49 @@ export default function StockControl() {
         // bad image data — just skip it rather than fail the whole PDF
       }
     }
-    doc.setFontSize(14);
+    doc.setFontSize(13);
     doc.setFont(undefined, "bold");
-    doc.text(company.name || "Purchase Order", textX, headerY);
+    // Wrap the company name to fit before the "PURCHASE ORDER" title, so a
+    // long registered company name never overlaps it.
+    const nameMaxWidth = 118 - (textX - leftX);
+    const nameLines = doc.splitTextToSize(company.name || "Purchase Order", nameMaxWidth);
+    doc.text(nameLines, textX, headerY);
+    let compY = headerY + nameLines.length * 5 + 3;
     doc.setFontSize(9);
     doc.setFont(undefined, "normal");
-    let compY = headerY + 6;
-    [company.address, company.phone, company.email].filter(Boolean).forEach((line) => {
+    [company.address, [company.phone, company.email].filter(Boolean).join("   ")].filter(Boolean).forEach((line) => {
       doc.text(line, textX, compY);
       compY += 5;
     });
+    if (company.vatNumber || company.regNumber) {
+      const bits = [];
+      if (company.vatNumber) bits.push(`VAT No: ${company.vatNumber}`);
+      if (company.regNumber) bits.push(`Reg No: ${company.regNumber}`);
+      doc.text(bits.join("    "), textX, compY);
+      compY += 5;
+    }
 
     doc.setFontSize(16);
     doc.setFont(undefined, "bold");
-    doc.text("PURCHASE ORDER", 196, 16, { align: "right" });
-    doc.setFontSize(10);
+    doc.text("PURCHASE ORDER", rightX, 16, { align: "right" });
+    doc.setFontSize(9);
     doc.setFont(undefined, "normal");
-    doc.text(po.poNumber, 196, 23, { align: "right" });
-    doc.text(new Date(po.dateCreated).toLocaleDateString(), 196, 29, { align: "right" });
+    let metaY = 23;
+    const metaLine = (label, value) => {
+      if (!value) return;
+      doc.setFont(undefined, "bold");
+      doc.text(label, rightX - 45, metaY);
+      doc.setFont(undefined, "normal");
+      doc.text(String(value), rightX, metaY, { align: "right" });
+      metaY += 5;
+    };
+    metaLine("Number:", po.poNumber);
+    metaLine("Date:", new Date(po.dateCreated).toLocaleDateString());
+    metaLine("Delivery Date:", po.deliveryDate ? new Date(po.deliveryDate).toLocaleDateString() : "");
 
-    let y = Math.max(compY, 40) + 8;
+    let y = Math.max(compY, metaY, 40) + 8;
 
+    // ---- Supplier block ----
     let supX = leftX;
     if (supplier?.logo) {
       try {
@@ -2234,8 +2258,14 @@ export default function StockControl() {
     doc.text("Supplier", supX, y + 4);
     doc.setFont(undefined, "normal");
     let supY = y + 10;
+    doc.setFont(undefined, "bold");
     doc.text(supplier?.name || po.supplierName || "—", supX, supY);
+    doc.setFont(undefined, "normal");
     supY += 5;
+    if (supplier?.vatNumber) {
+      doc.text(`Supplier VAT No: ${supplier.vatNumber}`, supX, supY);
+      supY += 5;
+    }
     [supplier?.email, supplier?.phone, supplier?.address].filter(Boolean).forEach((line) => {
       doc.text(line, supX, supY);
       supY += 5;
@@ -2243,25 +2273,48 @@ export default function StockControl() {
 
     y = Math.max(supY, y + 22) + 6;
 
+    // ---- Line items — priced excluding VAT, with VAT and the inclusive
+    // total broken out per line, same shape as a standard SA supplier PO ----
+    const vatRate = po.vatRate != null ? po.vatRate : 15;
     autoTable(doc, {
       startY: y,
-      head: [["Description", "Qty", "Unit Price", "Total"]],
-      body: po.lineItems.map((li) => [
-        li.description,
-        String(li.qty),
-        `R ${Number(li.unitPrice).toFixed(2)}`,
-        `R ${(Number(li.qty) * Number(li.unitPrice)).toFixed(2)}`,
-      ]),
-      foot: [["", "", "Total", `R ${po.totalValue.toFixed(2)}`]],
+      head: [["Description", "Qty", "Excl. Price", "VAT %", "Excl. Total", "Incl. Total"]],
+      body: po.lineItems.map((li) => {
+        const exclTotal = Number(li.qty) * Number(li.unitPrice);
+        const inclTotal = exclTotal * (1 + vatRate / 100);
+        return [
+          li.description,
+          String(li.qty),
+          `R ${Number(li.unitPrice).toFixed(2)}`,
+          `${vatRate}%`,
+          `R ${exclTotal.toFixed(2)}`,
+          `R ${inclTotal.toFixed(2)}`,
+        ];
+      }),
       theme: "grid",
       headStyles: { fillColor: [27, 29, 31] },
-      footStyles: { fillColor: [242, 169, 0], textColor: [27, 29, 31], fontStyle: "bold" },
     });
 
+    const afterTableY = (doc.lastAutoTable?.finalY || y + 20) + 8;
+    const exclusiveTotal = po.exclusiveTotal != null ? po.exclusiveTotal : po.lineItems.reduce((s, li) => s + Number(li.qty) * Number(li.unitPrice), 0);
+    const vatTotal = po.vatTotal != null ? po.vatTotal : exclusiveTotal * (vatRate / 100);
+    const grandTotal = po.totalValue != null ? po.totalValue : exclusiveTotal + vatTotal;
+
+    doc.setFontSize(9);
+    doc.setFont(undefined, "normal");
+    doc.text("Total Exclusive:", rightX - 45, afterTableY);
+    doc.text(`R ${exclusiveTotal.toFixed(2)}`, rightX, afterTableY, { align: "right" });
+    doc.text(`Total VAT (${vatRate}%):`, rightX - 45, afterTableY + 5);
+    doc.text(`R ${vatTotal.toFixed(2)}`, rightX, afterTableY + 5, { align: "right" });
+    doc.setFontSize(11);
+    doc.setFont(undefined, "bold");
+    doc.text("Total:", rightX - 45, afterTableY + 12);
+    doc.text(`R ${grandTotal.toFixed(2)}`, rightX, afterTableY + 12, { align: "right" });
+
     if (po.notes) {
-      const finalY = (doc.lastAutoTable?.finalY || y + 20) + 10;
       doc.setFontSize(9);
-      doc.text(`Notes: ${po.notes}`, leftX, finalY);
+      doc.setFont(undefined, "normal");
+      doc.text(`Notes: ${po.notes}`, leftX, afterTableY + 20);
     }
 
     return doc;
@@ -2419,6 +2472,8 @@ export default function StockControl() {
       lineItems: prefillLineItems.length ? prefillLineItems : [{ description: "", qty: "", unitPrice: "" }],
       notes: "",
       linkedRequisitionIds,
+      deliveryDate: "",
+      vatRate: "15",
     });
   }
 
@@ -2467,7 +2522,12 @@ export default function StockControl() {
     if (!poBuilder.supplierId) return;
     const validLines = poBuilder.lineItems.filter((li) => li.description.trim() && Number(li.qty) > 0);
     if (validLines.length === 0) return;
-    const totalValue = validLines.reduce((sum, li) => sum + Number(li.qty) * Number(li.unitPrice || 0), 0);
+    // Line prices are entered excluding VAT (standard practice, matches what
+    // a supplier quotes) — VAT gets added on top for the real payable total.
+    const exclusiveTotal = validLines.reduce((sum, li) => sum + Number(li.qty) * Number(li.unitPrice || 0), 0);
+    const vatRate = Number(poBuilder.vatRate) || 0;
+    const vatTotal = exclusiveTotal * (vatRate / 100);
+    const totalValue = exclusiveTotal + vatTotal;
     const po = {
       id: uid(),
       poNumber: formatPoNumber(master.nextPoNumber),
@@ -2476,7 +2536,11 @@ export default function StockControl() {
       dateCreated: new Date().toISOString(),
       createdBy: roleLabel,
       lineItems: validLines.map((li) => ({ ...li, qty: Number(li.qty), unitPrice: Number(li.unitPrice) || 0 })),
+      exclusiveTotal,
+      vatRate,
+      vatTotal,
       totalValue,
+      deliveryDate: poBuilder.deliveryDate,
       notes: poBuilder.notes.trim(),
       linkedRequisitionIds: poBuilder.linkedRequisitionIds,
       status: "outstanding",
@@ -3190,7 +3254,7 @@ export default function StockControl() {
     if (!newSupplierName.trim()) return;
     setMaster((prev) => ({
       ...prev,
-      suppliers: [...prev.suppliers, { id: uid(), name: newSupplierName.trim(), email: "", phone: "", address: "", logo: "" }],
+      suppliers: [...prev.suppliers, { id: uid(), name: newSupplierName.trim(), email: "", phone: "", address: "", logo: "", vatNumber: "" }],
     }));
     setNewSupplierName("");
   }
@@ -5813,6 +5877,12 @@ export default function StockControl() {
                         onChange={(e) => updateSupplierField(s.id, "address", e.target.value)}
                         placeholder="Address"
                       />
+                      <input
+                        style={{ ...S.input, marginTop: 8 }}
+                        value={s.vatNumber || ""}
+                        onChange={(e) => updateSupplierField(s.id, "vatNumber", e.target.value)}
+                        placeholder="VAT number (optional)"
+                      />
                     </div>
                   ))}
                   {master.suppliers.length === 0 && <div style={S.empty}>No suppliers yet — add one above.</div>}
@@ -5867,6 +5937,26 @@ export default function StockControl() {
                       type="email"
                       value={master.companyDetails.email}
                       onChange={(e) => updateCompanyDetail("email", e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div style={S.formGrid}>
+                  <div>
+                    <label style={S.label}>VAT number</label>
+                    <input
+                      style={S.input}
+                      value={master.companyDetails.vatNumber}
+                      onChange={(e) => updateCompanyDetail("vatNumber", e.target.value)}
+                      placeholder="e.g. 4420263735"
+                    />
+                  </div>
+                  <div>
+                    <label style={S.label}>Registration number</label>
+                    <input
+                      style={S.input}
+                      value={master.companyDetails.regNumber}
+                      onChange={(e) => updateCompanyDetail("regNumber", e.target.value)}
+                      placeholder="e.g. 2013/089712/07"
                     />
                   </div>
                 </div>
@@ -6791,12 +6881,39 @@ export default function StockControl() {
               </button>
             </div>
 
-            <div style={S.poTotalRow}>
-              Total: R
-              {poBuilder.lineItems
-                .reduce((sum, li) => sum + (Number(li.qty) || 0) * (Number(li.unitPrice) || 0), 0)
-                .toFixed(2)}
+            <div style={S.formGrid}>
+              <div>
+                <label style={S.label}>Delivery date (optional)</label>
+                <input
+                  type="date"
+                  style={S.input}
+                  value={poBuilder.deliveryDate}
+                  onChange={(e) => setPoBuilder((b) => ({ ...b, deliveryDate: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label style={S.label}>VAT %</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  style={S.input}
+                  value={poBuilder.vatRate}
+                  onChange={(e) => setPoBuilder((b) => ({ ...b, vatRate: e.target.value }))}
+                />
+              </div>
             </div>
+
+            {(() => {
+              const exclusiveTotal = poBuilder.lineItems.reduce((sum, li) => sum + (Number(li.qty) || 0) * (Number(li.unitPrice) || 0), 0);
+              const vatRate = Number(poBuilder.vatRate) || 0;
+              const vatTotal = exclusiveTotal * (vatRate / 100);
+              return (
+                <div style={S.poTotalRow}>
+                  Exclusive: R{exclusiveTotal.toFixed(2)} &nbsp;+&nbsp; VAT: R{vatTotal.toFixed(2)} &nbsp;=&nbsp; Total: R{(exclusiveTotal + vatTotal).toFixed(2)}
+                </div>
+              );
+            })()}
 
             <div style={{ marginTop: 10 }}>
               <label style={S.label}>Notes (optional)</label>
