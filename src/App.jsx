@@ -25,15 +25,24 @@ const TABS = [
 // TABS above stays as the physical stock divisions (used by the Add form,
 // exports, etc). NAV_TABS adds Requisitions on top of that just for the
 // main tab bar, since requisitions aren't a stock division themselves.
+// Jobs and Notifications deliberately aren't in here — they get their own
+// prominent header buttons instead of getting lost in this already-long
+// wrapped tab row.
 const NAV_TABS = [
   ...TABS,
   { key: "requisitions", label: "Requisitions" },
   { key: "purchaseOrders", label: "Purchase Orders" },
   { key: "receiving", label: "Receiving" },
-  { key: "jobs", label: "Jobs" },
-  { key: "notifications", label: "Notifications" },
   { key: "usageLog", label: "Usage Log" },
   { key: "drawings", label: "Drawings" },
+];
+
+// Jobs and Notifications still need a canView() entry (for the header
+// buttons and permission checks) even though they're not part of the main
+// tab row — this covers that without duplicating them into NAV_TABS.
+const EXTRA_SECTIONS = [
+  { key: "jobs", label: "Jobs" },
+  { key: "notifications", label: "Notifications" },
 ];
 
 const SECTIONS = ["plate", "structural", "cncBar", "custom", "stores", "assets", "drawings", "jobs"];
@@ -431,6 +440,8 @@ export default function StockControl() {
   const [showNewJob, setShowNewJob] = useState(false);
   const [newJobForm, setNewJobForm] = useState(null);
   const [notificationsList, setNotificationsList] = useState(null);
+  const [jobQtyInput, setJobQtyInput] = useState("");
+  const [jobQtyNote, setJobQtyNote] = useState("");
   const [drawingSearchQuery, setDrawingSearchQuery] = useState("");
   const [drawingSearchResults, setDrawingSearchResults] = useState(null);
   const [drawingCustomerFilter, setDrawingCustomerFilter] = useState("");
@@ -781,9 +792,11 @@ export default function StockControl() {
     if (tab === "jobs" && jobsList === null) fetchJobs();
   }, [tab]);
 
+  // Loaded eagerly (not just when the tab's opened) so the unread badge on
+  // the header button is accurate the moment someone signs in.
   useEffect(() => {
-    if (tab === "notifications" && notificationsList === null && profile?.isSalesPerson) fetchNotifications();
-  }, [tab, profile]);
+    if (profile?.isSalesPerson && notificationsList === null) fetchNotifications();
+  }, [profile]);
 
   // Belt-and-suspenders on top of the immediate saves above: the moment this
   // tab/app gets backgrounded or closed — phone locking, switching apps,
@@ -1096,14 +1109,15 @@ export default function StockControl() {
   function openNewJob() {
     setNewJobForm({
       customer: "",
+      newCustomerName: "",
+      newCustomerContactName: "",
+      newCustomerContactEmail: "",
+      quotePdfFile: null,
+      quoteExcelFile: null,
       qty: "",
       dueDate: "",
-      jobLocation: "",
       quoteReference: "",
       laserJobReference: "",
-      material1Grade: "", material1Qty: "",
-      material2Grade: "", material2Qty: "",
-      material3Grade: "", material3Qty: "",
       materialLocation: "",
       buyOutNotes: "",
       selectedProcesses: [],
@@ -1119,15 +1133,22 @@ export default function StockControl() {
   function toggleNewJobProcess(processName) {
     setNewJobForm((f) => ({
       ...f,
-      selectedProcesses: f.selectedProcesses.includes(processName)
-        ? f.selectedProcesses.filter((p) => p !== processName)
-        : [...f.selectedProcesses, processName],
+      selectedProcesses: f.selectedProcesses.some((p) => p.name === processName)
+        ? f.selectedProcesses.filter((p) => p.name !== processName)
+        : [...f.selectedProcesses, { name: processName, operator: "" }],
+    }));
+  }
+
+  function updateNewJobProcessOperator(processName, operator) {
+    setNewJobForm((f) => ({
+      ...f,
+      selectedProcesses: f.selectedProcesses.map((p) => (p.name === processName ? { ...p, operator } : p)),
     }));
   }
 
   async function submitNewJob() {
-    if (!newJobForm.customer) {
-      alert("Pick a customer before creating the job.");
+    if (!newJobForm.customer || (newJobForm.customer === CUSTOM && !newJobForm.newCustomerName.trim())) {
+      alert("Pick or add a customer before creating the job.");
       return;
     }
     if (newJobForm.selectedProcesses.length === 0) {
@@ -1135,25 +1156,48 @@ export default function StockControl() {
       return;
     }
     try {
+      // A brand-new customer, added right here — same info a full Stock
+      // Manager entry would eventually hold, just the essentials up front.
+      let customerName = newJobForm.customer;
+      if (customerName === CUSTOM) {
+        customerName = newJobForm.newCustomerName.trim();
+        ensureStringEntry("customers", customerName);
+        if (newJobForm.newCustomerContactName.trim() || newJobForm.newCustomerContactEmail.trim()) {
+          addCustomerContact(customerName);
+          // addCustomerContact creates a blank contact — fill it in via the
+          // same master update rather than a second async round-trip.
+          setMaster((prev) => {
+            const existing = prev.customerContacts?.[customerName] || [];
+            const last = existing[existing.length - 1];
+            if (!last) return prev;
+            return {
+              ...prev,
+              customerContacts: {
+                ...prev.customerContacts,
+                [customerName]: existing.map((c) =>
+                  c.id === last.id
+                    ? { ...c, name: newJobForm.newCustomerContactName.trim(), email: newJobForm.newCustomerContactEmail.trim() }
+                    : c
+                ),
+              },
+            };
+          });
+        }
+      }
+
       const jobNumber = formatJobNumber(master.nextJobNumber);
       const { data: job, error } = await supabase
         .from("jobs")
         .insert({
           job_number: jobNumber,
-          customer: newJobForm.customer,
+          customer: customerName,
           status: "in_progress",
           sales_rep: roleLabel,
           qty: newJobForm.qty ? Number(newJobForm.qty) : null,
+          qty_complete: 0,
           due_date: newJobForm.dueDate || null,
-          job_location: newJobForm.jobLocation,
           quote_reference: newJobForm.quoteReference,
           laser_job_reference: newJobForm.laserJobReference,
-          material_1_grade: newJobForm.material1Grade,
-          material_1_qty: newJobForm.material1Qty,
-          material_2_grade: newJobForm.material2Grade,
-          material_2_qty: newJobForm.material2Qty,
-          material_3_grade: newJobForm.material3Grade,
-          material_3_qty: newJobForm.material3Qty,
           material_location: newJobForm.materialLocation,
           buy_out_notes: newJobForm.buyOutNotes,
           created_by: roleLabel,
@@ -1162,13 +1206,17 @@ export default function StockControl() {
         .single();
       if (error) throw error;
 
-      const processRows = newJobForm.selectedProcesses.map((name, idx) => ({
+      const processRows = newJobForm.selectedProcesses.map((p, idx) => ({
         job_id: job.id,
-        process_name: name,
+        process_name: p.name,
+        operator: p.operator || "",
         sort_order: idx,
       }));
       const { error: procError } = await supabase.from("job_processes").insert(processRows);
       if (procError) throw procError;
+
+      if (newJobForm.quotePdfFile) await uploadJobDocument(job.id, newJobForm.quotePdfFile);
+      if (newJobForm.quoteExcelFile) await uploadJobDocument(job.id, newJobForm.quoteExcelFile);
 
       setMaster((prev) => ({ ...prev, nextJobNumber: (prev.nextJobNumber || 1) + 1 }));
       closeNewJob();
@@ -1317,7 +1365,6 @@ export default function StockControl() {
       `Customer: ${job.customer || "—"}`,
       `Sales rep: ${job.sales_rep || "—"}`,
       job.due_date ? `Due date: ${new Date(job.due_date).toLocaleDateString()}` : null,
-      job.job_location ? `Job location: ${job.job_location}` : null,
       job.quote_reference ? `Quote reference: ${job.quote_reference}` : null,
       job.laser_job_reference ? `Laser job reference: ${job.laser_job_reference}` : null,
       job.qty ? `Quantity: ${job.qty}` : null,
@@ -1377,6 +1424,31 @@ export default function StockControl() {
       if (jobDetail?.job.id === jobId) refreshJobDetail();
     } catch (err) {
       console.error("Failed to update job status:", err);
+    }
+  }
+
+  // Batched deliveries mean qty complete isn't a single number set once —
+  // it's a running log a floor manager or operator adds to as work
+  // finishes, same shape as the Asset History "log a reading" pattern.
+  async function submitJobQtyUpdate(job, qtyReported, notes) {
+    const reported = parseFloat(qtyReported);
+    if (!reported || reported <= 0) return;
+    try {
+      const newTotal = Number(job.qty_complete || 0) + reported;
+      const { error: jobError } = await supabase.from("jobs").update({ qty_complete: newTotal }).eq("id", job.id);
+      if (jobError) throw jobError;
+      const { error: logError } = await supabase.from("job_qty_updates").insert({
+        job_id: job.id,
+        qty_reported: reported,
+        reported_by: roleLabel,
+        notes: notes || null,
+      });
+      if (logError) throw logError;
+      refreshJobDetail();
+      fetchJobs();
+    } catch (err) {
+      console.error("Failed to log qty update:", err);
+      alert("Couldn't log that — check your connection and try again.");
     }
   }
 
@@ -3982,6 +4054,21 @@ export default function StockControl() {
             >
               <ClipboardList size={14} strokeWidth={2.5} />
               {requisitions.filter((r) => r.status === "pending").length} requests
+            </button>
+          )}
+          {canView("jobs") && (
+            <button className="stk-btn" style={S.jobsHeaderBtn} onClick={() => setTab("jobs")}>
+              <Wrench size={13} strokeWidth={2.5} />
+              Jobs
+            </button>
+          )}
+          {profile?.isSalesPerson && (
+            <button className="stk-btn" style={S.roleChip} onClick={() => setTab("notifications")}>
+              <AlertTriangle size={13} strokeWidth={2.5} />
+              Notifications
+              {notificationsList?.filter((n) => !n.is_read).length > 0 && (
+                <span style={S.notifBadgeCount}>{notificationsList.filter((n) => !n.is_read).length}</span>
+              )}
             </button>
           )}
           {canAccessStockManager && (
@@ -6646,7 +6733,7 @@ export default function StockControl() {
                             <div style={S.deptPermHead}>Edit qty</div>
                             {SECTIONS.map((sec) => (
                               <Fragment key={sec}>
-                                <div style={S.deptPermLabel}>{NAV_TABS.find((t) => t.key === sec)?.label}</div>
+                                <div style={S.deptPermLabel}>{[...NAV_TABS, ...EXTRA_SECTIONS].find((t) => t.key === sec)?.label}</div>
                                 <input
                                   type="checkbox"
                                   checked={!!p.permissions[sec]?.view}
@@ -7327,10 +7414,49 @@ export default function StockControl() {
             <div style={S.rowMeta}>
               <span>Sales rep: {jobDetail.job.sales_rep}</span>
               {jobDetail.job.due_date && <span>Due {new Date(jobDetail.job.due_date).toLocaleDateString()}</span>}
-              {jobDetail.job.job_location && <span>Location: {jobDetail.job.job_location}</span>}
               {jobDetail.job.quote_reference && <span>Quote: {jobDetail.job.quote_reference}</span>}
               {jobDetail.job.laser_job_reference && <span>Laser: {jobDetail.job.laser_job_reference}</span>}
             </div>
+
+            {jobDetail.job.qty != null && (
+              <div style={{ marginTop: 8, padding: 10, background: C.bg, borderRadius: 6, border: `1px solid ${C.border}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontWeight: 600 }}>
+                    {jobDetail.job.qty_complete || 0} / {jobDetail.job.qty} complete
+                  </span>
+                </div>
+                {canEditQty("jobs") && (
+                  <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                    <input
+                      type="number"
+                      min="0"
+                      style={{ ...S.input, width: 80 }}
+                      value={jobQtyInput}
+                      onChange={(e) => setJobQtyInput(e.target.value)}
+                      placeholder="Qty"
+                    />
+                    <input
+                      style={{ ...S.input, flex: 1 }}
+                      value={jobQtyNote}
+                      onChange={(e) => setJobQtyNote(e.target.value)}
+                      placeholder="Notes (optional, e.g. batch 1 of 3)"
+                    />
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={S.addBtn}
+                      onClick={() => {
+                        submitJobQtyUpdate(jobDetail.job, jobQtyInput, jobQtyNote);
+                        setJobQtyInput("");
+                        setJobQtyNote("");
+                      }}
+                    >
+                      Log
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {canEditQty("jobs") && (
               <div style={{ marginTop: 8 }}>
@@ -7441,12 +7567,66 @@ export default function StockControl() {
 
             <div style={{ marginTop: 10 }}>
               <label style={S.label}>Customer</label>
-              <select style={S.input} value={newJobForm.customer} onChange={(e) => setNewJobForm((f) => ({ ...f, customer: e.target.value }))}>
+              <select
+                style={S.input}
+                value={newJobForm.customer === CUSTOM ? CUSTOM : newJobForm.customer}
+                onChange={(e) => setNewJobForm((f) => ({ ...f, customer: e.target.value }))}
+              >
                 <option value="">Select a customer…</option>
                 {master.customers.map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
+                <option value={CUSTOM}>+ Add new customer…</option>
               </select>
+              {newJobForm.customer === CUSTOM && (
+                <div style={{ marginTop: 8, padding: 10, background: C.bg, borderRadius: 6, border: `1px solid ${C.border}` }}>
+                  <input
+                    style={S.input}
+                    value={newJobForm.newCustomerName}
+                    onChange={(e) => setNewJobForm((f) => ({ ...f, newCustomerName: e.target.value }))}
+                    placeholder="Customer name"
+                  />
+                  <div style={{ ...S.formGrid, marginTop: 8 }}>
+                    <input
+                      style={S.input}
+                      value={newJobForm.newCustomerContactName}
+                      onChange={(e) => setNewJobForm((f) => ({ ...f, newCustomerContactName: e.target.value }))}
+                      placeholder="Contact person (optional)"
+                    />
+                    <input
+                      style={S.input}
+                      type="email"
+                      value={newJobForm.newCustomerContactEmail}
+                      onChange={(e) => setNewJobForm((f) => ({ ...f, newCustomerContactEmail: e.target.value }))}
+                      placeholder="Contact email (optional)"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Quote documents (optional)</label>
+              <div style={S.formGrid}>
+                <label className="stk-btn" style={{ ...S.addBtn, cursor: "pointer", justifyContent: "center" }}>
+                  <Upload size={13} /> {newJobForm.quotePdfFile ? newJobForm.quotePdfFile.name : "Quote PDF"}
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    style={{ display: "none" }}
+                    onChange={(e) => setNewJobForm((f) => ({ ...f, quotePdfFile: e.target.files[0] || null }))}
+                  />
+                </label>
+                <label className="stk-btn" style={{ ...S.addBtn, cursor: "pointer", justifyContent: "center" }}>
+                  <Upload size={13} /> {newJobForm.quoteExcelFile ? newJobForm.quoteExcelFile.name : "Quote Excel"}
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.xlsm,.csv"
+                    style={{ display: "none" }}
+                    onChange={(e) => setNewJobForm((f) => ({ ...f, quoteExcelFile: e.target.files[0] || null }))}
+                  />
+                </label>
+              </div>
             </div>
 
             <div style={S.formGrid}>
@@ -7471,16 +7651,6 @@ export default function StockControl() {
               </div>
             </div>
 
-            <div style={{ marginTop: 10 }}>
-              <label style={S.label}>Job location</label>
-              <input
-                style={S.input}
-                value={newJobForm.jobLocation}
-                onChange={(e) => setNewJobForm((f) => ({ ...f, jobLocation: e.target.value }))}
-                placeholder="e.g. Bay 3"
-              />
-            </div>
-
             <div style={S.formGrid}>
               <div>
                 <label style={S.label}>Quote reference (optional)</label>
@@ -7500,32 +7670,6 @@ export default function StockControl() {
                   placeholder="SigmaNest reference"
                 />
               </div>
-            </div>
-
-            <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-              <label style={S.label}>Materials</label>
-              {[1, 2, 3].map((n) => (
-                <div key={n} style={{ ...S.formGrid, marginTop: 6 }}>
-                  <input
-                    style={S.input}
-                    value={newJobForm[`material${n}Grade`]}
-                    onChange={(e) => setNewJobForm((f) => ({ ...f, [`material${n}Grade`]: e.target.value }))}
-                    placeholder={`Material ${n} grade`}
-                  />
-                  <input
-                    style={S.input}
-                    value={newJobForm[`material${n}Qty`]}
-                    onChange={(e) => setNewJobForm((f) => ({ ...f, [`material${n}Qty`]: e.target.value }))}
-                    placeholder="Qty"
-                  />
-                </div>
-              ))}
-              <input
-                style={{ ...S.input, marginTop: 6 }}
-                value={newJobForm.materialLocation}
-                onChange={(e) => setNewJobForm((f) => ({ ...f, materialLocation: e.target.value }))}
-                placeholder="Material location"
-              />
             </div>
 
             <div style={{ marginTop: 10 }}>
@@ -7548,13 +7692,34 @@ export default function StockControl() {
                     onClick={() => toggleNewJobProcess(p)}
                     style={{
                       ...S.segBtn,
-                      ...(newJobForm.selectedProcesses.includes(p) ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                      ...(newJobForm.selectedProcesses.some((sp) => sp.name === p) ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
                     }}
                   >
                     {p}
                   </button>
                 ))}
               </div>
+              {newJobForm.selectedProcesses.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+                  <datalist id="job-operator-people">
+                    {(people || []).map((person) => (
+                      <option key={person.id} value={person.name} />
+                    ))}
+                  </datalist>
+                  {newJobForm.selectedProcesses.map((sp) => (
+                    <div key={sp.name} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 12.5, width: 140, flexShrink: 0 }}>{sp.name}</span>
+                      <input
+                        style={S.input}
+                        list="job-operator-people"
+                        value={sp.operator}
+                        onChange={(e) => updateNewJobProcessOperator(sp.name, e.target.value)}
+                        placeholder="Pick a person or type a name"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <button type="button" className="stk-btn" style={S.submitBtn} onClick={submitNewJob}>
@@ -8034,6 +8199,34 @@ const S = {
     padding: "6px 10px",
     cursor: "pointer",
     whiteSpace: "nowrap",
+  },
+  jobsHeaderBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    fontFamily: F.mono,
+    fontSize: 12,
+    fontWeight: 700,
+    color: C.bg,
+    background: C.accentRaw,
+    border: `1px solid ${C.accentRaw}`,
+    borderRadius: 6,
+    padding: "6px 10px",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  notifBadgeCount: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 16,
+    height: 16,
+    padding: "0 4px",
+    borderRadius: 8,
+    background: C.danger,
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: 700,
   },
   mainTabs: {
     display: "flex",
