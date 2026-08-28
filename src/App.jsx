@@ -462,6 +462,7 @@ export default function StockControl() {
   const [requisitionTarget, setRequisitionTarget] = useState(null);
   const [requisitionQty, setRequisitionQty] = useState("");
   const [requisitionNotes, setRequisitionNotes] = useState("");
+  const [requisitionSupplier, setRequisitionSupplier] = useState("");
   const [showArchive, setShowArchive] = useState(false);
   const [showLowStock, setShowLowStock] = useState(false);
   const [archiveTypeFilter, setArchiveTypeFilter] = useState("");
@@ -2091,12 +2092,14 @@ export default function StockControl() {
     setRequisitionTarget(it);
     setRequisitionQty("");
     setRequisitionNotes("");
+    setRequisitionSupplier(it.supplier || "");
   }
 
   function closeRequisition() {
     setRequisitionTarget(null);
     setRequisitionQty("");
     setRequisitionNotes("");
+    setRequisitionSupplier("");
   }
 
   function submitRequisition(e) {
@@ -2122,7 +2125,7 @@ export default function StockControl() {
         requestedBy: roleLabel,
         dateRequested: new Date().toISOString(),
         status: "pending",
-        supplier: "",
+        supplier: requisitionSupplier,
         orderedBy: "",
         dateOrdered: "",
         receivedBy: "",
@@ -6897,6 +6900,15 @@ export default function StockControl() {
                   requisitionTarget.mainCat === "plate" ? "Number of sheets" : requisitionTarget.mainCat === "structural" ? "Number of pieces" : "Quantity"
                 }
               />
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Supplier (optional)</label>
+              <select style={S.input} value={requisitionSupplier} onChange={(e) => setRequisitionSupplier(e.target.value)}>
+                <option value="">No supplier chosen yet</option>
+                {master.suppliers.map((s) => (
+                  <option key={s.id} value={s.name}>{s.name}</option>
+                ))}
+              </select>
             </div>
             <div style={{ marginTop: 10 }}>
               <label style={S.label}>Notes (optional)</label>
