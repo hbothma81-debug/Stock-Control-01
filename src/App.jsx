@@ -2224,37 +2224,69 @@ export default function StockControl() {
     let compY = headerY + nameLines.length * 5 + 3;
     doc.setFontSize(9);
     doc.setFont(undefined, "normal");
-    [company.address, [company.phone, company.email].filter(Boolean).join("   ")].filter(Boolean).forEach((line) => {
-      doc.text(line, textX, compY);
-      compY += 5;
-    });
-    if (company.vatNumber || company.regNumber) {
-      const bits = [];
-      if (company.vatNumber) bits.push(`VAT No: ${company.vatNumber}`);
-      if (company.regNumber) bits.push(`Reg No: ${company.regNumber}`);
-      doc.text(bits.join("    "), textX, compY);
+    const contactLine = [company.phone, company.email].filter(Boolean).join("   ");
+    if (contactLine) {
+      doc.text(contactLine, textX, compY);
       compY += 5;
     }
 
     doc.setFontSize(16);
     doc.setFont(undefined, "bold");
     doc.text("PURCHASE ORDER", rightX, 16, { align: "right" });
+
+    // ---- Three-column info strip: postal address / delivery address / PO
+    // metadata — matches the layout of your actual Sage documents. ----
+    const col1X = leftX;
+    const col2X = 80;
+    const col3X = 145;
+    const colTopY = Math.max(compY, 40) + 6;
+    const addressLines = (company.address || "").split(",").map((s) => s.trim()).filter(Boolean);
+
     doc.setFontSize(9);
+    let c1y = colTopY;
+    if (company.vatNumber) {
+      doc.setFont(undefined, "bold");
+      doc.text("VAT No: ", col1X, c1y);
+      doc.setFont(undefined, "normal");
+      doc.text(company.vatNumber, col1X + 15, c1y);
+      c1y += 5;
+    }
     doc.setFont(undefined, "normal");
-    let metaY = 23;
+    doc.text("POSTAL ADDRESS ONLY:", col1X, c1y);
+    c1y += 5;
+    addressLines.forEach((line) => {
+      doc.text(line, col1X, c1y);
+      c1y += 5;
+    });
+
+    let c2y = colTopY;
+    doc.text("DELIVERY ADDRESS:", col2X, c2y);
+    c2y += 5;
+    addressLines.forEach((line) => {
+      doc.text(line, col2X, c2y);
+      c2y += 5;
+    });
+    if (company.regNumber) {
+      doc.text(`Reg No: ${company.regNumber}`, col2X, c2y);
+      c2y += 5;
+    }
+
+    let c3y = colTopY;
     const metaLine = (label, value) => {
       if (!value) return;
       doc.setFont(undefined, "bold");
-      doc.text(label, rightX - 45, metaY);
+      doc.text(label, col3X, c3y);
       doc.setFont(undefined, "normal");
-      doc.text(String(value), rightX, metaY, { align: "right" });
-      metaY += 5;
+      doc.text(String(value), rightX, c3y, { align: "right" });
+      c3y += 5;
     };
     metaLine("Number:", po.poNumber);
     metaLine("Date:", new Date(po.dateCreated).toLocaleDateString());
+    metaLine("Reference:", po.reference);
+    metaLine("Sales person:", po.salesPerson);
     metaLine("Delivery Date:", po.deliveryDate ? new Date(po.deliveryDate).toLocaleDateString() : "");
 
-    let y = Math.max(compY, metaY, 40) + 8;
+    let y = Math.max(c1y, c2y, c3y) + 6;
 
     // ---- Supplier block ----
     let supX = leftX;
@@ -2496,6 +2528,7 @@ export default function StockControl() {
       linkedRequisitionIds,
       deliveryDate: "",
       vatRate: "15",
+      reference: "",
     });
   }
 
@@ -2563,6 +2596,11 @@ export default function StockControl() {
       vatTotal,
       totalValue,
       deliveryDate: poBuilder.deliveryDate,
+      reference: poBuilder.reference.trim(),
+      // Tied to whoever is actually logged in, not a free-pick dropdown —
+      // this is an accountability field, so it can't be set to someone
+      // else's name.
+      salesPerson: roleLabel,
       notes: poBuilder.notes.trim(),
       linkedRequisitionIds: poBuilder.linkedRequisitionIds,
       status: "outstanding",
@@ -6901,6 +6939,22 @@ export default function StockControl() {
               <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 6 }} onClick={addPoLineItem}>
                 <Plus size={13} /> Add line
               </button>
+            </div>
+
+            <div style={S.formGrid}>
+              <div>
+                <label style={S.label}>Reference (job number)</label>
+                <input
+                  style={S.input}
+                  value={poBuilder.reference}
+                  onChange={(e) => setPoBuilder((b) => ({ ...b, reference: e.target.value }))}
+                  placeholder="e.g. Job #4471"
+                />
+              </div>
+              <div>
+                <label style={S.label}>Sales person</label>
+                <div style={{ ...S.input, display: "flex", alignItems: "center", color: C.muted }}>{roleLabel}</div>
+              </div>
             </div>
 
             <div style={S.formGrid}>
