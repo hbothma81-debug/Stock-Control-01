@@ -2190,22 +2190,35 @@ export default function StockControl() {
     const leftX = 14;
     const rightX = 196;
 
-    // ---- Header: logo + company block on the left, "Purchase Order" + metadata on the right ----
-    let headerY = 18;
-    let textX = leftX;
+    // ---- Header: logo on its own row above the company details, at its
+    // real proportions — a fixed square box would squish anything that
+    // isn't already perfectly square, so the size is derived from the
+    // logo's actual width/height instead. ----
+    let logoY = 10;
+    const textX = leftX;
     if (company.logo) {
       try {
-        doc.addImage(company.logo, "JPEG", leftX, headerY - 6, 22, 22);
-        textX = leftX + 28;
+        const imgProps = doc.getImageProperties(company.logo);
+        const maxW = 45;
+        const maxH = 22;
+        let logoW = maxW;
+        let logoH = (imgProps.height / imgProps.width) * logoW;
+        if (logoH > maxH) {
+          logoH = maxH;
+          logoW = (imgProps.width / imgProps.height) * logoH;
+        }
+        doc.addImage(company.logo, "JPEG", leftX, logoY, logoW, logoH);
+        logoY += logoH + 6;
       } catch {
         // bad image data — just skip it rather than fail the whole PDF
       }
     }
+    let headerY = logoY + 4;
     doc.setFontSize(13);
     doc.setFont(undefined, "bold");
     // Wrap the company name to fit before the "PURCHASE ORDER" title, so a
     // long registered company name never overlaps it.
-    const nameMaxWidth = 118 - (textX - leftX);
+    const nameMaxWidth = 118;
     const nameLines = doc.splitTextToSize(company.name || "Purchase Order", nameMaxWidth);
     doc.text(nameLines, textX, headerY);
     let compY = headerY + nameLines.length * 5 + 3;
@@ -2247,7 +2260,16 @@ export default function StockControl() {
     let supX = leftX;
     if (supplier?.logo) {
       try {
-        doc.addImage(supplier.logo, "JPEG", leftX, y, 18, 18);
+        const imgProps = doc.getImageProperties(supplier.logo);
+        const maxW = 18;
+        const maxH = 18;
+        let logoW = maxW;
+        let logoH = (imgProps.height / imgProps.width) * logoW;
+        if (logoH > maxH) {
+          logoH = maxH;
+          logoW = (imgProps.width / imgProps.height) * logoH;
+        }
+        doc.addImage(supplier.logo, "JPEG", leftX, y, logoW, logoH);
         supX = leftX + 24;
       } catch {
         // skip on bad image data
