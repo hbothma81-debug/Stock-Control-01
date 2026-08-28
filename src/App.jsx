@@ -62,7 +62,15 @@ const fullPerm = () => ({ view: true, edit: true });
 const viewOnly = () => ({ view: true, edit: false });
 
 function blankPermissions() {
-  return { plate: noPerm(), structural: noPerm(), custom: noPerm(), stores: noPerm() };
+  return {
+    plate: noPerm(),
+    structural: noPerm(),
+    cncBar: noPerm(),
+    custom: noPerm(),
+    stores: noPerm(),
+    assets: noPerm(),
+    drawings: noPerm(),
+  };
 }
 
 function uid() {
@@ -448,13 +456,6 @@ export default function StockControl() {
   const [drawingUploadFiles, setDrawingUploadFiles] = useState([]); // [{file, partNumber, skip}]
   const [drawingUploadBusy, setDrawingUploadBusy] = useState(false);
   const [drawingUploadResult, setDrawingUploadResult] = useState(null);
-  const [showPricingImport, setShowPricingImport] = useState(false);
-  const [pricingImportCustomer, setPricingImportCustomer] = useState("");
-  const [pricingImportExcel, setPricingImportExcel] = useState(null);
-  const [pricingImportPdfs, setPricingImportPdfs] = useState([]);
-  const [pricingImportReplaceAll, setPricingImportReplaceAll] = useState(false);
-  const [pricingImportBusy, setPricingImportBusy] = useState(false);
-  const [pricingImportResult, setPricingImportResult] = useState(null);
   const [poReportFrom, setPoReportFrom] = useState("");
   const [poReportTo, setPoReportTo] = useState("");
   const [poReportSupplier, setPoReportSupplier] = useState("");
@@ -1194,6 +1195,40 @@ export default function StockControl() {
     }
   }
 
+  // A targeted way to clear out one customer's drawings (and every revision
+  // of each) before a fresh re-upload — scoped to whichever customer is
+  // currently filtered to, never a blanket wipe of everyone's drawings.
+  async function batchDeleteDrawingsForCustomer(customer) {
+    if (!supabase) return;
+    try {
+      let q = supabase.from("drawings").select("id, storage_path");
+      if (customer === "__internal__") q = q.is("customer", null);
+      else q = q.eq("customer", customer);
+      const { data, error } = await q;
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        alert(`No drawings found for ${customer === "__internal__" ? "internal drawings" : customer}.`);
+        return;
+      }
+      const ok = window.confirm(
+        `Delete all ${data.length} drawing${data.length === 1 ? "" : "s"} for ${
+          customer === "__internal__" ? "internal drawings" : customer
+        }? This permanently removes the files too — can't be undone.`
+      );
+      if (!ok) return;
+      const paths = data.map((d) => d.storage_path).filter(Boolean);
+      if (paths.length) await supabase.storage.from("drawings").remove(paths);
+      let delQ = supabase.from("drawings").delete();
+      delQ = customer === "__internal__" ? delQ.is("customer", null) : delQ.eq("customer", customer);
+      const { error: delError } = await delQ;
+      if (delError) throw delError;
+      refreshDrawings(drawingSearchQuery, drawingCustomerFilter);
+    } catch (err) {
+      console.error("Failed to batch delete drawings:", err);
+      alert("Couldn't delete those drawings — check your connection and try again.");
+    }
+  }
+
   async function openDrawingPreview(drawing) {
     setPreviewItem({ id: drawing.id, attachmentType: "pdf", attachmentName: drawing.file_name, restrictDownload: true });
     setPreviewData(null);
@@ -1279,133 +1314,6 @@ export default function StockControl() {
     setDrawingUploadFiles([]);
     setDrawingUploadResult(null);
     setDrawingUploadCustomer("");
-  }
-
-  function closePricingImport() {
-    setShowPricingImport(false);
-    setPricingImportExcel(null);
-    setPricingImportPdfs([]);
-    setPricingImportResult(null);
-    setPricingImportCustomer("");
-    setPricingImportReplaceAll(false);
-  }
-
-  // The combined Excel + PDF import for named corporate customers who supply
-  // their own official revision numbers. The spreadsheet drives pricing and
-  // description (same as the plain Stock Codes import); any row whose stock
-  // code matches an uploaded PDF's filename also gets a drawing record with
-  // that customer's revision attached — our own internal revision keeps
-  // auto-tracking underneath regardless, same as every other upload path.
-  async function submitPricingImport() {
-    if (!pricingImportExcel) return;
-    setPricingImportBusy(true);
-    try {
-      const buf = await pricingImportExcel.arrayBuffer();
-      const wb = XLSX.read(buf, { type: "array" });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
-      if (!rows.length) throw new Error("Empty spreadsheet");
-
-      // Find the actual header row instead of assuming it's row 1 — real
-      // spreadsheets sometimes have a blank leading row or two.
-      const HEADER_HINTS = ["code", "desc", "price", "cost", "value", "rev", "version", "recommend"];
-      let headerRowIdx = rows.findIndex((r) => {
-        const cells = r.map((c) => String(c).toLowerCase());
-        return cells.filter((c) => HEADER_HINTS.some((h) => c.includes(h))).length >= 2;
-      });
-      if (headerRowIdx < 0) headerRowIdx = 0;
-
-      const header = rows[headerRowIdx].map((h) => String(h).toLowerCase());
-      const codeIdx = header.findIndex((h) => h.includes("stockcode") || h.includes("stock code") || h.includes("code"));
-      const descIdx = header.findIndex((h) => h.includes("desc"));
-      const revIdx = header.findIndex((h) => h.includes("rev") || h.includes("version"));
-      const priceIdx = header.findIndex(
-        (h) => h.includes("price") || h.includes("cost") || h.includes("value") || h.includes("r/") || h.includes("rand")
-      );
-      const recIdx = header.findIndex((h) => h.includes("recommend") || h.includes("reorder") || h.includes("par"));
-
-      const parsedRows = rows
-        .slice(headerRowIdx + 1)
-        .filter((r) => r.length && r.some((c) => String(c).trim() !== ""))
-        .map((r) => ({
-          stockCode: codeIdx >= 0 ? String(r[codeIdx] || "").trim() : String(r[0] || "").trim(),
-          description: descIdx >= 0 ? String(r[descIdx] || "").trim() : String(r[1] || "").trim(),
-          revision: revIdx >= 0 ? String(r[revIdx] || "").trim() : "",
-          price: priceIdx >= 0 ? parseFloat(String(r[priceIdx]).replace(/[^0-9.]/g, "")) || 0 : 0,
-          recommendedStock: recIdx >= 0 ? parseFloat(r[recIdx]) || 0 : 0,
-        }))
-        .filter((r) => r.stockCode);
-
-      const pdfByCode = {};
-      pricingImportPdfs.forEach((f) => {
-        pdfByCode[f.name.replace(/\.pdf$/i, "").trim().toLowerCase()] = f;
-      });
-
-      let drawingsUploaded = 0;
-      let drawingsFailed = 0;
-      const newStockCodeRows = [];
-
-      for (const row of parsedRows) {
-        newStockCodeRows.push({
-          id: uid(),
-          stockCode: row.stockCode,
-          description: row.description,
-          price: row.price,
-          recommendedStock: row.recommendedStock,
-          customer: pricingImportCustomer,
-          revision: row.revision,
-        });
-        const matchedPdf = pdfByCode[row.stockCode.toLowerCase()];
-        if (matchedPdf) {
-          try {
-            const nextRevision = await getNextInternalRevision(row.stockCode);
-            const path = await uploadDrawingFile(matchedPdf, row.stockCode, nextRevision);
-            await insertDrawingRecord({
-              partNumber: row.stockCode,
-              customer: pricingImportCustomer || null,
-              customerRevision: row.revision || null,
-              storagePath: path,
-              fileName: matchedPdf.name,
-              description: row.description,
-              price: row.price,
-            });
-            drawingsUploaded++;
-          } catch (err) {
-            console.error(`Failed to upload drawing for ${row.stockCode}:`, err);
-            drawingsFailed++;
-          }
-        }
-      }
-
-      if (pricingImportReplaceAll) {
-        setMaster((prev) => ({ ...prev, stockCodes: newStockCodeRows }));
-      } else {
-        setMaster((prev) => {
-          const existing = [...(prev.stockCodes || [])];
-          newStockCodeRows.forEach((row) => {
-            const idx = existing.findIndex((r) => r.stockCode.toLowerCase() === row.stockCode.toLowerCase());
-            if (idx >= 0) existing[idx] = { ...existing[idx], ...row, id: existing[idx].id };
-            else existing.push(row);
-          });
-          return { ...prev, stockCodes: existing };
-        });
-      }
-
-      const matchedCount = drawingsUploaded + drawingsFailed;
-      setPricingImportResult({
-        stockCodesProcessed: parsedRows.length,
-        drawingsUploaded,
-        drawingsFailed,
-        unmatchedPdfs: pricingImportPdfs.length - matchedCount,
-      });
-      setPricingImportPdfs([]);
-      setPricingImportExcel(null);
-      if (tab === "drawings") refreshDrawings(drawingSearchQuery, drawingCustomerFilter);
-    } catch (err) {
-      console.error("Pricing import failed:", err);
-      alert("Couldn't process that import — check the spreadsheet is a .xlsx/.xls/.csv with the right columns and try again.");
-    }
-    setPricingImportBusy(false);
   }
 
   async function loadPeople() {
@@ -3309,6 +3217,25 @@ export default function StockControl() {
     setMaster((prev) => ({ ...prev, stockCodes: (prev.stockCodes || []).filter((r) => r.id !== id) }));
   }
 
+  // A targeted way to clear out one customer's stock codes before a fresh
+  // re-import — deliberately scoped to whichever customer is currently
+  // filtered to, never a blanket wipe of everyone's data.
+  function batchDeleteStockCodesForCustomer(customer) {
+    const count = (master.stockCodes || []).filter((r) => (r.customer || "") === (customer || "")).length;
+    if (count === 0) {
+      alert(customer ? `No stock codes found for ${customer}.` : "No unassigned stock codes found.");
+      return;
+    }
+    const ok = window.confirm(
+      `Delete all ${count} stock code${count === 1 ? "" : "s"} for ${customer || "(no customer)"}? This can't be undone.`
+    );
+    if (!ok) return;
+    setMaster((prev) => ({
+      ...prev,
+      stockCodes: (prev.stockCodes || []).filter((r) => (r.customer || "") !== (customer || "")),
+    }));
+  }
+
   function addStockCodeRow() {
     if (!scForm.stockCode.trim()) return;
     const code = scForm.stockCode.trim();
@@ -3441,6 +3368,11 @@ export default function StockControl() {
   function handleImportFile(e) {
     const file = e.target.files[0];
     if (!file) return;
+    if (!importCustomer) {
+      alert("Pick a customer before importing — this can't be left blank, so a stock code never accidentally ends up unassigned.");
+      e.target.value = "";
+      return;
+    }
     setImportFileLabel(file.name);
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -4220,9 +4152,15 @@ export default function StockControl() {
                 <Upload size={15} strokeWidth={2.5} /> Upload Drawings
               </button>
             )}
-            {canEditQty("drawings") && isAdmin && (
-              <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => setShowPricingImport(true)}>
-                <FileText size={13} /> Import with Pricing &amp; Revisions
+            {isAdmin && drawingCustomerFilter && (
+              <button
+                type="button"
+                className="stk-btn"
+                style={S.usageBtnUse}
+                onClick={() => batchDeleteDrawingsForCustomer(drawingCustomerFilter)}
+                title={`Delete all drawings for ${drawingCustomerFilter === "__internal__" ? "internal drawings" : drawingCustomerFilter}`}
+              >
+                <Trash2 size={13} /> Delete for {drawingCustomerFilter === "__internal__" ? "Internal" : drawingCustomerFilter}
               </button>
             )}
           </div>
@@ -5688,13 +5626,22 @@ export default function StockControl() {
                     value={importCustomer}
                     onChange={(e) => setImportCustomer(e.target.value)}
                   >
-                    <option value="">Customer for import (optional) — none</option>
+                    <option value="">Select a customer — required to import</option>
                     {master.customers.map((c) => (
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </select>
-                  <label className="stk-btn" style={{ ...S.addBtn, cursor: "pointer" }}>
-                    <input type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={handleImportFile} />
+                  <label
+                    className="stk-btn"
+                    style={{ ...S.addBtn, cursor: importCustomer ? "pointer" : "not-allowed", opacity: importCustomer ? 1 : 0.5 }}
+                  >
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      style={{ display: "none" }}
+                      onChange={handleImportFile}
+                      disabled={!importCustomer}
+                    />
                     Import Excel
                   </label>
                   <button type="button" className="stk-btn" style={S.roleChip} onClick={exportStockCodes}>
@@ -5715,7 +5662,7 @@ export default function StockControl() {
                 )}
                 <div style={S.roleHint}>
                   Imports the first sheet, matching columns containing "stock code", "description", "price", and "recommended"/"reorder". Test with a
-                  small file first and check a few rows below before importing the full 400. Leave the customer blank to import shared/general stock codes.
+                  small file first and check a few rows below before importing the full 400.
                   {!importReplaceAll && " Existing stock codes with a matching code get updated, not duplicated."}
                 </div>
 
@@ -5758,7 +5705,24 @@ export default function StockControl() {
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </select>
+                  {isAdmin && stockCodeCustomerFilter && (
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={S.usageBtnUse}
+                      onClick={() => batchDeleteStockCodesForCustomer(stockCodeCustomerFilter)}
+                      title={`Delete all stock codes for ${stockCodeCustomerFilter}`}
+                    >
+                      <Trash2 size={13} /> Delete for {stockCodeCustomerFilter}
+                    </button>
+                  )}
                 </div>
+                {isAdmin && stockCodeCustomerFilter && (
+                  <div style={S.roleHint}>
+                    Filter to a customer above, then use this to clear their stock codes before a fresh re-import — only
+                    affects that customer, nobody else's data.
+                  </div>
+                )}
 
                 <div style={{ ...S.managerAddRow, marginTop: 12, marginBottom: 4, opacity: 0.7 }}>
                   <span style={{ ...S.label, flex: "0 0 110px" }}>Stock code</span>
@@ -6742,97 +6706,6 @@ export default function StockControl() {
                     : `Upload ${drawingUploadFiles.filter((f) => !f.skip).length} drawing${
                         drawingUploadFiles.filter((f) => !f.skip).length === 1 ? "" : "s"
                       }`}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {showPricingImport && (
-        <div style={S.modalOverlay} onClick={pricingImportBusy ? undefined : closePricingImport}>
-          <div style={{ ...S.modal, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
-            <div style={S.modalHead}>
-              <span style={S.modalTitle}>Import with Pricing &amp; Revisions</span>
-              <button type="button" className="stk-btn" style={S.iconBtn} onClick={closePricingImport} disabled={pricingImportBusy}>
-                <X size={18} />
-              </button>
-            </div>
-
-            {pricingImportResult ? (
-              <div>
-                <div style={S.roleHint}>
-                  Processed {pricingImportResult.stockCodesProcessed} stock code{pricingImportResult.stockCodesProcessed === 1 ? "" : "s"}.{" "}
-                  {pricingImportResult.drawingsUploaded} drawing{pricingImportResult.drawingsUploaded === 1 ? "" : "s"} attached
-                  {pricingImportResult.drawingsFailed > 0 ? `, ${pricingImportResult.drawingsFailed} failed` : ""}.{" "}
-                  {pricingImportResult.unmatchedPdfs > 0
-                    ? `${pricingImportResult.unmatchedPdfs} PDF${pricingImportResult.unmatchedPdfs === 1 ? "" : "s"} had no matching row in the spreadsheet.`
-                    : ""}
-                </div>
-                <button type="button" className="stk-btn" style={S.submitBtn} onClick={closePricingImport}>
-                  Done
-                </button>
-              </div>
-            ) : (
-              <>
-                <div style={S.roleHint}>
-                  For a customer's official parts list: a spreadsheet with Stock code / Description / Revision / Item cost,
-                  plus the matching PDF drawings. A PDF only attaches to a stock code that names it exactly, e.g.{" "}
-                  <strong>4471.pdf</strong> for stock code <strong>4471</strong>.
-                </div>
-
-                <div style={{ marginTop: 10 }}>
-                  <label style={S.label}>Customer</label>
-                  <select style={S.input} value={pricingImportCustomer} onChange={(e) => setPricingImportCustomer(e.target.value)}>
-                    <option value="">Select a customer…</option>
-                    {master.customers.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div style={{ marginTop: 10 }}>
-                  <label style={S.label}>Spreadsheet (Stock code / Description / Revision / Item cost)</label>
-                  <input
-                    type="file"
-                    accept=".xlsx,.xls,.csv"
-                    style={S.input}
-                    onChange={(e) => setPricingImportExcel(e.target.files[0] || null)}
-                  />
-                </div>
-
-                <div style={{ marginTop: 10 }}>
-                  <label style={S.label}>Drawing PDFs (optional — only matching stock codes get attached)</label>
-                  <input
-                    type="file"
-                    accept="application/pdf"
-                    multiple
-                    style={S.input}
-                    onChange={(e) => setPricingImportPdfs(Array.from(e.target.files || []))}
-                  />
-                  {pricingImportPdfs.length > 0 && (
-                    <div style={{ ...S.roleHint, marginTop: 4 }}>{pricingImportPdfs.length} PDF file(s) selected</div>
-                  )}
-                </div>
-
-                <label style={{ ...S.checkRow, marginTop: 10 }}>
-                  <input type="checkbox" checked={pricingImportReplaceAll} onChange={(e) => setPricingImportReplaceAll(e.target.checked)} />
-                  Replace the whole Stock Codes list with this file, instead of updating/adding
-                </label>
-                {pricingImportReplaceAll && (
-                  <div style={{ ...S.roleHint, color: C.danger }}>
-                    Every stock code not in this file will be deleted — drawings already uploaded are not affected.
-                  </div>
-                )}
-
-                <button
-                  type="button"
-                  className="stk-btn"
-                  style={S.submitBtn}
-                  disabled={!pricingImportExcel || pricingImportBusy}
-                  onClick={submitPricingImport}
-                >
-                  {pricingImportBusy ? "Importing…" : "Import"}
                 </button>
               </>
             )}
