@@ -253,50 +253,6 @@ const DEFAULT_MASTER = {
   ],
 };
 
-const seed = [
-  // ---- Plate & Sheet ----
-  { id: "p1", mainCat: "plate", grade: "Mild Steel", size: "1225x2450mm", thickness: "0.9mm", name: plateName("1225x2450mm", "0.9mm"), unit: "sheet", trackLength: false, length: 0, qty: 0, low: 0, loc: "", comment: "", salesPerson: "", customer: "" },
-  { id: "p2", mainCat: "plate", grade: "Mild Steel", size: "1500x3000mm", thickness: "6mm", name: plateName("1500x3000mm", "6mm"), unit: "sheet", trackLength: false, length: 0, qty: 0, low: 0, loc: "", comment: "", salesPerson: "", customer: "" },
-  { id: "p3", mainCat: "plate", grade: "Stainless 430 BA PVC", size: "1250x2500mm", thickness: "0.9mm", name: plateName("1250x2500mm", "0.9mm"), unit: "sheet", trackLength: false, length: 0, qty: 0, low: 0, loc: "", comment: "", salesPerson: "", customer: "" },
-  { id: "p4", mainCat: "plate", grade: "Stainless 304 2B", size: "1250x2500mm", thickness: "2.5mm", name: plateName("1250x2500mm", "2.5mm"), unit: "sheet", trackLength: false, length: 0, qty: 0, low: 0, loc: "", comment: "", salesPerson: "", customer: "" },
-  { id: "p5", mainCat: "plate", grade: "Stainless 304 2B", size: "1250x2500mm", thickness: "3mm", name: plateName("1250x2500mm", "3mm"), unit: "sheet", trackLength: false, length: 0, qty: 0, low: 0, loc: "", comment: "", salesPerson: "", customer: "" },
-  { id: "p6", mainCat: "plate", grade: "Stainless 316 2B", size: "1250x2500mm", thickness: "3mm", name: plateName("1250x2500mm", "3mm"), unit: "sheet", trackLength: false, length: 0, qty: 0, low: 0, loc: "", comment: "", salesPerson: "", customer: "" },
-  { id: "p7", mainCat: "plate", grade: "Stainless 316 2B", size: "1250x2500mm", thickness: "4.5mm", name: plateName("1250x2500mm", "4.5mm"), unit: "sheet", trackLength: false, length: 0, qty: 0, low: 0, loc: "", comment: "", salesPerson: "", customer: "" },
-  { id: "p8", mainCat: "plate", grade: "Stainless 316 N4 PVC", size: "1250x2500mm", thickness: "3mm", name: plateName("1250x2500mm", "3mm"), unit: "sheet", trackLength: false, length: 0, qty: 0, low: 0, loc: "", comment: "", salesPerson: "", customer: "" },
-  { id: "p9", mainCat: "plate", grade: "3CR12", size: "2500x1250mm", thickness: "6mm", name: plateName("2500x1250mm", "6mm"), unit: "sheet", trackLength: false, length: 0, qty: 0, low: 0, loc: "", comment: "", salesPerson: "", customer: "" },
-  { id: "p10", mainCat: "plate", grade: "3CR12", size: "3000x1500mm", thickness: "6mm", name: plateName("3000x1500mm", "6mm"), unit: "sheet", trackLength: false, length: 0, qty: 0, low: 0, loc: "", comment: "", salesPerson: "", customer: "" },
-  { id: "p11", mainCat: "plate", grade: "DOMEX 700", size: "1300x3200mm", thickness: "8mm", name: plateName("1300x3200mm", "8mm"), unit: "sheet", trackLength: false, length: 0, qty: 0, low: 0, loc: "", comment: "", salesPerson: "", customer: "" },
-
-  // ---- Structural Steel ----
-  ...DEFAULT_MASTER.sections.map((s, i) => ({
-    id: "st" + i,
-    mainCat: "structural",
-    grade: s.name.includes("SS304") || s.name.includes("19.05mm") || s.name.includes("41.27mm") || s.name.includes("22.2mm") || (s.name.includes("38.1mm") && s.factor > 1 && s.factor < 2 && !s.name.includes("3.18") && !s.name.includes("1.6mm")) || s.name === "Round Bar 5mm"
-      ? "Stainless 304"
-      : s.name.includes("3.18mm") || s.name.includes("38.1mm x 1.6mm")
-      ? "Aluminium"
-      : "Mild Steel",
-    name: s.name,
-    unit: "m",
-    trackLength: true,
-    length: 6,
-    qty: 0,
-    low: 0,
-    loc: "",
-    comment: "",
-    salesPerson: "",
-    customer: "",
-  })),
-
-  // ---- Customer Stock (examples) ----
-  { id: "c1", mainCat: "custom", customer: "HPE", partNumber: "HPE-1042", name: "Jackhammer Handle — Std", grade: "", qty: 42, value: 185, low: 15, loc: "Shelf F3", comment: "", salesPerson: "" },
-  { id: "c2", mainCat: "custom", customer: "BPW", partNumber: "BPW-3307", name: "Fuel Theft Cover — SS", grade: "", qty: 11, value: 640, low: 12, loc: "Shelf F5", comment: "", salesPerson: "" },
-
-  // ---- Stores (examples) ----
-  { id: "s1", mainCat: "stores", customer: "CNC Tooling", partNumber: "", name: "10mm Carbide End Mill", grade: "", qty: 6, value: 320, low: 2, loc: "Tool Crib A", comment: "", salesPerson: "" },
-  { id: "s2", mainCat: "stores", customer: "Fasteners", partNumber: "", name: "M10 x 30mm Hex Bolt (box of 100)", grade: "", qty: 4, value: 145, low: 1, loc: "Bin 12", comment: "", salesPerson: "" },
-];
-
 const emptyForm = {
   id: "",
   mainCat: "plate",
@@ -537,12 +493,21 @@ export default function StockControl() {
   const [lastRefreshedAt, setLastRefreshedAt] = useState(null);
 
   // Shared by the initial load and both the manual and automatic refresh.
-  // isInitialLoad matters: on first load, "nothing saved yet" legitimately
-  // means seed the defaults. On a refresh, previously-existing data
-  // suddenly coming back empty is suspicious, not a fresh start — so a
-  // refresh never falls back to seed/empty, it just leaves the current
-  // state alone and tries again next time. Same reasoning as the earlier
-  // fix that stopped a failed load from silently overwriting good data.
+  // isInitialLoad only controls whether a problem here should show the
+  // blocking error screen (first load) versus fail quietly and retry next
+  // cycle (a background refresh, where the current on-screen data should
+  // stay put rather than flash an error).
+  //
+  // Critically: an empty-but-successful response is treated with the exact
+  // same suspicion as a thrown error — NEVER filled in with seed/example
+  // data or empty defaults. This app has real, long-standing production
+  // data; there is no legitimate scenario anymore where "nothing came
+  // back" should be read as "brand new install, start fresh." Silently
+  // seeding on an empty response was a leftover from early development,
+  // and it caused real data loss whenever a fetch came back empty for any
+  // reason (a misconfigured deploy, a transient hiccup) — since saves are
+  // immediate, that fake/empty state would get written straight back over
+  // whatever was actually there.
   async function loadAllData(isInitialLoad) {
     try {
       const res = await window.storage.get("stock-items-v3", true);
@@ -568,7 +533,8 @@ export default function StockControl() {
         );
         setItems(loadedItems);
       } else if (isInitialLoad) {
-        setItems(seed);
+        console.error("Items came back empty on load — refusing to seed example data over real data.");
+        setLoadError((prev) => ({ ...prev, items: true }));
       }
     } catch (err) {
       console.error("Failed to load items:", err);
@@ -613,7 +579,8 @@ export default function StockControl() {
         }
         setMaster(loaded);
       } else if (isInitialLoad) {
-        setMaster(DEFAULT_MASTER);
+        console.error("Master data came back empty on load — refusing to reset to defaults over real data.");
+        setLoadError((prev) => ({ ...prev, master: true }));
       }
     } catch (err) {
       console.error("Failed to load master data:", err);
@@ -622,7 +589,10 @@ export default function StockControl() {
     try {
       const res = await window.storage.get("stock-requisitions-v1", true);
       if (res && res.value) setRequisitions(JSON.parse(res.value));
-      else if (isInitialLoad) setRequisitions([]);
+      else if (isInitialLoad) {
+        console.error("Requisitions came back empty on load — refusing to reset to empty over real data.");
+        setLoadError((prev) => ({ ...prev, requisitions: true }));
+      }
     } catch (err) {
       console.error("Failed to load requisitions:", err);
       if (isInitialLoad) setLoadError((prev) => ({ ...prev, requisitions: true }));
@@ -630,7 +600,10 @@ export default function StockControl() {
     try {
       const res = await window.storage.get("stock-purchase-orders-v1", true);
       if (res && res.value) setPurchaseOrders(JSON.parse(res.value));
-      else if (isInitialLoad) setPurchaseOrders([]);
+      else if (isInitialLoad) {
+        console.error("Purchase orders came back empty on load — refusing to reset to empty over real data.");
+        setLoadError((prev) => ({ ...prev, purchaseOrders: true }));
+      }
     } catch (err) {
       console.error("Failed to load purchase orders:", err);
       if (isInitialLoad) setLoadError((prev) => ({ ...prev, purchaseOrders: true }));
@@ -638,7 +611,10 @@ export default function StockControl() {
     try {
       const res = await window.storage.get("stock-usage-log-v1", true);
       if (res && res.value) setUsageLog(JSON.parse(res.value));
-      else if (isInitialLoad) setUsageLog([]);
+      else if (isInitialLoad) {
+        console.error("Usage log came back empty on load — refusing to reset to empty over real data.");
+        setLoadError((prev) => ({ ...prev, usageLog: true }));
+      }
     } catch (err) {
       console.error("Failed to load usage log:", err);
       if (isInitialLoad) setLoadError((prev) => ({ ...prev, usageLog: true }));
