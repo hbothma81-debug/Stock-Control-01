@@ -6311,30 +6311,30 @@ export default function StockControl() {
                               />
                               Can view Usage Log
                             </label>
-                            <label style={S.deptToggleItem}>
-                              <input
-                                type="checkbox"
-                                checked={!!p.isSalesPerson}
-                                onChange={(e) => updatePersonField(p.id, "isSalesPerson", e.target.checked)}
-                              />
-                              Is a Sales Person (can be assigned to jobs, appears in Sales Person pickers)
-                            </label>
-                          </div>
-                          <div style={{ marginTop: 8 }}>
-                            <label style={S.label}>Department</label>
-                            <select
-                              style={S.input}
-                              value={p.department || ""}
-                              onChange={(e) => updatePersonField(p.id, "department", e.target.value)}
-                            >
-                              <option value="">Not set</option>
-                              {master.staffDepartments.map((d) => (
-                                <option key={d} value={d}>{d}</option>
-                              ))}
-                            </select>
                           </div>
                         </>
                       )}
+                      <label style={S.deptToggleItem}>
+                        <input
+                          type="checkbox"
+                          checked={!!p.isSalesPerson}
+                          onChange={(e) => updatePersonField(p.id, "isSalesPerson", e.target.checked)}
+                        />
+                        Is a Sales Person (can be assigned to jobs, appears in Sales Person pickers)
+                      </label>
+                      <div style={{ marginTop: 8 }}>
+                        <label style={S.label}>Department</label>
+                        <select
+                          style={S.input}
+                          value={p.department || ""}
+                          onChange={(e) => updatePersonField(p.id, "department", e.target.value)}
+                        >
+                          <option value="">Not set</option>
+                          {master.staffDepartments.map((d) => (
+                            <option key={d} value={d}>{d}</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                   ))}
                   {people && people.length === 0 && <div style={S.empty}>Nobody's signed up yet.</div>}
