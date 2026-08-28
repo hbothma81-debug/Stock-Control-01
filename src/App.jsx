@@ -430,6 +430,7 @@ export default function StockControl() {
   const [receivingPo, setReceivingPo] = useState(null);
   const [receivingLines, setReceivingLines] = useState([]);
   const [receivingDeliveryNote, setReceivingDeliveryNote] = useState("");
+  const [receivingAdjustingIdx, setReceivingAdjustingIdx] = useState(null);
   const [assetHistoryItem, setAssetHistoryItem] = useState(null);
   const [assetHistoryEntries, setAssetHistoryEntries] = useState(null);
   const [assetHistoryNote, setAssetHistoryNote] = useState("");
@@ -2365,10 +2366,55 @@ export default function StockControl() {
     doc.text("Total:", rightX - 45, afterTableY + 12);
     doc.text(`R ${grandTotal.toFixed(2)}`, rightX, afterTableY + 12, { align: "right" });
 
+    let stampBottomY = afterTableY + 12;
+
+    if (po.status === "received") {
+      // A clear, unmissable stamp showing what actually happened once this
+      // PO was received — reprinting an already-received PO should never
+      // look identical to the original, unreceived version.
+      const stampTop = afterTableY + 20;
+      const anyQtyDiffers = (po.receivedLineItems || []).some((l) => l.receivedQty !== l.orderedQty);
+      const stampLines = [
+        `RECEIVED — ${po.receivedBy || "—"} on ${po.receivedDate ? new Date(po.receivedDate).toLocaleString() : "—"}`,
+        `Supplier delivery note: ${po.deliveryNoteNumber || "—"}`,
+      ];
+      const qtyLines = anyQtyDiffers
+        ? (po.receivedLineItems || [])
+            .filter((l) => l.receivedQty !== l.orderedQty)
+            .map((l) => `  ${l.description}: ordered ${l.orderedQty}, received ${l.receivedQty}`)
+        : [];
+      const boxHeight = 8 + stampLines.length * 5 + (qtyLines.length ? 4 + qtyLines.length * 5 : 0) + 4;
+
+      doc.setDrawColor(200, 60, 60);
+      doc.setLineWidth(0.6);
+      doc.roundedRect(leftX, stampTop, rightX - leftX, boxHeight, 2, 2);
+
+      doc.setTextColor(200, 60, 60);
+      doc.setFontSize(10);
+      doc.setFont(undefined, "bold");
+      let stampY = stampTop + 6;
+      stampLines.forEach((line) => {
+        doc.text(line, leftX + 4, stampY);
+        stampY += 5;
+      });
+      if (qtyLines.length) {
+        doc.setFontSize(9);
+        doc.text("Quantity differed from what was ordered:", leftX + 4, stampY);
+        stampY += 5;
+        doc.setFont(undefined, "normal");
+        qtyLines.forEach((line) => {
+          doc.text(line, leftX + 4, stampY);
+          stampY += 5;
+        });
+      }
+      doc.setTextColor(0, 0, 0);
+      stampBottomY = stampTop + boxHeight;
+    }
+
     if (po.notes) {
       doc.setFontSize(9);
       doc.setFont(undefined, "normal");
-      doc.text(`Notes: ${po.notes}`, leftX, afterTableY + 20);
+      doc.text(`Notes: ${po.notes}`, leftX, stampBottomY + 8);
     }
 
     return doc;
@@ -2396,12 +2442,14 @@ export default function StockControl() {
     setReceivingPo(po);
     setReceivingLines(lines);
     setReceivingDeliveryNote("");
+    setReceivingAdjustingIdx(null);
   }
 
   function closeReceiving() {
     setReceivingPo(null);
     setReceivingLines([]);
     setReceivingDeliveryNote("");
+    setReceivingAdjustingIdx(null);
   }
 
   function updateReceivingLineQty(idx, value) {
@@ -2450,7 +2498,20 @@ export default function StockControl() {
     setPurchaseOrders((prev) =>
       prev.map((p) =>
         p.id === receivingPo.id
-          ? { ...p, status: "received", receivedBy: roleLabel, receivedDate: timestamp, deliveryNoteNumber: receivingDeliveryNote.trim() }
+          ? {
+              ...p,
+              status: "received",
+              receivedBy: roleLabel,
+              receivedDate: timestamp,
+              deliveryNoteNumber: receivingDeliveryNote.trim(),
+              // Kept so a printout of an already-received PO can show what
+              // actually arrived, not just what was originally ordered.
+              receivedLineItems: receivingLines.map((l) => ({
+                description: l.description,
+                orderedQty: Number(l.orderedQty),
+                receivedQty: parseFloat(l.receivedQty) || 0,
+              })),
+            }
           : p
       )
     );
@@ -6801,28 +6862,50 @@ export default function StockControl() {
             </div>
 
             <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-              {receivingLines.map((line, idx) => (
-                <div key={idx} style={S.managerRow}>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
-                    <span style={{ fontSize: 12.5 }}>{line.description}</span>
-                    <span style={{ fontSize: 11, color: line.linkedItemId ? C.accentFinished : C.danger }}>
-                      {line.linkedItemId ? "Linked to stock — will update automatically" : "No linked stock item — won't auto-update, add manually"}
-                    </span>
+              {receivingLines.map((line, idx) => {
+                const isAdjusting = receivingAdjustingIdx === idx;
+                const qtyDiffers = Number(line.receivedQty) !== Number(line.orderedQty);
+                return (
+                  <div key={idx} style={S.managerRow}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
+                      <span style={{ fontSize: 12.5 }}>{line.description}</span>
+                      <span style={{ fontSize: 11, color: line.linkedItemId ? C.accentFinished : C.danger }}>
+                        {line.linkedItemId ? "Linked to stock — will update automatically" : "No linked stock item — won't auto-update, add manually"}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 11, color: C.muted }}>Ordered {line.orderedQty}</span>
+                      {isAdjusting ? (
+                        <input
+                          autoFocus
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={line.receivedQty}
+                          onChange={(e) => updateReceivingLineQty(idx, e.target.value)}
+                          onBlur={() => setReceivingAdjustingIdx(null)}
+                          style={{ ...S.managerFactorInput, width: 60 }}
+                          title="Quantity actually received"
+                        />
+                      ) : (
+                        <>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: qtyDiffers ? C.accentRaw : C.text }}>
+                            Received {line.receivedQty}
+                          </span>
+                          <button
+                            type="button"
+                            className="stk-btn"
+                            style={S.reqActionBtnMuted}
+                            onClick={() => setReceivingAdjustingIdx(idx)}
+                          >
+                            Adjust
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <span style={{ fontSize: 11, color: C.muted }}>Ordered {line.orderedQty}</span>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={line.receivedQty}
-                      onChange={(e) => updateReceivingLineQty(idx, e.target.value)}
-                      style={{ ...S.managerFactorInput, width: 60 }}
-                      title="Quantity actually received"
-                    />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <button type="button" className="stk-btn" style={S.submitBtn} onClick={submitReceiving}>
