@@ -43,6 +43,7 @@ const MANAGER_TABS = [
   { key: "grades", label: "Material Types" },
   { key: "cncGrades", label: "CNC Bar Grades" },
   { key: "salesPeople", label: "Sales People" },
+  { key: "staffDepartments", label: "Staff Departments" },
   { key: "customers", label: "Customers" },
   { key: "stockCodes", label: "Stock Codes" },
   { key: "storeCategories", label: "Store Categories" },
@@ -226,6 +227,7 @@ const DEFAULT_MASTER = {
   // every existing place that treats customers as simple strings keeps
   // working untouched — this is purely additive.
   customerContacts: {},
+  staffDepartments: ["Sales", "Floor Manager", "Laser", "CNC", "Welding", "Fabrication", "Finishing", "Office", "Dispatch"],
   stockCodes: [],
   storeCategories: ["Electrical", "CNC Tooling", "Fasteners", "Welding Consumables", "PPE"],
   nextToolNumber: 1,
@@ -693,6 +695,8 @@ export default function StockControl() {
                 canManageRequisitions: !!data.can_manage_requisitions,
                 canRaisePO: !!data.can_raise_po,
                 canViewUsageLog: !!data.can_view_usage_log,
+                isSalesPerson: !!data.is_sales_person,
+                department: data.department || "",
               }
             : null
         );
@@ -1315,6 +1319,8 @@ export default function StockControl() {
         canManageRequisitions: !!d.can_manage_requisitions,
         canRaisePO: !!d.can_raise_po,
         canViewUsageLog: !!d.can_view_usage_log,
+        isSalesPerson: !!d.is_sales_person,
+        department: d.department || "",
       }))
     );
   }
@@ -1330,6 +1336,8 @@ export default function StockControl() {
     canManageRequisitions: "can_manage_requisitions",
     canRaisePO: "can_raise_po",
     canViewUsageLog: "can_view_usage_log",
+    isSalesPerson: "is_sales_person",
+    department: "department",
   };
 
   async function updatePersonField(id, field, value) {
@@ -1390,10 +1398,13 @@ export default function StockControl() {
   const currentUser = session?.user || null;
 
   useEffect(() => {
-    if (isAdmin && showManager && people === null) {
+    // Needed by more than just admin/User Management now — the Sales
+    // Person picker on the item form needs real account names too, so this
+    // loads for anyone signed in, not just when an admin opens the manager.
+    if (profile && people === null) {
       loadPeople();
     }
-  }, [isAdmin, showManager, people]);
+  }, [profile, people]);
 
   function canView(section) {
     if (isAdmin) return true;
@@ -5567,16 +5578,15 @@ export default function StockControl() {
                 </div>
 
                 <div style={{ marginTop: 10 }}>
-                  <LibraryField
-                    label="Sales person"
-                    options={master.salesPeople}
-                    value={form.salesPerson}
-                    onChange={(v) => setForm({ ...form, salesPerson: v })}
-                    customValue={form.customSalesPerson}
-                    onCustomChange={(v) => setForm({ ...form, customSalesPerson: v })}
-                    placeholder="e.g. Sipho M"
-                    allowNone
-                  />
+                  <label style={S.label}>Sales person</label>
+                  <select style={S.input} value={form.salesPerson} onChange={(e) => setForm({ ...form, salesPerson: e.target.value })}>
+                    <option value="">Not set</option>
+                    {(people || [])
+                      .filter((p) => p.isSalesPerson)
+                      .map((p) => (
+                        <option key={p.id} value={p.name}>{p.name}</option>
+                      ))}
+                  </select>
                 </div>
 
                 <div style={{ marginTop: 10 }}>
@@ -6301,6 +6311,27 @@ export default function StockControl() {
                               />
                               Can view Usage Log
                             </label>
+                            <label style={S.deptToggleItem}>
+                              <input
+                                type="checkbox"
+                                checked={!!p.isSalesPerson}
+                                onChange={(e) => updatePersonField(p.id, "isSalesPerson", e.target.checked)}
+                              />
+                              Is a Sales Person (can be assigned to jobs, appears in Sales Person pickers)
+                            </label>
+                          </div>
+                          <div style={{ marginTop: 8 }}>
+                            <label style={S.label}>Department</label>
+                            <select
+                              style={S.input}
+                              value={p.department || ""}
+                              onChange={(e) => updatePersonField(p.id, "department", e.target.value)}
+                            >
+                              <option value="">Not set</option>
+                              {master.staffDepartments.map((d) => (
+                                <option key={d} value={d}>{d}</option>
+                              ))}
+                            </select>
                           </div>
                         </>
                       )}
