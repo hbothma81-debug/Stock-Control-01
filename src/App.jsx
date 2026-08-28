@@ -1212,18 +1212,20 @@ export default function StockControl() {
       .filter((f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"))
       .map((f) => {
         const partNumber = f.name.replace(/\.pdf$/i, "").trim();
-        // Must match a stock code for the customer selected above (or a
-        // customer-less code, for internal drawings) — a PDF with no
-        // matching stock code doesn't get uploaded at all.
         const matchedStockCode = (master.stockCodes || []).find(
           (sc) =>
             sc.stockCode.toLowerCase() === partNumber.toLowerCase() &&
             (sc.customer || "") === (drawingUploadCustomer || "")
         );
+        // The "must already exist in Stock Codes" rule only applies when a
+        // customer is selected — an internal drawing (no customer chosen)
+        // isn't expected to already have a pre-loaded stock code, so it's
+        // never auto-skipped just for not matching one.
+        const requiresMatch = !!drawingUploadCustomer;
         return {
           file: f,
           partNumber,
-          skip: !matchedStockCode,
+          skip: requiresMatch && !matchedStockCode,
           matchedStockCode: matchedStockCode || null,
         };
       });
@@ -6493,10 +6495,12 @@ export default function StockControl() {
                             <span style={{ fontSize: 11, color: C.accentFinished }}>
                               ✓ Links to existing stock code — {entry.matchedStockCode.description || "no description"}
                             </span>
-                          ) : (
+                          ) : entry.skip ? (
                             <span style={{ fontSize: 11, color: C.danger }}>
                               ✕ No matching stock code for this customer — won't be uploaded
                             </span>
+                          ) : (
+                            <span style={{ fontSize: 11, color: C.muted }}>No matching stock code — uploading unlinked (internal drawing)</span>
                           )}
                         </div>
                         <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeDrawingUploadFile(idx)}>
