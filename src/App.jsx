@@ -7,7 +7,7 @@ import {
   Plus, Minus, Search, Trash2, PackagePlus, AlertTriangle, X,
   ChevronDown, User, UserCheck, ShieldCheck, Lock, Database,
   Download, Pencil, Copy, Filter as FilterIcon, Paperclip, FileText, Image as ImageIcon,
-  Wrench, Users, Eye, EyeOff, ShoppingCart, ClipboardList, Check, Package, Upload,
+  Wrench, Users, Eye, EyeOff, ShoppingCart, ClipboardList, Check, Package, Upload, RefreshCw,
 } from "lucide-react";
 
 // window.storage is installed in main.jsx before this component ever
@@ -29,6 +29,7 @@ const NAV_TABS = [
   ...TABS,
   { key: "requisitions", label: "Requisitions" },
   { key: "purchaseOrders", label: "Purchase Orders" },
+  { key: "receiving", label: "Receiving" },
   { key: "usageLog", label: "Usage Log" },
   { key: "drawings", label: "Drawings" },
 ];
@@ -327,6 +328,13 @@ const emptyForm = {
   manufacturer: "",
   serialNumber: "",
   purchaseDate: "",
+  serviceMode: "none",
+  serviceIntervalMonths: "",
+  serviceIntervalHours: "",
+  serviceIntervalKm: "",
+  lastServiceDate: "",
+  lastServiceReading: "",
+  currentReading: "",
 };
 
 function LibraryField({ label, options, value, onChange, customValue, onCustomChange, placeholder, showComment, comment, onCommentChange, allowNone }) {
@@ -418,6 +426,16 @@ export default function StockControl() {
   const [poBuilder, setPoBuilder] = useState(null); // { supplierId, lineItems: [...], linkedRequisitionIds: [...], notes }
   const [poSupplierFilter, setPoSupplierFilter] = useState("");
   const [showPoReport, setShowPoReport] = useState(false);
+  const [showCompletedPOs, setShowCompletedPOs] = useState(false);
+  const [receivingPo, setReceivingPo] = useState(null);
+  const [receivingLines, setReceivingLines] = useState([]);
+  const [receivingDeliveryNote, setReceivingDeliveryNote] = useState("");
+  const [assetHistoryItem, setAssetHistoryItem] = useState(null);
+  const [assetHistoryEntries, setAssetHistoryEntries] = useState(null);
+  const [assetHistoryNote, setAssetHistoryNote] = useState("");
+  const [assetHistoryFile, setAssetHistoryFile] = useState(null);
+  const [assetHistoryReading, setAssetHistoryReading] = useState("");
+  const [assetHistoryBusy, setAssetHistoryBusy] = useState(false);
   const [drawingSearchQuery, setDrawingSearchQuery] = useState("");
   const [drawingSearchResults, setDrawingSearchResults] = useState(null);
   const [drawingCustomerFilter, setDrawingCustomerFilter] = useState("");
@@ -439,6 +457,7 @@ export default function StockControl() {
   const [poReportFrom, setPoReportFrom] = useState("");
   const [poReportTo, setPoReportTo] = useState("");
   const [poReportSupplier, setPoReportSupplier] = useState("");
+  const [poReportStatus, setPoReportStatus] = useState("");
   const [selectedReqIds, setSelectedReqIds] = useState([]);
   const [requisitionTarget, setRequisitionTarget] = useState(null);
   const [requisitionQty, setRequisitionQty] = useState("");
@@ -511,11 +530,21 @@ export default function StockControl() {
   const [filterPieceLength, setFilterPieceLength] = useState("");
   const [filterStockType, setFilterStockType] = useState("");
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await window.storage.get("stock-items-v3", true);
-        let loadedItems = res && res.value ? JSON.parse(res.value) : seed;
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState(null);
+
+  // Shared by the initial load and both the manual and automatic refresh.
+  // isInitialLoad matters: on first load, "nothing saved yet" legitimately
+  // means seed the defaults. On a refresh, previously-existing data
+  // suddenly coming back empty is suspicious, not a fresh start — so a
+  // refresh never falls back to seed/empty, it just leaves the current
+  // state alone and tries again next time. Same reasoning as the earlier
+  // fix that stopped a failed load from silently overwriting good data.
+  async function loadAllData(isInitialLoad) {
+    try {
+      const res = await window.storage.get("stock-items-v3", true);
+      if (res && res.value) {
+        let loadedItems = JSON.parse(res.value);
         // Migration: Tools used to live in Stores as a "storesKind" — they
         // now have their own Assets category with different fields
         // (manufacturer, serial number, purchase date, one-at-a-time
@@ -535,13 +564,17 @@ export default function StockControl() {
             : it
         );
         setItems(loadedItems);
-      } catch (err) {
-        console.error("Failed to load items:", err);
-        setLoadError((prev) => ({ ...prev, items: true }));
+      } else if (isInitialLoad) {
+        setItems(seed);
       }
-      try {
-        const res = await window.storage.get("stock-master-data-v2", true);
-        let loaded = res && res.value ? { ...DEFAULT_MASTER, ...JSON.parse(res.value) } : DEFAULT_MASTER;
+    } catch (err) {
+      console.error("Failed to load items:", err);
+      if (isInitialLoad) setLoadError((prev) => ({ ...prev, items: true }));
+    }
+    try {
+      const res = await window.storage.get("stock-master-data-v2", true);
+      if (res && res.value) {
+        let loaded = { ...DEFAULT_MASTER, ...JSON.parse(res.value) };
         // Migration: sections saved before the Section Types feature don't have
         // a `type` field. Backfill it by matching against the default library
         // so existing data doesn't silently vanish from the filtered picker.
@@ -576,32 +609,58 @@ export default function StockControl() {
           };
         }
         setMaster(loaded);
-      } catch (err) {
-        console.error("Failed to load master data:", err);
-        setLoadError((prev) => ({ ...prev, master: true }));
+      } else if (isInitialLoad) {
+        setMaster(DEFAULT_MASTER);
       }
-      try {
-        const res = await window.storage.get("stock-requisitions-v1", true);
-        setRequisitions(res && res.value ? JSON.parse(res.value) : []);
-      } catch (err) {
-        console.error("Failed to load requisitions:", err);
-        setLoadError((prev) => ({ ...prev, requisitions: true }));
-      }
-      try {
-        const res = await window.storage.get("stock-purchase-orders-v1", true);
-        setPurchaseOrders(res && res.value ? JSON.parse(res.value) : []);
-      } catch (err) {
-        console.error("Failed to load purchase orders:", err);
-        setLoadError((prev) => ({ ...prev, purchaseOrders: true }));
-      }
-      try {
-        const res = await window.storage.get("stock-usage-log-v1", true);
-        setUsageLog(res && res.value ? JSON.parse(res.value) : []);
-      } catch (err) {
-        console.error("Failed to load usage log:", err);
-        setLoadError((prev) => ({ ...prev, usageLog: true }));
-      }
-    })();
+    } catch (err) {
+      console.error("Failed to load master data:", err);
+      if (isInitialLoad) setLoadError((prev) => ({ ...prev, master: true }));
+    }
+    try {
+      const res = await window.storage.get("stock-requisitions-v1", true);
+      if (res && res.value) setRequisitions(JSON.parse(res.value));
+      else if (isInitialLoad) setRequisitions([]);
+    } catch (err) {
+      console.error("Failed to load requisitions:", err);
+      if (isInitialLoad) setLoadError((prev) => ({ ...prev, requisitions: true }));
+    }
+    try {
+      const res = await window.storage.get("stock-purchase-orders-v1", true);
+      if (res && res.value) setPurchaseOrders(JSON.parse(res.value));
+      else if (isInitialLoad) setPurchaseOrders([]);
+    } catch (err) {
+      console.error("Failed to load purchase orders:", err);
+      if (isInitialLoad) setLoadError((prev) => ({ ...prev, purchaseOrders: true }));
+    }
+    try {
+      const res = await window.storage.get("stock-usage-log-v1", true);
+      if (res && res.value) setUsageLog(JSON.parse(res.value));
+      else if (isInitialLoad) setUsageLog([]);
+    } catch (err) {
+      console.error("Failed to load usage log:", err);
+      if (isInitialLoad) setLoadError((prev) => ({ ...prev, usageLog: true }));
+    }
+    setLastRefreshedAt(new Date());
+  }
+
+  async function manualRefresh() {
+    setIsRefreshing(true);
+    await loadAllData(false);
+    setIsRefreshing(false);
+  }
+
+  useEffect(() => {
+    loadAllData(true);
+  }, []);
+
+  // Automatic background refresh — every 60 seconds, only while the tab is
+  // actually visible, so a phone with the app backgrounded isn't quietly
+  // burning battery/data on a screen nobody's looking at.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") loadAllData(false);
+    }, 60000);
+    return () => clearInterval(interval);
   }, []);
 
   // Real sign-in via Supabase Auth, replacing the old shared-PIN system.
@@ -927,6 +986,193 @@ export default function StockControl() {
     }
   }
 
+  // ---- Asset maintenance history ----
+
+  async function fetchAssetHistory(itemId) {
+    if (!supabase) return [];
+    const { data, error } = await supabase
+      .from("asset_history")
+      .select("*")
+      .eq("item_id", itemId)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function uploadAssetAttachment(file, itemId) {
+    if (!supabase) return null;
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const path = `${itemId}/${Date.now()}-${safeName}`;
+    const { error } = await supabase.storage.from("asset-attachments").upload(path, file);
+    if (error) throw error;
+    return path;
+  }
+
+  async function getAssetAttachmentUrl(path) {
+    if (!supabase) return null;
+    const { data, error } = await supabase.storage.from("asset-attachments").createSignedUrl(path, 3600);
+    if (error) throw error;
+    return data.signedUrl;
+  }
+
+  async function addAssetHistoryEntry({ itemId, entryType, note, reading, attachmentFile, serviceMode }) {
+    if (!supabase) return;
+    let attachmentPath = null;
+    let attachmentName = null;
+    if (attachmentFile) {
+      attachmentPath = await uploadAssetAttachment(attachmentFile, itemId);
+      attachmentName = attachmentFile.name;
+    }
+    const row = {
+      item_id: itemId,
+      entry_type: entryType,
+      note: note || null,
+      hours_reading: entryType === "meter_reading" && serviceMode === "hours" ? reading : null,
+      km_reading: entryType === "meter_reading" && serviceMode === "km" ? reading : null,
+      attachment_path: attachmentPath,
+      attachment_name: attachmentName,
+      logged_by: roleLabel,
+    };
+    const { error } = await supabase.from("asset_history").insert(row);
+    if (error) throw error;
+    // A logged reading is also the asset's new "current" reading, used for
+    // the service-due calculation.
+    if (entryType === "meter_reading") {
+      setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, currentReading: reading } : it)));
+    }
+  }
+
+  async function deleteAssetHistoryEntry(entry) {
+    if (!supabase) return;
+    const ok = window.confirm("Delete this history entry permanently? This can't be undone.");
+    if (!ok) return;
+    try {
+      if (entry.attachment_path) await supabase.storage.from("asset-attachments").remove([entry.attachment_path]);
+      const { error } = await supabase.from("asset_history").delete().eq("id", entry.id);
+      if (error) throw error;
+      return true;
+    } catch (err) {
+      console.error("Failed to delete history entry:", err);
+      alert("Couldn't delete that entry — check your connection and try again.");
+      return false;
+    }
+  }
+
+  // Whether an asset is overdue or approaching its next service, based on
+  // whichever tracking mode it uses. Returns null if service tracking isn't
+  // set up for this asset at all.
+  function getServiceStatus(item) {
+    if (!item.serviceMode || item.serviceMode === "none") return null;
+    if (item.serviceMode === "months") {
+      if (!item.lastServiceDate || !item.serviceIntervalMonths) return null;
+      const due = new Date(item.lastServiceDate);
+      due.setMonth(due.getMonth() + Number(item.serviceIntervalMonths));
+      const daysUntil = (due - new Date()) / (1000 * 60 * 60 * 24);
+      if (daysUntil <= 0) return { level: "overdue", detail: `Overdue since ${due.toLocaleDateString()}` };
+      if (daysUntil <= 14) return { level: "soon", detail: `Due ${due.toLocaleDateString()}` };
+      return { level: "ok", detail: `Next due ${due.toLocaleDateString()}` };
+    }
+    const interval = item.serviceMode === "hours" ? item.serviceIntervalHours : item.serviceIntervalKm;
+    if (!interval) return null;
+    const unit = item.serviceMode === "hours" ? "hrs" : "km";
+    const used = Number(item.currentReading || 0) - Number(item.lastServiceReading || 0);
+    const remaining = interval - used;
+    if (remaining <= 0) return { level: "overdue", detail: `${Math.abs(remaining)}${unit} over interval` };
+    if (remaining <= interval * 0.1) return { level: "soon", detail: `${remaining}${unit} remaining` };
+    return { level: "ok", detail: `${remaining}${unit} remaining` };
+  }
+
+  async function openAssetHistory(item) {
+    setAssetHistoryItem(item);
+    setAssetHistoryEntries(null);
+    setAssetHistoryNote("");
+    setAssetHistoryFile(null);
+    setAssetHistoryReading(String(item.currentReading || ""));
+    try {
+      const entries = await fetchAssetHistory(item.id);
+      setAssetHistoryEntries(entries);
+    } catch (err) {
+      console.error("Failed to load asset history:", err);
+      setAssetHistoryEntries([]);
+    }
+  }
+
+  function closeAssetHistory() {
+    setAssetHistoryItem(null);
+    setAssetHistoryEntries(null);
+    setAssetHistoryNote("");
+    setAssetHistoryFile(null);
+    setAssetHistoryReading("");
+  }
+
+  async function refreshAssetHistoryEntries() {
+    if (!assetHistoryItem) return;
+    try {
+      const entries = await fetchAssetHistory(assetHistoryItem.id);
+      setAssetHistoryEntries(entries);
+    } catch (err) {
+      console.error("Failed to refresh asset history:", err);
+    }
+  }
+
+  async function submitAssetNote(e) {
+    e.preventDefault();
+    if (!assetHistoryNote.trim() && !assetHistoryFile) return;
+    setAssetHistoryBusy(true);
+    try {
+      await addAssetHistoryEntry({
+        itemId: assetHistoryItem.id,
+        entryType: "note",
+        note: assetHistoryNote.trim(),
+        attachmentFile: assetHistoryFile,
+      });
+      setAssetHistoryNote("");
+      setAssetHistoryFile(null);
+      await refreshAssetHistoryEntries();
+    } catch (err) {
+      console.error("Failed to add note:", err);
+      alert("Couldn't save that note — check your connection and try again.");
+    }
+    setAssetHistoryBusy(false);
+  }
+
+  async function submitAssetReading(e) {
+    e.preventDefault();
+    const reading = parseFloat(assetHistoryReading);
+    if (isNaN(reading) || reading < 0) return;
+    setAssetHistoryBusy(true);
+    try {
+      await addAssetHistoryEntry({
+        itemId: assetHistoryItem.id,
+        entryType: "meter_reading",
+        reading,
+        serviceMode: assetHistoryItem.serviceMode,
+      });
+      setAssetHistoryItem((prev) => ({ ...prev, currentReading: reading }));
+      await refreshAssetHistoryEntries();
+    } catch (err) {
+      console.error("Failed to log reading:", err);
+      alert("Couldn't save that reading — check your connection and try again.");
+    }
+    setAssetHistoryBusy(false);
+  }
+
+  async function viewAssetAttachment(entry) {
+    try {
+      const url = await getAssetAttachmentUrl(entry.attachment_path);
+      setPreviewItem({ id: entry.id, attachmentType: entry.attachment_name.toLowerCase().endsWith(".pdf") ? "pdf" : "image", attachmentName: entry.attachment_name });
+      setPreviewData(url);
+      setPreviewLoading(false);
+    } catch (err) {
+      console.error("Couldn't open attachment:", err);
+    }
+  }
+
+  async function handleDeleteAssetHistoryEntry(entry) {
+    const ok = await deleteAssetHistoryEntry(entry);
+    if (ok) refreshAssetHistoryEntries();
+  }
+
   async function deleteDrawing(drawing) {
     if (!supabase) return;
     const ok = window.confirm(
@@ -966,13 +1212,18 @@ export default function StockControl() {
       .filter((f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"))
       .map((f) => {
         const partNumber = f.name.replace(/\.pdf$/i, "").trim();
+        // Must match a stock code for the customer selected above (or a
+        // customer-less code, for internal drawings) — a PDF with no
+        // matching stock code doesn't get uploaded at all.
         const matchedStockCode = (master.stockCodes || []).find(
-          (sc) => sc.stockCode.toLowerCase() === partNumber.toLowerCase()
+          (sc) =>
+            sc.stockCode.toLowerCase() === partNumber.toLowerCase() &&
+            (sc.customer || "") === (drawingUploadCustomer || "")
         );
         return {
           file: f,
           partNumber,
-          skip: false,
+          skip: !matchedStockCode,
           matchedStockCode: matchedStockCode || null,
         };
       });
@@ -1256,6 +1507,7 @@ export default function StockControl() {
     if (isAdmin) return true;
     if (section === "requisitions") return !!profile?.canRequisition || !!profile?.canManageRequisitions;
     if (section === "purchaseOrders") return !!profile?.canManageRequisitions || !!profile?.canRaisePO;
+    if (section === "receiving") return !!profile?.canMarkReceived;
     if (section === "usageLog") return !!profile?.canViewUsageLog;
     return profile ? !!profile.permissions?.[section]?.view : false;
   }
@@ -1686,7 +1938,7 @@ export default function StockControl() {
   }
 
   function openUsageModal(item, direction) {
-    setUsageModal({ item, direction, qty: "", jobNumber: "", customer: "", note: "" });
+    setUsageModal({ item, direction, qty: "", cutQty: "1", jobNumber: "", customer: "", note: "" });
   }
 
   function closeUsageModal() {
@@ -1708,6 +1960,12 @@ export default function StockControl() {
       const metresPerPiece = item.trackLength ? Number(item.length || 0) : 1;
       return qty * metresPerPiece * pricePerM;
     }
+    if (item.mainCat === "cncBar") {
+      // qty here is the cut length in mm, not a piece count.
+      const w = cncBarWeight(item);
+      const pricePerKg = findPrice("cncGrades", item.grade);
+      return w ? (qty / 1000) * w.perM * pricePerKg : 0;
+    }
     return qty * Number(item.value || 0);
   }
 
@@ -1716,8 +1974,61 @@ export default function StockControl() {
     const qty = parseFloat(usageModal.qty);
     if (!qty || qty <= 0) return;
     if (usageModal.direction === "use" && !usageModal.jobNumber.trim() && !usageModal.customer.trim()) return;
-    const delta = usageModal.direction === "add" ? qty : -qty;
     const itemId = usageModal.item.id;
+
+    // CNC Bar is sold by cutting an arbitrary length off a single piece, not
+    // by whole pieces — cutting from a group of otherwise-identical pieces
+    // splits one of them off as its own shorter remainder line, so the
+    // other full-length pieces are never affected.
+    if (usageModal.item.mainCat === "cncBar" && usageModal.direction === "use") {
+      const item = usageModal.item;
+      const cutQty = parseInt(usageModal.cutQty, 10) || 1;
+      const totalMm = qty * cutQty;
+      if (totalMm > Number(item.length || 0)) {
+        alert(
+          `Can't cut ${cutQty} × ${qty}mm (${totalMm}mm total) — this piece only has ${item.length}mm remaining.`
+        );
+        return;
+      }
+      const remainder = Number(item.length) - totalMm;
+      const lineCost = resolveUsageLineCost(item, totalMm);
+      setItems((prev) => {
+        const currentQty = Number(item.qty) || 1;
+        if (currentQty <= 1) {
+          // Only one piece at this length — cut straight into it.
+          if (remainder <= 0) return prev.filter((it) => it.id !== itemId);
+          return prev.map((it) => (it.id === itemId ? { ...it, length: remainder } : it));
+        }
+        // Multiple identical pieces — take one out of the group to cut from,
+        // and (if anything's left) file the leftover as its own new line.
+        const reduced = prev.map((it) => (it.id === itemId ? { ...it, qty: currentQty - 1 } : it));
+        if (remainder <= 0) return reduced;
+        return [...reduced, { ...item, id: uid(), qty: 1, length: remainder }];
+      });
+      setUsageLog((prev) => [
+        ...prev,
+        {
+          id: uid(),
+          itemId,
+          itemName: item.name,
+          mainCat: item.mainCat,
+          qty: totalMm,
+          cutLength: qty,
+          cutPieces: cutQty,
+          direction: "use",
+          by: roleLabel,
+          jobNumber: usageModal.jobNumber.trim(),
+          customer: usageModal.customer.trim(),
+          note: usageModal.note.trim(),
+          lineCost,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+      closeUsageModal();
+      return;
+    }
+
+    const delta = usageModal.direction === "add" ? qty : -qty;
     const lineCost = usageModal.direction === "use" ? resolveUsageLineCost(usageModal.item, qty) : 0;
     setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, qty: Math.max(0, Number(it.qty) + delta) } : it)));
     if (delta > 0) closeOutRequisitionsForItem(itemId);
@@ -1951,6 +2262,89 @@ export default function StockControl() {
     return doc;
   }
 
+  // ---- Receiving ----
+  // A PO line only has a real stock item behind it when that line came from
+  // a linked requisition — lines added by hand in the PO builder have
+  // nothing to match against, so those just get flagged for manual entry.
+  function openReceiving(po) {
+    const linkedReqs = (po.linkedRequisitionIds || []).map((id) => requisitions.find((r) => r.id === id)).filter(Boolean);
+    const lines = po.lineItems.map((li, idx) => {
+      const linkedReq = linkedReqs[idx] || null;
+      const linkedItem = linkedReq ? items.find((it) => it.id === linkedReq.itemId) : null;
+      return {
+        description: li.description,
+        orderedQty: li.qty,
+        receivedQty: String(li.qty),
+        linkedRequisitionId: linkedReq?.id || null,
+        linkedItemId: linkedItem?.id || null,
+        linkedItemName: linkedItem?.name || null,
+        linkedItemMainCat: linkedItem?.mainCat || null,
+      };
+    });
+    setReceivingPo(po);
+    setReceivingLines(lines);
+    setReceivingDeliveryNote("");
+  }
+
+  function closeReceiving() {
+    setReceivingPo(null);
+    setReceivingLines([]);
+    setReceivingDeliveryNote("");
+  }
+
+  function updateReceivingLineQty(idx, value) {
+    setReceivingLines((prev) => prev.map((l, i) => (i === idx ? { ...l, receivedQty: value } : l)));
+  }
+
+  function submitReceiving() {
+    if (!receivingDeliveryNote.trim()) {
+      alert("Please enter the supplier's delivery note number before confirming.");
+      return;
+    }
+    const timestamp = new Date().toISOString();
+    receivingLines.forEach((line) => {
+      const receivedQty = parseFloat(line.receivedQty) || 0;
+      if (receivedQty <= 0) return;
+      if (line.linkedItemId) {
+        setItems((prev) => prev.map((it) => (it.id === line.linkedItemId ? { ...it, qty: Number(it.qty) + receivedQty } : it)));
+        setUsageLog((prev) => [
+          ...prev,
+          {
+            id: uid(),
+            itemId: line.linkedItemId,
+            itemName: line.linkedItemName,
+            mainCat: line.linkedItemMainCat,
+            qty: receivedQty,
+            direction: "add",
+            by: roleLabel,
+            jobNumber: "",
+            customer: "",
+            note: `Received against ${receivingPo.poNumber} — delivery note ${receivingDeliveryNote.trim()}`,
+            lineCost: 0,
+            timestamp,
+          },
+        ]);
+      }
+      if (line.linkedRequisitionId) {
+        setRequisitions((prev) =>
+          prev.map((r) =>
+            r.id === line.linkedRequisitionId
+              ? { ...r, status: "fulfilled", dateFulfilled: timestamp, receivedBy: roleLabel, dateReceived: timestamp }
+              : r
+          )
+        );
+      }
+    });
+    setPurchaseOrders((prev) =>
+      prev.map((p) =>
+        p.id === receivingPo.id
+          ? { ...p, status: "received", receivedBy: roleLabel, receivedDate: timestamp, deliveryNoteNumber: receivingDeliveryNote.trim() }
+          : p
+      )
+    );
+    closeReceiving();
+  }
+
   function downloadPoPdf(po) {
     buildPoDoc(po).save(`${po.poNumber}.pdf`);
   }
@@ -1969,6 +2363,7 @@ export default function StockControl() {
   function generatePoReport() {
     const matches = purchaseOrders
       .filter((po) => !poReportSupplier || po.supplierId === poReportSupplier)
+      .filter((po) => !poReportStatus || (poReportStatus === "received" ? po.status === "received" : po.status !== "received"))
       .filter((po) => !poReportFrom || new Date(po.dateCreated) >= new Date(poReportFrom))
       .filter((po) => !poReportTo || new Date(po.dateCreated) <= new Date(poReportTo + "T23:59:59"))
       .sort((a, b) => new Date(a.dateCreated) - new Date(b.dateCreated));
@@ -1993,15 +2388,17 @@ export default function StockControl() {
 
     autoTable(doc, {
       startY: 32,
-      head: [["PO Number", "Date", "Supplier", "Lines", "Total"]],
+      head: [["PO Number", "Date", "Supplier", "Status", "Received By", "Lines", "Total"]],
       body: matches.map((po) => [
         po.poNumber,
         new Date(po.dateCreated).toLocaleDateString(),
         po.supplierName || "—",
+        po.status === "received" ? "Received" : "Outstanding",
+        po.status === "received" ? `${po.receivedBy || "—"} (${po.receivedDate ? new Date(po.receivedDate).toLocaleDateString() : "—"})` : "—",
         String(po.lineItems.length),
         `R ${po.totalValue.toFixed(2)}`,
       ]),
-      foot: [["", "", "", "Grand total", `R ${total.toFixed(2)}`]],
+      foot: [["", "", "", "", "", "Grand total", `R ${total.toFixed(2)}`]],
       theme: "grid",
       headStyles: { fillColor: [27, 29, 31] },
       footStyles: { fillColor: [242, 169, 0], textColor: [27, 29, 31], fontStyle: "bold" },
@@ -2051,7 +2448,7 @@ export default function StockControl() {
     const lineItems = selected.map((r) => ({
       description: r.itemLabel,
       qty: r.qty,
-      unitPrice: resolveReqPrice(r),
+      unitPrice: resolvePoLineUnitPrice(r),
     }));
     // If every selected requisition already has the same supplier text set,
     // try to match it to a real supplier record to prefill the picker.
@@ -2077,6 +2474,10 @@ export default function StockControl() {
       totalValue,
       notes: poBuilder.notes.trim(),
       linkedRequisitionIds: poBuilder.linkedRequisitionIds,
+      status: "outstanding",
+      receivedBy: "",
+      receivedDate: "",
+      deliveryNoteNumber: "",
     };
     setPurchaseOrders((prev) => [...prev, po]);
     setMaster((prev) => ({ ...prev, nextPoNumber: (prev.nextPoNumber || 1) + 1 }));
@@ -2103,6 +2504,7 @@ export default function StockControl() {
     if (!master) return 0;
     if (req.mainCat === "plate") return findPrice("grades", req.itemGrade);
     if (req.mainCat === "structural") return findPrice("sections", req.itemRawName);
+    if (req.mainCat === "cncBar") return findPrice("cncGrades", req.itemGrade);
     const it = (items || []).find((i) => i.id === req.itemId);
     return it ? Number(it.value || 0) : 0;
   }
@@ -2119,9 +2521,36 @@ export default function StockControl() {
         ...prev,
         sections: prev.sections.map((s) => (s.name.toLowerCase() === (req.itemRawName || "").toLowerCase() ? { ...s, price } : s)),
       }));
+    } else if (req.mainCat === "cncBar") {
+      setMaster((prev) => ({
+        ...prev,
+        cncGrades: prev.cncGrades.map((g) => (g.name.toLowerCase() === (req.itemGrade || "").toLowerCase() ? { ...g, price } : g)),
+      }));
     } else {
       setItems((prev) => prev.map((it) => (it.id === req.itemId ? { ...it, value: price } : it)));
     }
+  }
+
+  // The rate (R/kg, R/m) isn't a usable "price each" on its own for anything
+  // sold by weight or length — a PO line needs price × qty to add up to the
+  // real total, so this multiplies the rate by however much is actually in
+  // one unit (one sheet's weight, one piece's length or weight).
+  function resolvePoLineUnitPrice(req) {
+    const rate = resolveReqPrice(req);
+    const it = (items || []).find((i) => i.id === req.itemId);
+    if (req.mainCat === "plate" && it) {
+      const w = plateWeight(it);
+      return w ? rate * w.perSheet : rate;
+    }
+    if (req.mainCat === "structural" && it) {
+      if (it.trackLength && it.length) return rate * Number(it.length);
+      return rate;
+    }
+    if (req.mainCat === "cncBar" && it) {
+      const w = cncBarWeight(it);
+      return w ? w.perM * (Number(it.length || 0) / 1000) * rate : 0;
+    }
+    return rate;
   }
 
   async function handleAttachmentSelect(e) {
@@ -2416,6 +2845,13 @@ export default function StockControl() {
         length: 0,
         unit: "ea",
         qty: 1,
+        serviceMode: form.serviceMode,
+        serviceIntervalMonths: Number(form.serviceIntervalMonths) || 0,
+        serviceIntervalHours: Number(form.serviceIntervalHours) || 0,
+        serviceIntervalKm: Number(form.serviceIntervalKm) || 0,
+        lastServiceDate: form.lastServiceDate,
+        lastServiceReading: Number(form.lastServiceReading) || 0,
+        currentReading: Number(form.currentReading) || 0,
         ...(isNewAsset ? { status: "active" } : {}),
       };
       if (isNewAsset) {
@@ -2545,6 +2981,7 @@ export default function StockControl() {
         ...base,
         // Duplicating an asset (e.g. buying another identical machine) should
         // get its own fresh number and a blank serial — it's a distinct unit.
+        // Service tracking is per-physical-machine too, so it resets on duplicate.
         partNumber: duplicate ? "" : it.partNumber || "",
         name: it.name || "",
         manufacturer: it.manufacturer || "",
@@ -2553,6 +2990,13 @@ export default function StockControl() {
         value: String(it.value || ""),
         salesPerson: sp.field, customSalesPerson: sp.custom,
         supplier: sup.field, customSupplier: sup.custom,
+        serviceMode: duplicate ? "none" : it.serviceMode || "none",
+        serviceIntervalMonths: duplicate ? "" : String(it.serviceIntervalMonths || ""),
+        serviceIntervalHours: duplicate ? "" : String(it.serviceIntervalHours || ""),
+        serviceIntervalKm: duplicate ? "" : String(it.serviceIntervalKm || ""),
+        lastServiceDate: duplicate ? "" : it.lastServiceDate || "",
+        lastServiceReading: duplicate ? "" : String(it.lastServiceReading || ""),
+        currentReading: duplicate ? "" : String(it.currentReading || ""),
       };
     }
     return {
@@ -2959,6 +3403,7 @@ export default function StockControl() {
         .stk-editable { transition: border-color .1s ease, background .1s ease; cursor: text; }
         .stk-editable:hover { border-color: ${C.border} !important; background: ${C.bg}; }
         .stk-editable:focus { border-color: ${C.accentRaw} !important; background: ${C.bg}; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
 
       <header style={S.header}>
@@ -2967,6 +3412,16 @@ export default function StockControl() {
           <h1 style={S.h1}>Stock Control</h1>
         </div>
         <div style={S.headerRight}>
+          <button
+            className="stk-btn"
+            style={S.roleChip}
+            onClick={manualRefresh}
+            disabled={isRefreshing}
+            title={lastRefreshedAt ? `Last updated ${lastRefreshedAt.toLocaleTimeString()}` : "Refresh"}
+          >
+            <RefreshCw size={13} strokeWidth={2.5} style={isRefreshing ? { animation: "spin 0.8s linear infinite" } : {}} />
+            {isRefreshing ? "Refreshing…" : "Refresh"}
+          </button>
           {canSeeValue && grandTotalValue > 0 && (
             <div style={S.totalValueBadge} title="Total stock value on hand across every division">
               R {grandTotalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
@@ -3163,7 +3618,7 @@ export default function StockControl() {
                         {canManageRequisitions && r.mainCat !== "custom" && (
                           <div style={S.reqPriceRow}>
                             <span style={S.reqPriceLabel}>
-                              Current price ({r.mainCat === "plate" ? "R/kg" : r.mainCat === "structural" ? "R/m" : "R/ea"})
+                              Current price ({r.mainCat === "plate" || r.mainCat === "cncBar" ? "R/kg" : r.mainCat === "structural" ? "R/m" : "R/ea"})
                               {price === 0 ? " — not set" : ""}:
                             </span>
                             <input
@@ -3323,6 +3778,7 @@ export default function StockControl() {
           {purchaseOrders.length === 0 && <div style={S.empty}>No Purchase Orders yet.</div>}
           <div style={{ ...S.gradeItems, marginTop: 10 }}>
             {[...purchaseOrders]
+              .filter((po) => po.status !== "received")
               .filter((po) => !poSupplierFilter || po.supplierId === poSupplierFilter)
               .sort((a, b) => new Date(b.dateCreated) - new Date(a.dateCreated))
               .map((po) => (
@@ -3343,6 +3799,79 @@ export default function StockControl() {
                     </button>
                     <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => downloadPoPdf(po)}>
                       <Download size={13} /> Download
+                    </button>
+                    {canMarkReceivedPerm && (
+                      <button type="button" className="stk-btn" style={{ ...S.reqActionBtn, background: C.accentFinished }} onClick={() => openReceiving(po)}>
+                        <Check size={13} /> Receive
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+          </div>
+
+          <div style={S.gradeBlock}>
+            <button className="stk-grade" style={S.gradeHeader} onClick={() => setShowCompletedPOs((v) => !v)}>
+              <ChevronDown size={15} style={{ transform: showCompletedPOs ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
+              <span style={S.gradeTitle}>Received / Completed</span>
+              <span style={S.gradeCount}>{purchaseOrders.filter((po) => po.status === "received").length}</span>
+            </button>
+            {showCompletedPOs && (
+              <div style={S.gradeItems}>
+                {[...purchaseOrders]
+                  .filter((po) => po.status === "received")
+                  .filter((po) => !poSupplierFilter || po.supplierId === poSupplierFilter)
+                  .sort((a, b) => new Date(b.receivedDate) - new Date(a.receivedDate))
+                  .map((po) => (
+                    <div key={po.id} style={S.reqCard}>
+                      <div style={S.reqCardTop}>
+                        <span style={S.itemName}>{po.poNumber} — {po.supplierName || "No supplier"}</span>
+                        <span style={{ ...S.reqStatusTag, ...S.reqStatus_received }}>R{po.totalValue.toFixed(2)}</span>
+                      </div>
+                      <div style={S.rowMeta}>
+                        <span>Raised by {po.createdBy}</span>
+                        <span>{new Date(po.dateCreated).toLocaleDateString()}</span>
+                        <span>Received by {po.receivedBy} on {new Date(po.receivedDate).toLocaleDateString()}</span>
+                        {po.deliveryNoteNumber && <span>Delivery note: {po.deliveryNoteNumber}</span>}
+                      </div>
+                      <div style={S.reqActions}>
+                        <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => viewPoPdf(po)}>
+                          <FileText size={13} /> View PDF
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                {purchaseOrders.filter((po) => po.status === "received").length === 0 && (
+                  <div style={S.empty}>Nothing received yet.</div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : tab === "receiving" ? (
+        <div style={S.list}>
+          <div style={S.roleHint}>Pick an outstanding Purchase Order to confirm what actually arrived.</div>
+          {purchaseOrders.filter((po) => po.status !== "received").length === 0 && (
+            <div style={S.empty}>Nothing outstanding to receive.</div>
+          )}
+          <div style={{ ...S.gradeItems, marginTop: 10 }}>
+            {[...purchaseOrders]
+              .filter((po) => po.status !== "received")
+              .sort((a, b) => new Date(b.dateCreated) - new Date(a.dateCreated))
+              .map((po) => (
+                <div key={po.id} style={S.reqCard}>
+                  <div style={S.reqCardTop}>
+                    <span style={S.itemName}>{po.poNumber} — {po.supplierName || "No supplier"}</span>
+                    <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>R{po.totalValue.toFixed(2)}</span>
+                  </div>
+                  <div style={S.rowMeta}>
+                    <span>Raised by {po.createdBy}</span>
+                    <span>{new Date(po.dateCreated).toLocaleDateString()}</span>
+                    <span>{po.lineItems.length} line{po.lineItems.length === 1 ? "" : "s"}</span>
+                  </div>
+                  <div style={S.reqActions}>
+                    <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => openReceiving(po)}>
+                      <Check size={13} /> Receive this PO
                     </button>
                   </div>
                 </div>
@@ -3472,7 +4001,11 @@ export default function StockControl() {
                   <div style={S.reqCardTop}>
                     <span style={S.itemName}>{u.itemName}</span>
                     <span style={{ ...S.reqStatusTag, ...(u.direction === "use" ? S.reqStatus_cancelled : S.reqStatus_ordered) }}>
-                      {u.direction === "use" ? "Used" : "Added"} {u.qty}
+                      {u.mainCat === "cncBar" && u.cutPieces > 1
+                        ? `${u.direction === "use" ? "Used" : "Added"} ${u.cutPieces} × ${u.cutLength}mm`
+                        : u.mainCat === "cncBar" && u.direction === "use"
+                        ? `Used ${u.qty}mm`
+                        : `${u.direction === "use" ? "Used" : "Added"} ${u.qty}`}
                     </span>
                   </div>
                   <div style={S.rowMeta}>
@@ -3885,6 +4418,17 @@ export default function StockControl() {
                             {tab === "assets" && it.manufacturer && <span>{it.manufacturer}</span>}
                             {tab === "assets" && it.serialNumber && <span>SN: {it.serialNumber}</span>}
                             {tab === "assets" && it.purchaseDate && <span>Bought {new Date(it.purchaseDate).toLocaleDateString()}</span>}
+                            {tab === "assets" &&
+                              (() => {
+                                const svc = getServiceStatus(it);
+                                if (!svc) return null;
+                                return (
+                                  <span style={svc.level === "overdue" ? S.lowTag : { color: svc.level === "soon" ? C.accentRaw : C.muted }}>
+                                    {svc.level === "overdue" && <AlertTriangle size={11} strokeWidth={2.5} />}
+                                    {svc.level === "overdue" ? "Service overdue" : svc.level === "soon" ? "Service due soon" : "Service OK"} — {svc.detail}
+                                  </span>
+                                );
+                              })()}
                             {it.loc && <span>{it.loc}</span>}
                             {it.supplier && <span>Supplier: {it.supplier}</span>}
                             {(tab === "custom" || tab === "stores") && canSeeValue && (
@@ -3909,16 +4453,21 @@ export default function StockControl() {
                         </div>
                         <div style={S.rowControls}>
                           {tab === "assets" ? (
-                            canEditQty("assets") && (
-                              <button className="stk-btn" style={S.usageBtnUse} onClick={() => openAssetRemoveModal(it)}>
-                                Remove
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                              <button className="stk-btn" style={S.usageBtnAdd} onClick={() => openAssetHistory(it)}>
+                                History
                               </button>
-                            )
+                              {canEditQty("assets") && (
+                                <button className="stk-btn" style={S.usageBtnUse} onClick={() => openAssetRemoveModal(it)}>
+                                  Remove
+                                </button>
+                              )}
+                            </div>
                           ) : (
                           <div style={S.qtyBlock}>
                             {canEditQty(tab) && (
                               <button className="stk-btn" style={S.usageBtnUse} onClick={() => openUsageModal(it, "use")}>
-                                Use
+                                {tab === "cncBar" ? "Cut" : "Use"}
                               </button>
                             )}
                             <div style={S.qtyDisplay}>
@@ -4117,6 +4666,103 @@ export default function StockControl() {
                   <label style={S.label}>Location</label>
                   <input style={S.input} value={form.loc} onChange={(e) => setForm({ ...form, loc: e.target.value })} placeholder="e.g. Tool crib" />
                 </div>
+
+                <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
+                  <label style={S.label}>Service tracking</label>
+                  <div style={S.segRow}>
+                    {[
+                      { key: "none", label: "None" },
+                      { key: "months", label: "By date" },
+                      { key: "hours", label: "By hours" },
+                      { key: "km", label: "By kilometers" },
+                    ].map((m) => (
+                      <button
+                        type="button"
+                        key={m.key}
+                        className="stk-btn"
+                        onClick={() => setForm({ ...form, serviceMode: m.key })}
+                        style={{
+                          ...S.segBtn,
+                          ...(form.serviceMode === m.key ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                        }}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {form.serviceMode === "months" && (
+                  <div style={S.formGrid}>
+                    <div>
+                      <label style={S.label}>Service every (months)</label>
+                      <input
+                        style={S.input}
+                        type="number"
+                        min="0"
+                        value={form.serviceIntervalMonths}
+                        onChange={(e) => setForm({ ...form, serviceIntervalMonths: e.target.value })}
+                        placeholder="e.g. 6"
+                      />
+                    </div>
+                    <div>
+                      <label style={S.label}>Last serviced</label>
+                      <input
+                        style={S.input}
+                        type="date"
+                        value={form.lastServiceDate}
+                        onChange={(e) => setForm({ ...form, lastServiceDate: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {(form.serviceMode === "hours" || form.serviceMode === "km") && (
+                  <>
+                    <div style={S.formGrid}>
+                      <div>
+                        <label style={S.label}>Service every ({form.serviceMode === "hours" ? "hours" : "km"})</label>
+                        <input
+                          style={S.input}
+                          type="number"
+                          min="0"
+                          value={form.serviceMode === "hours" ? form.serviceIntervalHours : form.serviceIntervalKm}
+                          onChange={(e) =>
+                            setForm(
+                              form.serviceMode === "hours"
+                                ? { ...form, serviceIntervalHours: e.target.value }
+                                : { ...form, serviceIntervalKm: e.target.value }
+                            )
+                          }
+                          placeholder={form.serviceMode === "hours" ? "e.g. 2500" : "e.g. 10000"}
+                        />
+                      </div>
+                      <div>
+                        <label style={S.label}>Reading at last service</label>
+                        <input
+                          style={S.input}
+                          type="number"
+                          min="0"
+                          value={form.lastServiceReading}
+                          onChange={(e) => setForm({ ...form, lastServiceReading: e.target.value })}
+                          placeholder="0"
+                        />
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 10 }}>
+                      <label style={S.label}>Current reading</label>
+                      <input
+                        style={S.input}
+                        type="number"
+                        min="0"
+                        value={form.currentReading}
+                        onChange={(e) => setForm({ ...form, currentReading: e.target.value })}
+                        placeholder="0"
+                      />
+                      <div style={S.roleHint}>Once saved, log day-to-day readings from the asset's own page instead of editing this each time.</div>
+                    </div>
+                  </>
+                )}
               </>
             ) : form.mainCat === "custom" || form.mainCat === "stores" ? (
               <>
@@ -5564,30 +6210,184 @@ export default function StockControl() {
         </div>
       )}
 
-      {usageModal && (
-        <div style={S.modalOverlay} onClick={closeUsageModal}>
-          <form style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()} onSubmit={submitUsageModal}>
+      {assetHistoryItem && (
+        <div style={S.modalOverlay} onClick={closeAssetHistory}>
+          <div style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
-              <span style={S.modalTitle}>{usageModal.direction === "use" ? "Use stock" : "Add stock"}</span>
-              <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeUsageModal}>
+              <span style={S.modalTitle}>{assetHistoryItem.name}</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeAssetHistory}>
                 <X size={18} />
               </button>
             </div>
-            <div style={S.roleHint}>{usageModal.item.name}</div>
+            <div style={S.roleHint}>{assetHistoryItem.partNumber}</div>
 
-            <div style={{ marginTop: 10 }}>
-              <label style={S.label}>Quantity</label>
-              <input
-                autoFocus
-                type="number"
-                step="any"
-                min="0"
-                style={S.input}
-                value={usageModal.qty}
-                onChange={(e) => setUsageModal((m) => ({ ...m, qty: e.target.value }))}
-                placeholder="e.g. 10"
-              />
+            {(() => {
+              const svc = getServiceStatus(assetHistoryItem);
+              if (!svc) return null;
+              return (
+                <div
+                  style={{
+                    ...S.roleHint,
+                    marginTop: 6,
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                    background: svc.level === "overdue" ? C.dangerTint : svc.level === "soon" ? C.accentTint : C.bg,
+                    color: svc.level === "overdue" ? C.danger : svc.level === "soon" ? C.accentRaw : C.muted,
+                  }}
+                >
+                  {svc.level === "overdue" ? "Service overdue" : svc.level === "soon" ? "Service due soon" : "Service on track"} — {svc.detail}
+                </div>
+              );
+            })()}
+
+            {canEditQty("assets") && (assetHistoryItem.serviceMode === "hours" || assetHistoryItem.serviceMode === "km") && (
+              <form onSubmit={submitAssetReading} style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "flex-end" }}>
+                <div style={{ flex: 1 }}>
+                  <label style={S.label}>Log current {assetHistoryItem.serviceMode === "hours" ? "hours" : "kilometers"}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    style={S.input}
+                    value={assetHistoryReading}
+                    onChange={(e) => setAssetHistoryReading(e.target.value)}
+                    placeholder="0"
+                  />
+                </div>
+                <button type="submit" className="stk-btn" style={{ ...S.addBtn, marginBottom: 1 }} disabled={assetHistoryBusy}>
+                  Log
+                </button>
+              </form>
+            )}
+
+            {canEditQty("assets") && (
+              <form onSubmit={submitAssetNote} style={{ marginTop: 12 }}>
+                <label style={S.label}>Add a note</label>
+                <input
+                  style={S.input}
+                  value={assetHistoryNote}
+                  onChange={(e) => setAssetHistoryNote(e.target.value)}
+                  placeholder="e.g. Replaced brushes"
+                />
+                <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <label className="stk-btn" style={{ ...S.reqActionBtnMuted, cursor: "pointer" }}>
+                    <Paperclip size={13} /> {assetHistoryFile ? assetHistoryFile.name : "Attach photo/file"}
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      style={{ display: "none" }}
+                      onChange={(e) => setAssetHistoryFile(e.target.files[0] || null)}
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    className="stk-btn"
+                    style={S.addBtn}
+                    disabled={assetHistoryBusy || (!assetHistoryNote.trim() && !assetHistoryFile)}
+                  >
+                    Submit
+                  </button>
+                </div>
+              </form>
+            )}
+
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 8 }}>
+              {assetHistoryEntries === null && <div style={S.empty}>Loading history…</div>}
+              {assetHistoryEntries?.length === 0 && <div style={S.empty}>No history yet — add a note or log a reading above.</div>}
+              {assetHistoryEntries?.map((entry) => (
+                <div key={entry.id} style={S.reqCard}>
+                  <div style={S.reqCardTop}>
+                    <span style={S.itemName}>
+                      {entry.entry_type === "meter_reading"
+                        ? `Reading logged: ${entry.hours_reading ?? entry.km_reading}${entry.hours_reading != null ? "hrs" : "km"}`
+                        : entry.note}
+                    </span>
+                    {isAdmin && (
+                      <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => handleDeleteAssetHistoryEntry(entry)}>
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                  <div style={S.rowMeta}>
+                    <span>{entry.logged_by}</span>
+                    <span>{new Date(entry.created_at).toLocaleString()}</span>
+                  </div>
+                  {entry.attachment_path && (
+                    <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 6 }} onClick={() => viewAssetAttachment(entry)}>
+                      <Paperclip size={13} /> {entry.attachment_name}
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {usageModal && (
+        <div style={S.modalOverlay} onClick={closeUsageModal}>
+          <form style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()} onSubmit={submitUsageModal}>
+            {(() => {
+              const isCncCut = usageModal.item.mainCat === "cncBar" && usageModal.direction === "use";
+              return (
+                <>
+                  <div style={S.modalHead}>
+                    <span style={S.modalTitle}>{isCncCut ? "Cut from stock" : usageModal.direction === "use" ? "Use stock" : "Add stock"}</span>
+                    <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeUsageModal}>
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div style={S.roleHint}>
+                    {usageModal.item.name}
+                    {isCncCut && ` — ${usageModal.item.length}mm remaining on this piece`}
+                  </div>
+
+                  <div style={isCncCut ? S.formGrid : { marginTop: 10 }}>
+                    <div>
+                      <label style={S.label}>{isCncCut ? "Length per piece (mm)" : "Quantity"}</label>
+                      <input
+                        autoFocus
+                        type="number"
+                        step="any"
+                        min="0"
+                        max={isCncCut ? usageModal.item.length : undefined}
+                        style={S.input}
+                        value={usageModal.qty}
+                        onChange={(e) => setUsageModal((m) => ({ ...m, qty: e.target.value }))}
+                        placeholder={isCncCut ? "e.g. 50" : "e.g. 10"}
+                      />
+                    </div>
+                    {isCncCut && (
+                      <div>
+                        <label style={S.label}>How many pieces</label>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          style={S.input}
+                          value={usageModal.cutQty}
+                          onChange={(e) => setUsageModal((m) => ({ ...m, cutQty: e.target.value }))}
+                          placeholder="1"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  {isCncCut &&
+                    (() => {
+                      const totalMm = Number(usageModal.qty || 0) * (parseInt(usageModal.cutQty, 10) || 1);
+                      if (totalMm <= 0) return null;
+                      const remainder = Number(usageModal.item.length) - totalMm;
+                      return (
+                        <div style={{ ...S.roleHint, marginTop: 6 }}>
+                          {parseInt(usageModal.cutQty, 10) > 1 ? `${usageModal.cutQty} × ${usageModal.qty}mm = ${totalMm}mm total. ` : ""}
+                          {remainder >= 0
+                            ? `${remainder}mm will remain as stock after this cut.`
+                            : `Not enough — this piece only has ${usageModal.item.length}mm remaining.`}
+                        </div>
+                      );
+                    })()}
+                </>
+              );
+            })()}
 
             {usageModal.direction === "use" ? (
               <>
@@ -5628,7 +6428,11 @@ export default function StockControl() {
               style={{ ...S.submitBtn, ...(usageModal.direction === "use" ? { background: C.danger } : {}) }}
               className="stk-btn"
             >
-              {usageModal.direction === "use" ? "Confirm use" : "Confirm add"}
+              {usageModal.item.mainCat === "cncBar" && usageModal.direction === "use"
+                ? "Confirm cut"
+                : usageModal.direction === "use"
+                ? "Confirm use"
+                : "Confirm add"}
             </button>
           </form>
         </div>
@@ -5680,7 +6484,7 @@ export default function StockControl() {
                 {drawingUploadFiles.length > 0 && (
                   <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6, maxHeight: 260, overflowY: "auto" }}>
                     {drawingUploadFiles.map((entry, idx) => (
-                      <div key={idx} style={S.managerRow}>
+                      <div key={idx} style={{ ...S.managerRow, opacity: entry.skip ? 0.6 : 1 }}>
                         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                           <span style={{ fontSize: 12, color: entry.partNumber ? C.text : C.danger }}>
                             {entry.file.name} → <strong>{entry.partNumber || "no part number"}</strong>
@@ -5689,15 +6493,22 @@ export default function StockControl() {
                             <span style={{ fontSize: 11, color: C.accentFinished }}>
                               ✓ Links to existing stock code — {entry.matchedStockCode.description || "no description"}
                             </span>
-                          ) : entry.partNumber ? (
-                            <span style={{ fontSize: 11, color: C.muted }}>No matching stock code yet — will upload unlinked</span>
-                          ) : null}
+                          ) : (
+                            <span style={{ fontSize: 11, color: C.danger }}>
+                              ✕ No matching stock code for this customer — won't be uploaded
+                            </span>
+                          )}
                         </div>
                         <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeDrawingUploadFile(idx)}>
                           <Trash2 size={13} />
                         </button>
                       </div>
                     ))}
+                    {drawingUploadFiles.some((f) => f.skip) && (
+                      <div style={S.roleHint}>
+                        Files without a matching stock code are skipped automatically — add them to Stock Codes first, then re-select the file.
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -5705,12 +6516,14 @@ export default function StockControl() {
                   type="button"
                   className="stk-btn"
                   style={S.submitBtn}
-                  disabled={drawingUploadFiles.length === 0 || drawingUploadBusy}
+                  disabled={drawingUploadFiles.filter((f) => !f.skip).length === 0 || drawingUploadBusy}
                   onClick={submitDrawingUpload}
                 >
                   {drawingUploadBusy
                     ? "Uploading…"
-                    : `Upload ${drawingUploadFiles.length} drawing${drawingUploadFiles.length === 1 ? "" : "s"}`}
+                    : `Upload ${drawingUploadFiles.filter((f) => !f.skip).length} drawing${
+                        drawingUploadFiles.filter((f) => !f.skip).length === 1 ? "" : "s"
+                      }`}
                 </button>
               </>
             )}
@@ -5809,6 +6622,59 @@ export default function StockControl() {
         </div>
       )}
 
+      {receivingPo && (
+        <div style={S.modalOverlay} onClick={closeReceiving}>
+          <div style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Receive {receivingPo.poNumber}</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeReceiving}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={S.roleHint}>{receivingPo.supplierName || "No supplier"}</div>
+
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Supplier delivery note number</label>
+              <input
+                style={S.input}
+                value={receivingDeliveryNote}
+                onChange={(e) => setReceivingDeliveryNote(e.target.value)}
+                placeholder="e.g. DN-88213"
+              />
+            </div>
+
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+              {receivingLines.map((line, idx) => (
+                <div key={idx} style={S.managerRow}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
+                    <span style={{ fontSize: 12.5 }}>{line.description}</span>
+                    <span style={{ fontSize: 11, color: line.linkedItemId ? C.accentFinished : C.danger }}>
+                      {line.linkedItemId ? "Linked to stock — will update automatically" : "No linked stock item — won't auto-update, add manually"}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ fontSize: 11, color: C.muted }}>Ordered {line.orderedQty}</span>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={line.receivedQty}
+                      onChange={(e) => updateReceivingLineQty(idx, e.target.value)}
+                      style={{ ...S.managerFactorInput, width: 60 }}
+                      title="Quantity actually received"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <button type="button" className="stk-btn" style={S.submitBtn} onClick={submitReceiving}>
+              Confirm receipt
+            </button>
+          </div>
+        </div>
+      )}
+
       {showPoReport && (
         <div style={S.modalOverlay} onClick={() => setShowPoReport(false)}>
           <div style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
@@ -5836,6 +6702,14 @@ export default function StockControl() {
                 {master.suppliers.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
+              </select>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Status</label>
+              <select style={S.input} value={poReportStatus} onChange={(e) => setPoReportStatus(e.target.value)}>
+                <option value="">Outstanding &amp; Received</option>
+                <option value="outstanding">Outstanding only</option>
+                <option value="received">Received only</option>
               </select>
             </div>
             <button type="button" className="stk-btn" style={S.submitBtn} onClick={generatePoReport}>
@@ -6068,7 +6942,7 @@ const S = {
     color: C.text,
     fontFamily: F.body,
     padding: "20px 16px 40px",
-    maxWidth: 760,
+    maxWidth: 1200,
     margin: "0 auto",
   },
   header: {
@@ -6592,7 +7466,7 @@ const S = {
     borderRadius: 10,
     padding: 18,
     width: "100%",
-    maxWidth: 400,
+    maxWidth: 480,
     maxHeight: "90vh",
     overflowY: "auto",
     display: "flex",
