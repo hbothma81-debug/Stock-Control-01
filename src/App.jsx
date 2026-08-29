@@ -1528,7 +1528,18 @@ export default function StockControl() {
 
   async function refreshJobDetail() {
     if (!jobDetail) return;
-    await openJobDetail(jobDetail.job);
+    // Re-fetch the job's own row too, not just its sub-collections — the
+    // job object passed to openJobDetail was otherwise stale, so a status
+    // change (e.g. marking Complete) updated the database correctly but
+    // never actually showed up on screen until the modal was reopened.
+    try {
+      const { data: freshJob, error } = await supabase.from("jobs").select("*").eq("id", jobDetail.job.id).single();
+      if (error) throw error;
+      await openJobDetail(freshJob || jobDetail.job);
+    } catch (err) {
+      console.error("Failed to refresh job:", err);
+      await openJobDetail(jobDetail.job);
+    }
   }
 
   async function toggleJobProcessComplete(process) {
@@ -1780,14 +1791,37 @@ export default function StockControl() {
 
     const renderCopy = (topY, copyLabel) => {
       let y = topY;
+      let textX = leftX;
+      // Logo, sized to its real proportions — never forced into a square,
+      // same fix applied to every other document that has one.
+      if (company.logo) {
+        try {
+          const imgProps = doc.getImageProperties(company.logo);
+          const maxW = 26;
+          const maxH = 14;
+          let logoW = maxW;
+          let logoH = (imgProps.height / imgProps.width) * logoW;
+          if (logoH > maxH) {
+            logoH = maxH;
+            logoW = (imgProps.width / imgProps.height) * logoH;
+          }
+          doc.addImage(company.logo, "JPEG", leftX, y - 8, logoW, logoH);
+          textX = leftX + logoW + 6;
+        } catch {
+          // bad image data — skip rather than fail the whole document
+        }
+      }
       doc.setFontSize(9);
       doc.setFont(undefined, "bold");
-      doc.text(copyLabel, rightX, y, { align: "right" });
-      doc.setFontSize(14);
-      doc.text(company.name || "Delivery Note", leftX, y);
+      doc.text(copyLabel, rightX, y - 6, { align: "right" });
       doc.setFontSize(16);
       doc.text("DELIVERY NOTE", rightX, y, { align: "right" });
-      y += 7;
+      // Company name wraps within the space before the title, so a long
+      // registered name can never collide with it.
+      doc.setFontSize(12);
+      const nameLines = doc.splitTextToSize(company.name || "Delivery Note", 105 - (textX - leftX));
+      doc.text(nameLines, textX, y);
+      y += Math.max(nameLines.length * 5, 5) + 4;
       doc.setFontSize(9);
       doc.setFont(undefined, "normal");
       doc.text(`Number: ${note.delivery_note_number}`, rightX, y, { align: "right" });
@@ -1819,12 +1853,12 @@ export default function StockControl() {
       return afterY + 10;
     };
 
-    renderCopy(18, "Recipient Copy");
+    renderCopy(26, "Recipient Copy");
     doc.setDrawColor(180, 180, 180);
     doc.setLineDashPattern([2, 2], 0);
-    doc.line(leftX, 148, rightX, 148);
+    doc.line(leftX, 155, rightX, 155);
     doc.setLineDashPattern([], 0);
-    renderCopy(158, "Our Copy");
+    renderCopy(166, "Our Copy");
 
     doc.save(`${note.delivery_note_number}.pdf`);
   }
@@ -1893,11 +1927,30 @@ export default function StockControl() {
     doc.text("DRAFT — NOT A TAX INVOICE — FOR ACCOUNTS REFERENCE ONLY", leftX, y);
     doc.setTextColor(0, 0, 0);
     y += 10;
-    doc.setFontSize(14);
-    doc.text(company.name || "Invoice Request", leftX, y);
+    let textX = leftX;
+    if (company.logo) {
+      try {
+        const imgProps = doc.getImageProperties(company.logo);
+        const maxW = 26;
+        const maxH = 14;
+        let logoW = maxW;
+        let logoH = (imgProps.height / imgProps.width) * logoW;
+        if (logoH > maxH) {
+          logoH = maxH;
+          logoW = (imgProps.width / imgProps.height) * logoH;
+        }
+        doc.addImage(company.logo, "JPEG", leftX, y - 8, logoW, logoH);
+        textX = leftX + logoW + 6;
+      } catch {
+        // bad image data — skip rather than fail the whole document
+      }
+    }
     doc.setFontSize(16);
     doc.text("INVOICE REQUEST", rightX, y, { align: "right" });
-    y += 8;
+    doc.setFontSize(12);
+    const nameLines = doc.splitTextToSize(company.name || "Invoice Request", 105 - (textX - leftX));
+    doc.text(nameLines, textX, y);
+    y += Math.max(nameLines.length * 5, 5) + 4;
     doc.setFontSize(9);
     doc.setFont(undefined, "normal");
     doc.text(`Job: ${job.job_number}`, rightX, y, { align: "right" });
@@ -1923,8 +1976,26 @@ export default function StockControl() {
   // only ever shows the processes this job actually needs, not all twenty.
   function printJobSheet(job, processes) {
     const doc = new jsPDF();
+    const company = master.companyDetails || {};
     const leftX = 14;
     let y = 18;
+    if (company.logo) {
+      try {
+        const imgProps = doc.getImageProperties(company.logo);
+        const maxW = 26;
+        const maxH = 14;
+        let logoW = maxW;
+        let logoH = (imgProps.height / imgProps.width) * logoW;
+        if (logoH > maxH) {
+          logoH = maxH;
+          logoW = (imgProps.width / imgProps.height) * logoH;
+        }
+        doc.addImage(company.logo, "JPEG", leftX, 10, logoW, logoH);
+        y = 10 + logoH + 6;
+      } catch {
+        // bad image data — skip rather than fail the whole document
+      }
+    }
     doc.setFontSize(16);
     doc.setFont(undefined, "bold");
     doc.text(`Job ${job.job_number}`, leftX, y);
