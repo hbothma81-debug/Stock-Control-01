@@ -437,12 +437,15 @@ export default function StockControl() {
   const [assetHistoryReading, setAssetHistoryReading] = useState("");
   const [assetHistoryBusy, setAssetHistoryBusy] = useState(false);
   const [jobsList, setJobsList] = useState(null);
+  const [jobInvoiceRequests, setJobInvoiceRequests] = useState([]);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [jobDetail, setJobDetail] = useState(null); // { job, processes, documents }
   const [jobDetailLoading, setJobDetailLoading] = useState(false);
   const [showNewJob, setShowNewJob] = useState(false);
   const [newStockItemModal, setNewStockItemModal] = useState(null);
   const [markInvoicedModal, setMarkInvoicedModal] = useState(null);
+  const [selectedForInvoice, setSelectedForInvoice] = useState(new Set());
+  const [copyJobModal, setCopyJobModal] = useState(null);
   const [deliveryNoteModal, setDeliveryNoteModal] = useState(null);
   const [showAddStockItemModal, setShowAddStockItemModal] = useState(false);
   const [showStockImportModal, setShowStockImportModal] = useState(false);
@@ -1217,9 +1220,14 @@ export default function StockControl() {
     if (!supabase) return;
     setJobsLoading(true);
     try {
-      const { data, error } = await supabase.from("jobs").select("*").order("created_at", { ascending: false });
+      const [{ data, error }, { data: invoiceRequests, error: invError }] = await Promise.all([
+        supabase.from("jobs").select("*").order("created_at", { ascending: false }),
+        supabase.from("job_invoice_requests").select("*").order("submitted_at", { ascending: false }),
+      ]);
       if (error) throw error;
+      if (invError) throw invError;
       setJobsList(data || []);
+      setJobInvoiceRequests(invoiceRequests || []);
     } catch (err) {
       console.error("Failed to load jobs:", err);
       setJobsList([]);
@@ -1524,6 +1532,7 @@ export default function StockControl() {
 
   function closeJobDetail() {
     setJobDetail(null);
+    setSelectedForInvoice(new Set());
   }
 
   async function refreshJobDetail() {
@@ -1603,46 +1612,86 @@ export default function StockControl() {
     }
   }
 
-  // Partial invoicing on a quoted line — logs how much was added this time
-  // and bumps the running total, rather than one all-or-nothing flag.
-  async function addQuoteItemToInvoice(job, item, qtyToAdd) {
-    if (!supabase) return;
-    const remaining = Number(item.qty) - Number(item.qty_invoiced);
-    if (qtyToAdd <= 0 || qtyToAdd > remaining) {
-      alert(`Enter a quantity between 1 and ${remaining} (the remaining un-invoiced amount).`);
+  function toggleSelectedForInvoice(itemId) {
+    setSelectedForInvoice((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }
+
+  // Replaces the old one-item-at-a-time "Add to Invoice" prompt — tick
+  // whichever items are ready, submit once, get one consolidated draft
+  // covering everything ticked rather than a separate document per click.
+  async function submitSelectedItemsToInvoice(job, quoteItems) {
+    const itemsToSubmit = quoteItems.filter((it) => selectedForInvoice.has(it.id) && Number(it.qty) - Number(it.qty_invoiced) > 0);
+    if (itemsToSubmit.length === 0) {
+      alert("Tick at least one item that still has a remaining quantity to invoice.");
       return;
     }
     try {
-      const newTotal = Number(item.qty_invoiced) + qtyToAdd;
-      const nowFullyInvoiced = newTotal >= Number(item.qty);
-      const { error: updateError } = await supabase
-        .from("job_quote_items")
-        .update({ qty_invoiced: newTotal, item_status: nowFullyInvoiced ? "invoiced" : item.item_status })
-        .eq("id", item.id);
-      if (updateError) throw updateError;
-      const { error: logError } = await supabase.from("job_quote_item_invoices").insert({
-        quote_item_id: item.id,
-        job_id: item.job_id,
-        qty_added: qtyToAdd,
-        invoiced_by: roleLabel,
-      });
-      if (logError) throw logError;
+      const lines = [];
+      for (const it of itemsToSubmit) {
+        const remaining = Number(it.qty) - Number(it.qty_invoiced);
+        const newTotal = Number(it.qty_invoiced) + remaining;
+        const { error: updateError } = await supabase
+          .from("job_quote_items")
+          .update({ qty_invoiced: newTotal, item_status: "invoiced" })
+          .eq("id", it.id);
+        if (updateError) throw updateError;
+        const { error: logError } = await supabase.from("job_quote_item_invoices").insert({
+          quote_item_id: it.id,
+          job_id: it.job_id,
+          qty_added: remaining,
+          invoiced_by: roleLabel,
+        });
+        if (logError) throw logError;
+        lines.push({ description: it.description, qty: remaining, unitPrice: Number(it.unit_price) });
+      }
       if (job.sales_rep) {
         await supabase.from("job_notifications").insert({
           job_id: job.id,
           job_number: job.job_number,
           sales_rep: job.sales_rep,
-          message: `${qtyToAdd} × ${item.description} added to invoice by ${roleLabel} on ${job.job_number} (${job.customer || "no customer"})`,
+          message: `${lines.length} item(s) submitted to invoice on ${job.job_number} (${job.customer || "no customer"}) by ${roleLabel}`,
         });
       }
-      // A real, printable document — not just a number incrementing
-      // somewhere — so accounts has something concrete to work from.
-      buildDraftInvoiceDoc(job, item, qtyToAdd);
-      flashSaved(`quoteitem-${item.id}`);
+      // Stored as a real document accounts can open when ready — never
+      // downloaded automatically. Visible from both the job itself and
+      // the Invoicing tab, since accounts works from there.
+      const doc = buildDraftInvoiceDoc(job, lines);
+      const totalAmount = lines.reduce((sum, li) => sum + li.qty * li.unitPrice, 0);
+      const fileName = `Invoice-Request-${job.job_number}-${Date.now()}.pdf`;
+      const blob = doc.output("blob");
+      const path = `${job.id}/${fileName}`;
+      const { error: upError } = await supabase.storage.from("job-invoices").upload(path, blob);
+      if (upError) throw upError;
+      const { error: reqError } = await supabase.from("job_invoice_requests").insert({
+        job_id: job.id,
+        storage_path: path,
+        file_name: fileName,
+        total_amount: totalAmount,
+        submitted_by: roleLabel,
+      });
+      if (reqError) throw reqError;
+      setSelectedForInvoice(new Set());
       refreshJobDetail();
+      fetchJobs();
     } catch (err) {
-      console.error("Failed to add to invoice:", err);
-      alert("Couldn't log that — check your connection and try again.");
+      console.error("Failed to submit invoice:", err);
+      alert("Couldn't submit that — check your connection and try again.");
+    }
+  }
+
+  async function viewJobInvoiceRequest(request) {
+    try {
+      const { data, error } = await supabase.storage.from("job-invoices").createSignedUrl(request.storage_path, 3600);
+      if (error) throw error;
+      window.open(data.signedUrl, "_blank");
+    } catch (err) {
+      console.error("Couldn't open invoice request:", err);
+      alert("Couldn't open that document — check your connection and try again.");
     }
   }
 
@@ -1892,30 +1941,10 @@ export default function StockControl() {
     }
   }
 
-  async function markItemReadyToInvoice(job, quoteItem) {
-    try {
-      const { error } = await supabase.from("job_quote_items").update({ item_status: "ready_to_invoice" }).eq("id", quoteItem.id);
-      if (error) throw error;
-      if (job.sales_rep) {
-        await supabase.from("job_notifications").insert({
-          job_id: job.id,
-          job_number: job.job_number,
-          sales_rep: job.sales_rep,
-          message: `${quoteItem.description} marked ready to invoice by ${roleLabel} on ${job.job_number} (${job.customer || "no customer"})`,
-        });
-      }
-      flashSaved(`quoteitem-status-${quoteItem.id}`);
-      refreshJobDetail();
-    } catch (err) {
-      console.error("Failed to update item status:", err);
-      alert("That didn't save — check your connection and try again.");
-    }
-  }
-
   // A clearly-labeled draft, not a real tax invoice — the real one is
   // still made in Sage, but this gives accounts something concrete to
   // work from rather than nothing at all.
-  function buildDraftInvoiceDoc(job, quoteItem, qtyInvoiced) {
+  function buildDraftInvoiceDoc(job, lines) {
     const doc = new jsPDF();
     const company = master.companyDetails || {};
     const leftX = 14;
@@ -1962,14 +1991,19 @@ export default function StockControl() {
     doc.setFont(undefined, "normal");
     doc.text(job.customer || "—", leftX + 30, y);
     y += 10;
+    const grandTotal = lines.reduce((sum, li) => sum + li.qty * li.unitPrice, 0);
     autoTable(doc, {
       startY: y,
       head: [["Description", "Qty", "Unit Price", "Total"]],
-      body: [[quoteItem.description, String(qtyInvoiced), `R ${Number(quoteItem.unit_price).toFixed(2)}`, `R ${(qtyInvoiced * Number(quoteItem.unit_price)).toFixed(2)}`]],
+      body: lines.map((li) => [li.description, String(li.qty), `R ${li.unitPrice.toFixed(2)}`, `R ${(li.qty * li.unitPrice).toFixed(2)}`]),
+      foot: [["", "", "Total", `R ${grandTotal.toFixed(2)}`]],
       theme: "grid",
       headStyles: { fillColor: [27, 29, 31] },
+      footStyles: { fillColor: [242, 169, 0], textColor: [27, 29, 31], fontStyle: "bold" },
     });
-    doc.save(`Invoice-Request-${job.job_number}-${Date.now()}.pdf`);
+    // Never auto-downloaded — the caller stores this and gives an explicit
+    // Open button instead, since accounts should decide when to open it.
+    return doc;
   }
 
   // A printable job sheet — same purpose as the paper process sheet, but
@@ -5422,6 +5456,16 @@ export default function StockControl() {
                     <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => openJobDetail(job)}>
                       <ClipboardList size={13} /> Open
                     </button>
+                    {jobInvoiceRequests.find((r) => r.job_id === job.id) && (
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={S.reqActionBtnMuted}
+                        onClick={() => viewJobInvoiceRequest(jobInvoiceRequests.find((r) => r.job_id === job.id))}
+                      >
+                        <FileText size={13} /> Open Invoice
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -5498,6 +5542,16 @@ export default function StockControl() {
                     <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openJobDetail(job)}>
                       <ClipboardList size={13} /> Open
                     </button>
+                    {jobInvoiceRequests.find((r) => r.job_id === job.id) && (
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={S.reqActionBtnMuted}
+                        onClick={() => viewJobInvoiceRequest(jobInvoiceRequests.find((r) => r.job_id === job.id))}
+                      >
+                        <FileText size={13} /> Open Invoice
+                      </button>
+                    )}
                     {isAdmin || !!profile?.canManageInvoicing && (
                       <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => openMarkInvoicedModal(job)}>
                         <Check size={13} /> Mark as Invoiced
@@ -8614,17 +8668,26 @@ export default function StockControl() {
                     const revision = linkedItem?.partNumber ? drawingLookup[linkedItem.partNumber.trim()] : null;
                     const status = it.item_status || "on_floor";
                     const openDeliveryNote = jobDetail.deliveryNotes.find((dn) => dn.quote_item_id === it.id && !dn.checked_back_in_at);
-                    const statusLabel = { on_floor: "On floor", out_external: "Out — external", ready_to_invoice: "Ready to invoice", invoiced: "Invoiced" }[status];
-                    const statusColor = { on_floor: C.muted, out_external: C.danger, ready_to_invoice: C.accentRaw, invoiced: C.accentFinished }[status];
+                    const canInvoiceThis = canEditQty("jobs") && remaining > 0 && status !== "out_external";
                     return (
                       <div key={it.id} style={S.managerRow}>
+                        {canInvoiceThis && (
+                          <input
+                            type="checkbox"
+                            checked={selectedForInvoice.has(it.id)}
+                            onChange={() => toggleSelectedForInvoice(it.id)}
+                            title="Include in next invoice submission"
+                            style={{ marginTop: 3 }}
+                          />
+                        )}
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 12.5, display: "flex", alignItems: "center" }}>
                             {it.description}
                             <SavedCheck fieldKey={`quoteitem-${it.id}`} />
                             <SavedCheck fieldKey={`quoteitem-price-${it.id}`} />
-                            <SavedCheck fieldKey={`quoteitem-status-${it.id}`} />
-                            <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 600, color: statusColor }}>{statusLabel}</span>
+                            {status === "out_external" && (
+                              <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 600, color: C.danger }}>Out — external</span>
+                            )}
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
                             <span style={S.roleHint}>{it.qty} ×</span>
@@ -8657,39 +8720,22 @@ export default function StockControl() {
                               )}
                             </div>
                           )}
-                          {canEditQty("jobs") && (
+                          {canEditQty("jobs") && status !== "out_external" && remaining > 0 && (
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-                              {status === "on_floor" && (
-                                <>
-                                  <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => markItemReadyToInvoice(jobDetail.job, it)}>
-                                    Mark ready to invoice
-                                  </button>
-                                  <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openDeliveryNoteModal(jobDetail.job, it)}>
-                                    <Truck size={12} /> Create delivery note
-                                  </button>
-                                </>
-                              )}
-                              {status === "out_external" && openDeliveryNote && (
-                                <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => checkInDeliveryNote(jobDetail.job, openDeliveryNote, it)}>
-                                  Check back in ({openDeliveryNote.delivery_note_number})
-                                </button>
-                              )}
-                              {(status === "ready_to_invoice" || status === "on_floor") && remaining > 0 && (
-                                <button
-                                  type="button"
-                                  className="stk-btn"
-                                  style={S.reqActionBtnMuted}
-                                  onClick={() => {
-                                    const input = window.prompt(`Add to invoice — how many of ${it.description} (remaining: ${remaining})?`, remaining);
-                                    if (input === null) return;
-                                    const qty = parseFloat(input);
-                                    if (!isNaN(qty)) addQuoteItemToInvoice(jobDetail.job, it, qty);
-                                  }}
-                                >
-                                  Add to Invoice
-                                </button>
-                              )}
+                              <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openDeliveryNoteModal(jobDetail.job, it)}>
+                                <Truck size={12} /> Create delivery note
+                              </button>
                             </div>
+                          )}
+                          {status === "out_external" && openDeliveryNote && canEditQty("jobs") && (
+                            <button
+                              type="button"
+                              className="stk-btn"
+                              style={{ ...S.reqActionBtn, marginTop: 6 }}
+                              onClick={() => checkInDeliveryNote(jobDetail.job, openDeliveryNote, it)}
+                            >
+                              Check back in ({openDeliveryNote.delivery_note_number})
+                            </button>
                           )}
                         </div>
                         {remaining <= 0 && <span style={{ ...S.roleHint, color: C.accentFinished }}>Fully invoiced</span>}
@@ -8697,6 +8743,16 @@ export default function StockControl() {
                     );
                   })}
                 </div>
+                {canEditQty("jobs") && selectedForInvoice.size > 0 && (
+                  <button
+                    type="button"
+                    className="stk-btn"
+                    style={{ ...S.submitBtn, marginTop: 10 }}
+                    onClick={() => submitSelectedItemsToInvoice(jobDetail.job, jobDetail.quoteItems)}
+                  >
+                    Submit Invoice ({selectedForInvoice.size} item{selectedForInvoice.size === 1 ? "" : "s"})
+                  </button>
+                )}
                 {jobDetail.job.quoted_value != null && (
                   <div style={{ ...S.roleHint, marginTop: 6 }}>Quoted value: R {Number(jobDetail.job.quoted_value).toFixed(2)}</div>
                 )}
