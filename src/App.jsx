@@ -1354,61 +1354,89 @@ export default function StockControl() {
         }
       }
 
-      const jobNumber = formatJobNumber(master.nextJobNumber);
-      // No standalone quantity field anymore — the job's overall quantity
-      // is just the sum of its quoted line items, so progress tracking
-      // still has a real target without asking for the same number twice.
+      // Self-healing job number: if the counter is stale for any reason
+      // (an earlier attempt created the job row but failed on a later
+      // step, so the counter never advanced), retry with the next number
+      // instead of getting permanently stuck on a collision.
       const derivedQty = newJobForm.quoteItems.reduce((sum, it) => sum + (Number(it.qty) || 0), 0);
-      const { data: job, error } = await supabase
-        .from("jobs")
-        .insert({
-          job_number: jobNumber,
-          customer: customerName,
-          status: "in_progress",
-          sales_rep: roleLabel,
-          qty: derivedQty > 0 ? derivedQty : null,
-          qty_complete: 0,
-          due_date: newJobForm.dueDate || null,
-          description: newJobForm.description,
-          quoted_value: newJobForm.quotedValue ? Number(newJobForm.quotedValue) : null,
-          quote_reference: newJobForm.quoteReference,
-          laser_job_reference: newJobForm.laserJobReference,
-          material_location: newJobForm.materialLocation,
-          buy_out_notes: newJobForm.buyOutNotes,
-          created_by: roleLabel,
-        })
-        .select()
-        .single();
-      if (error) throw error;
+      let job = null;
+      let jobNumber = null;
+      let candidateNumber = master.nextJobNumber;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        jobNumber = formatJobNumber(candidateNumber);
+        const { data, error } = await supabase
+          .from("jobs")
+          .insert({
+            job_number: jobNumber,
+            customer: customerName,
+            status: "in_progress",
+            sales_rep: roleLabel,
+            qty: derivedQty > 0 ? derivedQty : null,
+            qty_complete: 0,
+            due_date: newJobForm.dueDate || null,
+            description: newJobForm.description,
+            quoted_value: newJobForm.quotedValue ? Number(newJobForm.quotedValue) : null,
+            quote_reference: newJobForm.quoteReference,
+            laser_job_reference: newJobForm.laserJobReference,
+            material_location: newJobForm.materialLocation,
+            buy_out_notes: newJobForm.buyOutNotes,
+            created_by: roleLabel,
+          })
+          .select()
+          .single();
+        if (!error) {
+          job = data;
+          break;
+        }
+        if (error.code === "23505") {
+          // That number's taken — try the next one.
+          candidateNumber++;
+          continue;
+        }
+        throw error;
+      }
+      if (!job) throw new Error("Couldn't find an available job number after several attempts.");
 
-      const processRows = newJobForm.selectedProcesses.map((p, idx) => ({
-        job_id: job.id,
-        process_name: p.name,
-        operator: p.operator || "",
-        external_supplier: p.externalSupplier || "",
-        sort_order: idx,
-      }));
-      const { error: procError } = await supabase.from("job_processes").insert(processRows);
-      if (procError) throw procError;
+      // Advance the counter past whatever number actually worked, right
+      // away — not at the very end — so a later step failing can never
+      // cause this same collision again.
+      setMaster((prev) => ({ ...prev, nextJobNumber: candidateNumber + 1 }));
 
-      const validQuoteItems = newJobForm.quoteItems.filter((it) => it.description.trim() && Number(it.qty) > 0);
-      if (validQuoteItems.length) {
-        const quoteItemRows = validQuoteItems.map((it, idx) => ({
+      try {
+        const processRows = newJobForm.selectedProcesses.map((p, idx) => ({
           job_id: job.id,
-          description: it.description.trim(),
-          qty: Number(it.qty),
-          unit_price: Number(it.unitPrice) || 0,
-          linked_item_id: it.linkedItemId || null,
+          process_name: p.name,
+          operator: p.operator || "",
+          external_supplier: p.externalSupplier || "",
           sort_order: idx,
         }));
-        const { error: quoteItemError } = await supabase.from("job_quote_items").insert(quoteItemRows);
-        if (quoteItemError) throw quoteItemError;
+        const { error: procError } = await supabase.from("job_processes").insert(processRows);
+        if (procError) throw procError;
+
+        const validQuoteItems = newJobForm.quoteItems.filter((it) => it.description.trim() && Number(it.qty) > 0);
+        if (validQuoteItems.length) {
+          const quoteItemRows = validQuoteItems.map((it, idx) => ({
+            job_id: job.id,
+            description: it.description.trim(),
+            qty: Number(it.qty),
+            unit_price: Number(it.unitPrice) || 0,
+            linked_item_id: it.linkedItemId || null,
+            sort_order: idx,
+          }));
+          const { error: quoteItemError } = await supabase.from("job_quote_items").insert(quoteItemRows);
+          if (quoteItemError) throw quoteItemError;
+        }
+
+        if (newJobForm.quotePdfFile) await uploadJobDocument(job.id, newJobForm.quotePdfFile);
+        if (newJobForm.quoteExcelFile) await uploadJobDocument(job.id, newJobForm.quoteExcelFile);
+      } catch (innerErr) {
+        // Something after the job itself failed — clean up the orphaned
+        // job row (its processes/quote items cascade-delete with it)
+        // rather than leaving a half-created job cluttering the list.
+        await supabase.from("jobs").delete().eq("id", job.id);
+        throw innerErr;
       }
 
-      if (newJobForm.quotePdfFile) await uploadJobDocument(job.id, newJobForm.quotePdfFile);
-      if (newJobForm.quoteExcelFile) await uploadJobDocument(job.id, newJobForm.quoteExcelFile);
-
-      setMaster((prev) => ({ ...prev, nextJobNumber: (prev.nextJobNumber || 1) + 1 }));
       closeNewJob();
       fetchJobs();
     } catch (err) {
