@@ -19,6 +19,7 @@ const TABS = [
   { key: "cncBar", label: "CNC Bar" },
   { key: "custom", label: "Customer Stock" },
   { key: "stores", label: "Stores" },
+  { key: "fasteners", label: "Fasteners" },
   { key: "assets", label: "Assets" },
 ];
 
@@ -46,7 +47,7 @@ const EXTRA_SECTIONS = [
   { key: "notifications", label: "Notifications" },
 ];
 
-const SECTIONS = ["plate", "structural", "cncBar", "custom", "stores", "assets", "drawings", "jobs"];
+const SECTIONS = ["plate", "structural", "cncBar", "custom", "stores", "fasteners", "assets", "drawings", "jobs"];
 
 const MANAGER_TABS = [
   { key: "sizes", label: "Sheet Sizes" },
@@ -60,6 +61,7 @@ const MANAGER_TABS = [
   { key: "customers", label: "Customers" },
   { key: "stockCodes", label: "Stock Codes" },
   { key: "storeCategories", label: "Store Categories" },
+  { key: "fastenerCategories", label: "Fastener Categories" },
   { key: "suppliers", label: "Suppliers" },
   { key: "sheetNames", label: "Sheet Names" },
   { key: "storesCatalog", label: "Stores Catalog" },
@@ -82,6 +84,7 @@ function blankPermissions() {
     cncBar: noPerm(),
     custom: noPerm(),
     stores: noPerm(),
+    fasteners: noPerm(),
     assets: noPerm(),
     drawings: noPerm(),
     jobs: noPerm(),
@@ -261,7 +264,8 @@ const DEFAULT_MASTER = {
   nextJobNumber: 1,
   nextDeliveryNoteNumber: 1,
   stockCodes: [],
-  storeCategories: ["Electrical", "CNC Tooling", "Fasteners", "Welding Consumables", "PPE"],
+  storeCategories: ["Electrical", "CNC Tooling", "Welding Consumables", "PPE"],
+  fastenerCategories: ["Bolts", "Nuts", "Washers", "Screws"],
   nextToolNumber: 1,
   nextPoNumber: 1,
   suppliers: [],
@@ -491,7 +495,7 @@ export default function StockControl() {
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
-  const [tab, setTab] = useState("plate");
+  const [tab, setTab] = useState("jobs");
   const [query, setQuery] = useState("");
   const [customerFilter, setCustomerFilter] = useState(null);
   const [sectionTypeFilter, setSectionTypeFilter] = useState(null);
@@ -597,6 +601,12 @@ export default function StockControl() {
                 qty: 1,
               }
             : it
+        );
+        // Migration: Fasteners used to just be a Store Category, mixed in
+        // with everything else in Stores — they're now their own division,
+        // since they're resale stock, not something the shop consumes.
+        loadedItems = loadedItems.map((it) =>
+          it.mainCat === "stores" && it.customer === "Fasteners" ? { ...it, mainCat: "fasteners", customer: "" } : it
         );
         setItems(loadedItems);
       } else if (isInitialLoad) {
@@ -2209,7 +2219,7 @@ export default function StockControl() {
       // active requisition tracking it, so the red/orange/green flag stays
       // visible until the order is actually fulfilled.
       .filter((it) => Number(it.qty) > 0 || !!activeRequisitionForItem(it.id))
-      .filter((it) => (tab !== "custom" && tab !== "stores") || !customerFilter || it.customer === customerFilter)
+      .filter((it) => (tab !== "custom" && tab !== "stores" && tab !== "fasteners") || !customerFilter || it.customer === customerFilter)
       .filter((it) => tab !== "structural" || !sectionTypeFilter || findSectionType(it.name) === sectionTypeFilter)
       .filter((it) => !filterGrade || it.grade === filterGrade)
       .filter((it) => {
@@ -2426,7 +2436,7 @@ export default function StockControl() {
 
   const tabValueTotal = useMemo(() => {
     if (!master) return null;
-    if (tab === "custom" || tab === "stores") return tabItems.reduce((sum, it) => sum + Number(it.value || 0) * Number(it.qty || 0), 0);
+    if (tab === "custom" || tab === "stores" || tab === "fasteners") return tabItems.reduce((sum, it) => sum + Number(it.value || 0) * Number(it.qty || 0), 0);
     if (tab === "plate") return tabItems.reduce((sum, it) => sum + (plateValue(it)?.total || 0), 0);
     if (tab === "structural") return tabItems.reduce((sum, it) => sum + (structuralValue(it)?.total || 0), 0);
     if (tab === "cncBar") return tabItems.reduce((sum, it) => sum + (cncBarValue(it)?.total || 0), 0);
@@ -2440,7 +2450,7 @@ export default function StockControl() {
       if (it.mainCat === "plate") return sum + (plateValue(it)?.total || 0);
       if (it.mainCat === "structural") return sum + (structuralValue(it)?.total || 0);
       if (it.mainCat === "cncBar") return sum + (cncBarValue(it)?.total || 0);
-      if (it.mainCat === "custom" || it.mainCat === "stores") return sum + Number(it.value || 0) * Number(it.qty || 0);
+      if (it.mainCat === "custom" || it.mainCat === "stores" || it.mainCat === "fasteners") return sum + Number(it.value || 0) * Number(it.qty || 0);
       return sum;
     }, 0);
   }, [items, master]);
@@ -3899,7 +3909,7 @@ export default function StockControl() {
     setShowLowStock(false);
     setTab(it.mainCat);
     setCustomerFilter(null);
-    setQuery(it.mainCat === "custom" || it.mainCat === "stores" ? (it.partNumber || it.name) : it.name);
+    setQuery(it.mainCat === "custom" || it.mainCat === "stores" || it.mainCat === "fasteners" ? (it.partNumber || it.name) : it.name);
   }
 
   const managerIsFactorTable = FACTOR_TABLES.includes(managerTab);
@@ -5373,7 +5383,7 @@ export default function StockControl() {
         </div>
       )}
 
-      {(tab === "custom" || tab === "stores") && (
+      {(tab === "custom" || tab === "stores" || tab === "fasteners") && (
         <div style={S.chipRow}>
           <button className="stk-btn" style={{ ...S.chip, ...(!customerFilter ? S.chipActive : {}) }} onClick={() => setCustomerFilter(null)}>
             All
@@ -5515,7 +5525,7 @@ export default function StockControl() {
                               })()}
                             {it.loc && <span>{it.loc}</span>}
                             {it.supplier && <span>Supplier: {it.supplier}</span>}
-                            {(tab === "custom" || tab === "stores") && canSeeValue && (
+                            {(tab === "custom" || tab === "stores" || tab === "fasteners") && canSeeValue && (
                               <span>R{Number(it.value || 0).toFixed(2)} ea · R{(Number(it.value || 0) * Number(it.qty || 0)).toFixed(2)} total</span>
                             )}
                             {tab === "assets" && canSeeValue && Number(it.value || 0) > 0 && <span>R{Number(it.value).toFixed(2)}</span>}
@@ -5848,16 +5858,16 @@ export default function StockControl() {
                   </>
                 )}
               </>
-            ) : form.mainCat === "custom" || form.mainCat === "stores" ? (
+            ) : form.mainCat === "custom" || form.mainCat === "stores" || form.mainCat === "fasteners" ? (
               <>
                 <LibraryField
-                  label={form.mainCat === "stores" ? "Category" : "Customer"}
-                  options={form.mainCat === "stores" ? master.storeCategories : master.customers}
+                  label={form.mainCat === "stores" ? "Category" : form.mainCat === "fasteners" ? "Category" : "Customer"}
+                  options={form.mainCat === "stores" ? master.storeCategories : form.mainCat === "fasteners" ? master.fastenerCategories : master.customers}
                   value={form.customer}
                   onChange={(v) => setForm({ ...form, customer: v })}
                   customValue={form.customCustomer}
                   onCustomChange={(v) => setForm({ ...form, customCustomer: v })}
-                  placeholder={form.mainCat === "stores" ? "e.g. Hand Tools" : "e.g. New Customer Pty Ltd"}
+                  placeholder={form.mainCat === "stores" ? "e.g. Hand Tools" : form.mainCat === "fasteners" ? "e.g. Bolts" : "e.g. New Customer Pty Ltd"}
                 />
                 {form.mainCat === "stores" && (
                   <div style={{ marginTop: 10 }}>
@@ -6388,7 +6398,7 @@ export default function StockControl() {
               </div>
             )}
 
-            {form.mainCat === "assets" ? null : form.mainCat === "custom" || form.mainCat === "stores" ? (
+            {form.mainCat === "assets" ? null : form.mainCat === "custom" || form.mainCat === "stores" || form.mainCat === "fasteners" ? (
               <div style={S.formGrid}>
                 <div>
                   <label style={S.label}>Quantity</label>
