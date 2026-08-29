@@ -30,6 +30,7 @@ const TABS = [
 // prominent header buttons instead of getting lost in this already-long
 // wrapped tab row.
 const NAV_TABS = [
+  { key: "jobs", label: "Jobs" },
   ...TABS,
   { key: "requisitions", label: "Requisitions" },
   { key: "purchaseOrders", label: "Purchase Orders" },
@@ -39,13 +40,15 @@ const NAV_TABS = [
   { key: "drawings", label: "Drawings" },
 ];
 
+// The tab bar groups the four core stock divisions under one "Stock"
+// dropdown instead of showing each as its own button — everything else
+// (Stores, Fasteners, Assets, and the workflow tabs) stays a plain tab.
+const STOCK_GROUP_KEYS = ["plate", "structural", "cncBar", "custom"];
+
 // Jobs and Notifications still need a canView() entry (for the header
 // buttons and permission checks) even though they're not part of the main
 // tab row — this covers that without duplicating them into NAV_TABS.
-const EXTRA_SECTIONS = [
-  { key: "jobs", label: "Jobs" },
-  { key: "notifications", label: "Notifications" },
-];
+const EXTRA_SECTIONS = [{ key: "notifications", label: "Notifications" }];
 
 const SECTIONS = ["plate", "structural", "cncBar", "custom", "stores", "fasteners", "assets", "drawings", "jobs"];
 
@@ -496,6 +499,7 @@ export default function StockControl() {
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [tab, setTab] = useState("jobs");
+  const [stockMenuOpen, setStockMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [customerFilter, setCustomerFilter] = useState(null);
   const [sectionTypeFilter, setSectionTypeFilter] = useState(null);
@@ -4391,12 +4395,6 @@ export default function StockControl() {
               {requisitions.filter((r) => r.status === "pending").length} requests
             </button>
           )}
-          {canView("jobs") && (
-            <button className="stk-btn" style={S.jobsHeaderBtn} onClick={() => setTab("jobs")}>
-              <Wrench size={13} strokeWidth={2.5} />
-              Jobs
-            </button>
-          )}
           {profile?.isSalesPerson && (
             <button className="stk-btn" style={S.roleChip} onClick={() => setTab("notifications")}>
               <AlertTriangle size={13} strokeWidth={2.5} />
@@ -4524,21 +4522,73 @@ export default function StockControl() {
       ) : (
         <>
           <div style={S.mainTabs}>
-        {visibleTabs.map((t) => (
-          <button
-            key={t.key}
-            className="stk-btn"
-            onClick={() => {
-              setTab(t.key);
-              setCustomerFilter(null);
-              setSectionTypeFilter(null);
-            }}
-            style={{ ...S.mainTab, ...(tab === t.key ? S.mainTabActive : {}) }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+            {(() => {
+              const rendered = [];
+              let stockGroupShown = false;
+              visibleTabs.forEach((t) => {
+                if (STOCK_GROUP_KEYS.includes(t.key)) {
+                  if (stockGroupShown) return; // already rendered the Stock dropdown once
+                  stockGroupShown = true;
+                  const stockTabs = visibleTabs.filter((vt) => STOCK_GROUP_KEYS.includes(vt.key));
+                  const isActive = STOCK_GROUP_KEYS.includes(tab);
+                  rendered.push(
+                    <div key="stock-group" style={{ position: "relative" }}>
+                      {stockMenuOpen && (
+                        <div
+                          onClick={() => setStockMenuOpen(false)}
+                          style={{ position: "fixed", inset: 0, zIndex: 15 }}
+                        />
+                      )}
+                      <button
+                        className="stk-btn"
+                        onClick={() => setStockMenuOpen((o) => !o)}
+                        style={{ ...S.mainTab, ...(isActive ? S.mainTabActive : {}) }}
+                      >
+                        Stock
+                        <ChevronDown size={13} style={{ marginLeft: 4, transform: stockMenuOpen ? "rotate(180deg)" : "none" }} />
+                      </button>
+                      {stockMenuOpen && (
+                        <div style={S.stockDropdown}>
+                          {stockTabs.map((st) => (
+                            <button
+                              key={st.key}
+                              className="stk-btn"
+                              onClick={() => {
+                                setTab(st.key);
+                                setCustomerFilter(null);
+                                setSectionTypeFilter(null);
+                                setStockMenuOpen(false);
+                              }}
+                              style={{ ...S.stockDropdownItem, ...(tab === st.key ? S.stockDropdownItemActive : {}) }}
+                            >
+                              {st.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                  return;
+                }
+                rendered.push(
+                  <button
+                    key={t.key}
+                    className="stk-btn"
+                    onClick={() => {
+                      setTab(t.key);
+                      setCustomerFilter(null);
+                      setSectionTypeFilter(null);
+                      setStockMenuOpen(false);
+                    }}
+                    style={{ ...S.mainTab, ...(tab === t.key ? S.mainTabActive : {}) }}
+                  >
+                    {t.label}
+                  </button>
+                );
+              });
+              return rendered;
+            })()}
+          </div>
 
       {tab === "requisitions" ? (
         <div style={S.list}>
@@ -8976,6 +9026,36 @@ const S = {
     fontSize: 13,
     fontWeight: 500,
     cursor: "pointer",
+  },
+  stockDropdown: {
+    position: "absolute",
+    top: "100%",
+    left: 0,
+    marginTop: 4,
+    background: C.panel,
+    border: `1px solid ${C.border}`,
+    borderRadius: 8,
+    padding: 4,
+    display: "flex",
+    flexDirection: "column",
+    minWidth: 160,
+    zIndex: 20,
+    boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+  },
+  stockDropdownItem: {
+    background: "transparent",
+    border: "none",
+    color: C.text,
+    borderRadius: 6,
+    padding: "8px 10px",
+    fontSize: 13,
+    fontWeight: 500,
+    textAlign: "left",
+    cursor: "pointer",
+  },
+  stockDropdownItemActive: {
+    background: C.accentTint,
+    color: C.accentRaw,
   },
   mainTabActive: {
     background: C.accentRaw,
