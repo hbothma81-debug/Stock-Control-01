@@ -841,9 +841,12 @@ export default function StockControl() {
     if (session?.user) loadDrawingLookup();
   }, [session]);
 
+  // Loaded eagerly, not just when the Jobs tab opens — the Use modal
+  // (reachable from every item, everywhere) needs the real job list to
+  // populate its job picker regardless of which tab someone's on.
   useEffect(() => {
-    if (tab === "jobs" && jobsList === null) fetchJobs();
-  }, [tab]);
+    if (session?.user && jobsList === null) fetchJobs();
+  }, [session, jobsList]);
 
   // Loaded eagerly (not just when the tab's opened) so the unread badge on
   // the header button is accurate the moment someone signs in.
@@ -7596,13 +7599,21 @@ export default function StockControl() {
             {usageModal.direction === "use" ? (
               <>
                 <div style={{ marginTop: 10 }}>
-                  <label style={S.label}>Job number</label>
-                  <input
+                  <label style={S.label}>Job (optional)</label>
+                  <select
                     style={S.input}
                     value={usageModal.jobNumber}
                     onChange={(e) => setUsageModal((m) => ({ ...m, jobNumber: e.target.value }))}
-                    placeholder="e.g. 4471"
-                  />
+                  >
+                    <option value="">No specific job</option>
+                    {(jobsList || [])
+                      .filter((j) => j.status === "in_progress" || j.status === "complete")
+                      .map((j) => (
+                        <option key={j.id} value={j.job_number}>
+                          {j.job_number} — {j.customer || "No customer"}
+                        </option>
+                      ))}
+                  </select>
                 </div>
                 <div style={{ marginTop: 10 }}>
                   <label style={S.label}>Customer</label>
@@ -7912,6 +7923,40 @@ export default function StockControl() {
                 )}
               </div>
             )}
+
+            {(() => {
+              const materialsUsed = (usageLog || []).filter(
+                (u) => u.direction === "use" && u.jobNumber === jobDetail.job.job_number
+              );
+              if (materialsUsed.length === 0) return null;
+              const totalCost = materialsUsed.reduce((sum, u) => sum + Number(u.lineCost || 0), 0);
+              return (
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+                  <label style={S.label}>Materials used</label>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                    {materialsUsed.map((u) => (
+                      <div key={u.id} style={S.managerRow}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5 }}>{u.itemName}</div>
+                          <div style={S.roleHint}>
+                            {u.qty} — R{Number(u.lineCost || 0).toFixed(2)} — {u.by} on {new Date(u.timestamp).toLocaleDateString()}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ ...S.roleHint, marginTop: 6, fontWeight: 600 }}>Total actual cost: R {totalCost.toFixed(2)}</div>
+                  {jobDetail.job.quoted_value != null && (
+                    <div style={S.roleHint}>
+                      Quoted R {Number(jobDetail.job.quoted_value).toFixed(2)} vs actual R {totalCost.toFixed(2)} — {" "}
+                      {totalCost <= Number(jobDetail.job.quoted_value)
+                        ? `R ${(Number(jobDetail.job.quoted_value) - totalCost).toFixed(2)} under`
+                        : `R ${(totalCost - Number(jobDetail.job.quoted_value)).toFixed(2)} over`}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
               <label style={S.label}>Process checklist</label>
