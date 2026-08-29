@@ -579,10 +579,12 @@ export default function StockControl() {
   // immediate, that fake/empty state would get written straight back over
   // whatever was actually there.
   async function loadAllData(isInitialLoad) {
+    let loadedItems = null; // shared across the items/master blocks below, so
+    // the Stock Codes → real item migration (further down) can see both.
     try {
       const res = await window.storage.get("stock-items-v3", true);
       if (res && res.value) {
-        let loadedItems = JSON.parse(res.value);
+        loadedItems = JSON.parse(res.value);
         // Migration: Tools used to live in Stores as a "storesKind" — they
         // now have their own Assets category with different fields
         // (manufacturer, serial number, purchase date, one-at-a-time
@@ -658,6 +660,41 @@ export default function StockControl() {
         // division — remove it now, since it's redundant with the real one.
         if (loaded.storesCatalog) {
           loaded = { ...loaded, storesCatalog: loaded.storesCatalog.filter((r) => r.category !== "Fasteners") };
+        }
+        // Migration: Stock Codes used to be a separate catalog from real
+        // Customer Stock items — now there's only one real source of truth.
+        // Any stock code without a matching real item becomes one, at
+        // qty 0 (we don't know an actual on-hand quantity from a price
+        // list import) — it just won't show in the normal Customer Stock
+        // browsing view until it has real stock, same as any other
+        // zero-qty item, but it's a real, findable, editable record.
+        if (loaded.stockCodes?.length && loadedItems) {
+          const existingKeys = new Set(
+            loadedItems
+              .filter((it) => it.mainCat === "custom")
+              .map((it) => `${(it.partNumber || "").toLowerCase()}|${it.customer || ""}`)
+          );
+          const newItemsFromCodes = loaded.stockCodes
+            .filter((r) => !existingKeys.has(`${(r.stockCode || "").toLowerCase()}|${r.customer || ""}`))
+            .map((r) => ({
+              id: uid(),
+              mainCat: "custom",
+              customer: r.customer || "",
+              partNumber: r.stockCode,
+              name: r.description || r.stockCode,
+              grade: "",
+              qty: 0,
+              value: Number(r.price) || 0,
+              low: Number(r.recommendedStock) || 0,
+              loc: "",
+              comment: "",
+              salesPerson: "",
+              customerRevision: r.revision || "",
+            }));
+          if (newItemsFromCodes.length) {
+            loadedItems = [...loadedItems, ...newItemsFromCodes];
+            setItems(loadedItems);
+          }
         }
         setMaster(loaded);
       } else if (isInitialLoad) {
@@ -1980,21 +2017,22 @@ export default function StockControl() {
       .filter((f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"))
       .map((f) => {
         const partNumber = f.name.replace(/\.pdf$/i, "").trim();
-        const matchedStockCode = (master.stockCodes || []).find(
-          (sc) =>
-            sc.stockCode.toLowerCase() === partNumber.toLowerCase() &&
-            (sc.customer || "") === (drawingUploadCustomer || "")
+        const matchedItem = (items || []).find(
+          (it) =>
+            it.mainCat === "custom" &&
+            (it.partNumber || "").toLowerCase() === partNumber.toLowerCase() &&
+            (it.customer || "") === (drawingUploadCustomer || "")
         );
-        // The "must already exist in Stock Codes" rule only applies when a
-        // customer is selected — an internal drawing (no customer chosen)
-        // isn't expected to already have a pre-loaded stock code, so it's
-        // never auto-skipped just for not matching one.
+        // The "must already exist in Customer Stock" rule only applies when
+        // a customer is selected — an internal drawing (no customer chosen)
+        // isn't expected to already have a matching item, so it's never
+        // auto-skipped just for not matching one.
         const requiresMatch = !!drawingUploadCustomer;
         return {
           file: f,
           partNumber,
-          skip: requiresMatch && !matchedStockCode,
-          matchedStockCode: matchedStockCode || null,
+          skip: requiresMatch && !matchedItem,
+          matchedStockCode: matchedItem ? { description: matchedItem.name } : null,
         };
       });
     setDrawingUploadFiles(entries);
@@ -2779,6 +2817,14 @@ export default function StockControl() {
     window.storage.delete(`attachment:${id}`, true).catch(() => {});
   }
 
+  // Used by the Stock Manager's Customer Stock catalog view — the same real
+  // items shown on the main tab, just including zero-qty ones too, so the
+  // full catalog (imported but not yet actually stocked) stays manageable.
+  function updateCustomerStockField(id, field, value) {
+    const numericFields = ["value", "low", "qty"];
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, [field]: numericFields.includes(field) ? parseFloat(value) || 0 : value } : it)));
+  }
+
   function openRequisition(it) {
     setRequisitionTarget(it);
     setRequisitionQty("");
@@ -3554,20 +3600,25 @@ export default function StockControl() {
   }
 
   function exportStockCodes() {
-    const rows = (master.stockCodes || []).map((r) => ({
-      "Stock Code": r.stockCode,
-      Description: r.description,
-      "Unit Price (R)": r.price,
-      "Recommended Stock": r.recommendedStock,
-    }));
+    const rows = items
+      .filter((it) => it.mainCat === "custom")
+      .map((it) => ({
+        "Part Number": it.partNumber,
+        Description: it.name,
+        "Unit Price (R)": it.value,
+        "Qty on Hand": it.qty,
+        "Low Stock Warning At": it.low,
+        "Customer Revision": it.customerRevision || "",
+        Customer: it.customer || "",
+      }));
     if (rows.length === 0) {
-      alert("Nothing in the stock codes catalog yet.");
+      alert("No Customer Stock items yet.");
       return;
     }
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Stock Codes");
-    XLSX.writeFile(wb, `Stock-Codes-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "Customer Stock");
+    XLSX.writeFile(wb, `Customer-Stock-${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
   // A full, one-click copy of everything — items, the whole master library,
@@ -4041,77 +4092,65 @@ export default function StockControl() {
     }));
   }
 
-  function updateStockCodeRow(id, field, value) {
-    setMaster((prev) => ({
-      ...prev,
-      stockCodes: (prev.stockCodes || []).map((r) =>
-        r.id === id ? { ...r, [field]: field === "price" || field === "recommendedStock" ? parseFloat(value) || 0 : value } : r
-      ),
-    }));
-  }
-
-  function removeStockCodeRow(id) {
-    setMaster((prev) => ({ ...prev, stockCodes: (prev.stockCodes || []).filter((r) => r.id !== id) }));
-  }
 
   // A targeted way to clear out one customer's stock codes before a fresh
   // re-import — deliberately scoped to whichever customer is currently
   // filtered to, never a blanket wipe of everyone's data.
   function batchDeleteStockCodesForCustomer(customer) {
-    const count = (master.stockCodes || []).filter((r) => (r.customer || "") === (customer || "")).length;
-    if (count === 0) {
-      alert(customer ? `No stock codes found for ${customer}.` : "No unassigned stock codes found.");
+    // Only ever targets zero-qty catalog-style items for this customer —
+    // anything with real stock on hand is never touched by this action.
+    const matching = items.filter((it) => it.mainCat === "custom" && (it.customer || "") === (customer || "") && Number(it.qty) === 0);
+    if (matching.length === 0) {
+      alert(customer ? `No zero-stock catalog items found for ${customer}.` : "No unassigned zero-stock catalog items found.");
       return;
     }
     const ok = window.confirm(
-      `Delete all ${count} stock code${count === 1 ? "" : "s"} for ${customer || "(no customer)"}? This can't be undone.`
+      `Delete all ${matching.length} zero-stock catalog item${matching.length === 1 ? "" : "s"} for ${customer || "(no customer)"}? Anything with real stock on hand is kept regardless. This can't be undone.`
     );
     if (!ok) return;
-    setMaster((prev) => ({
-      ...prev,
-      stockCodes: (prev.stockCodes || []).filter((r) => (r.customer || "") !== (customer || "")),
-    }));
+    const idsToDelete = new Set(matching.map((it) => it.id));
+    setItems((prev) => prev.filter((it) => !idsToDelete.has(it.id)));
   }
 
   function addStockCodeRow() {
     if (!scForm.stockCode.trim()) return;
     const code = scForm.stockCode.trim();
-    setMaster((prev) => {
-      const existing = (prev.stockCodes || []).find((r) => r.stockCode.toLowerCase() === code.toLowerCase());
+    setItems((prev) => {
+      const existing = prev.find((it) => it.mainCat === "custom" && (it.partNumber || "").toLowerCase() === code.toLowerCase() && it.customer === scForm.customer);
       if (existing) {
-        // Same stock code already exists — update it in place rather than
-        // creating a second entry for the same part.
-        return {
-          ...prev,
-          stockCodes: prev.stockCodes.map((r) =>
-            r.id === existing.id
-              ? {
-                  ...r,
-                  description: scForm.description.trim() || r.description,
-                  price: parseFloat(scForm.price) || r.price,
-                  recommendedStock: parseFloat(scForm.recommendedStock) || r.recommendedStock,
-                  customer: scForm.customer || r.customer,
-                  revision: scForm.revision.trim() || r.revision,
-                }
-              : r
-          ),
-        };
+        // Same part number for this customer already exists — update it in
+        // place rather than creating a duplicate. Quantity is never touched
+        // here — this is a catalog action, not a stock count.
+        return prev.map((it) =>
+          it.id === existing.id
+            ? {
+                ...it,
+                name: scForm.description.trim() || it.name,
+                value: parseFloat(scForm.price) || it.value,
+                low: parseFloat(scForm.recommendedStock) || it.low,
+                customerRevision: scForm.revision.trim() || it.customerRevision,
+              }
+            : it
+        );
       }
-      return {
+      return [
         ...prev,
-        stockCodes: [
-          ...(prev.stockCodes || []),
-          {
-            id: uid(),
-            stockCode: code,
-            description: scForm.description.trim(),
-            price: parseFloat(scForm.price) || 0,
-            recommendedStock: parseFloat(scForm.recommendedStock) || 0,
-            customer: scForm.customer,
-            revision: scForm.revision.trim(),
-          },
-        ],
-      };
+        {
+          id: uid(),
+          mainCat: "custom",
+          customer: scForm.customer,
+          partNumber: code,
+          name: scForm.description.trim() || code,
+          grade: "",
+          qty: 0,
+          value: parseFloat(scForm.price) || 0,
+          low: parseFloat(scForm.recommendedStock) || 0,
+          loc: "",
+          comment: "",
+          salesPerson: "",
+          customerRevision: scForm.revision.trim(),
+        },
+      ];
     });
     setScForm({ stockCode: "", description: "", price: "", recommendedStock: "", customer: "" });
   }
@@ -4340,38 +4379,79 @@ export default function StockControl() {
           `First data row read as: ${JSON.stringify(sampleRow)}`;
 
         if (importReplaceAll) {
-          setMaster((prev) => ({ ...prev, stockCodes: newRows }));
-          alert(`Replaced the whole Stock Codes list with ${newRows.length} rows${importCustomer ? ` for ${importCustomer}` : ""}.\n\n${diagnosticSummary}`);
+          setItems((prev) => {
+            const otherItems = prev.filter((it) => !(it.mainCat === "custom" && it.customer === importCustomer));
+            // Never delete anything with real stock on hand, even if it's
+            // not in this file — only zero-qty catalog-style entries get
+            // replaced wholesale.
+            const keptRealStock = prev.filter((it) => it.mainCat === "custom" && it.customer === importCustomer && Number(it.qty) > 0);
+            const keptKeys = new Set(keptRealStock.map((it) => (it.partNumber || "").toLowerCase()));
+            const newItems = newRows
+              .filter((row) => !keptKeys.has(row.stockCode.toLowerCase()))
+              .map((row) => ({
+                id: uid(),
+                mainCat: "custom",
+                customer: row.customer,
+                partNumber: row.stockCode,
+                name: row.description || row.stockCode,
+                grade: "",
+                qty: 0,
+                value: row.price,
+                low: row.recommendedStock,
+                loc: "",
+                comment: "",
+                salesPerson: "",
+                customerRevision: row.revision,
+              }));
+            return [...otherItems, ...keptRealStock, ...newItems];
+          });
+          alert(
+            `Replaced the catalog with ${newRows.length} rows${importCustomer ? ` for ${importCustomer}` : ""} — any item with real stock on hand was kept regardless.\n\n${diagnosticSummary}`
+          );
         } else {
-          // Merge by stock code — update anything that already exists
-          // instead of creating a duplicate row for the same part.
-          setMaster((prev) => {
-            const existing = [...(prev.stockCodes || [])];
-            let updated = 0;
+          // Merge by part number — update anything that already exists
+          // instead of creating a duplicate row for the same part. Real
+          // quantity on hand is never touched by an import.
+          setItems((prev) => {
+            const existing = [...prev];
             newRows.forEach((row) => {
-              const idx = existing.findIndex((r) => r.stockCode.toLowerCase() === row.stockCode.toLowerCase());
+              const idx = existing.findIndex(
+                (it) => it.mainCat === "custom" && it.customer === row.customer && (it.partNumber || "").toLowerCase() === row.stockCode.toLowerCase()
+              );
               if (idx >= 0) {
                 // Only overwrite a field if the import actually found a real
                 // value for it — a parsing miss shouldn't silently erase a
                 // price/revision that was already there from before.
                 existing[idx] = {
                   ...existing[idx],
-                  description: row.description || existing[idx].description,
-                  price: row.price || existing[idx].price,
-                  recommendedStock: row.recommendedStock || existing[idx].recommendedStock,
-                  revision: row.revision || existing[idx].revision,
-                  customer: row.customer || existing[idx].customer,
+                  name: row.description || existing[idx].name,
+                  value: row.price || existing[idx].value,
+                  low: row.recommendedStock || existing[idx].low,
+                  customerRevision: row.revision || existing[idx].customerRevision,
                 };
-                updated++;
               } else {
-                existing.push(row);
+                existing.push({
+                  id: uid(),
+                  mainCat: "custom",
+                  customer: row.customer,
+                  partNumber: row.stockCode,
+                  name: row.description || row.stockCode,
+                  grade: "",
+                  qty: 0,
+                  value: row.price,
+                  low: row.recommendedStock,
+                  loc: "",
+                  comment: "",
+                  salesPerson: "",
+                  customerRevision: row.revision,
+                });
               }
             });
-            return { ...prev, stockCodes: existing };
+            return existing;
           });
           const addedCount = newRows.length;
           alert(
-            `Processed ${addedCount} rows${importCustomer ? ` for ${importCustomer}` : ""}.\n\n${diagnosticSummary}`
+            `Processed ${addedCount} rows${importCustomer ? ` for ${importCustomer}` : ""} — new parts are added at qty 0 until real stock arrives; matched existing parts had their price/description updated, never their quantity.\n\n${diagnosticSummary}`
           );
         }
       } catch (err) {
@@ -6183,35 +6263,6 @@ export default function StockControl() {
                     </div>
                   </div>
                 )}
-                {form.mainCat === "custom" && master.stockCodes.length > 0 && (
-                  <div style={{ marginTop: 10 }}>
-                    <label style={S.label}>Fill from Stock Codes (optional)</label>
-                    <input
-                      style={S.input}
-                      list="stock-code-options"
-                      placeholder="Start typing a stock code or description…"
-                      onChange={(e) => {
-                        const hit = master.stockCodes.find((r) => `${r.stockCode} — ${r.description}` === e.target.value);
-                        if (hit) {
-                          const custResolved = hit.customer ? resolveField(master.customers, hit.customer) : null;
-                          setForm((f) => ({
-                            ...f,
-                            partNumber: hit.stockCode,
-                            name: hit.description,
-                            value: String(hit.price || ""),
-                            low: f.low || String(hit.recommendedStock || ""),
-                            ...(custResolved ? { customer: custResolved.field, customCustomer: custResolved.custom } : {}),
-                          }));
-                        }
-                      }}
-                    />
-                    <datalist id="stock-code-options">
-                      {master.stockCodes.map((r) => (
-                        <option key={r.id} value={`${r.stockCode} — ${r.description}`} />
-                      ))}
-                    </datalist>
-                  </div>
-                )}
                 {form.mainCat === "stores" && master.storesCatalog.length > 0 && (
                   <div style={{ marginTop: 10 }}>
                     <label style={S.label}>Fill from Stores Catalog (optional)</label>
@@ -6922,13 +6973,13 @@ export default function StockControl() {
                 </div>
 
                 <div style={{ ...S.managerAddRow, marginTop: 12 }}>
-                  <input style={{ ...S.input, flex: 1 }} value={scForm.stockCode} onChange={(e) => setScForm({ ...scForm, stockCode: e.target.value })} placeholder="Stock code" />
+                  <input style={{ ...S.input, flex: 1 }} value={scForm.stockCode} onChange={(e) => setScForm({ ...scForm, stockCode: e.target.value })} placeholder="Part number" />
                   <input style={{ ...S.input, flex: 2 }} value={scForm.description} onChange={(e) => setScForm({ ...scForm, description: e.target.value })} placeholder="Description" />
                 </div>
                 <div style={{ ...S.managerAddRow, marginTop: 6 }}>
                   <input style={{ ...S.input, flex: 1 }} type="number" step="0.01" value={scForm.price} onChange={(e) => setScForm({ ...scForm, price: e.target.value })} placeholder="Unit price (R)" />
-                  <input style={{ ...S.input, flex: 1 }} type="number" value={scForm.recommendedStock} onChange={(e) => setScForm({ ...scForm, recommendedStock: e.target.value })} placeholder="Recommended stock" />
-                  <input style={{ ...S.input, flex: 1 }} value={scForm.revision} onChange={(e) => setScForm({ ...scForm, revision: e.target.value })} placeholder="Revision (e.g. A)" />
+                  <input style={{ ...S.input, flex: 1 }} type="number" value={scForm.recommendedStock} onChange={(e) => setScForm({ ...scForm, recommendedStock: e.target.value })} placeholder="Low stock warning at" />
+                  <input style={{ ...S.input, flex: 1 }} value={scForm.revision} onChange={(e) => setScForm({ ...scForm, revision: e.target.value })} placeholder="Customer revision (e.g. A)" />
                 </div>
                 <div style={{ ...S.managerAddRow, marginTop: 6 }}>
                   <select style={{ ...S.input, flex: 1 }} value={scForm.customer} onChange={(e) => setScForm({ ...scForm, customer: e.target.value })}>
@@ -6942,13 +6993,17 @@ export default function StockControl() {
                     Add
                   </button>
                 </div>
+                <div style={S.roleHint}>
+                  This creates a real Customer Stock item at qty 0 — it won't show on the main Customer Stock tab until it
+                  actually has stock, but it's real, searchable, and can have a drawing linked to it right away.
+                </div>
 
                 <div style={{ ...S.managerAddRow, marginTop: 12 }}>
                   <input
                     style={{ ...S.input, flex: 2 }}
                     value={stockCodeQuery}
                     onChange={(e) => setStockCodeQuery(e.target.value)}
-                    placeholder="Search stock code or description…"
+                    placeholder="Search part number or description…"
                   />
                   <select
                     style={{ ...S.input, flex: 1 }}
@@ -6966,7 +7021,7 @@ export default function StockControl() {
                       className="stk-btn"
                       style={S.usageBtnUse}
                       onClick={() => batchDeleteStockCodesForCustomer(stockCodeCustomerFilter)}
-                      title={`Delete all stock codes for ${stockCodeCustomerFilter}`}
+                      title={`Delete all zero-stock catalog items for ${stockCodeCustomerFilter}`}
                     >
                       <Trash2 size={13} /> Delete for {stockCodeCustomerFilter}
                     </button>
@@ -6974,55 +7029,65 @@ export default function StockControl() {
                 </div>
                 {isAdmin && stockCodeCustomerFilter && (
                   <div style={S.roleHint}>
-                    Filter to a customer above, then use this to clear their stock codes before a fresh re-import — only
-                    affects that customer, nobody else's data.
+                    Filter to a customer above, then use this to clear their zero-stock catalog items before a fresh
+                    re-import — only affects that customer, and never touches anything with real stock on hand.
                   </div>
                 )}
 
                 <div style={{ ...S.managerAddRow, marginTop: 12, marginBottom: 4, opacity: 0.7 }}>
-                  <span style={{ ...S.label, flex: "0 0 110px" }}>Stock code</span>
+                  <span style={{ ...S.label, flex: "0 0 110px" }}>Part number</span>
                   <span style={{ ...S.label, flex: 1 }}>Description</span>
+                  <span style={{ ...S.label, flex: "0 0 60px" }}>Qty</span>
                   <span style={{ ...S.label, flex: "0 0 70px" }}>Price (R)</span>
-                  <span style={{ ...S.label, flex: "0 0 70px" }}>Recomm.</span>
-                  <span style={{ ...S.label, flex: "0 0 60px" }}>Revision</span>
+                  <span style={{ ...S.label, flex: "0 0 70px" }}>Low at</span>
+                  <span style={{ ...S.label, flex: "0 0 60px" }}>Cust. rev</span>
                   <span style={{ ...S.label, flex: "0 0 110px" }}>Customer</span>
                 </div>
                 <div style={S.managerList}>
-                  {(master.stockCodes || [])
-                    .filter((r) => (r.stockCode + " " + r.description).toLowerCase().includes(stockCodeQuery.toLowerCase()))
-                    .filter((r) => !stockCodeCustomerFilter || r.customer === stockCodeCustomerFilter)
-                    .map((r) => (
-                      <div key={r.id} style={S.managerRow}>
-                        <EditableName value={r.stockCode} onCommit={(v) => updateStockCodeRow(r.id, "stockCode", v)} style={{ maxWidth: 110 }} />
-                        <EditableName value={r.description} onCommit={(v) => updateStockCodeRow(r.id, "description", v)} />
+                  {(items || [])
+                    .filter((it) => it.mainCat === "custom")
+                    .filter((it) => ((it.partNumber || "") + " " + (it.name || "")).toLowerCase().includes(stockCodeQuery.toLowerCase()))
+                    .filter((it) => !stockCodeCustomerFilter || it.customer === stockCodeCustomerFilter)
+                    .map((it) => (
+                      <div key={it.id} style={S.managerRow}>
+                        <EditableName value={it.partNumber || ""} onCommit={(v) => updateCustomerStockField(it.id, "partNumber", v)} style={{ maxWidth: 110 }} />
+                        <EditableName value={it.name || ""} onCommit={(v) => updateCustomerStockField(it.id, "name", v)} />
+                        <input
+                          type="number"
+                          value={it.qty === 0 ? "" : it.qty}
+                          placeholder="0"
+                          onChange={(e) => updateCustomerStockField(it.id, "qty", e.target.value)}
+                          style={{ ...S.managerFactorInput, width: 55 }}
+                          title="Actual quantity on hand"
+                        />
                         <input
                           type="number"
                           step="0.01"
-                          value={r.price === 0 ? "" : r.price}
+                          value={it.value === 0 ? "" : it.value}
                           placeholder="0"
-                          onChange={(e) => updateStockCodeRow(r.id, "price", e.target.value)}
+                          onChange={(e) => updateCustomerStockField(it.id, "value", e.target.value)}
                           style={S.managerFactorInput}
                           title="Unit price (R)"
                         />
                         <input
                           type="number"
-                          value={r.recommendedStock === 0 ? "" : r.recommendedStock}
+                          value={it.low === 0 ? "" : it.low}
                           placeholder="0"
-                          onChange={(e) => updateStockCodeRow(r.id, "recommendedStock", e.target.value)}
+                          onChange={(e) => updateCustomerStockField(it.id, "low", e.target.value)}
                           style={S.managerFactorInput}
-                          title="Recommended stock"
+                          title="Low stock warning threshold"
                         />
                         <input
                           type="text"
-                          value={r.revision || ""}
+                          value={it.customerRevision || ""}
                           placeholder="—"
-                          onChange={(e) => updateStockCodeRow(r.id, "revision", e.target.value)}
+                          onChange={(e) => updateCustomerStockField(it.id, "customerRevision", e.target.value)}
                           style={{ ...S.managerFactorInput, width: 50 }}
                           title="Revision (customer's own, e.g. a letter or number)"
                         />
                         <select
-                          value={r.customer || ""}
-                          onChange={(e) => updateStockCodeRow(r.id, "customer", e.target.value)}
+                          value={it.customer || ""}
+                          onChange={(e) => updateCustomerStockField(it.id, "customer", e.target.value)}
                           style={{ ...S.managerFactorInput, width: 110 }}
                         >
                           <option value="">No customer</option>
@@ -7030,12 +7095,16 @@ export default function StockControl() {
                             <option key={c} value={c}>{c}</option>
                           ))}
                         </select>
-                        <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeStockCodeRow(r.id)}>
-                          <Trash2 size={13} />
-                        </button>
+                        {isAdmin && (
+                          <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeItem(it.id)}>
+                            <Trash2 size={13} />
+                          </button>
+                        )}
                       </div>
                     ))}
-                  {(master.stockCodes || []).length === 0 && <div style={S.empty}>Nothing here yet — import a file or add one above.</div>}
+                  {(items || []).filter((it) => it.mainCat === "custom").length === 0 && (
+                    <div style={S.empty}>Nothing here yet — import a file or add one above.</div>
+                  )}
                 </div>
               </>
             ) : managerTab === "storesCatalog" ? (
