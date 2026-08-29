@@ -5632,15 +5632,19 @@ export default function StockControl() {
 
       {(tab === "custom" || tab === "stores" || tab === "fasteners") && (
         <div style={S.chipRow}>
-          <button className="stk-btn" style={{ ...S.chip, ...(!customerFilter ? S.chipActive : {}) }} onClick={() => setCustomerFilter(null)}>
+          <button
+            className="stk-btn"
+            style={{ ...S.chip, ...((tab === "fasteners" ? !filterFastenerType : !customerFilter) ? S.chipActive : {}) }}
+            onClick={() => (tab === "fasteners" ? setFilterFastenerType("") : setCustomerFilter(null))}
+          >
             All
           </button>
-          {(tab === "custom" ? master.customers : master.storeCategories).map((c) => (
+          {(tab === "custom" ? master.customers : tab === "fasteners" ? master.fastenerCategories : master.storeCategories).map((c) => (
             <button
               key={c}
               className="stk-btn"
-              style={{ ...S.chip, ...(customerFilter === c ? S.chipActive : {}) }}
-              onClick={() => setCustomerFilter(c)}
+              style={{ ...S.chip, ...((tab === "fasteners" ? filterFastenerType === c : customerFilter === c) ? S.chipActive : {}) }}
+              onClick={() => (tab === "fasteners" ? setFilterFastenerType(c) : setCustomerFilter(c))}
             >
               {c}
             </button>
