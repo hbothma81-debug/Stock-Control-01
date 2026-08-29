@@ -444,6 +444,7 @@ export default function StockControl() {
   const [jobDetail, setJobDetail] = useState(null); // { job, processes, documents }
   const [jobDetailLoading, setJobDetailLoading] = useState(false);
   const [showNewJob, setShowNewJob] = useState(false);
+  const [newStockItemModal, setNewStockItemModal] = useState(null);
   const [newJobForm, setNewJobForm] = useState(null);
   const [notificationsList, setNotificationsList] = useState(null);
   const [jobQtyInput, setJobQtyInput] = useState("");
@@ -1180,7 +1181,6 @@ export default function StockControl() {
       quoteExcelFile: null,
       description: "",
       quotedValue: "",
-      qty: "",
       dueDate: "",
       quoteReference: "",
       laserJobReference: "",
@@ -1242,25 +1242,45 @@ export default function StockControl() {
       alert("Pick a real customer first, and make sure this line has a description.");
       return;
     }
+    // Opens a small form instead of creating a bare item — a part number is
+    // required for the drawing/revision system to ever be able to link to
+    // this item later, so it can't be skipped here.
+    setNewStockItemModal({
+      quoteItemIdx: idx,
+      forJob: true,
+      partNumber: "",
+      name: line.description.trim(),
+      value: line.unitPrice || "",
+      loc: "",
+    });
+  }
+
+  function submitNewStockItemFromJob() {
+    const m = newStockItemModal;
+    if (!m.partNumber.trim()) {
+      alert("A part number is needed — without one, this item can never be linked to a drawing or revision later.");
+      return;
+    }
     const newItem = {
       id: uid(),
       mainCat: "custom",
       customer: newJobForm.customer,
-      partNumber: "",
-      name: line.description.trim(),
+      partNumber: m.partNumber.trim(),
+      name: m.name.trim(),
       grade: "",
       qty: 0,
-      value: Number(line.unitPrice) || 0,
+      value: Number(m.value) || 0,
       low: 0,
-      loc: "",
+      loc: m.loc.trim(),
       comment: "",
       salesPerson: "",
     };
     setItems((prev) => [...prev, newItem]);
     setNewJobForm((f) => ({
       ...f,
-      quoteItems: f.quoteItems.map((it, i) => (i === idx ? { ...it, linkedItemId: newItem.id } : it)),
+      quoteItems: f.quoteItems.map((it, i) => (i === m.quoteItemIdx ? { ...it, linkedItemId: newItem.id, unitPrice: String(newItem.value) } : it)),
     }));
+    setNewStockItemModal(null);
   }
 
   function removeNewJobQuoteItem(idx) {
@@ -1335,6 +1355,10 @@ export default function StockControl() {
       }
 
       const jobNumber = formatJobNumber(master.nextJobNumber);
+      // No standalone quantity field anymore — the job's overall quantity
+      // is just the sum of its quoted line items, so progress tracking
+      // still has a real target without asking for the same number twice.
+      const derivedQty = newJobForm.quoteItems.reduce((sum, it) => sum + (Number(it.qty) || 0), 0);
       const { data: job, error } = await supabase
         .from("jobs")
         .insert({
@@ -1342,7 +1366,7 @@ export default function StockControl() {
           customer: customerName,
           status: "in_progress",
           sales_rep: roleLabel,
-          qty: newJobForm.qty ? Number(newJobForm.qty) : null,
+          qty: derivedQty > 0 ? derivedQty : null,
           qty_complete: 0,
           due_date: newJobForm.dueDate || null,
           description: newJobForm.description,
@@ -1389,7 +1413,7 @@ export default function StockControl() {
       fetchJobs();
     } catch (err) {
       console.error("Failed to create job:", err);
-      alert("Couldn't create that job — check your connection and try again.");
+      alert(`Couldn't create that job: ${err.message || "unknown error"}. If this mentions a missing column, an SQL migration hasn't been run yet in Supabase.`);
     }
   }
 
@@ -8051,6 +8075,60 @@ export default function StockControl() {
         </div>
       )}
 
+      {newStockItemModal && (
+        <div style={S.modalOverlay} onClick={() => setNewStockItemModal(null)}>
+          <div style={{ ...S.modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Add to Customer Stock</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setNewStockItemModal(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Part number (required — needed to link drawings/revisions later)</label>
+              <input
+                style={S.input}
+                value={newStockItemModal.partNumber}
+                onChange={(e) => setNewStockItemModal((m) => ({ ...m, partNumber: e.target.value }))}
+                autoFocus
+              />
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Name</label>
+              <input
+                style={S.input}
+                value={newStockItemModal.name}
+                onChange={(e) => setNewStockItemModal((m) => ({ ...m, name: e.target.value }))}
+              />
+            </div>
+            <div style={S.formGrid}>
+              <div>
+                <label style={S.label}>Price</label>
+                <input
+                  style={S.input}
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={newStockItemModal.value}
+                  onChange={(e) => setNewStockItemModal((m) => ({ ...m, value: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label style={S.label}>Location (optional)</label>
+                <input
+                  style={S.input}
+                  value={newStockItemModal.loc}
+                  onChange={(e) => setNewStockItemModal((m) => ({ ...m, loc: e.target.value }))}
+                />
+              </div>
+            </div>
+            <button type="button" className="stk-btn" style={S.submitBtn} onClick={submitNewStockItemFromJob}>
+              Add to Customer Stock
+            </button>
+          </div>
+        </div>
+      )}
+
       {showNewJob && newJobForm && (
         <div style={S.modalOverlay} onClick={closeNewJob}>
           <div style={{ ...S.modal, maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
@@ -8135,26 +8213,14 @@ export default function StockControl() {
               </div>
             </div>
 
-            <div style={S.formGrid}>
-              <div>
-                <label style={S.label}>Quantity</label>
-                <input
-                  type="number"
-                  min="0"
-                  style={S.input}
-                  value={newJobForm.qty}
-                  onChange={(e) => setNewJobForm((f) => ({ ...f, qty: e.target.value }))}
-                />
-              </div>
-              <div>
-                <label style={S.label}>Due date</label>
-                <input
-                  type="date"
-                  style={S.input}
-                  value={newJobForm.dueDate}
-                  onChange={(e) => setNewJobForm((f) => ({ ...f, dueDate: e.target.value }))}
-                />
-              </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Due date</label>
+              <input
+                type="date"
+                style={S.input}
+                value={newJobForm.dueDate}
+                onChange={(e) => setNewJobForm((f) => ({ ...f, dueDate: e.target.value }))}
+              />
             </div>
 
             <div style={S.formGrid}>
