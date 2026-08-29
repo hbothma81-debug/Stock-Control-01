@@ -33,6 +33,7 @@ const NAV_TABS = [
   { key: "requisitions", label: "Requisitions" },
   { key: "purchaseOrders", label: "Purchase Orders" },
   { key: "receiving", label: "Receiving" },
+  { key: "invoicing", label: "Invoicing" },
   { key: "usageLog", label: "Usage Log" },
   { key: "drawings", label: "Drawings" },
 ];
@@ -101,6 +102,10 @@ function formatPoNumber(n) {
 
 function formatJobNumber(n) {
   return "JOB-" + String(n).padStart(4, "0");
+}
+
+function formatDeliveryNoteNumber(n) {
+  return "DN-" + String(n).padStart(4, "0");
 }
 
 function plateName(size, thickness) {
@@ -254,6 +259,7 @@ const DEFAULT_MASTER = {
     "Plating", "Buy - out", "Assembly", "Quality Check", "Dispatch",
   ],
   nextJobNumber: 1,
+  nextDeliveryNoteNumber: 1,
   stockCodes: [],
   storeCategories: ["Electrical", "CNC Tooling", "Fasteners", "Welding Consumables", "PPE"],
   nextToolNumber: 1,
@@ -490,6 +496,25 @@ export default function StockControl() {
   const [sectionTypeFilter, setSectionTypeFilter] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saveState, setSaveState] = useState("idle");
+  // A brief inline "✓ Saved" confirmation next to whichever field just
+  // saved successfully — { key, at } so a field can check "was that me,
+  // and was it recent" without a separate state var per field.
+  const [lastSaved, setLastSaved] = useState(null);
+  function flashSaved(key) {
+    setLastSaved({ key, at: Date.now() });
+  }
+  function SavedCheck({ fieldKey }) {
+    const [visible, setVisible] = useState(false);
+    useEffect(() => {
+      if (lastSaved?.key === fieldKey && Date.now() - lastSaved.at < 1600) {
+        setVisible(true);
+        const t = setTimeout(() => setVisible(false), 1600);
+        return () => clearTimeout(t);
+      }
+    }, [lastSaved, fieldKey]);
+    if (!visible) return null;
+    return <Check size={13} strokeWidth={3} style={{ color: C.accentFinished, marginLeft: 4, flexShrink: 0 }} />;
+  }
   const [form, setForm] = useState(emptyForm);
   const [collapsed, setCollapsed] = useState({});
   const [showManager, setShowManager] = useState(false);
@@ -730,6 +755,7 @@ export default function StockControl() {
                 canManageRequisitions: !!data.can_manage_requisitions,
                 canRaisePO: !!data.can_raise_po,
                 canViewUsageLog: !!data.can_view_usage_log,
+                canManageInvoicing: !!data.can_manage_invoicing,
                 isSalesPerson: !!data.is_sales_person,
                 department: data.department || "",
               }
@@ -749,28 +775,55 @@ export default function StockControl() {
     setSaveState("saving");
     window.storage
       .set("stock-items-v3", JSON.stringify(items), true)
-      .then(() => setSaveState("saved"))
-      .catch(() => setSaveState("error"));
+      .then(() => { setSaveState("saved"); flashSaved("core"); })
+      .catch((err) => {
+        console.error("Failed to save items:", err);
+        setSaveState("error");
+      });
   }, [items]);
 
   useEffect(() => {
     if (master === null) return;
-    window.storage.set("stock-master-data-v2", JSON.stringify(master), true).catch(() => {});
+    window.storage
+      .set("stock-master-data-v2", JSON.stringify(master), true)
+      .then(() => { setSaveState("saved"); flashSaved("core"); })
+      .catch((err) => {
+        console.error("Failed to save master data:", err);
+        setSaveState("error");
+      });
   }, [master]);
 
   useEffect(() => {
     if (requisitions === null) return;
-    window.storage.set("stock-requisitions-v1", JSON.stringify(requisitions), true).catch(() => {});
+    window.storage
+      .set("stock-requisitions-v1", JSON.stringify(requisitions), true)
+      .then(() => { setSaveState("saved"); flashSaved("core"); })
+      .catch((err) => {
+        console.error("Failed to save requisitions:", err);
+        setSaveState("error");
+      });
   }, [requisitions]);
 
   useEffect(() => {
     if (purchaseOrders === null) return;
-    window.storage.set("stock-purchase-orders-v1", JSON.stringify(purchaseOrders), true).catch(() => {});
+    window.storage
+      .set("stock-purchase-orders-v1", JSON.stringify(purchaseOrders), true)
+      .then(() => { setSaveState("saved"); flashSaved("core"); })
+      .catch((err) => {
+        console.error("Failed to save purchase orders:", err);
+        setSaveState("error");
+      });
   }, [purchaseOrders]);
 
   useEffect(() => {
     if (usageLog === null) return;
-    window.storage.set("stock-usage-log-v1", JSON.stringify(usageLog), true).catch(() => {});
+    window.storage
+      .set("stock-usage-log-v1", JSON.stringify(usageLog), true)
+      .then(() => { setSaveState("saved"); flashSaved("core"); })
+      .catch((err) => {
+        console.error("Failed to save usage log:", err);
+        setSaveState("error");
+      });
   }, [usageLog]);
 
   // Drawings live in their own real table, not window.storage — load the
@@ -1114,6 +1167,8 @@ export default function StockControl() {
       newCustomerContactEmail: "",
       quotePdfFile: null,
       quoteExcelFile: null,
+      description: "",
+      quotedValue: "",
       qty: "",
       dueDate: "",
       quoteReference: "",
@@ -1121,8 +1176,24 @@ export default function StockControl() {
       materialLocation: "",
       buyOutNotes: "",
       selectedProcesses: [],
+      quoteItems: [],
     });
     setShowNewJob(true);
+  }
+
+  function addNewJobQuoteItem() {
+    setNewJobForm((f) => ({ ...f, quoteItems: [...f.quoteItems, { description: "", qty: "", unitPrice: "" }] }));
+  }
+
+  function updateNewJobQuoteItem(idx, field, value) {
+    setNewJobForm((f) => ({
+      ...f,
+      quoteItems: f.quoteItems.map((it, i) => (i === idx ? { ...it, [field]: value } : it)),
+    }));
+  }
+
+  function removeNewJobQuoteItem(idx) {
+    setNewJobForm((f) => ({ ...f, quoteItems: f.quoteItems.filter((_, i) => i !== idx) }));
   }
 
   function closeNewJob() {
@@ -1135,7 +1206,7 @@ export default function StockControl() {
       ...f,
       selectedProcesses: f.selectedProcesses.some((p) => p.name === processName)
         ? f.selectedProcesses.filter((p) => p.name !== processName)
-        : [...f.selectedProcesses, { name: processName, operator: "" }],
+        : [...f.selectedProcesses, { name: processName, operator: "", externalSupplier: "" }],
     }));
   }
 
@@ -1143,6 +1214,13 @@ export default function StockControl() {
     setNewJobForm((f) => ({
       ...f,
       selectedProcesses: f.selectedProcesses.map((p) => (p.name === processName ? { ...p, operator } : p)),
+    }));
+  }
+
+  function updateNewJobProcessSupplier(processName, externalSupplier) {
+    setNewJobForm((f) => ({
+      ...f,
+      selectedProcesses: f.selectedProcesses.map((p) => (p.name === processName ? { ...p, externalSupplier } : p)),
     }));
   }
 
@@ -1196,6 +1274,8 @@ export default function StockControl() {
           qty: newJobForm.qty ? Number(newJobForm.qty) : null,
           qty_complete: 0,
           due_date: newJobForm.dueDate || null,
+          description: newJobForm.description,
+          quoted_value: newJobForm.quotedValue ? Number(newJobForm.quotedValue) : null,
           quote_reference: newJobForm.quoteReference,
           laser_job_reference: newJobForm.laserJobReference,
           material_location: newJobForm.materialLocation,
@@ -1210,10 +1290,24 @@ export default function StockControl() {
         job_id: job.id,
         process_name: p.name,
         operator: p.operator || "",
+        external_supplier: p.externalSupplier || "",
         sort_order: idx,
       }));
       const { error: procError } = await supabase.from("job_processes").insert(processRows);
       if (procError) throw procError;
+
+      const validQuoteItems = newJobForm.quoteItems.filter((it) => it.description.trim() && Number(it.qty) > 0);
+      if (validQuoteItems.length) {
+        const quoteItemRows = validQuoteItems.map((it, idx) => ({
+          job_id: job.id,
+          description: it.description.trim(),
+          qty: Number(it.qty),
+          unit_price: Number(it.unitPrice) || 0,
+          sort_order: idx,
+        }));
+        const { error: quoteItemError } = await supabase.from("job_quote_items").insert(quoteItemRows);
+        if (quoteItemError) throw quoteItemError;
+      }
 
       if (newJobForm.quotePdfFile) await uploadJobDocument(job.id, newJobForm.quotePdfFile);
       if (newJobForm.quoteExcelFile) await uploadJobDocument(job.id, newJobForm.quoteExcelFile);
@@ -1228,16 +1322,18 @@ export default function StockControl() {
   }
 
   async function openJobDetail(job) {
-    setJobDetail({ job, processes: [], documents: [] });
+    setJobDetail({ job, processes: [], documents: [], quoteItems: [] });
     setJobDetailLoading(true);
     try {
-      const [{ data: processes, error: procError }, { data: documents, error: docError }] = await Promise.all([
+      const [{ data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }] = await Promise.all([
         supabase.from("job_processes").select("*").eq("job_id", job.id).order("sort_order"),
         supabase.from("job_documents").select("*").eq("job_id", job.id).order("created_at", { ascending: false }),
+        supabase.from("job_quote_items").select("*").eq("job_id", job.id).order("sort_order"),
       ]);
       if (procError) throw procError;
       if (docError) throw docError;
-      setJobDetail({ job, processes: processes || [], documents: documents || [] });
+      if (qiError) throw qiError;
+      setJobDetail({ job, processes: processes || [], documents: documents || [], quoteItems: quoteItems || [] });
     } catch (err) {
       console.error("Failed to load job detail:", err);
     }
@@ -1289,8 +1385,38 @@ export default function StockControl() {
     try {
       const { error } = await supabase.from("job_processes").update({ [field]: value }).eq("id", process.id);
       if (error) throw error;
+      flashSaved(`process-${process.id}`);
     } catch (err) {
       console.error("Failed to update process field:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  // Partial invoicing on a quoted line — logs how much was added this time
+  // and bumps the running total, rather than one all-or-nothing flag.
+  async function addQuoteItemToInvoice(item, qtyToAdd) {
+    if (!supabase) return;
+    const remaining = Number(item.qty) - Number(item.qty_invoiced);
+    if (qtyToAdd <= 0 || qtyToAdd > remaining) {
+      alert(`Enter a quantity between 1 and ${remaining} (the remaining un-invoiced amount).`);
+      return;
+    }
+    try {
+      const newTotal = Number(item.qty_invoiced) + qtyToAdd;
+      const { error: updateError } = await supabase.from("job_quote_items").update({ qty_invoiced: newTotal }).eq("id", item.id);
+      if (updateError) throw updateError;
+      const { error: logError } = await supabase.from("job_quote_item_invoices").insert({
+        quote_item_id: item.id,
+        job_id: item.job_id,
+        qty_added: qtyToAdd,
+        invoiced_by: roleLabel,
+      });
+      if (logError) throw logError;
+      flashSaved(`quoteitem-${item.id}`);
+      refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to add to invoice:", err);
+      alert("Couldn't log that — check your connection and try again.");
     }
   }
 
@@ -1424,6 +1550,24 @@ export default function StockControl() {
       if (jobDetail?.job.id === jobId) refreshJobDetail();
     } catch (err) {
       console.error("Failed to update job status:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  async function markJobInvoiced(jobId) {
+    const ok = window.confirm("Mark this job as invoiced? Make sure the real invoice has already been created in Sage.");
+    if (!ok) return;
+    try {
+      const { error } = await supabase
+        .from("jobs")
+        .update({ status: "invoiced", invoiced_by: roleLabel, invoiced_at: new Date().toISOString() })
+        .eq("id", jobId);
+      if (error) throw error;
+      fetchJobs();
+      if (jobDetail?.job.id === jobId) refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to mark job invoiced:", err);
+      alert("That didn't save — check your connection and try again.");
     }
   }
 
@@ -1753,6 +1897,7 @@ export default function StockControl() {
         canManageRequisitions: !!d.can_manage_requisitions,
         canRaisePO: !!d.can_raise_po,
         canViewUsageLog: !!d.can_view_usage_log,
+        canManageInvoicing: !!d.can_manage_invoicing,
         isSalesPerson: !!d.is_sales_person,
         department: d.department || "",
       }))
@@ -1770,6 +1915,7 @@ export default function StockControl() {
     canManageRequisitions: "can_manage_requisitions",
     canRaisePO: "can_raise_po",
     canViewUsageLog: "can_view_usage_log",
+    canManageInvoicing: "can_manage_invoicing",
     isSalesPerson: "is_sales_person",
     department: "department",
   };
@@ -1777,7 +1923,15 @@ export default function StockControl() {
   async function updatePersonField(id, field, value) {
     setPeople((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
     const column = FIELD_TO_COLUMN[field] || field;
-    await supabase.from("profiles").update({ [column]: value }).eq("id", id);
+    try {
+      const { error } = await supabase.from("profiles").update({ [column]: value }).eq("id", id);
+      if (error) throw error;
+      flashSaved(`person-${id}`);
+    } catch (err) {
+      console.error("Failed to save person field:", err);
+      alert("That didn't save — check your connection and try again.");
+      loadPeople();
+    }
   }
 
   async function updatePersonPermission(id, section, kind, value) {
@@ -1785,7 +1939,15 @@ export default function StockControl() {
     if (!person) return;
     const newPermissions = { ...person.permissions, [section]: { ...person.permissions[section], [kind]: value } };
     setPeople((prev) => prev.map((p) => (p.id === id ? { ...p, permissions: newPermissions } : p)));
-    await supabase.from("profiles").update({ permissions: newPermissions }).eq("id", id);
+    try {
+      const { error } = await supabase.from("profiles").update({ permissions: newPermissions }).eq("id", id);
+      if (error) throw error;
+      flashSaved(`person-${id}`);
+    } catch (err) {
+      console.error("Failed to save permission:", err);
+      alert("That didn't save — check your connection and try again.");
+      loadPeople();
+    }
   }
 
   async function resetPersonAccess(id) {
@@ -1810,22 +1972,29 @@ export default function StockControl() {
           : p
       )
     );
-    await supabase
-      .from("profiles")
-      .update({
-        is_admin: false,
-        permissions: blank,
-        can_add_items: false,
-        can_edit_items: false,
-        can_requisition: false,
-        can_mark_received: false,
-        can_see_value: false,
-        can_access_stock_manager: false,
-        can_manage_requisitions: false,
-        can_raise_po: false,
-        can_view_usage_log: false,
-      })
-      .eq("id", id);
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          is_admin: false,
+          permissions: blank,
+          can_add_items: false,
+          can_edit_items: false,
+          can_requisition: false,
+          can_mark_received: false,
+          can_see_value: false,
+          can_access_stock_manager: false,
+          can_manage_requisitions: false,
+          can_raise_po: false,
+          can_view_usage_log: false,
+        })
+        .eq("id", id);
+      if (error) throw error;
+    } catch (err) {
+      console.error("Failed to reset access:", err);
+      alert("That didn't save — check your connection and try again.");
+      loadPeople();
+    }
   }
 
   const isAdmin = !!profile?.isAdmin;
@@ -1845,6 +2014,7 @@ export default function StockControl() {
     if (section === "requisitions") return !!profile?.canRequisition || !!profile?.canManageRequisitions;
     if (section === "purchaseOrders") return !!profile?.canManageRequisitions || !!profile?.canRaisePO;
     if (section === "receiving") return !!profile?.canMarkReceived;
+    if (section === "invoicing") return !!profile?.canManageInvoicing;
     if (section === "notifications") return !!profile?.isSalesPerson;
     if (section === "usageLog") return !!profile?.canViewUsageLog;
     return profile ? !!profile.permissions?.[section]?.view : false;
@@ -4025,6 +4195,7 @@ export default function StockControl() {
           <h1 style={S.h1}>Stock Control</h1>
         </div>
         <div style={S.headerRight}>
+          <SavedCheck fieldKey="core" />
           <button
             className="stk-btn"
             style={S.roleChip}
@@ -4090,6 +4261,16 @@ export default function StockControl() {
           )}
         </div>
       </header>
+
+      {saveState === "error" && (
+        <div style={S.saveErrorBanner}>
+          <AlertTriangle size={14} strokeWidth={2.5} />
+          A change didn't save — check your connection.
+          <button className="stk-btn" style={S.saveErrorRetry} onClick={() => window.location.reload()}>
+            Refresh
+          </button>
+        </div>
+      )}
 
       {authLoading ? (
         <div style={S.loginPrompt}>
@@ -4563,6 +4744,62 @@ export default function StockControl() {
                 <div style={{ ...S.itemName, fontSize: 13.5, marginTop: 2 }}>{n.message}</div>
               </div>
             ))}
+          </div>
+        </div>
+      ) : tab === "invoicing" ? (
+        <div style={S.list}>
+          <div style={S.roleHint}>
+            Jobs marked Complete show up here, ready to invoice — create the real invoice in Sage, then mark it here to keep a record.
+          </div>
+          <label style={S.label}>Outstanding</label>
+          {(jobsList || []).filter((j) => j.status === "complete").length === 0 && (
+            <div style={S.empty}>Nothing waiting to be invoiced.</div>
+          )}
+          <div style={{ ...S.gradeItems, marginTop: 6 }}>
+            {(jobsList || [])
+              .filter((j) => j.status === "complete")
+              .map((job) => (
+                <div key={job.id} style={S.reqCard}>
+                  <div style={S.reqCardTop}>
+                    <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
+                  </div>
+                  <div style={S.rowMeta}>
+                    <span>Sales rep: {job.sales_rep}</span>
+                    {job.quoted_value != null && <span>Quoted: R {Number(job.quoted_value).toFixed(2)}</span>}
+                  </div>
+                  <div style={S.reqActions}>
+                    <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openJobDetail(job)}>
+                      <ClipboardList size={13} /> Open
+                    </button>
+                    {isAdmin || !!profile?.canManageInvoicing && (
+                      <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => markJobInvoiced(job.id)}>
+                        <Check size={13} /> Mark as Invoiced
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+          </div>
+
+          <label style={{ ...S.label, marginTop: 16, display: "block" }}>Invoiced</label>
+          <div style={{ ...S.gradeItems, marginTop: 6 }}>
+            {(jobsList || [])
+              .filter((j) => j.status === "invoiced")
+              .map((job) => (
+                <div key={job.id} style={S.reqCard}>
+                  <div style={S.reqCardTop}>
+                    <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
+                  </div>
+                  <div style={S.rowMeta}>
+                    <span>Invoiced by {job.invoiced_by} on {new Date(job.invoiced_at).toLocaleDateString()}</span>
+                  </div>
+                  <div style={S.reqActions}>
+                    <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openJobDetail(job)}>
+                      <ClipboardList size={13} /> Open
+                    </button>
+                  </div>
+                </div>
+              ))}
           </div>
         </div>
       ) : tab === "usageLog" ? (
@@ -6714,7 +6951,10 @@ export default function StockControl() {
                     <div key={p.id} style={S.deptCard}>
                       <div style={S.deptCardHead}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 600, fontSize: 14 }}>{p.name}</div>
+                          <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center" }}>
+                            {p.name}
+                            <SavedCheck fieldKey={`person-${p.id}`} />
+                          </div>
                           <div style={{ fontFamily: F.mono, fontSize: 11, color: C.muted }}>{p.email}</div>
                         </div>
                         <label style={{ ...S.deptToggleItem, flexShrink: 0 }}>
@@ -6819,6 +7059,14 @@ export default function StockControl() {
                                 onChange={(e) => updatePersonField(p.id, "canViewUsageLog", e.target.checked)}
                               />
                               Can view Usage Log
+                            </label>
+                            <label style={S.deptToggleItem}>
+                              <input
+                                type="checkbox"
+                                checked={!!p.canManageInvoicing}
+                                onChange={(e) => updatePersonField(p.id, "canManageInvoicing", e.target.checked)}
+                              />
+                              Can manage Invoicing
                             </label>
                           </div>
                         </>
@@ -7474,6 +7722,53 @@ export default function StockControl() {
               </div>
             )}
 
+            {jobDetail.job.description && (
+              <div style={{ ...S.roleHint, marginTop: 8 }}>{jobDetail.job.description}</div>
+            )}
+
+            {jobDetail.quoteItems.length > 0 && (
+              <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+                <label style={S.label}>Quoted items</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                  {jobDetail.quoteItems.map((it) => {
+                    const remaining = Number(it.qty) - Number(it.qty_invoiced);
+                    return (
+                      <div key={it.id} style={S.managerRow}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, display: "flex", alignItems: "center" }}>
+                            {it.description}
+                            <SavedCheck fieldKey={`quoteitem-${it.id}`} />
+                          </div>
+                          <div style={S.roleHint}>
+                            {it.qty} × R{Number(it.unit_price).toFixed(2)} — Invoiced {it.qty_invoiced} / {it.qty}
+                          </div>
+                        </div>
+                        {canEditQty("jobs") && remaining > 0 && (
+                          <button
+                            type="button"
+                            className="stk-btn"
+                            style={S.reqActionBtnMuted}
+                            onClick={() => {
+                              const input = window.prompt(`Add to invoice — how many of ${it.description} (remaining: ${remaining})?`, remaining);
+                              if (input === null) return;
+                              const qty = parseFloat(input);
+                              if (!isNaN(qty)) addQuoteItemToInvoice(it, qty);
+                            }}
+                          >
+                            Add to Invoice
+                          </button>
+                        )}
+                        {remaining <= 0 && <span style={{ ...S.roleHint, color: C.accentFinished }}>Fully invoiced</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+                {jobDetail.job.quoted_value != null && (
+                  <div style={{ ...S.roleHint, marginTop: 6 }}>Quoted value: R {Number(jobDetail.job.quoted_value).toFixed(2)}</div>
+                )}
+              </div>
+            )}
+
             <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
               <label style={S.label}>Process checklist</label>
               {jobDetailLoading && <div style={S.empty}>Loading…</div>}
@@ -7490,11 +7785,13 @@ export default function StockControl() {
                         />
                         {p.process_name}
                       </label>
+                      <SavedCheck fieldKey={`process-${p.id}`} />
                       {p.is_complete && (
                         <div style={{ ...S.roleHint, marginLeft: 22 }}>
                           {p.completed_by} — {new Date(p.completed_at).toLocaleString()}
                         </div>
                       )}
+                      {p.external_supplier && <div style={{ ...S.roleHint, marginLeft: 22 }}>External supplier: {p.external_supplier}</div>}
                       {canEditQty("jobs") && (
                         <div style={{ display: "flex", gap: 6, marginTop: 4, marginLeft: 22 }}>
                           <input
@@ -7509,6 +7806,16 @@ export default function StockControl() {
                             onBlur={(e) => updateJobProcessField(p, "notes", e.target.value)}
                             placeholder="Notes"
                           />
+                          <select
+                            style={{ ...S.input, fontSize: 12, padding: "5px 8px" }}
+                            value={p.external_supplier || ""}
+                            onChange={(e) => updateJobProcessField(p, "external_supplier", e.target.value)}
+                          >
+                            <option value="">No external supplier</option>
+                            {master.suppliers.map((s) => (
+                              <option key={s.id} value={s.name}>{s.name}</option>
+                            ))}
+                          </select>
                         </div>
                       )}
                     </div>
@@ -7681,6 +7988,67 @@ export default function StockControl() {
               />
             </div>
 
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Description (optional)</label>
+              <input
+                style={S.input}
+                value={newJobForm.description}
+                onChange={(e) => setNewJobForm((f) => ({ ...f, description: e.target.value }))}
+                placeholder="What this job is"
+              />
+            </div>
+
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <label style={S.label}>Quoted items (optional)</label>
+                <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={addNewJobQuoteItem}>
+                  <Plus size={12} /> Add line
+                </button>
+              </div>
+              {newJobForm.quoteItems.map((it, idx) => (
+                <div key={idx} style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
+                  <input
+                    style={{ ...S.input, flex: 2 }}
+                    value={it.description}
+                    onChange={(e) => updateNewJobQuoteItem(idx, "description", e.target.value)}
+                    placeholder="Description"
+                  />
+                  <input
+                    style={{ ...S.input, width: 60 }}
+                    type="number"
+                    min="0"
+                    value={it.qty}
+                    onChange={(e) => updateNewJobQuoteItem(idx, "qty", e.target.value)}
+                    placeholder="Qty"
+                  />
+                  <input
+                    style={{ ...S.input, width: 80 }}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={it.unitPrice}
+                    onChange={(e) => updateNewJobQuoteItem(idx, "unitPrice", e.target.value)}
+                    placeholder="Unit R"
+                  />
+                  <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeNewJobQuoteItem(idx)}>
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+              <div style={{ marginTop: 10 }}>
+                <label style={S.label}>Quoted value (optional)</label>
+                <input
+                  style={S.input}
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={newJobForm.quotedValue}
+                  onChange={(e) => setNewJobForm((f) => ({ ...f, quotedValue: e.target.value }))}
+                  placeholder="Total quoted value, for comparing against actual cost later"
+                />
+              </div>
+            </div>
+
             <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
               <label style={S.label}>Which processes does this job need?</label>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
@@ -7707,7 +8075,7 @@ export default function StockControl() {
                     ))}
                   </datalist>
                   {newJobForm.selectedProcesses.map((sp) => (
-                    <div key={sp.name} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div key={sp.name} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                       <span style={{ fontSize: 12.5, width: 140, flexShrink: 0 }}>{sp.name}</span>
                       <input
                         style={S.input}
@@ -7716,6 +8084,17 @@ export default function StockControl() {
                         onChange={(e) => updateNewJobProcessOperator(sp.name, e.target.value)}
                         placeholder="Pick a person or type a name"
                       />
+                      <select
+                        style={S.input}
+                        value={sp.externalSupplier}
+                        onChange={(e) => updateNewJobProcessSupplier(sp.name, e.target.value)}
+                        title="External supplier for this process, if any"
+                      >
+                        <option value="">No external supplier</option>
+                        {master.suppliers.map((s) => (
+                          <option key={s.id} value={s.name}>{s.name}</option>
+                        ))}
+                      </select>
                     </div>
                   ))}
                 </div>
@@ -8133,6 +8512,29 @@ const S = {
     marginBottom: 16,
     gap: 12,
     flexWrap: "wrap",
+  },
+  saveErrorBanner: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "8px 12px",
+    marginBottom: 12,
+    borderRadius: 6,
+    background: "rgba(220, 60, 60, 0.12)",
+    border: `1px solid ${C.danger}`,
+    color: C.danger,
+    fontFamily: F.mono,
+    fontSize: 12.5,
+  },
+  saveErrorRetry: {
+    marginLeft: "auto",
+    padding: "4px 10px",
+    borderRadius: 5,
+    border: `1px solid ${C.danger}`,
+    background: "transparent",
+    color: C.danger,
+    fontFamily: F.mono,
+    fontSize: 11.5,
   },
   eyebrow: {
     fontFamily: F.mono,
