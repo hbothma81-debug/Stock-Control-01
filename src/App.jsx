@@ -442,6 +442,8 @@ export default function StockControl() {
   const [jobDetailLoading, setJobDetailLoading] = useState(false);
   const [showNewJob, setShowNewJob] = useState(false);
   const [newStockItemModal, setNewStockItemModal] = useState(null);
+  const [showAddStockItemModal, setShowAddStockItemModal] = useState(false);
+  const [showStockImportModal, setShowStockImportModal] = useState(false);
   const [newJobForm, setNewJobForm] = useState(null);
   const [notificationsList, setNotificationsList] = useState(null);
   const [jobQtyInput, setJobQtyInput] = useState("");
@@ -6926,79 +6928,7 @@ export default function StockControl() {
 
             {managerTab === "stockCodes" ? (
               <>
-                <div style={S.managerAddRow}>
-                  <select
-                    style={{ ...S.input, flex: 1 }}
-                    value={importCustomer}
-                    onChange={(e) => setImportCustomer(e.target.value)}
-                  >
-                    <option value="">Select a customer — required to import</option>
-                    {master.customers.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                  <label
-                    className="stk-btn"
-                    style={{ ...S.addBtn, cursor: importCustomer ? "pointer" : "not-allowed", opacity: importCustomer ? 1 : 0.5 }}
-                  >
-                    <input
-                      type="file"
-                      accept=".xlsx,.xls,.csv"
-                      style={{ display: "none" }}
-                      onChange={handleImportFile}
-                      disabled={!importCustomer}
-                    />
-                    Import Excel
-                  </label>
-                  <button type="button" className="stk-btn" style={S.roleChip} onClick={exportStockCodes}>
-                    <Download size={13} />
-                    Export
-                  </button>
-                </div>
-                {importFileLabel && <div style={{ fontFamily: F.mono, fontSize: 11, color: C.muted, marginTop: 4 }}>{importFileLabel}</div>}
-                <label style={{ ...S.checkRow, marginTop: 8 }}>
-                  <input type="checkbox" checked={importReplaceAll} onChange={(e) => setImportReplaceAll(e.target.checked)} />
-                  Replace the whole list with this file, instead of updating/adding
-                </label>
-                {importReplaceAll && (
-                  <div style={{ ...S.roleHint, color: C.danger }}>
-                    Every stock code not in this file will be deleted. Use this for a full refresh (e.g. re-uploading a
-                    supplier's updated pricing sheet) — not for adding a few extra items.
-                  </div>
-                )}
-                <div style={S.roleHint}>
-                  Imports the first sheet, matching columns containing "stock code", "description", "price", and "recommended"/"reorder". Test with a
-                  small file first and check a few rows below before importing the full 400.
-                  {!importReplaceAll && " Existing stock codes with a matching code get updated, not duplicated."}
-                </div>
-
-                <div style={{ ...S.managerAddRow, marginTop: 12 }}>
-                  <input style={{ ...S.input, flex: 1 }} value={scForm.stockCode} onChange={(e) => setScForm({ ...scForm, stockCode: e.target.value })} placeholder="Part number" />
-                  <input style={{ ...S.input, flex: 2 }} value={scForm.description} onChange={(e) => setScForm({ ...scForm, description: e.target.value })} placeholder="Description" />
-                </div>
-                <div style={{ ...S.managerAddRow, marginTop: 6 }}>
-                  <input style={{ ...S.input, flex: 1 }} type="number" step="0.01" value={scForm.price} onChange={(e) => setScForm({ ...scForm, price: e.target.value })} placeholder="Unit price (R)" />
-                  <input style={{ ...S.input, flex: 1 }} type="number" value={scForm.recommendedStock} onChange={(e) => setScForm({ ...scForm, recommendedStock: e.target.value })} placeholder="Low stock warning at" />
-                  <input style={{ ...S.input, flex: 1 }} value={scForm.revision} onChange={(e) => setScForm({ ...scForm, revision: e.target.value })} placeholder="Customer revision (e.g. A)" />
-                </div>
-                <div style={{ ...S.managerAddRow, marginTop: 6 }}>
-                  <select style={{ ...S.input, flex: 1 }} value={scForm.customer} onChange={(e) => setScForm({ ...scForm, customer: e.target.value })}>
-                    <option value="">Customer (optional) — none</option>
-                    {master.customers.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                  <button type="button" className="stk-btn" style={S.addBtn} onClick={addStockCodeRow}>
-                    <Plus size={15} />
-                    Add
-                  </button>
-                </div>
-                <div style={S.roleHint}>
-                  This creates a real Customer Stock item at qty 0 — it won't show on the main Customer Stock tab until it
-                  actually has stock, but it's real, searchable, and can have a drawing linked to it right away.
-                </div>
-
-                <div style={{ ...S.managerAddRow, marginTop: 12 }}>
+                <div style={{ ...S.managerAddRow, marginBottom: 4 }}>
                   <input
                     style={{ ...S.input, flex: 2 }}
                     value={stockCodeQuery}
@@ -7015,6 +6945,14 @@ export default function StockControl() {
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </select>
+                  <button type="button" className="stk-btn" style={S.addBtn} onClick={() => setShowAddStockItemModal(true)}>
+                    <Plus size={15} />
+                    Add Item
+                  </button>
+                  <button type="button" className="stk-btn" style={S.roleChip} onClick={() => setShowStockImportModal(true)}>
+                    <Upload size={13} />
+                    Import / Export
+                  </button>
                   {isAdmin && stockCodeCustomerFilter && (
                     <button
                       type="button"
@@ -7027,12 +6965,6 @@ export default function StockControl() {
                     </button>
                   )}
                 </div>
-                {isAdmin && stockCodeCustomerFilter && (
-                  <div style={S.roleHint}>
-                    Filter to a customer above, then use this to clear their zero-stock catalog items before a fresh
-                    re-import — only affects that customer, and never touches anything with real stock on hand.
-                  </div>
-                )}
 
                 <div style={{ ...S.managerAddRow, marginTop: 12, marginBottom: 4, opacity: 0.7 }}>
                   <span style={{ ...S.label, flex: "0 0 110px" }}>Part number</span>
@@ -8490,6 +8422,124 @@ export default function StockControl() {
                 ))}
                 {jobDetail.documents.length === 0 && <div style={S.empty}>No documents yet.</div>}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddStockItemModal && (
+        <div style={{ ...S.modalOverlay, zIndex: 30 }} onClick={() => setShowAddStockItemModal(false)}>
+          <div style={{ ...S.modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Add Customer Stock Item</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setShowAddStockItemModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Part number</label>
+              <input style={S.input} value={scForm.stockCode} onChange={(e) => setScForm({ ...scForm, stockCode: e.target.value })} autoFocus />
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Description</label>
+              <input style={S.input} value={scForm.description} onChange={(e) => setScForm({ ...scForm, description: e.target.value })} />
+            </div>
+            <div style={S.formGrid}>
+              <div>
+                <label style={S.label}>Unit price (R)</label>
+                <input style={S.input} type="number" step="0.01" value={scForm.price} onChange={(e) => setScForm({ ...scForm, price: e.target.value })} />
+              </div>
+              <div>
+                <label style={S.label}>Low stock warning at</label>
+                <input style={S.input} type="number" value={scForm.recommendedStock} onChange={(e) => setScForm({ ...scForm, recommendedStock: e.target.value })} />
+              </div>
+            </div>
+            <div style={S.formGrid}>
+              <div>
+                <label style={S.label}>Customer revision (optional)</label>
+                <input style={S.input} value={scForm.revision} onChange={(e) => setScForm({ ...scForm, revision: e.target.value })} placeholder="e.g. A" />
+              </div>
+              <div>
+                <label style={S.label}>Customer</label>
+                <select style={S.input} value={scForm.customer} onChange={(e) => setScForm({ ...scForm, customer: e.target.value })}>
+                  <option value="">None</option>
+                  {master.customers.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div style={S.roleHint}>
+              This creates a real Customer Stock item at qty 0 — it won't show on the main Customer Stock tab until it
+              actually has stock, but it's real, searchable, and can have a drawing linked to it right away.
+            </div>
+            <button
+              type="button"
+              className="stk-btn"
+              style={S.submitBtn}
+              onClick={() => {
+                addStockCodeRow();
+                setShowAddStockItemModal(false);
+              }}
+            >
+              Add Item
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showStockImportModal && (
+        <div style={{ ...S.modalOverlay, zIndex: 30 }} onClick={() => setShowStockImportModal(false)}>
+          <div style={{ ...S.modal, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Import / Export Customer Stock</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setShowStockImportModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Customer</label>
+              <select style={S.input} value={importCustomer} onChange={(e) => setImportCustomer(e.target.value)}>
+                <option value="">Select a customer — required to import</option>
+                {master.customers.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ ...S.managerAddRow, marginTop: 10 }}>
+              <label
+                className="stk-btn"
+                style={{ ...S.addBtn, flex: 1, cursor: importCustomer ? "pointer" : "not-allowed", opacity: importCustomer ? 1 : 0.5 }}
+              >
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  style={{ display: "none" }}
+                  onChange={handleImportFile}
+                  disabled={!importCustomer}
+                />
+                Import Excel
+              </label>
+              <button type="button" className="stk-btn" style={S.roleChip} onClick={exportStockCodes}>
+                <Download size={13} />
+                Export
+              </button>
+            </div>
+            {importFileLabel && <div style={{ fontFamily: F.mono, fontSize: 11, color: C.muted, marginTop: 4 }}>{importFileLabel}</div>}
+            <label style={{ ...S.checkRow, marginTop: 8 }}>
+              <input type="checkbox" checked={importReplaceAll} onChange={(e) => setImportReplaceAll(e.target.checked)} />
+              Replace the whole list with this file, instead of updating/adding
+            </label>
+            {importReplaceAll && (
+              <div style={{ ...S.roleHint, color: C.danger }}>
+                Every zero-stock catalog item not in this file will be deleted — anything with real stock on hand is
+                always kept regardless. Use this for a full refresh, not for adding a few extra items.
+              </div>
+            )}
+            <div style={S.roleHint}>
+              Imports the first sheet, matching columns containing "stock code", "description", "price", and "recommended"/"reorder". Test with a
+              small file first.
+              {!importReplaceAll && " Existing parts with a matching part number get updated, not duplicated — and their quantity is never touched."}
             </div>
           </div>
         </div>
