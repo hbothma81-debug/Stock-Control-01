@@ -40,10 +40,9 @@ const NAV_TABS = [
   { key: "drawings", label: "Drawings" },
 ];
 
-// The tab bar groups the four core stock divisions under one "Stock"
-// dropdown instead of showing each as its own button — everything else
-// (Stores, Fasteners, Assets, and the workflow tabs) stays a plain tab.
-const STOCK_GROUP_KEYS = ["plate", "structural", "cncBar", "custom"];
+// The tab bar groups related divisions under a shared dropdown instead of
+// showing each as its own button.
+const TAB_GROUPS = [{ label: "Stock", keys: ["plate", "structural", "cncBar", "custom", "fasteners"] }];
 
 // Jobs and Notifications still need a canView() entry (for the header
 // buttons and permission checks) even though they're not part of the main
@@ -499,7 +498,7 @@ export default function StockControl() {
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [tab, setTab] = useState("jobs");
-  const [stockMenuOpen, setStockMenuOpen] = useState(false);
+  const [stockMenuOpen, setStockMenuOpen] = useState(null); // holds the open group's label, or null
   const [query, setQuery] = useState("");
   const [customerFilter, setCustomerFilter] = useState(null);
   const [sectionTypeFilter, setSectionTypeFilter] = useState(null);
@@ -530,6 +529,7 @@ export default function StockControl() {
   const [managerTab, setManagerTab] = useState("sizes");
   const [managerInput, setManagerInput] = useState("");
   const [managerFactor, setManagerFactor] = useState("");
+  const [managerShortName, setManagerShortName] = useState("");
   const [managerPrice, setManagerPrice] = useState("");
   const [managerType, setManagerType] = useState("");
   const [stockCodeQuery, setStockCodeQuery] = useState("");
@@ -2225,7 +2225,15 @@ export default function StockControl() {
       .filter((it) => Number(it.qty) > 0 || !!activeRequisitionForItem(it.id))
       .filter((it) => (tab !== "custom" && tab !== "stores" && tab !== "fasteners") || !customerFilter || it.customer === customerFilter)
       .filter((it) => tab !== "structural" || !sectionTypeFilter || findSectionType(it.name) === sectionTypeFilter)
-      .filter((it) => !filterGrade || it.grade === filterGrade)
+      .filter((it) => {
+        if (!filterGrade) return true;
+        if (it.grade === filterGrade) return true;
+        // filterGrade may be a short name — also match items still storing
+        // the full name from before short names existed.
+        const gradeList = tab === "cncBar" ? master.cncGrades : master.grades;
+        const match = (gradeList || []).find((g) => (g.shortName || g.name) === filterGrade);
+        return match ? it.grade === match.name : false;
+      })
       .filter((it) => {
         if (tab !== "plate") return true;
         const d = parseSize(it.size);
@@ -2354,7 +2362,8 @@ export default function StockControl() {
 
   function findPrice(listKey, name) {
     if (!master) return 0;
-    const hit = (master[listKey] || []).find((e) => e.name.toLowerCase() === (name || "").toLowerCase());
+    const q = (name || "").toLowerCase();
+    const hit = (master[listKey] || []).find((e) => e.name.toLowerCase() === q || (e.shortName || "").toLowerCase() === q);
     return hit ? hit.price || 0 : 0;
   }
 
@@ -2362,9 +2371,12 @@ export default function StockControl() {
   // straight back to the shared grade or section price, same underlying
   // value Requisitions and Stock Manager already read from.
   function setMaterialPrice(listKey, name, price) {
+    const q = (name || "").toLowerCase();
     setMaster((prev) => ({
       ...prev,
-      [listKey]: (prev[listKey] || []).map((x) => (x.name.toLowerCase() === (name || "").toLowerCase() ? { ...x, price } : x)),
+      [listKey]: (prev[listKey] || []).map((x) =>
+        x.name.toLowerCase() === q || (x.shortName || "").toLowerCase() === q ? { ...x, price } : x
+      ),
     }));
   }
 
@@ -3776,7 +3788,11 @@ export default function StockControl() {
       qty: duplicate ? "" : String(it.qty || ""),
       comment: it.comment || "",
     };
-    const grade = resolveField(master.grades.map((g) => g.name), it.grade);
+    // Accept either the full name or short name as a valid match — older
+    // items may have the full name stored from before short names existed.
+    const gradeOptions = master.grades.map((g) => g.shortName || g.name);
+    const gradeMatch = master.grades.find((g) => g.name === it.grade || (g.shortName && g.shortName === it.grade));
+    const grade = gradeMatch ? { field: gradeMatch.shortName || gradeMatch.name, custom: "" } : resolveField(gradeOptions, it.grade);
     const sp = resolveField(master.salesPeople, it.salesPerson);
     const cust = resolveField(master.customers, it.customer);
     const sup = resolveField(master.suppliers.map((s) => s.name), it.supplier);
@@ -3924,7 +3940,7 @@ export default function StockControl() {
     if (managerIsFactorTable) {
       const factor = parseFloat(managerFactor) || 0;
       const price = parseFloat(managerPrice) || 0;
-      const extra = managerTab === "sections" ? { type: managerType } : {};
+      const extra = managerTab === "sections" ? { type: managerType } : managerTab === "grades" ? { shortName: managerShortName.trim() } : {};
       setMaster((prev) => {
         const list = prev[managerTab] || [];
         if (list.some((x) => x.name.toLowerCase() === val.toLowerCase())) return prev;
@@ -3933,6 +3949,7 @@ export default function StockControl() {
       setManagerFactor("");
       setManagerPrice("");
       setManagerType("");
+      setManagerShortName("");
     } else {
       setMaster((prev) => {
         const list = prev[managerTab] || [];
@@ -3958,6 +3975,13 @@ export default function StockControl() {
     setMaster((prev) => ({
       ...prev,
       [managerTab]: prev[managerTab].map((x) => (x.name === name ? { ...x, [field]: parseFloat(newValue) || 0 } : x)),
+    }));
+  }
+
+  function updateGradeShortName(name, newValue) {
+    setMaster((prev) => ({
+      ...prev,
+      grades: (prev.grades || []).map((x) => (x.name === name ? { ...x, shortName: newValue } : x)),
     }));
   }
 
@@ -4524,44 +4548,43 @@ export default function StockControl() {
           <div style={S.mainTabs}>
             {(() => {
               const rendered = [];
-              let stockGroupShown = false;
+              const groupsShown = new Set();
               visibleTabs.forEach((t) => {
-                if (STOCK_GROUP_KEYS.includes(t.key)) {
-                  if (stockGroupShown) return; // already rendered the Stock dropdown once
-                  stockGroupShown = true;
-                  const stockTabs = visibleTabs.filter((vt) => STOCK_GROUP_KEYS.includes(vt.key));
-                  const isActive = STOCK_GROUP_KEYS.includes(tab);
+                const group = TAB_GROUPS.find((g) => g.keys.includes(t.key));
+                if (group) {
+                  if (groupsShown.has(group.label)) return; // this group's dropdown already rendered
+                  groupsShown.add(group.label);
+                  const groupTabs = visibleTabs.filter((vt) => group.keys.includes(vt.key));
+                  const isActive = group.keys.includes(tab);
+                  const isOpen = stockMenuOpen === group.label;
                   rendered.push(
-                    <div key="stock-group" style={{ position: "relative" }}>
-                      {stockMenuOpen && (
-                        <div
-                          onClick={() => setStockMenuOpen(false)}
-                          style={{ position: "fixed", inset: 0, zIndex: 15 }}
-                        />
+                    <div key={`group-${group.label}`} style={{ position: "relative" }}>
+                      {isOpen && (
+                        <div onClick={() => setStockMenuOpen(null)} style={{ position: "fixed", inset: 0, zIndex: 15 }} />
                       )}
                       <button
                         className="stk-btn"
-                        onClick={() => setStockMenuOpen((o) => !o)}
+                        onClick={() => setStockMenuOpen((o) => (o === group.label ? null : group.label))}
                         style={{ ...S.mainTab, ...(isActive ? S.mainTabActive : {}) }}
                       >
-                        Stock
-                        <ChevronDown size={13} style={{ marginLeft: 4, transform: stockMenuOpen ? "rotate(180deg)" : "none" }} />
+                        {group.label}
+                        <ChevronDown size={13} style={{ marginLeft: 4, transform: isOpen ? "rotate(180deg)" : "none" }} />
                       </button>
-                      {stockMenuOpen && (
+                      {isOpen && (
                         <div style={S.stockDropdown}>
-                          {stockTabs.map((st) => (
+                          {groupTabs.map((gt) => (
                             <button
-                              key={st.key}
+                              key={gt.key}
                               className="stk-btn"
                               onClick={() => {
-                                setTab(st.key);
+                                setTab(gt.key);
                                 setCustomerFilter(null);
                                 setSectionTypeFilter(null);
-                                setStockMenuOpen(false);
+                                setStockMenuOpen(null);
                               }}
-                              style={{ ...S.stockDropdownItem, ...(tab === st.key ? S.stockDropdownItemActive : {}) }}
+                              style={{ ...S.stockDropdownItem, ...(tab === gt.key ? S.stockDropdownItemActive : {}) }}
                             >
-                              {st.label}
+                              {gt.label}
                             </button>
                           ))}
                         </div>
@@ -4578,7 +4601,7 @@ export default function StockControl() {
                       setTab(t.key);
                       setCustomerFilter(null);
                       setSectionTypeFilter(null);
-                      setStockMenuOpen(false);
+                      setStockMenuOpen(null);
                     }}
                     style={{ ...S.mainTab, ...(tab === t.key ? S.mainTabActive : {}) }}
                   >
@@ -5342,7 +5365,7 @@ export default function StockControl() {
             <select style={S.input} value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)}>
               <option value="">All materials</option>
               {(tab === "cncBar" ? master.cncGrades : master.grades).map((g) => (
-                <option key={g.name} value={g.name}>{g.name}</option>
+                <option key={g.name} value={g.shortName || g.name}>{g.shortName || g.name}</option>
               ))}
             </select>
           </div>
@@ -6077,7 +6100,7 @@ export default function StockControl() {
                   <div style={{ marginTop: form.mainCat === "structural" ? 10 : 0 }}>
                     <LibraryField
                       label="Material grade"
-                      options={master.grades.map((g) => g.name)}
+                      options={master.grades.map((g) => g.shortName || g.name)}
                       value={form.grade}
                       onChange={(v) => setForm({ ...form, grade: v })}
                       customValue={form.customGrade}
@@ -7341,6 +7364,14 @@ export default function StockControl() {
                         onChange={(e) => setManagerPrice(e.target.value)}
                         placeholder={managerTab !== "sections" ? "R/kg" : "R/m"}
                       />
+                      {managerTab === "grades" && (
+                        <input
+                          style={{ ...S.input, flex: 1 }}
+                          value={managerShortName}
+                          onChange={(e) => setManagerShortName(e.target.value)}
+                          placeholder="Short name, e.g. SS304-2B"
+                        />
+                      )}
                     </>
                   )}
                   <button type="button" className="stk-btn" style={S.addBtn} onClick={addMasterEntry}>
@@ -7432,6 +7463,14 @@ export default function StockControl() {
                                     <option key={t} value={t}>{t}</option>
                                   ))}
                                 </select>
+                              )}
+                              {managerTab === "grades" && (
+                                <input
+                                  value={entry.shortName || ""}
+                                  placeholder="Short name"
+                                  onChange={(e) => updateGradeShortName(entry.name, e.target.value)}
+                                  style={{ ...S.managerFactorInput, width: 130 }}
+                                />
                               )}
                               <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeMasterEntry(entry)}>
                                 <Trash2 size={13} />
@@ -9032,7 +9071,7 @@ const S = {
     top: "100%",
     left: 0,
     marginTop: 4,
-    background: C.panel,
+    background: C.surface,
     border: `1px solid ${C.border}`,
     borderRadius: 8,
     padding: 4,
