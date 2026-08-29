@@ -442,6 +442,7 @@ export default function StockControl() {
   const [jobDetailLoading, setJobDetailLoading] = useState(false);
   const [showNewJob, setShowNewJob] = useState(false);
   const [newStockItemModal, setNewStockItemModal] = useState(null);
+  const [markInvoicedModal, setMarkInvoicedModal] = useState(null);
   const [showAddStockItemModal, setShowAddStockItemModal] = useState(false);
   const [showStockImportModal, setShowStockImportModal] = useState(false);
   const [newJobForm, setNewJobForm] = useState(null);
@@ -1762,17 +1763,25 @@ export default function StockControl() {
     }
   }
 
-  async function markJobInvoiced(jobId) {
-    const ok = window.confirm("Mark this job as invoiced? Make sure the real invoice has already been created in Sage.");
-    if (!ok) return;
+  function openMarkInvoicedModal(job) {
+    setMarkInvoicedModal({ job, invoiceNumber: "" });
+  }
+
+  async function submitMarkInvoiced() {
+    const { job, invoiceNumber } = markInvoicedModal;
+    if (!invoiceNumber.trim()) {
+      alert("Enter the real invoice number from Sage before marking this invoiced.");
+      return;
+    }
     try {
       const { error } = await supabase
         .from("jobs")
-        .update({ status: "invoiced", invoiced_by: roleLabel, invoiced_at: new Date().toISOString() })
-        .eq("id", jobId);
+        .update({ status: "invoiced", invoiced_by: roleLabel, invoiced_at: new Date().toISOString(), invoice_number: invoiceNumber.trim() })
+        .eq("id", job.id);
       if (error) throw error;
+      setMarkInvoicedModal(null);
       fetchJobs();
-      if (jobDetail?.job.id === jobId) refreshJobDetail();
+      if (jobDetail?.job.id === job.id) refreshJobDetail();
     } catch (err) {
       console.error("Failed to mark job invoiced:", err);
       alert("That didn't save — check your connection and try again.");
@@ -5064,20 +5073,17 @@ export default function StockControl() {
           )}
           {jobsLoading && <div style={{ ...S.empty, marginTop: 10 }}>Loading…</div>}
           {!jobsLoading && jobsList?.length === 0 && <div style={S.empty}>No jobs yet.</div>}
-          <div style={{ ...S.gradeItems, marginTop: 10 }}>
+
+          <label style={{ ...S.label, marginTop: 10, display: "block" }}>Active</label>
+          <div style={{ ...S.gradeItems, marginTop: 6 }}>
             {(jobsList || [])
-              .filter((j) => j.status !== "cancelled")
+              .filter((j) => j.status === "in_progress" || j.status === "complete")
               .map((job) => (
                 <div key={job.id} style={S.reqCard}>
                   <div style={S.reqCardTop}>
                     <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
-                    <span
-                      style={{
-                        ...S.reqStatusTag,
-                        ...(job.status === "complete" || job.status === "invoiced" ? S.reqStatus_received : S.reqStatus_ordered),
-                      }}
-                    >
-                      {job.status === "in_progress" ? "In Progress" : job.status === "complete" ? "Complete" : job.status === "invoiced" ? "Invoiced" : job.status}
+                    <span style={{ ...S.reqStatusTag, ...(job.status === "complete" ? S.reqStatus_received : S.reqStatus_ordered) }}>
+                      {job.status === "in_progress" ? "In Progress" : "Complete"}
                     </span>
                   </div>
                   <div style={S.rowMeta}>
@@ -5093,6 +5099,33 @@ export default function StockControl() {
                   </div>
                 </div>
               ))}
+            {(jobsList || []).filter((j) => j.status === "in_progress" || j.status === "complete").length === 0 && (
+              <div style={S.empty}>Nothing active.</div>
+            )}
+          </div>
+
+          <label style={{ ...S.label, marginTop: 16, display: "block" }}>Completed</label>
+          <div style={{ ...S.gradeItems, marginTop: 6 }}>
+            {(jobsList || [])
+              .filter((j) => j.status === "invoiced")
+              .map((job) => (
+                <div key={job.id} style={S.reqCard}>
+                  <div style={S.reqCardTop}>
+                    <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
+                    <span style={{ ...S.reqStatusTag, ...S.reqStatus_received }}>Invoiced</span>
+                  </div>
+                  <div style={S.rowMeta}>
+                    <span>Invoice #{job.invoice_number}</span>
+                    <span>{job.invoiced_by} on {new Date(job.invoiced_at).toLocaleDateString()}</span>
+                  </div>
+                  <div style={S.reqActions}>
+                    <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openJobDetail(job)}>
+                      <ClipboardList size={13} /> Open
+                    </button>
+                  </div>
+                </div>
+              ))}
+            {(jobsList || []).filter((j) => j.status === "invoiced").length === 0 && <div style={S.empty}>Nothing completed yet.</div>}
           </div>
         </div>
       ) : tab === "notifications" ? (
@@ -5140,7 +5173,7 @@ export default function StockControl() {
                       <ClipboardList size={13} /> Open
                     </button>
                     {isAdmin || !!profile?.canManageInvoicing && (
-                      <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => markJobInvoiced(job.id)}>
+                      <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => openMarkInvoicedModal(job)}>
                         <Check size={13} /> Mark as Invoiced
                       </button>
                     )}
@@ -8210,7 +8243,7 @@ export default function StockControl() {
               </div>
             )}
 
-            {canEditQty("jobs") && (
+            {canEditQty("jobs") && jobDetail.job.status !== "invoiced" && (
               <div style={{ marginTop: 8 }}>
                 <label style={S.label}>Status</label>
                 <select
@@ -8220,9 +8253,24 @@ export default function StockControl() {
                 >
                   <option value="in_progress">In Progress</option>
                   <option value="complete">Complete</option>
-                  <option value="invoiced">Invoiced</option>
                   <option value="cancelled">Cancelled</option>
                 </select>
+                {jobDetail.job.status === "complete" && (
+                  <button
+                    type="button"
+                    className="stk-btn"
+                    style={{ ...S.reqActionBtn, marginTop: 8 }}
+                    onClick={() => openMarkInvoicedModal(jobDetail.job)}
+                  >
+                    <Check size={13} /> Mark as Invoiced
+                  </button>
+                )}
+              </div>
+            )}
+
+            {jobDetail.job.status === "invoiced" && (
+              <div style={{ ...S.roleHint, marginTop: 8, color: C.accentFinished }}>
+                Invoiced — #{jobDetail.job.invoice_number} — by {jobDetail.job.invoiced_by} on {new Date(jobDetail.job.invoiced_at).toLocaleDateString()}
               </div>
             )}
 
@@ -8487,6 +8535,33 @@ export default function StockControl() {
               }}
             >
               Add Item
+            </button>
+          </div>
+        </div>
+      )}
+
+      {markInvoicedModal && (
+        <div style={{ ...S.modalOverlay, zIndex: 30 }} onClick={() => setMarkInvoicedModal(null)}>
+          <div style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Mark {markInvoicedModal.job.job_number} as Invoiced</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setMarkInvoicedModal(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={S.roleHint}>Make sure the real invoice has already been created in Sage before entering its number here.</div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Invoice number</label>
+              <input
+                style={S.input}
+                value={markInvoicedModal.invoiceNumber}
+                onChange={(e) => setMarkInvoicedModal((m) => ({ ...m, invoiceNumber: e.target.value }))}
+                placeholder="e.g. INV-4471"
+                autoFocus
+              />
+            </div>
+            <button type="button" className="stk-btn" style={S.submitBtn} onClick={submitMarkInvoiced}>
+              Mark as Invoiced
             </button>
           </div>
         </div>
