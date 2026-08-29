@@ -5,7 +5,7 @@ import autoTable from "jspdf-autotable";
 import { supabase } from "./lib/supabaseClient.js";
 import {
   Plus, Minus, Search, Trash2, PackagePlus, AlertTriangle, X,
-  ChevronDown, User, UserCheck, ShieldCheck, Lock, Database,
+  ChevronDown, User, UserCheck, ShieldCheck, Lock, Database, Truck,
   Download, Pencil, Copy, Filter as FilterIcon, Paperclip, FileText, Image as ImageIcon,
   Wrench, Users, Eye, EyeOff, ShoppingCart, ClipboardList, Check, Package, Upload, RefreshCw,
 } from "lucide-react";
@@ -443,6 +443,7 @@ export default function StockControl() {
   const [showNewJob, setShowNewJob] = useState(false);
   const [newStockItemModal, setNewStockItemModal] = useState(null);
   const [markInvoicedModal, setMarkInvoicedModal] = useState(null);
+  const [deliveryNoteModal, setDeliveryNoteModal] = useState(null);
   const [showAddStockItemModal, setShowAddStockItemModal] = useState(false);
   const [showStockImportModal, setShowStockImportModal] = useState(false);
   const [newJobForm, setNewJobForm] = useState(null);
@@ -1501,18 +1502,20 @@ export default function StockControl() {
   }
 
   async function openJobDetail(job) {
-    setJobDetail({ job, processes: [], documents: [], quoteItems: [] });
+    setJobDetail({ job, processes: [], documents: [], quoteItems: [], deliveryNotes: [] });
     setJobDetailLoading(true);
     try {
-      const [{ data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }] = await Promise.all([
+      const [{ data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }] = await Promise.all([
         supabase.from("job_processes").select("*").eq("job_id", job.id).order("sort_order"),
         supabase.from("job_documents").select("*").eq("job_id", job.id).order("created_at", { ascending: false }),
         supabase.from("job_quote_items").select("*").eq("job_id", job.id).order("sort_order"),
+        supabase.from("delivery_notes").select("*").eq("job_id", job.id).order("created_at", { ascending: false }),
       ]);
       if (procError) throw procError;
       if (docError) throw docError;
       if (qiError) throw qiError;
-      setJobDetail({ job, processes: processes || [], documents: documents || [], quoteItems: quoteItems || [] });
+      if (dnError) throw dnError;
+      setJobDetail({ job, processes: processes || [], documents: documents || [], quoteItems: quoteItems || [], deliveryNotes: deliveryNotes || [] });
     } catch (err) {
       console.error("Failed to load job detail:", err);
     }
@@ -1591,7 +1594,7 @@ export default function StockControl() {
 
   // Partial invoicing on a quoted line — logs how much was added this time
   // and bumps the running total, rather than one all-or-nothing flag.
-  async function addQuoteItemToInvoice(item, qtyToAdd) {
+  async function addQuoteItemToInvoice(job, item, qtyToAdd) {
     if (!supabase) return;
     const remaining = Number(item.qty) - Number(item.qty_invoiced);
     if (qtyToAdd <= 0 || qtyToAdd > remaining) {
@@ -1600,7 +1603,11 @@ export default function StockControl() {
     }
     try {
       const newTotal = Number(item.qty_invoiced) + qtyToAdd;
-      const { error: updateError } = await supabase.from("job_quote_items").update({ qty_invoiced: newTotal }).eq("id", item.id);
+      const nowFullyInvoiced = newTotal >= Number(item.qty);
+      const { error: updateError } = await supabase
+        .from("job_quote_items")
+        .update({ qty_invoiced: newTotal, item_status: nowFullyInvoiced ? "invoiced" : item.item_status })
+        .eq("id", item.id);
       if (updateError) throw updateError;
       const { error: logError } = await supabase.from("job_quote_item_invoices").insert({
         quote_item_id: item.id,
@@ -1609,6 +1616,17 @@ export default function StockControl() {
         invoiced_by: roleLabel,
       });
       if (logError) throw logError;
+      if (job.sales_rep) {
+        await supabase.from("job_notifications").insert({
+          job_id: job.id,
+          job_number: job.job_number,
+          sales_rep: job.sales_rep,
+          message: `${qtyToAdd} × ${item.description} added to invoice by ${roleLabel} on ${job.job_number} (${job.customer || "no customer"})`,
+        });
+      }
+      // A real, printable document — not just a number incrementing
+      // somewhere — so accounts has something concrete to work from.
+      buildDraftInvoiceDoc(job, item, qtyToAdd);
       flashSaved(`quoteitem-${item.id}`);
       refreshJobDetail();
     } catch (err) {
@@ -1670,6 +1688,235 @@ export default function StockControl() {
       console.error("Failed to delete document:", err);
       alert("Couldn't delete that file — check your connection and try again.");
     }
+  }
+
+  function openDeliveryNoteModal(job, quoteItem) {
+    const remaining = Number(quoteItem.qty) - Number(quoteItem.qty_invoiced);
+    setDeliveryNoteModal({
+      job,
+      quoteItem,
+      direction: "to_supplier",
+      recipientName: "",
+      qty: String(Math.max(remaining, 0) || quoteItem.qty),
+      notes: "",
+    });
+  }
+
+  async function submitDeliveryNote() {
+    const m = deliveryNoteModal;
+    if (!m.recipientName.trim()) {
+      alert("Pick or type who this is going to.");
+      return;
+    }
+    const qty = Number(m.qty);
+    if (!qty || qty <= 0) {
+      alert("Enter a quantity greater than 0.");
+      return;
+    }
+    try {
+      const noteNumber = formatDeliveryNoteNumber(master.nextDeliveryNoteNumber);
+      let recipientAddress = "";
+      if (m.direction === "to_supplier") {
+        const sup = master.suppliers.find((s) => s.name === m.recipientName);
+        recipientAddress = sup?.address || "";
+      }
+      const { data: note, error } = await supabase
+        .from("delivery_notes")
+        .insert({
+          delivery_note_number: noteNumber,
+          job_id: m.job.id,
+          quote_item_id: m.quoteItem.id,
+          recipient_type: m.direction === "to_supplier" ? "supplier" : "customer",
+          recipient_name: m.recipientName.trim(),
+          recipient_address: recipientAddress,
+          direction: m.direction,
+          notes: m.notes.trim(),
+          created_by: roleLabel,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      const { error: itemError } = await supabase.from("delivery_note_items").insert({
+        delivery_note_id: note.id,
+        description: m.quoteItem.description,
+        qty,
+        sort_order: 0,
+      });
+      if (itemError) throw itemError;
+
+      if (m.direction === "to_supplier") {
+        const { error: statusError } = await supabase
+          .from("job_quote_items")
+          .update({ item_status: "out_external" })
+          .eq("id", m.quoteItem.id);
+        if (statusError) throw statusError;
+      }
+
+      setMaster((prev) => ({ ...prev, nextDeliveryNoteNumber: (prev.nextDeliveryNoteNumber || 1) + 1 }));
+      if (m.job.sales_rep) {
+        await supabase.from("job_notifications").insert({
+          job_id: m.job.id,
+          job_number: m.job.job_number,
+          sales_rep: m.job.sales_rep,
+          message: `${m.quoteItem.description} sent out on ${noteNumber} to ${m.recipientName.trim()} on ${m.job.job_number} (${m.job.customer || "no customer"})`,
+        });
+      }
+      buildDeliveryNoteDoc({ ...note, delivery_note_number: noteNumber, recipient_address: recipientAddress }, [{ description: m.quoteItem.description, qty }]);
+      setDeliveryNoteModal(null);
+      refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to create delivery note:", err);
+      alert("Couldn't create that delivery note — check your connection and try again.");
+    }
+  }
+
+  // Two copies on one document — recipient copy on top, our copy below,
+  // both signable — same physical purpose as a paper delivery note.
+  function buildDeliveryNoteDoc(note, lineItems) {
+    const doc = new jsPDF();
+    const company = master.companyDetails || {};
+    const leftX = 14;
+    const rightX = 196;
+
+    const renderCopy = (topY, copyLabel) => {
+      let y = topY;
+      doc.setFontSize(9);
+      doc.setFont(undefined, "bold");
+      doc.text(copyLabel, rightX, y, { align: "right" });
+      doc.setFontSize(14);
+      doc.text(company.name || "Delivery Note", leftX, y);
+      doc.setFontSize(16);
+      doc.text("DELIVERY NOTE", rightX, y, { align: "right" });
+      y += 7;
+      doc.setFontSize(9);
+      doc.setFont(undefined, "normal");
+      doc.text(`Number: ${note.delivery_note_number}`, rightX, y, { align: "right" });
+      y += 5;
+      doc.text(`Date: ${new Date(note.created_at || Date.now()).toLocaleDateString()}`, rightX, y, { align: "right" });
+      y += 8;
+      doc.setFont(undefined, "bold");
+      doc.text(note.direction === "to_supplier" ? "To (Supplier):" : "To (Customer):", leftX, y);
+      doc.setFont(undefined, "normal");
+      doc.text(note.recipient_name, leftX + 45, y);
+      y += 5;
+      if (note.recipient_address) {
+        doc.text(note.recipient_address, leftX + 45, y);
+        y += 5;
+      }
+      y += 5;
+      autoTable(doc, {
+        startY: y,
+        head: [["Description", "Qty"]],
+        body: lineItems.map((li) => [li.description, String(li.qty)]),
+        theme: "grid",
+        headStyles: { fillColor: [27, 29, 31] },
+        margin: { left: leftX, right: leftX },
+      });
+      const afterY = (doc.lastAutoTable?.finalY || y + 20) + 12;
+      doc.setFontSize(9);
+      doc.text("Sent by: _______________________", leftX, afterY);
+      doc.text("Received by: _______________________", rightX - 70, afterY);
+      return afterY + 10;
+    };
+
+    renderCopy(18, "Recipient Copy");
+    doc.setDrawColor(180, 180, 180);
+    doc.setLineDashPattern([2, 2], 0);
+    doc.line(leftX, 148, rightX, 148);
+    doc.setLineDashPattern([], 0);
+    renderCopy(158, "Our Copy");
+
+    doc.save(`${note.delivery_note_number}.pdf`);
+  }
+
+  async function checkInDeliveryNote(job, note, quoteItem) {
+    try {
+      const { error } = await supabase
+        .from("delivery_notes")
+        .update({ checked_back_in_at: new Date().toISOString(), checked_back_in_by: roleLabel })
+        .eq("id", note.id);
+      if (error) throw error;
+      if (note.quote_item_id) {
+        const { error: statusError } = await supabase
+          .from("job_quote_items")
+          .update({ item_status: "on_floor" })
+          .eq("id", note.quote_item_id);
+        if (statusError) throw statusError;
+      }
+      if (job.sales_rep) {
+        await supabase.from("job_notifications").insert({
+          job_id: job.id,
+          job_number: job.job_number,
+          sales_rep: job.sales_rep,
+          message: `${quoteItem?.description || "An item"} checked back in from ${note.recipient_name} on ${job.job_number} (${job.customer || "no customer"})`,
+        });
+      }
+      refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to check delivery note back in:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  async function markItemReadyToInvoice(job, quoteItem) {
+    try {
+      const { error } = await supabase.from("job_quote_items").update({ item_status: "ready_to_invoice" }).eq("id", quoteItem.id);
+      if (error) throw error;
+      if (job.sales_rep) {
+        await supabase.from("job_notifications").insert({
+          job_id: job.id,
+          job_number: job.job_number,
+          sales_rep: job.sales_rep,
+          message: `${quoteItem.description} marked ready to invoice by ${roleLabel} on ${job.job_number} (${job.customer || "no customer"})`,
+        });
+      }
+      flashSaved(`quoteitem-status-${quoteItem.id}`);
+      refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to update item status:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  // A clearly-labeled draft, not a real tax invoice — the real one is
+  // still made in Sage, but this gives accounts something concrete to
+  // work from rather than nothing at all.
+  function buildDraftInvoiceDoc(job, quoteItem, qtyInvoiced) {
+    const doc = new jsPDF();
+    const company = master.companyDetails || {};
+    const leftX = 14;
+    const rightX = 196;
+    let y = 18;
+    doc.setFontSize(10);
+    doc.setFont(undefined, "bold");
+    doc.setTextColor(200, 60, 60);
+    doc.text("DRAFT — NOT A TAX INVOICE — FOR ACCOUNTS REFERENCE ONLY", leftX, y);
+    doc.setTextColor(0, 0, 0);
+    y += 10;
+    doc.setFontSize(14);
+    doc.text(company.name || "Invoice Request", leftX, y);
+    doc.setFontSize(16);
+    doc.text("INVOICE REQUEST", rightX, y, { align: "right" });
+    y += 8;
+    doc.setFontSize(9);
+    doc.setFont(undefined, "normal");
+    doc.text(`Job: ${job.job_number}`, rightX, y, { align: "right" });
+    y += 5;
+    doc.text(`Date: ${new Date().toLocaleDateString()}`, rightX, y, { align: "right" });
+    y += 8;
+    doc.setFont(undefined, "bold");
+    doc.text("Customer:", leftX, y);
+    doc.setFont(undefined, "normal");
+    doc.text(job.customer || "—", leftX + 30, y);
+    y += 10;
+    autoTable(doc, {
+      startY: y,
+      head: [["Description", "Qty", "Unit Price", "Total"]],
+      body: [[quoteItem.description, String(qtyInvoiced), `R ${Number(quoteItem.unit_price).toFixed(2)}`, `R ${(qtyInvoiced * Number(quoteItem.unit_price)).toFixed(2)}`]],
+      theme: "grid",
+      headStyles: { fillColor: [27, 29, 31] },
+    });
+    doc.save(`Invoice-Request-${job.job_number}-${Date.now()}.pdf`);
   }
 
   // A printable job sheet — same purpose as the paper process sheet, but
@@ -1779,6 +2026,14 @@ export default function StockControl() {
         .update({ status: "invoiced", invoiced_by: roleLabel, invoiced_at: new Date().toISOString(), invoice_number: invoiceNumber.trim() })
         .eq("id", job.id);
       if (error) throw error;
+      if (job.sales_rep) {
+        await supabase.from("job_notifications").insert({
+          job_id: job.id,
+          job_number: job.job_number,
+          sales_rep: job.sales_rep,
+          message: `${job.job_number} (${job.customer || "no customer"}) fully invoiced by ${roleLabel} — invoice #${invoiceNumber.trim()}`,
+        });
+      }
       setMarkInvoicedModal(null);
       fetchJobs();
       if (jobDetail?.job.id === job.id) refreshJobDetail();
@@ -8286,6 +8541,10 @@ export default function StockControl() {
                     const remaining = Number(it.qty) - Number(it.qty_invoiced);
                     const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
                     const revision = linkedItem?.partNumber ? drawingLookup[linkedItem.partNumber.trim()] : null;
+                    const status = it.item_status || "on_floor";
+                    const openDeliveryNote = jobDetail.deliveryNotes.find((dn) => dn.quote_item_id === it.id && !dn.checked_back_in_at);
+                    const statusLabel = { on_floor: "On floor", out_external: "Out — external", ready_to_invoice: "Ready to invoice", invoiced: "Invoiced" }[status];
+                    const statusColor = { on_floor: C.muted, out_external: C.danger, ready_to_invoice: C.accentRaw, invoiced: C.accentFinished }[status];
                     return (
                       <div key={it.id} style={S.managerRow}>
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -8293,6 +8552,8 @@ export default function StockControl() {
                             {it.description}
                             <SavedCheck fieldKey={`quoteitem-${it.id}`} />
                             <SavedCheck fieldKey={`quoteitem-price-${it.id}`} />
+                            <SavedCheck fieldKey={`quoteitem-status-${it.id}`} />
+                            <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 600, color: statusColor }}>{statusLabel}</span>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
                             <span style={S.roleHint}>{it.qty} ×</span>
@@ -8325,22 +8586,41 @@ export default function StockControl() {
                               )}
                             </div>
                           )}
+                          {canEditQty("jobs") && (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                              {status === "on_floor" && (
+                                <>
+                                  <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => markItemReadyToInvoice(jobDetail.job, it)}>
+                                    Mark ready to invoice
+                                  </button>
+                                  <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openDeliveryNoteModal(jobDetail.job, it)}>
+                                    <Truck size={12} /> Create delivery note
+                                  </button>
+                                </>
+                              )}
+                              {status === "out_external" && openDeliveryNote && (
+                                <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => checkInDeliveryNote(jobDetail.job, openDeliveryNote, it)}>
+                                  Check back in ({openDeliveryNote.delivery_note_number})
+                                </button>
+                              )}
+                              {(status === "ready_to_invoice" || status === "on_floor") && remaining > 0 && (
+                                <button
+                                  type="button"
+                                  className="stk-btn"
+                                  style={S.reqActionBtnMuted}
+                                  onClick={() => {
+                                    const input = window.prompt(`Add to invoice — how many of ${it.description} (remaining: ${remaining})?`, remaining);
+                                    if (input === null) return;
+                                    const qty = parseFloat(input);
+                                    if (!isNaN(qty)) addQuoteItemToInvoice(jobDetail.job, it, qty);
+                                  }}
+                                >
+                                  Add to Invoice
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
-                        {canEditQty("jobs") && remaining > 0 && (
-                          <button
-                            type="button"
-                            className="stk-btn"
-                            style={S.reqActionBtnMuted}
-                            onClick={() => {
-                              const input = window.prompt(`Add to invoice — how many of ${it.description} (remaining: ${remaining})?`, remaining);
-                              if (input === null) return;
-                              const qty = parseFloat(input);
-                              if (!isNaN(qty)) addQuoteItemToInvoice(it, qty);
-                            }}
-                          >
-                            Add to Invoice
-                          </button>
-                        )}
                         {remaining <= 0 && <span style={{ ...S.roleHint, color: C.accentFinished }}>Fully invoiced</span>}
                       </div>
                     );
@@ -8562,6 +8842,83 @@ export default function StockControl() {
             </div>
             <button type="button" className="stk-btn" style={S.submitBtn} onClick={submitMarkInvoiced}>
               Mark as Invoiced
+            </button>
+          </div>
+        </div>
+      )}
+
+      {deliveryNoteModal && (
+        <div style={{ ...S.modalOverlay, zIndex: 30 }} onClick={() => setDeliveryNoteModal(null)}>
+          <div style={{ ...S.modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Create Delivery Note</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setDeliveryNoteModal(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={S.roleHint}>{deliveryNoteModal.quoteItem.description}</div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Going to</label>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={{ ...S.segBtn, ...(deliveryNoteModal.direction === "to_supplier" ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}) }}
+                  onClick={() => setDeliveryNoteModal((m) => ({ ...m, direction: "to_supplier", recipientName: "" }))}
+                >
+                  External supplier
+                </button>
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={{ ...S.segBtn, ...(deliveryNoteModal.direction === "to_customer" ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}) }}
+                  onClick={() => setDeliveryNoteModal((m) => ({ ...m, direction: "to_customer", recipientName: m.job.customer || "" }))}
+                >
+                  Customer
+                </button>
+              </div>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>{deliveryNoteModal.direction === "to_supplier" ? "Supplier" : "Recipient name"}</label>
+              {deliveryNoteModal.direction === "to_supplier" ? (
+                <select
+                  style={S.input}
+                  value={deliveryNoteModal.recipientName}
+                  onChange={(e) => setDeliveryNoteModal((m) => ({ ...m, recipientName: e.target.value }))}
+                >
+                  <option value="">Select a supplier…</option>
+                  {master.suppliers.map((s) => (
+                    <option key={s.id} value={s.name}>{s.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  style={S.input}
+                  value={deliveryNoteModal.recipientName}
+                  onChange={(e) => setDeliveryNoteModal((m) => ({ ...m, recipientName: e.target.value }))}
+                />
+              )}
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Quantity going out</label>
+              <input
+                style={S.input}
+                type="number"
+                min="0"
+                value={deliveryNoteModal.qty}
+                onChange={(e) => setDeliveryNoteModal((m) => ({ ...m, qty: e.target.value }))}
+              />
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Notes (optional)</label>
+              <input
+                style={S.input}
+                value={deliveryNoteModal.notes}
+                onChange={(e) => setDeliveryNoteModal((m) => ({ ...m, notes: e.target.value }))}
+              />
+            </div>
+            <button type="button" className="stk-btn" style={S.submitBtn} onClick={submitDeliveryNote}>
+              Create & Print Delivery Note
             </button>
           </div>
         </div>
