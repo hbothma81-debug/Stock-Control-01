@@ -63,7 +63,9 @@ const MANAGER_TABS = [
   { key: "customers", label: "Customers" },
   { key: "stockCodes", label: "Stock Codes" },
   { key: "storeCategories", label: "Store Categories" },
-  { key: "fastenerCategories", label: "Fastener Categories" },
+  { key: "fastenerCategories", label: "Fastener Types" },
+  { key: "fastenerGrades", label: "Fastener Grades" },
+  { key: "fastenerFinishes", label: "Fastener Finishes" },
   { key: "suppliers", label: "Suppliers" },
   { key: "sheetNames", label: "Sheet Names" },
   { key: "storesCatalog", label: "Stores Catalog" },
@@ -111,6 +113,10 @@ function formatJobNumber(n) {
 
 function formatDeliveryNoteNumber(n) {
   return "DN-" + String(n).padStart(4, "0");
+}
+
+function formatFastenerNumber(n) {
+  return "FST-" + String(n).padStart(4, "0");
 }
 
 function plateName(size, thickness) {
@@ -265,9 +271,12 @@ const DEFAULT_MASTER = {
   ],
   nextJobNumber: 1,
   nextDeliveryNoteNumber: 1,
+  nextFastenerNumber: 1,
   stockCodes: [],
   storeCategories: ["Electrical", "CNC Tooling", "Welding Consumables", "PPE"],
-  fastenerCategories: ["Bolts", "Nuts", "Washers", "Screws"],
+  fastenerCategories: ["Hex Bolt", "Nut", "Washer", "Socket Screw", "Self-Tapping Screw", "Threaded Rod"],
+  fastenerGrades: ["4.6", "8.8", "10.9"],
+  fastenerFinishes: ["Black", "ZP", "YP"],
   nextToolNumber: 1,
   nextPoNumber: 1,
   suppliers: [],
@@ -343,6 +352,10 @@ const emptyForm = {
   lastServiceDate: "",
   lastServiceReading: "",
   currentReading: "",
+  fastenerType: "",
+  customFastenerType: "",
+  fastenerGrade: "",
+  fastenerFinish: "",
 };
 
 function LibraryField({ label, options, value, onChange, customValue, onCustomChange, placeholder, showComment, comment, onCommentChange, allowNone }) {
@@ -554,6 +567,10 @@ export default function StockControl() {
 
   const [showFilters, setShowFilters] = useState(false);
   const [filterGrade, setFilterGrade] = useState("");
+  const [filterFastenerType, setFilterFastenerType] = useState("");
+  const [filterFastenerDiameter, setFilterFastenerDiameter] = useState("");
+  const [filterFastenerGrade, setFilterFastenerGrade] = useState("");
+  const [filterFastenerFinish, setFilterFastenerFinish] = useState("");
   const [filterWidth, setFilterWidth] = useState("");
   const [filterLength, setFilterLength] = useState("");
   const [filterAreaMin, setFilterAreaMin] = useState("");
@@ -2234,6 +2251,10 @@ export default function StockControl() {
         const match = (gradeList || []).find((g) => (g.shortName || g.name) === filterGrade);
         return match ? it.grade === match.name : false;
       })
+      .filter((it) => tab !== "fasteners" || !filterFastenerType || it.fastenerType === filterFastenerType)
+      .filter((it) => tab !== "fasteners" || !filterFastenerDiameter || String(it.diameter) === filterFastenerDiameter)
+      .filter((it) => tab !== "fasteners" || !filterFastenerGrade || it.fastenerGrade === filterFastenerGrade)
+      .filter((it) => tab !== "fasteners" || !filterFastenerFinish || it.finish === filterFastenerFinish)
       .filter((it) => {
         if (tab !== "plate") return true;
         const d = parseSize(it.size);
@@ -2345,6 +2366,7 @@ export default function StockControl() {
   const effectiveSection = form.section === CUSTOM ? form.customSection.trim() : form.section.trim();
   const effectiveSectionType = form.sectionType === CUSTOM ? form.customSectionType.trim() : form.sectionType.trim();
   const effectiveCustomer = form.customer === CUSTOM ? form.customCustomer.trim() : form.customer.trim();
+  const effectiveFastenerType = form.fastenerType === CUSTOM ? (form.customFastenerType || "").trim() : form.fastenerType.trim();
   const effectiveSalesPerson = form.salesPerson === CUSTOM ? form.customSalesPerson.trim() : form.salesPerson.trim();
   const effectiveSupplier = form.supplier === CUSTOM ? form.customSupplier.trim() : form.supplier.trim();
   const effectiveSheetName = form.sheetName === CUSTOM ? form.customSheetName.trim() : form.sheetName.trim();
@@ -3641,6 +3663,7 @@ export default function StockControl() {
     if (form.sectionType === CUSTOM && effectiveSectionType) ensureStringEntry("sectionTypes", effectiveSectionType);
     if (form.section === CUSTOM && effectiveSection) ensureFactorEntry("sections", effectiveSection, 0, effectiveSectionType);
     if (form.customer === CUSTOM && effectiveCustomer) ensureStringEntry("customers", effectiveCustomer);
+    if (form.fastenerType === CUSTOM && effectiveFastenerType) ensureStringEntry("fastenerCategories", effectiveFastenerType);
     if (form.salesPerson === CUSTOM && effectiveSalesPerson) ensureStringEntry("salesPeople", effectiveSalesPerson);
     if (form.supplier === CUSTOM && effectiveSupplier) ensureSupplierEntry(effectiveSupplier);
     if (form.sheetName === CUSTOM && effectiveSheetName) ensureStringEntry("sheetNames", effectiveSheetName);
@@ -3730,6 +3753,32 @@ export default function StockControl() {
       };
       if (isNewAsset) {
         setMaster((prev) => ({ ...prev, nextToolNumber: (prev.nextToolNumber || 1) + 1 }));
+      }
+    } else if (form.mainCat === "fasteners") {
+      if (!effectiveFastenerType || !form.diameter.trim()) return;
+      const isNewFastener = !editingId;
+      const assignedPartNumber = isNewFastener ? formatFastenerNumber(master.nextFastenerNumber) : form.partNumber.trim();
+      const lengthPart = form.length.trim() ? `x${form.length.trim()}` : "";
+      const designation = `M${form.diameter.trim()}${lengthPart} ${effectiveFastenerType}`;
+      payload = {
+        ...base,
+        mainCat: "fasteners",
+        grade: effectiveGrade, // "Material" — reuses the shared Material Types library, short name
+        partNumber: assignedPartNumber,
+        name: designation,
+        fastenerType: effectiveFastenerType,
+        diameter: form.diameter.trim(),
+        length: form.length.trim(),
+        fastenerGrade: form.fastenerGrade,
+        finish: form.fastenerFinish,
+        value: Number(form.value) || 0,
+        comment: "",
+        trackLength: false,
+        unit: "ea",
+        qty: Number(form.qty) || 0,
+      };
+      if (isNewFastener) {
+        setMaster((prev) => ({ ...prev, nextFastenerNumber: (prev.nextFastenerNumber || 1) + 1 }));
       }
     } else {
       // Customer Stock requires a part number; Stores items don't have to.
@@ -3875,6 +3924,22 @@ export default function StockControl() {
         lastServiceDate: duplicate ? "" : it.lastServiceDate || "",
         lastServiceReading: duplicate ? "" : String(it.lastServiceReading || ""),
         currentReading: duplicate ? "" : String(it.currentReading || ""),
+      };
+    }
+    if (it.mainCat === "fasteners") {
+      return {
+        ...base,
+        grade: gradeMatch ? gradeMatch.shortName || gradeMatch.name : grade.field,
+        customGrade: grade.custom,
+        partNumber: duplicate ? "" : it.partNumber || "",
+        name: it.name || "",
+        fastenerType: it.fastenerType || "",
+        diameter: it.diameter || "",
+        length: it.length || "",
+        fastenerGrade: it.fastenerGrade || "",
+        fastenerFinish: it.finish || "",
+        value: String(it.value || ""),
+        supplier: sup.field, customSupplier: sup.custom,
       };
     }
     return {
@@ -5431,6 +5496,48 @@ export default function StockControl() {
               </select>
             </div>
           )}
+          {tab === "fasteners" && (
+            <>
+              <div>
+                <label style={S.label}>Type</label>
+                <select style={S.input} value={filterFastenerType} onChange={(e) => setFilterFastenerType(e.target.value)}>
+                  <option value="">Any</option>
+                  {master.fastenerCategories.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={S.label}>Diameter</label>
+                <select style={S.input} value={filterFastenerDiameter} onChange={(e) => setFilterFastenerDiameter(e.target.value)}>
+                  <option value="">Any</option>
+                  {[...new Set((items || []).filter((it) => it.mainCat === "fasteners" && it.diameter).map((it) => String(it.diameter)))]
+                    .sort((a, b) => Number(a) - Number(b))
+                    .map((d) => (
+                      <option key={d} value={d}>M{d}</option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <label style={S.label}>Grade</label>
+                <select style={S.input} value={filterFastenerGrade} onChange={(e) => setFilterFastenerGrade(e.target.value)}>
+                  <option value="">Any</option>
+                  {master.fastenerGrades.map((g) => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={S.label}>Finish</label>
+                <select style={S.input} value={filterFastenerFinish} onChange={(e) => setFilterFastenerFinish(e.target.value)}>
+                  <option value="">Any</option>
+                  {master.fastenerFinishes.map((f) => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
           {(tab === "plate" || tab === "structural") && (
             <div>
               <label style={S.label}>Stock type</label>
@@ -5449,6 +5556,7 @@ export default function StockControl() {
               setFilterGrade(""); setFilterWidth(""); setFilterLength(""); setFilterThickness("");
               setFilterPieceLength(""); setFilterStockType("");
               setFilterAreaMin(""); setFilterAreaMax(""); setFilterWeightMin(""); setFilterWeightMax("");
+              setFilterFastenerType(""); setFilterFastenerDiameter(""); setFilterFastenerGrade(""); setFilterFastenerFinish("");
             }}
           >
             Clear filters
@@ -5755,7 +5863,119 @@ export default function StockControl() {
               <div style={S.roleHint}>Category is locked while {editingId ? "editing" : "duplicating"} — remove and re-add to change it.</div>
             )}
 
-            {form.mainCat === "assets" ? (
+            {form.mainCat === "fasteners" ? (
+              <>
+                <div style={{ marginTop: 10 }}>
+                  <label style={S.label}>Type</label>
+                  <LibraryField
+                    options={master.fastenerCategories}
+                    value={form.fastenerType}
+                    onChange={(v) => setForm({ ...form, fastenerType: v })}
+                    customValue={form.customFastenerType || ""}
+                    onCustomChange={(v) => setForm({ ...form, customFastenerType: v })}
+                    placeholder="e.g. Hex Bolt"
+                  />
+                </div>
+                <div style={S.formGrid}>
+                  <div>
+                    <label style={S.label}>Diameter (mm)</label>
+                    <input
+                      style={S.input}
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={form.diameter}
+                      onChange={(e) => setForm({ ...form, diameter: e.target.value })}
+                      placeholder="e.g. 10"
+                    />
+                  </div>
+                  <div>
+                    <label style={S.label}>Length (mm, if applicable)</label>
+                    <input
+                      style={S.input}
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={form.length}
+                      onChange={(e) => setForm({ ...form, length: e.target.value })}
+                      placeholder="e.g. 25 — leave blank for nuts/washers"
+                    />
+                  </div>
+                </div>
+                {form.diameter.trim() && effectiveFastenerType && (
+                  <div style={{ ...S.roleHint, marginTop: 4 }}>
+                    Designation: <strong style={{ color: C.accentRaw }}>
+                      M{form.diameter.trim()}{form.length.trim() ? `x${form.length.trim()}` : ""} {effectiveFastenerType}
+                    </strong>
+                  </div>
+                )}
+                <div style={{ marginTop: 10 }}>
+                  <label style={S.label}>Part number</label>
+                  <div style={S.roleHint}>
+                    {editingId ? (
+                      <>This fastener's number: <strong style={{ color: C.accentRaw }}>{form.partNumber || "—"}</strong> (doesn't change when editing)</>
+                    ) : (
+                      <>Assigned automatically when you save — will be <strong style={{ color: C.accentRaw }}>{formatFastenerNumber(master.nextFastenerNumber)}</strong></>
+                    )}
+                  </div>
+                </div>
+                <div style={S.formGrid}>
+                  <div>
+                    <label style={S.label}>Grade</label>
+                    <select style={S.input} value={form.fastenerGrade} onChange={(e) => setForm({ ...form, fastenerGrade: e.target.value })}>
+                      <option value="">Not set</option>
+                      {master.fastenerGrades.map((g) => (
+                        <option key={g} value={g}>{g}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={S.label}>Finish</label>
+                    <select style={S.input} value={form.fastenerFinish} onChange={(e) => setForm({ ...form, fastenerFinish: e.target.value })}>
+                      <option value="">Not set</option>
+                      {master.fastenerFinishes.map((f) => (
+                        <option key={f} value={f}>{f}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <LibraryField
+                    label="Material"
+                    options={master.grades.map((g) => g.shortName || g.name)}
+                    value={form.grade}
+                    onChange={(v) => setForm({ ...form, grade: v })}
+                    customValue={form.customGrade}
+                    onCustomChange={(v) => setForm({ ...form, customGrade: v })}
+                    placeholder="e.g. SS304-2B"
+                    allowNone
+                  />
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <LibraryField
+                    label="Supplier"
+                    options={master.suppliers.map((s) => s.name)}
+                    value={form.supplier}
+                    onChange={(v) => setForm({ ...form, supplier: v })}
+                    customValue={form.customSupplier}
+                    onCustomChange={(v) => setForm({ ...form, customSupplier: v })}
+                    placeholder="e.g. Macsteel"
+                    allowNone
+                  />
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <label style={S.label}>Price each (R)</label>
+                  <input
+                    style={S.input}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.value}
+                    onChange={(e) => setForm({ ...form, value: e.target.value })}
+                  />
+                </div>
+              </>
+            ) : form.mainCat === "assets" ? (
               <>
                 <div style={{ marginTop: 10 }}>
                   <label style={S.label}>Description</label>
