@@ -57,7 +57,6 @@ const MANAGER_TABS = [
   { key: "sectionTypes", label: "Section Types" },
   { key: "grades", label: "Material Types" },
   { key: "cncGrades", label: "CNC Bar Grades" },
-  { key: "salesPeople", label: "Sales People" },
   { key: "staffDepartments", label: "Staff Departments" },
   { key: "jobProcessTypes", label: "Job Process Types" },
   { key: "customers", label: "Customers" },
@@ -282,28 +281,7 @@ const DEFAULT_MASTER = {
   suppliers: [],
   companyDetails: { name: "East Rand Supplies", address: "", phone: "", email: "", vatNumber: "", regNumber: "" },
   sheetNames: [],
-  storesCatalog: [
-    { id: "sc1", name: "M6 Hex Bolt", category: "Fasteners", price: 0 },
-    { id: "sc2", name: "M8 Hex Bolt", category: "Fasteners", price: 0 },
-    { id: "sc3", name: "M10 Hex Bolt", category: "Fasteners", price: 0 },
-    { id: "sc4", name: "M12 Hex Bolt", category: "Fasteners", price: 0 },
-    { id: "sc5", name: "M16 Hex Bolt", category: "Fasteners", price: 0 },
-    { id: "sc6", name: "M6 Hex Nut", category: "Fasteners", price: 0 },
-    { id: "sc7", name: "M8 Hex Nut", category: "Fasteners", price: 0 },
-    { id: "sc8", name: "M10 Hex Nut", category: "Fasteners", price: 0 },
-    { id: "sc9", name: "M12 Hex Nut", category: "Fasteners", price: 0 },
-    { id: "sc10", name: "M16 Hex Nut", category: "Fasteners", price: 0 },
-    { id: "sc11", name: "M6 Flat Washer", category: "Fasteners", price: 0 },
-    { id: "sc12", name: "M8 Flat Washer", category: "Fasteners", price: 0 },
-    { id: "sc13", name: "M10 Flat Washer", category: "Fasteners", price: 0 },
-    { id: "sc14", name: "M12 Flat Washer", category: "Fasteners", price: 0 },
-    { id: "sc15", name: "M16 Flat Washer", category: "Fasteners", price: 0 },
-    { id: "sc16", name: "M6 Spring Washer", category: "Fasteners", price: 0 },
-    { id: "sc17", name: "M8 Spring Washer", category: "Fasteners", price: 0 },
-    { id: "sc18", name: "M10 Spring Washer", category: "Fasteners", price: 0 },
-    { id: "sc19", name: "M12 Spring Washer", category: "Fasteners", price: 0 },
-    { id: "sc20", name: "M16 Spring Washer", category: "Fasteners", price: 0 },
-  ],
+  storesCatalog: [],
 };
 
 const emptyForm = {
@@ -674,6 +652,12 @@ export default function StockControl() {
             ...loaded,
             cncGrades: loaded.cncGrades.map((g) => (typeof g === "string" ? { name: g, factor: 0, price: 0 } : g)),
           };
+        }
+        // Migration: the Stores quick-add catalog used to include a
+        // "Fasteners" category, seeded before Fasteners existed as its own
+        // division — remove it now, since it's redundant with the real one.
+        if (loaded.storesCatalog) {
+          loaded = { ...loaded, storesCatalog: loaded.storesCatalog.filter((r) => r.category !== "Fasteners") };
         }
         setMaster(loaded);
       } else if (isInitialLoad) {
@@ -3842,7 +3826,7 @@ export default function StockControl() {
     const gradeOptions = master.grades.map((g) => g.shortName || g.name);
     const gradeMatch = master.grades.find((g) => g.name === it.grade || (g.shortName && g.shortName === it.grade));
     const grade = gradeMatch ? { field: gradeMatch.shortName || gradeMatch.name, custom: "" } : resolveField(gradeOptions, it.grade);
-    const sp = resolveField(master.salesPeople, it.salesPerson);
+    const sp = resolveField((people || []).filter((p) => p.isSalesPerson).map((p) => p.name), it.salesPerson);
     const cust = resolveField(master.customers, it.customer);
     const sup = resolveField(master.suppliers.map((s) => s.name), it.supplier);
     if (it.mainCat === "plate") {
@@ -4206,7 +4190,7 @@ export default function StockControl() {
       ...prev,
       customerContacts: {
         ...prev.customerContacts,
-        [customerName]: [...(prev.customerContacts?.[customerName] || []), { id: uid(), name: "", email: "" }],
+        [customerName]: [...(prev.customerContacts?.[customerName] || []), { id: uid(), name: "", email: "", phone: "" }],
       },
     }));
   }
@@ -5963,16 +5947,29 @@ export default function StockControl() {
                     allowNone
                   />
                 </div>
-                <div style={{ marginTop: 10 }}>
-                  <label style={S.label}>Price each (R)</label>
-                  <input
-                    style={S.input}
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={form.value}
-                    onChange={(e) => setForm({ ...form, value: e.target.value })}
-                  />
+                <div style={S.formGrid}>
+                  <div>
+                    <label style={S.label}>Quantity</label>
+                    <input
+                      style={S.input}
+                      type="number"
+                      min="0"
+                      value={form.qty}
+                      onChange={(e) => setForm({ ...form, qty: e.target.value })}
+                      placeholder="0"
+                    />
+                  </div>
+                  <div>
+                    <label style={S.label}>Price each (R)</label>
+                    <input
+                      style={S.input}
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.value}
+                      onChange={(e) => setForm({ ...form, value: e.target.value })}
+                    />
+                  </div>
                 </div>
               </>
             ) : form.mainCat === "assets" ? (
@@ -6691,7 +6688,7 @@ export default function StockControl() {
               </div>
             )}
 
-            {form.mainCat === "assets" ? null : form.mainCat === "custom" || form.mainCat === "stores" || form.mainCat === "fasteners" ? (
+            {form.mainCat === "assets" ? null : form.mainCat === "custom" || form.mainCat === "stores" ? (
               <div style={S.formGrid}>
                 <div>
                   <label style={S.label}>Quantity</label>
@@ -7192,20 +7189,27 @@ export default function StockControl() {
                           </button>
                         </div>
                         {(master.customerContacts?.[cust] || []).map((c) => (
-                          <div key={c.id} style={{ ...S.formGrid, marginTop: 6 }}>
+                          <div key={c.id} style={{ marginTop: 6 }}>
                             <input
                               style={S.input}
                               value={c.name}
                               onChange={(e) => updateCustomerContact(cust, c.id, "name", e.target.value)}
                               placeholder="Contact name"
                             />
-                            <div style={{ display: "flex", gap: 6 }}>
+                            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
                               <input
                                 style={{ ...S.input, flex: 1 }}
                                 type="email"
                                 value={c.email}
                                 onChange={(e) => updateCustomerContact(cust, c.id, "email", e.target.value)}
                                 placeholder="Email"
+                              />
+                              <input
+                                style={{ ...S.input, flex: 1 }}
+                                type="tel"
+                                value={c.phone || ""}
+                                onChange={(e) => updateCustomerContact(cust, c.id, "phone", e.target.value)}
+                                placeholder="Phone"
                               />
                               <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeCustomerContact(cust, c.id)}>
                                 <Trash2 size={13} />
@@ -8423,7 +8427,11 @@ export default function StockControl() {
       )}
 
       {newStockItemModal && (
-        <div style={S.modalOverlay} onClick={() => setNewStockItemModal(null)}>
+        // Higher z-index than the standard modal overlay — this can open
+        // while the New Job modal is already open behind it, and without
+        // this, the later-rendered New Job overlay paints on top and hides
+        // this one completely even though it's genuinely open.
+        <div style={{ ...S.modalOverlay, zIndex: 30 }} onClick={() => setNewStockItemModal(null)}>
           <div style={{ ...S.modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Add to Customer Stock</span>
