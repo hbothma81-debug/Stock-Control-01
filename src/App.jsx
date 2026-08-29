@@ -1043,11 +1043,19 @@ export default function StockControl() {
   async function loadDrawingLookup() {
     if (!supabase) return;
     try {
-      const { data, error } = await supabase.from("drawings").select("id, part_number, description").eq("status", "current");
+      const { data, error } = await supabase
+        .from("drawings")
+        .select("id, part_number, description, internal_revision, customer_revision")
+        .eq("status", "current");
       if (error) throw error;
       const map = {};
       (data || []).forEach((d) => {
-        map[d.part_number.trim()] = { id: d.id, description: d.description };
+        map[d.part_number.trim()] = {
+          id: d.id,
+          description: d.description,
+          internalRevision: d.internal_revision,
+          customerRevision: d.customer_revision,
+        };
       });
       setDrawingLookup(map);
     } catch (err) {
@@ -1182,13 +1190,73 @@ export default function StockControl() {
   }
 
   function addNewJobQuoteItem() {
-    setNewJobForm((f) => ({ ...f, quoteItems: [...f.quoteItems, { description: "", qty: "", unitPrice: "" }] }));
+    setNewJobForm((f) => ({ ...f, quoteItems: [...f.quoteItems, { description: "", qty: "", unitPrice: "", linkedItemId: null }] }));
   }
 
   function updateNewJobQuoteItem(idx, field, value) {
     setNewJobForm((f) => ({
       ...f,
-      quoteItems: f.quoteItems.map((it, i) => (i === idx ? { ...it, [field]: value } : it)),
+      quoteItems: f.quoteItems.map((it, i) => {
+        if (i !== idx) return it;
+        // Typing a new description un-links from whatever was matched
+        // before — a fresh match gets re-established on blur.
+        if (field === "description") return { ...it, description: value, linkedItemId: null };
+        return { ...it, [field]: value };
+      }),
+    }));
+    // Editing price on an already-linked item pushes the new price back to
+    // the actual stock record, not just this quote line.
+    if (field === "unitPrice") {
+      const item = newJobForm.quoteItems[idx];
+      if (item?.linkedItemId) {
+        setItems((prev) => prev.map((it) => (it.id === item.linkedItemId ? { ...it, value: Number(value) || 0 } : it)));
+      }
+    }
+  }
+
+  // Called on blur — matches the typed description against this customer's
+  // existing Customer Stock items and pulls in the price + link if found.
+  function matchNewJobQuoteItemToStock(idx) {
+    setNewJobForm((f) => {
+      const line = f.quoteItems[idx];
+      if (!line || !line.description.trim() || !f.customer || f.customer === CUSTOM) return f;
+      const match = (items || []).find(
+        (it) => it.mainCat === "custom" && it.customer === f.customer && it.name.trim().toLowerCase() === line.description.trim().toLowerCase()
+      );
+      if (!match) return f;
+      return {
+        ...f,
+        quoteItems: f.quoteItems.map((it, i) => (i === idx ? { ...it, linkedItemId: match.id, unitPrice: String(match.value ?? "") } : it)),
+      };
+    });
+  }
+
+  // The description didn't match anything — add it to Customer Stock right
+  // from here, at whatever price is currently on the line, and link it.
+  function addNewJobQuoteItemToStockManager(idx) {
+    const line = newJobForm.quoteItems[idx];
+    if (!line?.description.trim() || !newJobForm.customer || newJobForm.customer === CUSTOM) {
+      alert("Pick a real customer first, and make sure this line has a description.");
+      return;
+    }
+    const newItem = {
+      id: uid(),
+      mainCat: "custom",
+      customer: newJobForm.customer,
+      partNumber: "",
+      name: line.description.trim(),
+      grade: "",
+      qty: 0,
+      value: Number(line.unitPrice) || 0,
+      low: 0,
+      loc: "",
+      comment: "",
+      salesPerson: "",
+    };
+    setItems((prev) => [...prev, newItem]);
+    setNewJobForm((f) => ({
+      ...f,
+      quoteItems: f.quoteItems.map((it, i) => (i === idx ? { ...it, linkedItemId: newItem.id } : it)),
     }));
   }
 
@@ -1303,6 +1371,7 @@ export default function StockControl() {
           description: it.description.trim(),
           qty: Number(it.qty),
           unit_price: Number(it.unitPrice) || 0,
+          linked_item_id: it.linkedItemId || null,
           sort_order: idx,
         }));
         const { error: quoteItemError } = await supabase.from("job_quote_items").insert(quoteItemRows);
@@ -1388,6 +1457,24 @@ export default function StockControl() {
       flashSaved(`process-${process.id}`);
     } catch (err) {
       console.error("Failed to update process field:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  // Editing price on an already-created quote item pushes the new price
+  // back to the linked stock item too, same as the creation-time version.
+  async function updateJobQuoteItemPrice(item, newPrice) {
+    if (!supabase) return;
+    try {
+      const { error } = await supabase.from("job_quote_items").update({ unit_price: newPrice }).eq("id", item.id);
+      if (error) throw error;
+      if (item.linked_item_id) {
+        setItems((prev) => prev.map((it) => (it.id === item.linked_item_id ? { ...it, value: newPrice } : it)));
+      }
+      flashSaved(`quoteitem-price-${item.id}`);
+      refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to update quote item price:", err);
       alert("That didn't save — check your connection and try again.");
     }
   }
@@ -1550,6 +1637,18 @@ export default function StockControl() {
       if (jobDetail?.job.id === jobId) refreshJobDetail();
     } catch (err) {
       console.error("Failed to update job status:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  async function updateJobField(jobId, field, value) {
+    try {
+      const { error } = await supabase.from("jobs").update({ [field]: value }).eq("id", jobId);
+      if (error) throw error;
+      flashSaved(`job-${jobId}-${field}`);
+      if (jobDetail?.job.id === jobId) refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to update job field:", err);
       alert("That didn't save — check your connection and try again.");
     }
   }
@@ -7663,8 +7762,22 @@ export default function StockControl() {
               <span>Sales rep: {jobDetail.job.sales_rep}</span>
               {jobDetail.job.due_date && <span>Due {new Date(jobDetail.job.due_date).toLocaleDateString()}</span>}
               {jobDetail.job.quote_reference && <span>Quote: {jobDetail.job.quote_reference}</span>}
-              {jobDetail.job.laser_job_reference && <span>Laser: {jobDetail.job.laser_job_reference}</span>}
             </div>
+
+            {canEditQty("jobs") && (
+              <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={S.label}>SigmaNest / laser job number</label>
+                  <input
+                    style={S.input}
+                    defaultValue={jobDetail.job.laser_job_reference || ""}
+                    onBlur={(e) => updateJobField(jobDetail.job.id, "laser_job_reference", e.target.value)}
+                    placeholder="Often only known once nesting is done — fill in when it exists"
+                  />
+                </div>
+                <SavedCheck fieldKey={`job-${jobDetail.job.id}-laser_job_reference`} />
+              </div>
+            )}
 
             {jobDetail.job.qty != null && (
               <div style={{ marginTop: 8, padding: 10, background: C.bg, borderRadius: 6, border: `1px solid ${C.border}` }}>
@@ -7732,16 +7845,47 @@ export default function StockControl() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
                   {jobDetail.quoteItems.map((it) => {
                     const remaining = Number(it.qty) - Number(it.qty_invoiced);
+                    const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
+                    const revision = linkedItem?.partNumber ? drawingLookup[linkedItem.partNumber.trim()] : null;
                     return (
                       <div key={it.id} style={S.managerRow}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 12.5, display: "flex", alignItems: "center" }}>
                             {it.description}
                             <SavedCheck fieldKey={`quoteitem-${it.id}`} />
+                            <SavedCheck fieldKey={`quoteitem-price-${it.id}`} />
                           </div>
-                          <div style={S.roleHint}>
-                            {it.qty} × R{Number(it.unit_price).toFixed(2)} — Invoiced {it.qty_invoiced} / {it.qty}
+                          <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                            <span style={S.roleHint}>{it.qty} ×</span>
+                            {canEditQty("jobs") ? (
+                              <input
+                                style={{ ...S.input, width: 70, fontSize: 11, padding: "3px 6px" }}
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                defaultValue={it.unit_price}
+                                onBlur={(e) => {
+                                  const val = Number(e.target.value) || 0;
+                                  if (val !== Number(it.unit_price)) updateJobQuoteItemPrice(it, val);
+                                }}
+                              />
+                            ) : (
+                              <span style={S.roleHint}>R{Number(it.unit_price).toFixed(2)}</span>
+                            )}
+                            <span style={S.roleHint}>— Invoiced {it.qty_invoiced} / {it.qty}</span>
                           </div>
+                          {linkedItem && (
+                            <div style={S.roleHint}>
+                              Available: {linkedItem.qty}
+                              {revision && (
+                                <>
+                                  {" "}
+                                  — Our rev {revision.internalRevision ?? "—"}
+                                  {revision.customerRevision ? `, customer rev ${revision.customerRevision}` : ""}
+                                </>
+                              )}
+                            </div>
+                          )}
                         </div>
                         {canEditQty("jobs") && remaining > 0 && (
                           <button
@@ -7913,6 +8057,16 @@ export default function StockControl() {
             </div>
 
             <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Description (optional)</label>
+              <input
+                style={S.input}
+                value={newJobForm.description}
+                onChange={(e) => setNewJobForm((f) => ({ ...f, description: e.target.value }))}
+                placeholder="What this job is"
+              />
+            </div>
+
+            <div style={{ marginTop: 10 }}>
               <label style={S.label}>Quote documents (optional)</label>
               <div style={S.formGrid}>
                 <label className="stk-btn" style={{ ...S.addBtn, cursor: "pointer", justifyContent: "center" }}>
@@ -7988,16 +8142,6 @@ export default function StockControl() {
               />
             </div>
 
-            <div style={{ marginTop: 10 }}>
-              <label style={S.label}>Description (optional)</label>
-              <input
-                style={S.input}
-                value={newJobForm.description}
-                onChange={(e) => setNewJobForm((f) => ({ ...f, description: e.target.value }))}
-                placeholder="What this job is"
-              />
-            </div>
-
             <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <label style={S.label}>Quoted items (optional)</label>
@@ -8005,36 +8149,69 @@ export default function StockControl() {
                   <Plus size={12} /> Add line
                 </button>
               </div>
-              {newJobForm.quoteItems.map((it, idx) => (
-                <div key={idx} style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
-                  <input
-                    style={{ ...S.input, flex: 2 }}
-                    value={it.description}
-                    onChange={(e) => updateNewJobQuoteItem(idx, "description", e.target.value)}
-                    placeholder="Description"
-                  />
-                  <input
-                    style={{ ...S.input, width: 60 }}
-                    type="number"
-                    min="0"
-                    value={it.qty}
-                    onChange={(e) => updateNewJobQuoteItem(idx, "qty", e.target.value)}
-                    placeholder="Qty"
-                  />
-                  <input
-                    style={{ ...S.input, width: 80 }}
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={it.unitPrice}
-                    onChange={(e) => updateNewJobQuoteItem(idx, "unitPrice", e.target.value)}
-                    placeholder="Unit R"
-                  />
-                  <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeNewJobQuoteItem(idx)}>
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              ))}
+              <datalist id="job-customer-stock-items">
+                {(items || [])
+                  .filter((it) => it.mainCat === "custom" && it.customer === newJobForm.customer)
+                  .map((it) => (
+                    <option key={it.id} value={it.name} />
+                  ))}
+              </datalist>
+              {newJobForm.quoteItems.map((it, idx) => {
+                const linkedItem = it.linkedItemId ? (items || []).find((i) => i.id === it.linkedItemId) : null;
+                const revision = linkedItem?.partNumber ? drawingLookup[linkedItem.partNumber.trim()] : null;
+                return (
+                  <div key={idx} style={{ marginTop: 6 }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <input
+                        style={{ ...S.input, flex: 2 }}
+                        list="job-customer-stock-items"
+                        value={it.description}
+                        onChange={(e) => updateNewJobQuoteItem(idx, "description", e.target.value)}
+                        onBlur={() => matchNewJobQuoteItemToStock(idx)}
+                        placeholder="Start typing to match Customer Stock…"
+                      />
+                      <input
+                        style={{ ...S.input, width: 60 }}
+                        type="number"
+                        min="0"
+                        value={it.qty}
+                        onChange={(e) => updateNewJobQuoteItem(idx, "qty", e.target.value)}
+                        placeholder="Qty"
+                      />
+                      <input
+                        style={{ ...S.input, width: 80 }}
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={it.unitPrice}
+                        onChange={(e) => updateNewJobQuoteItem(idx, "unitPrice", e.target.value)}
+                        placeholder="Unit R"
+                      />
+                      <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeNewJobQuoteItem(idx)}>
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                    <div style={{ ...S.roleHint, marginTop: 2 }}>
+                      {linkedItem ? (
+                        <>
+                          Linked to Customer Stock — Available: {linkedItem.qty}
+                          {revision && (
+                            <>
+                              {" "}
+                              — Our rev {revision.internalRevision ?? "—"}
+                              {revision.customerRevision ? `, customer rev ${revision.customerRevision}` : ""}
+                            </>
+                          )}
+                        </>
+                      ) : it.description.trim() && newJobForm.customer && newJobForm.customer !== CUSTOM ? (
+                        <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => addNewJobQuoteItemToStockManager(idx)}>
+                          <Plus size={11} /> Not in Customer Stock — add it
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
               <div style={{ marginTop: 10 }}>
                 <label style={S.label}>Quoted value (optional)</label>
                 <input
