@@ -496,6 +496,7 @@ function ReqFlag({ req, onClick }) {
 export default function StockControl() {
   const [items, setItems] = useState(null);
   const [loadError, setLoadError] = useState({});
+  const [loadRetriesExhausted, setLoadRetriesExhausted] = useState(false);
   const [master, setMaster] = useState(null);
   const [requisitions, setRequisitions] = useState(null);
   const [purchaseOrders, setPurchaseOrders] = useState(null);
@@ -878,15 +879,26 @@ export default function StockControl() {
   // blocking "couldn't load" screen — on a slow-but-working connection, 5
   // separate requests all needing to succeed in one pass can need more
   // than a couple of quick tries to all land.
+  //
+  // Critically: the blocking screen must only appear once every attempt
+  // has been exhausted, not the instant the first one hits trouble — the
+  // per-request loadError state gets set (and cleared) mid-attempt, so
+  // reading it directly made the blocking screen appear within seconds of
+  // the very first failure, hiding the retry loop's entire benefit behind
+  // a scary screen the user saw well before the app had actually given up.
   useEffect(() => {
     let cancelled = false;
     async function loadWithRetry() {
       for (let attempt = 0; attempt < 6; attempt++) {
         const hadError = await loadAllData(true);
         if (cancelled) return;
-        if (!hadError) return;
+        if (!hadError) {
+          setLoadRetriesExhausted(false);
+          return;
+        }
         if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, 2500));
       }
+      if (!cancelled) setLoadRetriesExhausted(true);
     }
     loadWithRetry();
     return () => {
@@ -5446,9 +5458,7 @@ export default function StockControl() {
     e.target.value = "";
   }
 
-  const hasLoadError = Object.values(loadError).some(Boolean);
-
-  if (hasLoadError) {
+  if (loadRetriesExhausted) {
     return (
       <div style={{ ...S.page, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
         <div style={{ maxWidth: 380, textAlign: "center" }}>
