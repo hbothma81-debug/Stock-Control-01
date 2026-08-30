@@ -611,7 +611,7 @@ export default function StockControl() {
   const [form, setForm] = useState(emptyForm);
   const [collapsed, setCollapsed] = useState({});
   const [showManager, setShowManager] = useState(false);
-  const [managerTab, setManagerTab] = useState("sizes");
+  const [managerTab, setManagerTab] = useState(null);
   const [managerInput, setManagerInput] = useState("");
   const [managerFactor, setManagerFactor] = useState("");
   const [managerShortName, setManagerShortName] = useState("");
@@ -6206,6 +6206,19 @@ export default function StockControl() {
                             {isReady ? "Ready" : "Waiting"}
                           </span>
                         </div>
+                        {process.process_name === "Nesting" && (
+                          <div style={{ marginBottom: 4 }}>
+                            <label style={S.label}>SigmaNest job number</label>
+                            <input
+                              style={{ ...S.input, marginTop: 4 }}
+                              defaultValue={job.laser_job_reference || ""}
+                              placeholder="Not filled in yet"
+                              onBlur={(e) => {
+                                if (e.target.value !== (job.laser_job_reference || "")) saveJobSigmaNestNumber(job, e.target.value.trim());
+                              }}
+                            />
+                          </div>
+                        )}
                         {job.description && <div style={S.roleHint}>{job.description}</div>}
                         <div className="stk-meta-row" style={S.rowMeta}>
                           {totalQty > 0 && <span>Qty: {totalQty}</span>}
@@ -6218,7 +6231,21 @@ export default function StockControl() {
                             ⚠ Shortage: {process.shortage_note} — flagged by {process.shortage_flagged_by}
                           </div>
                         )}
-                        <div style={{ marginTop: 8 }}>
+                        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                          <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => toggleProcessUrgent(process)}>
+                            {process.is_urgent ? "Unmark urgent" : "Mark urgent"}
+                          </button>
+                          {process.has_shortage ? (
+                            <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => clearShortage(process)}>
+                              Clear shortage
+                            </button>
+                          ) : (
+                            <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => openShortageModal(job, process)}>
+                              Flag shortage
+                            </button>
+                          )}
+                        </div>
+                        <div style={{ marginTop: 6 }}>
                           {process.tracking_mode === "each" ? (
                             <QtyProgressControl
                               process={process}
@@ -6237,20 +6264,6 @@ export default function StockControl() {
                               />
                               Complete
                             </label>
-                          )}
-                        </div>
-                        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                          <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => toggleProcessUrgent(process)}>
-                            {process.is_urgent ? "Unmark urgent" : "Mark urgent"}
-                          </button>
-                          {process.has_shortage ? (
-                            <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => clearShortage(process)}>
-                              Clear shortage
-                            </button>
-                          ) : (
-                            <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => openShortageModal(job, process)}>
-                              Flag shortage
-                            </button>
                           )}
                         </div>
                         {drawingsForJob.length > 0 && (
@@ -6274,19 +6287,6 @@ export default function StockControl() {
                         <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
                           <ExpandableProcessNotes value={process.notes} onCommit={(notes) => saveProcessNote(process, notes)} />
                         </div>
-                        {process.process_name === "Nesting" && (
-                          <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
-                            <label style={S.label}>SigmaNest job number</label>
-                            <input
-                              style={{ ...S.input, marginTop: 4 }}
-                              defaultValue={job.laser_job_reference || ""}
-                              placeholder="Not filled in yet"
-                              onBlur={(e) => {
-                                if (e.target.value !== (job.laser_job_reference || "")) saveJobSigmaNestNumber(job, e.target.value.trim());
-                              }}
-                            />
-                          </div>
-                        )}
                         {process.process_name === "Nesting" && (
                           <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
                             <label style={S.label}>Nesting document</label>
@@ -8237,11 +8237,11 @@ export default function StockControl() {
       )}
 
       {showManager && canAccessStockManager && (
-        <div style={S.modalOverlay} onClick={() => setShowManager(false)}>
+        <div style={S.modalOverlay} onClick={() => { setShowManager(false); setManagerTab(null); }}>
           <div style={S.managerModal} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Stock Manager</span>
-              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setShowManager(false)}>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => { setShowManager(false); setManagerTab(null); }}>
                 <X size={18} />
               </button>
             </div>
@@ -8258,28 +8258,35 @@ export default function StockControl() {
               </div>
             )}
 
-            <div style={S.managerTabs}>
-              {MANAGER_TABS.filter((t) => t.key !== "departments" || isAdmin).map((t) => (
-                <button
-                  key={t.key}
-                  type="button"
-                  className="stk-btn"
-                  onClick={() => {
-                    setManagerTab(t.key);
-                    setManagerInput("");
-                    setManagerFactor("");
-                    setManagerSearchQuery("");
-                    setSectionTypeFilterInManager("");
-                  }}
-                  style={{ ...S.managerTab, ...(managerTab === t.key ? S.managerTabActive : {}) }}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
-            {managerTab === "stockCodes" ? (
+            {!managerTab ? (
+              <div style={S.managerList}>
+                {MANAGER_TABS.filter((t) => t.key !== "departments" || isAdmin).map((t) => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    className="stk-btn"
+                    style={S.managerMenuRow}
+                    onClick={() => {
+                      setManagerTab(t.key);
+                      setManagerInput("");
+                      setManagerFactor("");
+                      setManagerSearchQuery("");
+                      setSectionTypeFilterInManager("");
+                    }}
+                  >
+                    <span>{t.label}</span>
+                    <ChevronDown size={14} style={{ transform: "rotate(-90deg)" }} />
+                  </button>
+                ))}
+              </div>
+            ) : (
               <>
+                <button type="button" className="stk-btn" style={S.managerBackBtn} onClick={() => setManagerTab(null)}>
+                  <ChevronDown size={14} style={{ transform: "rotate(90deg)" }} /> Back to Stock Manager
+                </button>
+
+                {managerTab === "stockCodes" ? (
+                  <>
                 <div style={{ ...S.managerAddRow, marginBottom: 4 }}>
                   <input
                     style={{ ...S.input, flex: 2 }}
@@ -9105,6 +9112,8 @@ export default function StockControl() {
                         </div>
                       ))}
                 </div>
+              </>
+            )}
               </>
             )}
           </div>
@@ -11647,6 +11656,34 @@ const S = {
     borderRadius: 8,
     padding: 4,
     marginBottom: 12,
+  },
+  managerMenuRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    width: "100%",
+    background: C.bg,
+    border: `1px solid ${C.border}`,
+    borderRadius: 8,
+    padding: "12px 14px",
+    fontSize: 14,
+    fontWeight: 500,
+    color: C.text,
+    cursor: "pointer",
+  },
+  managerBackBtn: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    background: "transparent",
+    border: "none",
+    color: C.accentRaw,
+    fontSize: 13.5,
+    fontWeight: 600,
+    padding: "4px 0",
+    marginBottom: 10,
+    cursor: "pointer",
+    width: "fit-content",
   },
   managerTab: {
     flex: "1 1 auto",
