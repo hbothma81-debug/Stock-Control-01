@@ -31,6 +31,7 @@ const TABS = [
 // wrapped tab row.
 const NAV_TABS = [
   { key: "jobs", label: "Jobs" },
+  { key: "production", label: "Production" },
   ...TABS,
   { key: "requisitions", label: "Requisitions" },
   { key: "purchaseOrders", label: "Purchase Orders" },
@@ -279,7 +280,7 @@ const DEFAULT_MASTER = {
   nextToolNumber: 1,
   nextPoNumber: 1,
   suppliers: [],
-  companyDetails: { name: "East Rand Supplies", address: "", phone: "", email: "", vatNumber: "", regNumber: "" },
+  companyDetails: { name: "", address: "", phone: "", email: "", vatNumber: "", regNumber: "" },
   sheetNames: [],
   storesCatalog: [],
 };
@@ -437,6 +438,8 @@ export default function StockControl() {
   const [assetHistoryReading, setAssetHistoryReading] = useState("");
   const [assetHistoryBusy, setAssetHistoryBusy] = useState(false);
   const [jobsList, setJobsList] = useState(null);
+  const [productionQueue, setProductionQueue] = useState(null);
+  const [productionLoading, setProductionLoading] = useState(false);
   const [jobInvoiceRequests, setJobInvoiceRequests] = useState([]);
   const [allJobQuoteItems, setAllJobQuoteItems] = useState([]);
   const [jobsLoading, setJobsLoading] = useState(false);
@@ -452,8 +455,6 @@ export default function StockControl() {
   const [showStockImportModal, setShowStockImportModal] = useState(false);
   const [newJobForm, setNewJobForm] = useState(null);
   const [notificationsList, setNotificationsList] = useState(null);
-  const [jobQtyInput, setJobQtyInput] = useState("");
-  const [jobQtyNote, setJobQtyNote] = useState("");
   const [drawingSearchQuery, setDrawingSearchQuery] = useState("");
   const [drawingSearchResults, setDrawingSearchResults] = useState(null);
   const [drawingCustomerFilter, setDrawingCustomerFilter] = useState("");
@@ -817,6 +818,7 @@ export default function StockControl() {
                 canRaisePO: !!data.can_raise_po,
                 canViewUsageLog: !!data.can_view_usage_log,
                 canManageInvoicing: !!data.can_manage_invoicing,
+                allowedProcessTypes: data.allowed_process_types || [],
                 isSalesPerson: !!data.is_sales_person,
                 department: data.department || "",
               }
@@ -908,6 +910,10 @@ export default function StockControl() {
   useEffect(() => {
     if (session?.user && jobsList === null) fetchJobs();
   }, [session, jobsList]);
+
+  useEffect(() => {
+    if (tab === "production" && productionQueue === null && profile?.allowedProcessTypes?.length) fetchProductionQueue();
+  }, [tab, profile]);
 
   // Loaded eagerly (not just when the tab's opened) so the unread badge on
   // the header button is accurate the moment someone signs in.
@@ -1005,17 +1011,6 @@ export default function StockControl() {
     const { data, error } = await supabase.storage.from("drawings").createSignedUrl(storagePath, 3600);
     if (error) throw error;
     return data.signedUrl;
-  }
-
-  async function fetchDrawingsForPartNumber(partNumber) {
-    if (!supabase) return [];
-    const { data, error } = await supabase
-      .from("drawings")
-      .select("*")
-      .eq("part_number", partNumber)
-      .order("internal_revision", { ascending: false });
-    if (error) throw error;
-    return data || [];
   }
 
   async function getNextInternalRevision(partNumber) {
@@ -1245,7 +1240,6 @@ export default function StockControl() {
       newCustomerName: "",
       newCustomerContactName: "",
       newCustomerContactEmail: "",
-      quotePdfFile: null,
       quoteExcelFile: null,
       description: "",
       quotedValue: "",
@@ -1383,6 +1377,99 @@ export default function StockControl() {
     }));
   }
 
+  // Reads a quote Excel file and pulls out customer, quote reference, sales
+  // rep, and line items to pre-fill the New Job form. Deliberately strict:
+  // if the sheet or header layout doesn't match exactly what's expected,
+  // this refuses and asks for manual entry rather than guessing at
+  // misaligned data. A broken formula on one specific cell (not a layout
+  // problem, just bad data on that one line) gets flagged for that item
+  // alone rather than rejecting the whole file.
+  function parseQuoteExcelFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const wb = XLSX.read(e.target.result, { type: "array", cellDates: true });
+          const sheetName = wb.SheetNames.find((n) => n.trim().toUpperCase() === "ERS QUOTE");
+          if (!sheetName) {
+            reject("This doesn't look like an ERS quote file — no \"ERS QUOTE\" sheet found. Fill in the job details manually.");
+            return;
+          }
+          const ws = wb.Sheets[sheetName];
+          const cellAt = (addr) => ws[addr]?.v;
+          const textAt = (addr) => {
+            const v = cellAt(addr);
+            return v === undefined || v === null ? "" : String(v).trim();
+          };
+
+          // The header row must be exactly where every real quote we've
+          // checked has it — if it's not, something about this file's
+          // layout is different and it needs a human, not a guess.
+          if (
+            textAt("C21").toUpperCase() !== "DESCRIPTION" ||
+            textAt("J21").toUpperCase() !== "QTY" ||
+            textAt("K21").toUpperCase() !== "RATE"
+          ) {
+            reject("This file's layout doesn't match the expected quote format (header row has moved or changed) — fill in the job details manually.");
+            return;
+          }
+
+          const customer = textAt("D10");
+          if (!customer) {
+            reject("Couldn't find a customer name in this file — fill in the job details manually.");
+            return;
+          }
+          const contact = textAt("D11") || textAt("D9");
+          const quoteNumber = textAt("K10");
+          const salesRep = textAt("K13");
+
+          // Walk row by row rather than assuming a fixed 2-row gap between
+          // every item — a note or footnote can push the next real item
+          // further down than the usual spacing.
+          const quoteItems = [];
+          let blankStreak = 0;
+          for (let row = 23; row <= 45; row++) {
+            const bVal = cellAt(`B${row}`);
+            const cText = textAt(`C${row}`);
+            if (typeof bVal === "number") {
+              const qtyVal = cellAt(`J${row}`);
+              const rateVal = cellAt(`K${row}`);
+              const rateIsUsable = typeof rateVal === "number";
+              quoteItems.push({
+                description: cText,
+                qty: typeof qtyVal === "number" ? qtyVal : 1,
+                unitPrice: rateIsUsable ? rateVal : "",
+                priceNeedsReview: !rateIsUsable,
+              });
+              blankStreak = 0;
+            } else if (cText) {
+              // A note/footnote line — append to whichever item is most
+              // recent rather than treating it as its own item.
+              if (quoteItems.length > 0) {
+                quoteItems[quoteItems.length - 1].description += ` — ${cText}`;
+              }
+              blankStreak = 0;
+            } else {
+              blankStreak++;
+              if (quoteItems.length > 0 && blankStreak >= 2) break;
+            }
+          }
+
+          if (quoteItems.length === 0) {
+            reject("Couldn't find any line items in this file — fill in the job details manually.");
+            return;
+          }
+
+          resolve({ customer, contact, quoteNumber, salesRep, quoteItems });
+        } catch (err) {
+          reject("Couldn't read that file — fill in the job details manually.");
+        }
+      };
+      reader.onerror = () => reject("Couldn't read that file — fill in the job details manually.");
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
   async function submitNewJob() {
     if (!newJobForm.customer || (newJobForm.customer === CUSTOM && !newJobForm.newCustomerName.trim())) {
       alert("Pick or add a customer before creating the job.");
@@ -1440,7 +1527,6 @@ export default function StockControl() {
             status: "in_progress",
             sales_rep: roleLabel,
             qty: derivedQty > 0 ? derivedQty : null,
-            qty_complete: 0,
             due_date: newJobForm.dueDate || null,
             description: newJobForm.description,
             quoted_value: newJobForm.quotedValue ? Number(newJobForm.quotedValue) : null,
@@ -1495,7 +1581,6 @@ export default function StockControl() {
           if (quoteItemError) throw quoteItemError;
         }
 
-        if (newJobForm.quotePdfFile) await uploadJobDocument(job.id, newJobForm.quotePdfFile);
         if (newJobForm.quoteExcelFile) await uploadJobDocument(job.id, newJobForm.quoteExcelFile);
       } catch (innerErr) {
         // Something after the job itself failed — clean up the orphaned
@@ -1555,8 +1640,60 @@ export default function StockControl() {
     }
   }
 
-  async function toggleJobProcessComplete(process) {
-    if (!supabase || !jobDetail) return;
+  // A process is only actionable once every process before it (by
+  // sort_order, on the same job) is marked complete — the order processes
+  // were selected in becomes the real workflow sequence, one after
+  // another, not all open at once.
+  function isProcessActionable(process, jobProcesses) {
+    return jobProcesses.filter((p) => p.sort_order < process.sort_order).every((p) => p.is_complete);
+  }
+
+  // The floor-facing queue: for someone with specific process-type access,
+  // this is every job currently sitting at a stage that's actually theirs
+  // to work on right now — not the whole job, not stages still waiting on
+  // something earlier in the sequence.
+  async function fetchProductionQueue() {
+    if (!supabase || !profile?.allowedProcessTypes?.length) return;
+    setProductionLoading(true);
+    try {
+      const { data: activeJobs, error: jobsError } = await supabase
+        .from("jobs")
+        .select("*")
+        .in("status", ["in_progress", "complete"]);
+      if (jobsError) throw jobsError;
+      const jobIds = (activeJobs || []).map((j) => j.id);
+      if (jobIds.length === 0) {
+        setProductionQueue([]);
+        setProductionLoading(false);
+        return;
+      }
+      const [{ data: allProcesses, error: procError }, { data: allQuoteItems, error: qiError }] = await Promise.all([
+        supabase.from("job_processes").select("*").in("job_id", jobIds).order("sort_order"),
+        supabase.from("job_quote_items").select("*").in("job_id", jobIds),
+      ]);
+      if (procError) throw procError;
+      if (qiError) throw qiError;
+
+      const queue = [];
+      for (const job of activeJobs) {
+        const jobProcesses = (allProcesses || []).filter((p) => p.job_id === job.id);
+        const myActionableProcesses = jobProcesses.filter(
+          (p) => !p.is_complete && profile.allowedProcessTypes.includes(p.process_name) && isProcessActionable(p, jobProcesses)
+        );
+        if (myActionableProcesses.length === 0) continue;
+        const jobQuoteItems = (allQuoteItems || []).filter((it) => it.job_id === job.id);
+        queue.push({ job, processes: myActionableProcesses, quoteItems: jobQuoteItems });
+      }
+      setProductionQueue(queue);
+    } catch (err) {
+      console.error("Failed to load production queue:", err);
+      setProductionQueue([]);
+    }
+    setProductionLoading(false);
+  }
+
+  async function toggleJobProcessComplete(process, job) {
+    if (!supabase || !job) return;
     const nowComplete = !process.is_complete;
     try {
       const { error } = await supabase
@@ -1571,15 +1708,18 @@ export default function StockControl() {
 
       // Notify whoever's running this job the moment a process wraps up —
       // never on un-ticking, that's just a correction, not progress.
-      if (nowComplete && jobDetail.job.sales_rep) {
+      if (nowComplete && job.sales_rep) {
         await supabase.from("job_notifications").insert({
-          job_id: jobDetail.job.id,
-          job_number: jobDetail.job.job_number,
-          sales_rep: jobDetail.job.sales_rep,
-          message: `${process.process_name} marked complete by ${roleLabel} on ${jobDetail.job.job_number} (${jobDetail.job.customer || "no customer"})`,
+          job_id: job.id,
+          job_number: job.job_number,
+          sales_rep: job.sales_rep,
+          message: `${process.process_name} marked complete by ${roleLabel} on ${job.job_number} (${job.customer || "no customer"})`,
         });
       }
-      refreshJobDetail();
+      // Refresh whichever view(s) are actually active — this can be
+      // called from Job Detail, the Production queue, or both.
+      if (jobDetail?.job.id === job.id) refreshJobDetail();
+      if (productionQueue !== null) fetchProductionQueue();
     } catch (err) {
       console.error("Failed to update process:", err);
       alert("Couldn't update that — check your connection and try again.");
@@ -1594,24 +1734,6 @@ export default function StockControl() {
       flashSaved(`process-${process.id}`);
     } catch (err) {
       console.error("Failed to update process field:", err);
-      alert("That didn't save — check your connection and try again.");
-    }
-  }
-
-  // Editing price on an already-created quote item pushes the new price
-  // back to the linked stock item too, same as the creation-time version.
-  async function updateJobQuoteItemPrice(item, newPrice) {
-    if (!supabase) return;
-    try {
-      const { error } = await supabase.from("job_quote_items").update({ unit_price: newPrice }).eq("id", item.id);
-      if (error) throw error;
-      if (item.linked_item_id) {
-        setItems((prev) => prev.map((it) => (it.id === item.linked_item_id ? { ...it, value: newPrice } : it)));
-      }
-      flashSaved(`quoteitem-price-${item.id}`);
-      refreshJobDetail();
-    } catch (err) {
-      console.error("Failed to update quote item price:", err);
       alert("That didn't save — check your connection and try again.");
     }
   }
@@ -1634,10 +1756,12 @@ export default function StockControl() {
     const lines = [];
     for (const { item: it, qty } of itemsWithQty) {
       const newTotal = Number(it.qty_invoiced) + qty;
-      const nowFullyInvoiced = newTotal >= Number(it.qty);
+      // Submitting only ever means "requested" — it never becomes actually
+      // "invoiced" until accounts marks the whole job invoiced with a real
+      // invoice number. Those are two genuinely different states.
       const { error: updateError } = await supabase
         .from("job_quote_items")
-        .update({ qty_invoiced: newTotal, item_status: nowFullyInvoiced ? "invoiced" : it.item_status })
+        .update({ qty_invoiced: newTotal, item_status: "invoice_requested" })
         .eq("id", it.id);
       if (updateError) throw updateError;
       const { error: logError } = await supabase.from("job_quote_item_invoices").insert({
@@ -1739,7 +1863,6 @@ export default function StockControl() {
             status: "in_progress",
             sales_rep: roleLabel,
             qty: source.qty,
-            qty_complete: 0,
             due_date: dueDate || null,
             description: source.description,
             quoted_value: source.quoted_value,
@@ -2270,6 +2393,14 @@ export default function StockControl() {
         .update({ status: "invoiced", invoiced_by: roleLabel, invoiced_at: new Date().toISOString(), invoice_number: invoiceNumber.trim() })
         .eq("id", job.id);
       if (error) throw error;
+      // Everything that was only "requested" becomes genuinely invoiced
+      // now that a real invoice number actually exists for this job.
+      const { error: itemsError } = await supabase
+        .from("job_quote_items")
+        .update({ item_status: "invoiced" })
+        .eq("job_id", job.id)
+        .eq("item_status", "invoice_requested");
+      if (itemsError) throw itemsError;
       if (job.sales_rep) {
         await supabase.from("job_notifications").insert({
           job_id: job.id,
@@ -2590,6 +2721,7 @@ export default function StockControl() {
         canRaisePO: !!d.can_raise_po,
         canViewUsageLog: !!d.can_view_usage_log,
         canManageInvoicing: !!d.can_manage_invoicing,
+        allowedProcessTypes: d.allowed_process_types || [],
         isSalesPerson: !!d.is_sales_person,
         department: d.department || "",
       }))
@@ -2608,6 +2740,7 @@ export default function StockControl() {
     canRaisePO: "can_raise_po",
     canViewUsageLog: "can_view_usage_log",
     canManageInvoicing: "can_manage_invoicing",
+    allowedProcessTypes: "allowed_process_types",
     isSalesPerson: "is_sales_person",
     department: "department",
   };
@@ -2624,6 +2757,16 @@ export default function StockControl() {
       alert("That didn't save — check your connection and try again.");
       loadPeople();
     }
+  }
+
+  // Real, enforced access to specific process types — this is what gates
+  // the Production tab, separate from the free-text Department label.
+  async function toggleProcessTypeAccess(id, processType) {
+    const person = people.find((p) => p.id === id);
+    if (!person) return;
+    const current = person.allowedProcessTypes || [];
+    const next = current.includes(processType) ? current.filter((p) => p !== processType) : [...current, processType];
+    await updatePersonField(id, "allowedProcessTypes", next);
   }
 
   async function updatePersonPermission(id, section, kind, value) {
@@ -2708,6 +2851,7 @@ export default function StockControl() {
     if (section === "receiving") return !!profile?.canMarkReceived;
     if (section === "invoicing") return !!profile?.canManageInvoicing;
     if (section === "notifications") return !!profile?.isSalesPerson;
+    if (section === "production") return !!profile?.allowedProcessTypes?.length;
     if (section === "usageLog") return !!profile?.canViewUsageLog;
     return profile ? !!profile.permissions?.[section]?.view : false;
   }
@@ -3381,6 +3525,23 @@ export default function StockControl() {
     const qtyToAdd = parseFloat(req.qty);
     if (!isNaN(qtyToAdd) && qtyToAdd > 0) {
       setItems((prev) => prev.map((it) => (it.id === req.itemId ? { ...it, qty: Number(it.qty || 0) + qtyToAdd } : it)));
+      setUsageLog((prev) => [
+        ...prev,
+        {
+          id: uid(),
+          itemId: req.itemId,
+          itemName: req.itemLabel,
+          mainCat: req.mainCat,
+          qty: qtyToAdd,
+          direction: "add",
+          by: roleLabel,
+          jobNumber: "",
+          customer: "",
+          note: `Received via requisition${req.supplier ? ` — ${req.supplier}` : ""}`,
+          lineCost: 0,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
     }
     updateRequisition(id, {
       status: "fulfilled",
@@ -3775,14 +3936,32 @@ export default function StockControl() {
 
     const doc = new jsPDF();
     const company = master.companyDetails || {};
+    let textX = 14;
+    if (company.logo) {
+      try {
+        const imgProps = doc.getImageProperties(company.logo);
+        const maxW = 26;
+        const maxH = 14;
+        let logoW = maxW;
+        let logoH = (imgProps.height / imgProps.width) * logoW;
+        if (logoH > maxH) {
+          logoH = maxH;
+          logoW = (imgProps.width / imgProps.height) * logoH;
+        }
+        doc.addImage(company.logo, "JPEG", 14, 10, logoW, logoH);
+        textX = 14 + logoW + 6;
+      } catch {
+        // bad image data — skip rather than fail the whole document
+      }
+    }
     doc.setFontSize(14);
     doc.setFont(undefined, "bold");
-    doc.text(`${company.name || "Purchase Order Report"}`, 14, 18);
+    doc.text(`${company.name || "Purchase Order Report"}`, textX, 18);
     doc.setFontSize(10);
     doc.setFont(undefined, "normal");
     const supplierLabel = poReportSupplier ? master.suppliers.find((s) => s.id === poReportSupplier)?.name || "" : "All suppliers";
     const rangeLabel = `${poReportFrom || "earliest"} to ${poReportTo || "latest"}`;
-    doc.text(`${supplierLabel} · ${rangeLabel}`, 14, 25);
+    doc.text(`${supplierLabel} · ${rangeLabel}`, textX, 25);
 
     const total = matches.reduce((sum, po) => sum + po.totalValue, 0);
 
@@ -5560,7 +5739,7 @@ export default function StockControl() {
               .filter((j) => j.status === "in_progress" || j.status === "complete")
               .map((job) => {
                 const jobItems = allJobQuoteItems.filter((it) => it.job_id === job.id);
-                const invoicedCount = jobItems.filter((it) => Number(it.qty) - Number(it.qty_invoiced) <= 0).length;
+                const invoicedCount = jobItems.filter((it) => it.item_status === "invoiced").length;
                 return (
                 <div key={job.id} style={S.reqCard}>
                   <div style={S.reqCardTop}>
@@ -5575,6 +5754,7 @@ export default function StockControl() {
                     {job.quote_reference && <span>Quote: {job.quote_reference}</span>}
                     {job.laser_job_reference && <span>Laser: {job.laser_job_reference}</span>}
                     {jobItems.length > 0 && <span>{invoicedCount}/{jobItems.length} invoiced</span>}
+                    {job.invoice_number && <span>Invoice #{job.invoice_number}</span>}
                   </div>
                   <div style={S.reqActions}>
                     <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => openJobDetail(job)}>
@@ -5631,6 +5811,61 @@ export default function StockControl() {
             {(jobsList || []).filter((j) => j.status === "invoiced").length === 0 && <div style={S.empty}>Nothing completed yet.</div>}
           </div>
         </div>
+      ) : tab === "production" ? (
+        <div style={S.list}>
+          <div style={S.roleHint}>Your work queue — jobs currently at a stage that's ready for {profile?.allowedProcessTypes?.join(", ")}.</div>
+          {productionLoading && <div style={{ ...S.empty, marginTop: 10 }}>Loading…</div>}
+          {!productionLoading && productionQueue?.length === 0 && <div style={{ ...S.empty, marginTop: 10 }}>Nothing waiting on you right now.</div>}
+          <div style={{ ...S.gradeItems, marginTop: 10 }}>
+            {(productionQueue || []).map(({ job, processes, quoteItems }) => (
+              <div key={job.id} style={S.reqCard}>
+                <div style={S.reqCardTop}>
+                  <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
+                  {job.due_date && <span style={S.roleHint}>Due {new Date(job.due_date).toLocaleDateString()}</span>}
+                </div>
+                {job.description && <div style={S.roleHint}>{job.description}</div>}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+                  {processes.map((p) => (
+                    <div key={p.id} style={S.managerRow}>
+                      <label style={{ ...S.checkRow, fontWeight: 600, flex: 1 }}>
+                        <input type="checkbox" checked={p.is_complete} onChange={() => toggleJobProcessComplete(p, job)} />
+                        {p.process_name}
+                      </label>
+                    </div>
+                  ))}
+                </div>
+                {(() => {
+                  const drawingsForJob = quoteItems
+                    .map((it) => {
+                      const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
+                      const drawing = linkedItem?.partNumber ? drawingLookup[linkedItem.partNumber.trim()] : null;
+                      return drawing ? { description: it.description, partNumber: linkedItem.partNumber, drawing } : null;
+                    })
+                    .filter(Boolean);
+                  if (drawingsForJob.length === 0) return null;
+                  return (
+                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
+                      <label style={S.label}>Drawings</label>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+                        {drawingsForJob.map((d, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            className="stk-btn"
+                            style={S.reqActionBtnMuted}
+                            onClick={() => openDrawingPreviewByPartNumber(d.partNumber)}
+                          >
+                            <FileText size={12} /> {d.description}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            ))}
+          </div>
+        </div>
       ) : tab === "notifications" ? (
         <div style={S.list}>
           {notificationsList === null && <div style={S.empty}>Loading…</div>}
@@ -5656,12 +5891,12 @@ export default function StockControl() {
             Jobs marked Complete show up here, ready to invoice — create the real invoice in Sage, then mark it here to keep a record.
           </div>
           <label style={S.label}>Outstanding</label>
-          {(jobsList || []).filter((j) => j.status === "complete").length === 0 && (
+          {(jobsList || []).filter((j) => j.status !== "invoiced" && j.status !== "cancelled" && (j.status === "complete" || jobInvoiceRequests.some((r) => r.job_id === j.id))).length === 0 && (
             <div style={S.empty}>Nothing waiting to be invoiced.</div>
           )}
           <div style={{ ...S.gradeItems, marginTop: 6 }}>
             {(jobsList || [])
-              .filter((j) => j.status === "complete")
+              .filter((j) => j.status !== "invoiced" && j.status !== "cancelled" && (j.status === "complete" || jobInvoiceRequests.some((r) => r.job_id === j.id)))
               .map((job) => (
                 <div key={job.id} style={S.reqCard}>
                   <div style={S.reqCardTop}>
@@ -5721,6 +5956,7 @@ export default function StockControl() {
           <div style={S.segRow}>
             {[
               { key: "log", label: "Usage Log" },
+              { key: "received", label: "Received" },
               { key: "jobCosting", label: "Job Costing" },
             ].map((m) => (
               <button
@@ -5738,7 +5974,60 @@ export default function StockControl() {
             ))}
           </div>
 
-          {usageViewMode === "jobCosting" ? (
+          {usageViewMode === "received" ? (
+            <div style={{ marginTop: 12 }}>
+              <div style={S.filterBar}>
+                <div>
+                  <label style={S.label}>From</label>
+                  <input type="date" style={S.input} value={usageDateFrom} onChange={(e) => setUsageDateFrom(e.target.value)} />
+                </div>
+                <div>
+                  <label style={S.label}>To</label>
+                  <input type="date" style={S.input} value={usageDateTo} onChange={(e) => setUsageDateTo(e.target.value)} />
+                </div>
+                <input
+                  style={S.input}
+                  value={usageSearchQuery}
+                  onChange={(e) => setUsageSearchQuery(e.target.value)}
+                  placeholder="Search item, supplier note, or person…"
+                />
+              </div>
+              {(() => {
+                const received = [...usageLog]
+                  .filter((u) => u.direction === "add")
+                  .filter((u) => !usageDateFrom || new Date(u.timestamp) >= new Date(usageDateFrom))
+                  .filter((u) => !usageDateTo || new Date(u.timestamp) <= new Date(usageDateTo + "T23:59:59"))
+                  .filter((u) => {
+                    if (!usageSearchQuery.trim()) return true;
+                    const q = usageSearchQuery.toLowerCase();
+                    return (
+                      u.itemName.toLowerCase().includes(q) ||
+                      (u.note || "").toLowerCase().includes(q) ||
+                      (u.by || "").toLowerCase().includes(q)
+                    );
+                  })
+                  .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                return (
+                  <div style={{ ...S.gradeItems, marginTop: 10 }}>
+                    {received.length === 0 && <div style={S.empty}>Nothing received yet.</div>}
+                    {received.map((u) => (
+                      <div key={u.id} style={S.reqCard}>
+                        <div style={S.reqCardTop}>
+                          <span style={S.itemName}>{u.itemName}</span>
+                          <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>+{u.qty}</span>
+                        </div>
+                        <div style={S.rowMeta}>
+                          <span>By {u.by}</span>
+                          <span>{new Date(u.timestamp).toLocaleString()}</span>
+                        </div>
+                        {u.note && <div style={S.itemComment}>{u.note}</div>}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          ) : usageViewMode === "jobCosting" ? (
             <div style={{ marginTop: 12 }}>
               <input
                 style={S.input}
@@ -8104,6 +8393,27 @@ export default function StockControl() {
                           ))}
                         </select>
                       </div>
+                      <div style={{ marginTop: 8 }}>
+                        <label style={S.label}>
+                          Production access — which processes this person handles (gives them the Production tab, scoped to just these)
+                        </label>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+                          {master.jobProcessTypes.map((proc) => {
+                            const has = (p.allowedProcessTypes || []).includes(proc);
+                            return (
+                              <button
+                                type="button"
+                                key={proc}
+                                className="stk-btn"
+                                onClick={() => toggleProcessTypeAccess(p.id, proc)}
+                                style={{ ...S.segBtn, ...(has ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}) }}
+                              >
+                                {proc}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
                   ))}
                   {people && people.length === 0 && <div style={S.empty}>Nobody's signed up yet.</div>}
@@ -8787,7 +9097,8 @@ export default function StockControl() {
                           />
                         )}
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12.5, display: "flex", alignItems: "center" }}>
+                          <div style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ fontSize: 12.5, fontWeight: 600 }}>{it.qty}×</span>
                             {it.description}
                             <SavedCheck fieldKey={`quoteitem-${it.id}`} />
                             <SavedCheck fieldKey={`quoteitem-price-${it.id}`} />
@@ -8796,22 +9107,7 @@ export default function StockControl() {
                             )}
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
-                            <span style={S.roleHint}>{it.qty} ×</span>
-                            {canEditThisJob ? (
-                              <input
-                                style={{ ...S.input, width: 70, fontSize: 11, padding: "3px 6px" }}
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                defaultValue={it.unit_price}
-                                onBlur={(e) => {
-                                  const val = Number(e.target.value) || 0;
-                                  if (val !== Number(it.unit_price)) updateJobQuoteItemPrice(it, val);
-                                }}
-                              />
-                            ) : (
-                              <span style={S.roleHint}>R{Number(it.unit_price).toFixed(2)}</span>
-                            )}
+                            <span style={S.roleHint}>R{Number(it.unit_price).toFixed(2)} each</span>
                             <span style={S.roleHint}>— Invoiced {it.qty_invoiced} / {it.qty}</span>
                           </div>
                           {linkedItem && (
@@ -8837,7 +9133,11 @@ export default function StockControl() {
                             </button>
                           )}
                         </div>
-                        {remaining <= 0 && <span style={{ ...S.roleHint, color: C.accentFinished }}>Fully invoiced</span>}
+                        {remaining <= 0 && (
+                          <span style={{ ...S.roleHint, color: jobDetail.job.status === "invoiced" ? C.accentFinished : C.accentRaw }}>
+                            {jobDetail.job.status === "invoiced" ? "Invoiced" : "Invoice requested — awaiting accounts"}
+                          </span>
+                        )}
                       </div>
                     );
                   })}
@@ -8855,7 +9155,7 @@ export default function StockControl() {
                     <button
                       type="button"
                       className="stk-btn"
-                      style={{ ...S.reqActionBtnMuted, flex: 1 }}
+                      style={{ ...S.submitBtn, flex: 1 }}
                       onClick={() => openBatchDeliveryNoteModal(jobDetail.job, jobDetail.quoteItems)}
                     >
                       <Truck size={13} /> Delivery Note
@@ -8914,7 +9214,7 @@ export default function StockControl() {
                           type="checkbox"
                           checked={p.is_complete}
                           disabled={!canEditThisJob}
-                          onChange={() => toggleJobProcessComplete(p)}
+                          onChange={() => toggleJobProcessComplete(p, jobDetail.job)}
                         />
                         {p.process_name}
                       </label>
@@ -9357,27 +9657,46 @@ export default function StockControl() {
             </div>
 
             <div style={{ marginTop: 10 }}>
-              <label style={S.label}>Quote documents (optional)</label>
-              <div style={S.formGrid}>
-                <label className="stk-btn" style={{ ...S.addBtn, cursor: "pointer", justifyContent: "center" }}>
-                  <Upload size={13} /> {newJobForm.quotePdfFile ? newJobForm.quotePdfFile.name : "Quote PDF"}
-                  <input
-                    type="file"
-                    accept="application/pdf"
-                    style={{ display: "none" }}
-                    onChange={(e) => setNewJobForm((f) => ({ ...f, quotePdfFile: e.target.files[0] || null }))}
-                  />
-                </label>
-                <label className="stk-btn" style={{ ...S.addBtn, cursor: "pointer", justifyContent: "center" }}>
-                  <Upload size={13} /> {newJobForm.quoteExcelFile ? newJobForm.quoteExcelFile.name : "Quote Excel"}
+              <label style={S.label}>Quote (optional)</label>
+              <label className="stk-btn" style={{ ...S.addBtn, cursor: "pointer", justifyContent: "center", width: "100%" }}>
+                <Upload size={13} /> {newJobForm.quoteExcelFile ? newJobForm.quoteExcelFile.name : "Upload Quote Excel"}
                   <input
                     type="file"
                     accept=".xlsx,.xls,.xlsm,.csv"
                     style={{ display: "none" }}
-                    onChange={(e) => setNewJobForm((f) => ({ ...f, quoteExcelFile: e.target.files[0] || null }))}
+                    onChange={async (e) => {
+                      const file = e.target.files[0] || null;
+                      setNewJobForm((f) => ({ ...f, quoteExcelFile: file }));
+                      if (!file) return;
+                      try {
+                        const parsed = await parseQuoteExcelFile(file);
+                        const matchedCustomer = master.customers.find((c) => c.toLowerCase() === parsed.customer.toLowerCase());
+                        setNewJobForm((f) => ({
+                          ...f,
+                          customer: matchedCustomer || CUSTOM,
+                          newCustomerName: matchedCustomer ? "" : parsed.customer,
+                          newCustomerContactName: matchedCustomer ? f.newCustomerContactName : parsed.contact,
+                          quoteReference: parsed.quoteNumber || f.quoteReference,
+                          quoteItems: parsed.quoteItems.map((it) => ({
+                            id: uid(),
+                            description: it.description,
+                            qty: String(it.qty),
+                            unitPrice: String(it.unitPrice),
+                            priceNeedsReview: it.priceNeedsReview,
+                            linkedItemId: null,
+                          })),
+                        }));
+                        const reviewFlags = parsed.quoteItems.filter((it) => it.priceNeedsReview).length;
+                        alert(
+                          `Pulled ${parsed.quoteItems.length} item(s) from the quote — check everything below before saving, especially the prices.` +
+                            (reviewFlags ? `\n\n${reviewFlags} item(s) had a price that couldn't be read and were left blank — fill those in manually.` : "")
+                        );
+                      } catch (err) {
+                        alert(typeof err === "string" ? err : "Couldn't read that file — fill in the job details manually.");
+                      }
+                    }}
                   />
-                </label>
-              </div>
+              </label>
             </div>
 
             <div style={{ marginTop: 10 }}>
@@ -9439,6 +9758,11 @@ export default function StockControl() {
                 const revision = linkedItem?.partNumber ? drawingLookup[linkedItem.partNumber.trim()] : null;
                 return (
                   <div key={idx} style={{ marginTop: 6 }}>
+                    {it.priceNeedsReview && (
+                      <div style={{ ...S.roleHint, color: C.danger, marginBottom: 2 }}>
+                        ⚠ Price couldn't be read from the quote — check and fill in manually
+                      </div>
+                    )}
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                       <input
                         style={{ ...S.input, flex: 2 }}
