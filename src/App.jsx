@@ -1936,6 +1936,21 @@ export default function StockControl() {
     }
   }
 
+  // Writes straight to the job's own laser_job_reference column — the same
+  // field New Job / Job Detail read and write — so filling this in from
+  // Production shows up there automatically, with nothing to keep in sync.
+  async function saveJobSigmaNestNumber(job, value) {
+    try {
+      const { error } = await supabase.from("jobs").update({ laser_job_reference: value }).eq("id", job.id);
+      if (error) throw error;
+      fetchProductionQueue();
+      if (jobDetail?.job.id === job.id) refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to save SigmaNest number:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
   function openShortageModal(job, process) {
     setShortageModal({ job, process, note: process.shortage_note || "" });
   }
@@ -6203,7 +6218,7 @@ export default function StockControl() {
                             ⚠ Shortage: {process.shortage_note} — flagged by {process.shortage_flagged_by}
                           </div>
                         )}
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8, alignItems: "center" }}>
+                        <div style={{ marginTop: 8 }}>
                           {process.tracking_mode === "each" ? (
                             <QtyProgressControl
                               process={process}
@@ -6223,15 +6238,17 @@ export default function StockControl() {
                               Complete
                             </label>
                           )}
-                          <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => toggleProcessUrgent(process)}>
+                        </div>
+                        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                          <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => toggleProcessUrgent(process)}>
                             {process.is_urgent ? "Unmark urgent" : "Mark urgent"}
                           </button>
                           {process.has_shortage ? (
-                            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => clearShortage(process)}>
+                            <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => clearShortage(process)}>
                               Clear shortage
                             </button>
                           ) : (
-                            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openShortageModal(job, process)}>
+                            <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => openShortageModal(job, process)}>
                               Flag shortage
                             </button>
                           )}
@@ -6257,6 +6274,19 @@ export default function StockControl() {
                         <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
                           <ExpandableProcessNotes value={process.notes} onCommit={(notes) => saveProcessNote(process, notes)} />
                         </div>
+                        {process.process_name === "Nesting" && (
+                          <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
+                            <label style={S.label}>SigmaNest job number</label>
+                            <input
+                              style={{ ...S.input, marginTop: 4 }}
+                              defaultValue={job.laser_job_reference || ""}
+                              placeholder="Not filled in yet"
+                              onBlur={(e) => {
+                                if (e.target.value !== (job.laser_job_reference || "")) saveJobSigmaNestNumber(job, e.target.value.trim());
+                              }}
+                            />
+                          </div>
+                        )}
                         {process.process_name === "Nesting" && (
                           <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
                             <label style={S.label}>Nesting document</label>
@@ -8288,76 +8318,93 @@ export default function StockControl() {
                   )}
                 </div>
 
-                <div style={{ ...S.managerAddRow, marginTop: 12, marginBottom: 4, opacity: 0.7 }}>
-                  <span style={{ ...S.label, flex: "0 0 110px" }}>Part number</span>
-                  <span style={{ ...S.label, flex: 1 }}>Description</span>
-                  <span style={{ ...S.label, flex: "0 0 60px" }}>Qty</span>
-                  <span style={{ ...S.label, flex: "0 0 70px" }}>Price (R)</span>
-                  <span style={{ ...S.label, flex: "0 0 70px" }}>Low at</span>
-                  <span style={{ ...S.label, flex: "0 0 60px" }}>Cust. rev</span>
-                  <span style={{ ...S.label, flex: "0 0 110px" }}>Customer</span>
-                </div>
                 <div style={S.managerList}>
                   {(items || [])
                     .filter((it) => it.mainCat === "custom")
                     .filter((it) => ((it.partNumber || "") + " " + (it.name || "")).toLowerCase().includes(stockCodeQuery.toLowerCase()))
                     .filter((it) => !stockCodeCustomerFilter || it.customer === stockCodeCustomerFilter)
                     .map((it) => (
-                      <div key={it.id} style={S.managerRow}>
-                        <EditableName value={it.partNumber || ""} onCommit={(v) => updateCustomerStockField(it.id, "partNumber", v)} style={{ maxWidth: 110 }} />
-                        <EditableName value={it.name || ""} onCommit={(v) => updateCustomerStockField(it.id, "name", v)} />
-                        <input
-                          type="number"
-                          value={it.qty === 0 ? "" : it.qty}
-                          placeholder="0"
-                          onChange={(e) => updateCustomerStockField(it.id, "qty", e.target.value)}
-                          style={{ ...S.managerFactorInput, width: 55 }}
-                          title="Actual quantity on hand"
-                        />
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={it.value === 0 ? "" : it.value}
-                          placeholder="0"
-                          onChange={(e) => updateCustomerStockField(it.id, "value", e.target.value)}
-                          style={S.managerFactorInput}
-                          title="Unit price (R)"
-                        />
-                        <input
-                          type="number"
-                          value={it.low === 0 ? "" : it.low}
-                          placeholder="0"
-                          onChange={(e) => updateCustomerStockField(it.id, "low", e.target.value)}
-                          style={S.managerFactorInput}
-                          title="Low stock warning threshold"
-                        />
-                        <input
-                          type="text"
-                          value={it.customerRevision || ""}
-                          placeholder="—"
-                          onChange={(e) => updateCustomerStockField(it.id, "customerRevision", e.target.value)}
-                          style={{ ...S.managerFactorInput, width: 50 }}
-                          title="Revision (customer's own, e.g. a letter or number)"
-                        />
-                        <select
-                          value={it.customer || ""}
-                          onChange={(e) => updateCustomerStockField(it.id, "customer", e.target.value)}
-                          style={{ ...S.managerFactorInput, width: 110 }}
-                        >
-                          <option value="">No customer</option>
-                          {master.customers.map((c) => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                        </select>
-                        {isAdmin && (
-                          <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeItem(it.id)}>
-                            <Trash2 size={13} />
-                          </button>
-                        )}
+                      <div key={it.id} style={{ ...S.managerRow, flexDirection: "column", alignItems: "stretch" }}>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <EditableName value={it.partNumber || ""} onCommit={(v) => updateCustomerStockField(it.id, "partNumber", v)} style={{ maxWidth: 110 }} />
+                          <EditableName value={it.name || ""} onCommit={(v) => updateCustomerStockField(it.id, "name", v)} style={{ flex: 1, minWidth: 140 }} />
+                          {isAdmin && (
+                            <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeItem(it.id)}>
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
+                          <div>
+                            <label style={S.label}>Qty</label>
+                            <input
+                              type="number"
+                              value={it.qty === 0 ? "" : it.qty}
+                              placeholder="0"
+                              onChange={(e) => updateCustomerStockField(it.id, "qty", e.target.value)}
+                              style={{ ...S.managerFactorInput, width: 55, display: "block" }}
+                              title="Actual quantity on hand"
+                            />
+                          </div>
+                          <div>
+                            <label style={S.label}>Price (R)</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={it.value === 0 ? "" : it.value}
+                              placeholder="0"
+                              onChange={(e) => updateCustomerStockField(it.id, "value", e.target.value)}
+                              style={{ ...S.managerFactorInput, display: "block" }}
+                              title="Unit price (R)"
+                            />
+                          </div>
+                          <div>
+                            <label style={S.label}>Low at</label>
+                            <input
+                              type="number"
+                              value={it.low === 0 ? "" : it.low}
+                              placeholder="0"
+                              onChange={(e) => updateCustomerStockField(it.id, "low", e.target.value)}
+                              style={{ ...S.managerFactorInput, display: "block" }}
+                              title="Low stock warning threshold"
+                            />
+                          </div>
+                          <div>
+                            <label style={S.label}>Cust. rev</label>
+                            <input
+                              type="text"
+                              value={it.customerRevision || ""}
+                              placeholder="—"
+                              onChange={(e) => updateCustomerStockField(it.id, "customerRevision", e.target.value)}
+                              style={{ ...S.managerFactorInput, width: 50, display: "block" }}
+                              title="Revision (customer's own, e.g. a letter or number)"
+                            />
+                          </div>
+                          <div>
+                            <label style={S.label}>Customer</label>
+                            <select
+                              value={it.customer || ""}
+                              onChange={(e) => updateCustomerStockField(it.id, "customer", e.target.value)}
+                              style={{ ...S.managerFactorInput, width: 110, display: "block" }}
+                            >
+                              <option value="">No customer</option>
+                              {master.customers.map((c) => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
                       </div>
                     ))}
-                  {(items || []).filter((it) => it.mainCat === "custom").length === 0 && (
-                    <div style={S.empty}>Nothing here yet — import a file or add one above.</div>
+                  {(items || [])
+                    .filter((it) => it.mainCat === "custom")
+                    .filter((it) => ((it.partNumber || "") + " " + (it.name || "")).toLowerCase().includes(stockCodeQuery.toLowerCase()))
+                    .filter((it) => !stockCodeCustomerFilter || it.customer === stockCodeCustomerFilter).length === 0 && (
+                    <div style={S.empty}>
+                      {(items || []).filter((it) => it.mainCat === "custom").length === 0
+                        ? "Nothing here yet — import a file or add one above."
+                        : "Nothing matches that search or customer filter."}
+                    </div>
                   )}
                 </div>
               </>
@@ -9083,12 +9130,22 @@ export default function StockControl() {
             )}
             {!previewLoading && previewData && previewItem.attachmentType === "pdf" && (
               <>
-                <embed src={previewData} type="application/pdf" style={S.previewPdf} />
-                {(!previewItem.restrictDownload || isAdmin) && (
-                  <a href={previewData} download={previewItem.attachmentName || "drawing.pdf"} style={S.previewDownload}>
-                    Download PDF
-                  </a>
-                )}
+                {/* iframe, not embed — most mobile browsers don't support
+                    <embed type="application/pdf"> and were falling back to
+                    downloading the file instead of showing it inline. */}
+                <iframe src={previewData} title={previewItem.attachmentName || "Attachment"} style={S.previewPdf} />
+                <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 8 }}>
+                  {(!previewItem.restrictDownload || isAdmin) && (
+                    <>
+                      <a href={previewData} target="_blank" rel="noreferrer" style={S.previewDownload}>
+                        Open / Print
+                      </a>
+                      <a href={previewData} download={previewItem.attachmentName || "drawing.pdf"} style={S.previewDownload}>
+                        Download PDF
+                      </a>
+                    </>
+                  )}
+                </div>
                 {previewItem.restrictDownload && !isAdmin && (
                   <div style={{ ...S.roleHint, textAlign: "center", marginTop: 8 }}>
                     Downloading this drawing is restricted to Admin.
