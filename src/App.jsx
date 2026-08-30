@@ -42,8 +42,14 @@ const NAV_TABS = [
 ];
 
 // The tab bar groups related divisions under a shared dropdown instead of
-// showing each as its own button.
-const TAB_GROUPS = [{ label: "Stock", keys: ["plate", "structural", "cncBar", "custom", "fasteners"] }];
+// showing each as its own button — keeps the row to a small, stable set of
+// top-level buttons (Jobs and Production stay standalone since they're
+// used the most) with everything else folded into a few logical groups.
+const TAB_GROUPS = [
+  { label: "Stock", keys: ["plate", "structural", "cncBar", "custom", "fasteners", "stores", "assets"] },
+  { label: "Procurement", keys: ["requisitions", "purchaseOrders", "receiving"] },
+  { label: "Records", keys: ["invoicing", "usageLog", "drawings"] },
+];
 
 // Jobs and Notifications still need a canView() entry (for the header
 // buttons and permission checks) even though they're not part of the main
@@ -403,13 +409,13 @@ function QtyProgressControl({ process, job, totalQty, isReady, onSubmit }) {
   }
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <span style={{ fontSize: 13, fontWeight: 600 }}>{done}/{totalQty}</span>
+      <span style={{ fontSize: 14, fontWeight: 600 }}>{done}/{totalQty}</span>
       <input
         type="number"
         min="0"
         max={remaining}
         disabled={!isReady}
-        style={{ ...S.input, width: 64, fontSize: 12, padding: "5px 6px" }}
+        style={{ ...S.input, width: 64, fontSize: 13.5, padding: "5px 6px" }}
         value={input}
         onChange={(e) => setInput(e.target.value)}
         placeholder="Qty"
@@ -428,6 +434,40 @@ function QtyProgressControl({ process, job, totalQty, isReady, onSubmit }) {
         Log
       </button>
     </div>
+  );
+}
+
+// Optional per-process notes — starts as a compact one-line prompt/preview,
+// expands into a full textarea on click, saves on blur. Meant to sit on
+// every process card, not just specific process types.
+function ExpandableProcessNotes({ value, onCommit }) {
+  const [expanded, setExpanded] = useState(false);
+  const [val, setVal] = useState(value || "");
+  useEffect(() => setVal(value || ""), [value]);
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        className="stk-btn"
+        style={{ ...S.roleHint, textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer", width: "100%" }}
+        onClick={() => setExpanded(true)}
+      >
+        {value ? `Note: ${value}` : "+ Add note"}
+      </button>
+    );
+  }
+  return (
+    <textarea
+      autoFocus
+      style={{ ...S.input, minHeight: 60, resize: "vertical", fontFamily: "inherit" }}
+      value={val}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={() => {
+        setExpanded(false);
+        if (val !== (value || "")) onCommit(val);
+      }}
+      placeholder="Add a note…"
+    />
   );
 }
 
@@ -481,6 +521,7 @@ export default function StockControl() {
   const [productionQueue, setProductionQueue] = useState(null);
   const [invoicedSectionOpen, setInvoicedSectionOpen] = useState(false);
   const [productionExpanded, setProductionExpanded] = useState({});
+  const [productionSearchQuery, setProductionSearchQuery] = useState("");
   const [shortageModal, setShortageModal] = useState(null);
   const [productionLoading, setProductionLoading] = useState(false);
   const [jobInvoiceRequests, setJobInvoiceRequests] = useState([]);
@@ -596,6 +637,7 @@ export default function StockControl() {
   const [priceUnitMode, setPriceUnitMode] = useState("perUnit"); // "perUnit" (sheet/metre) or "perKg"
 
   const [showFilters, setShowFilters] = useState(false);
+  const [showCustomerChips, setShowCustomerChips] = useState(false);
   const [filterGrade, setFilterGrade] = useState("");
   const [filterFastenerType, setFilterFastenerType] = useState("");
   const [filterFastenerDiameter, setFilterFastenerDiameter] = useState("");
@@ -957,6 +999,60 @@ export default function StockControl() {
   useEffect(() => {
     if (tab === "production" && productionQueue === null && profile?.allowedProcessTypes?.length) fetchProductionQueue();
   }, [tab, profile]);
+
+  // Makes the phone/browser back action close whatever's open (Job Detail,
+  // a preview, any modal) instead of leaving the app entirely — the app
+  // wasn't registering these as a "page" the browser knew how to step back
+  // into, so back had nothing to do but exit. Deliberately closes
+  // everything open on one back press rather than one layer at a time —
+  // simpler and more reliable than tracking exact nesting order, and it
+  // directly fixes the actual complaint (leaving the app), not a polish
+  // detail on top of it.
+  const anyModalOpen = !!(
+    usageModal || assetRemoveModal || shortageModal || jobDetail || newStockItemModal ||
+    markInvoicedModal || deliveryNoteBatchModal || copyJobModal || previewItem ||
+    showAddStockItemModal || showStockImportModal
+  );
+  const modalWasOpenRef = useRef(false);
+  const closingViaBackRef = useRef(false);
+
+  function closeAllModals() {
+    setUsageModal(null);
+    setAssetRemoveModal(null);
+    setShortageModal(null);
+    setJobDetail(null);
+    setNewStockItemModal(null);
+    setMarkInvoicedModal(null);
+    setDeliveryNoteBatchModal(null);
+    setCopyJobModal(null);
+    setPreviewItem(null);
+    setShowAddStockItemModal(false);
+    setShowStockImportModal(false);
+  }
+
+  useEffect(() => {
+    if (anyModalOpen && !modalWasOpenRef.current) {
+      window.history.pushState({ stkModalOpen: true }, "");
+    } else if (!anyModalOpen && modalWasOpenRef.current && !closingViaBackRef.current) {
+      if (window.history.state?.stkModalOpen) window.history.back();
+    }
+    modalWasOpenRef.current = anyModalOpen;
+  }, [anyModalOpen]);
+
+  useEffect(() => {
+    function handlePopState() {
+      if (modalWasOpenRef.current) {
+        closingViaBackRef.current = true;
+        closeAllModals();
+        modalWasOpenRef.current = false;
+        setTimeout(() => {
+          closingViaBackRef.current = false;
+        }, 0);
+      }
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   // Loaded eagerly (not just when the tab's opened) so the unread badge on
   // the header button is accurate the moment someone signs in.
@@ -1710,12 +1806,14 @@ export default function StockControl() {
         setProductionLoading(false);
         return;
       }
-      const [{ data: allProcesses, error: procError }, { data: allQuoteItems, error: qiError }] = await Promise.all([
+      const [{ data: allProcesses, error: procError }, { data: allQuoteItems, error: qiError }, { data: allDocs, error: docError }] = await Promise.all([
         supabase.from("job_processes").select("*").in("job_id", jobIds).order("sort_order"),
         supabase.from("job_quote_items").select("*").in("job_id", jobIds),
+        supabase.from("job_documents").select("*").in("job_id", jobIds).not("process_name", "is", null),
       ]);
       if (procError) throw procError;
       if (qiError) throw qiError;
+      if (docError) throw docError;
 
       // Grouped by process type, one "pill box" per type the person has
       // access to — every job with that process still outstanding shows
@@ -1734,6 +1832,7 @@ export default function StockControl() {
             process: p,
             isReady: isProcessActionable(p, jobProcesses),
             quoteItems: jobQuoteItems,
+            documents: (allDocs || []).filter((d) => d.job_id === job.id && d.process_name === p.process_name),
           });
         }
       }
@@ -1761,6 +1860,17 @@ export default function StockControl() {
       fetchProductionQueue();
     } catch (err) {
       console.error("Failed to update priority:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  async function saveProcessNote(process, notes) {
+    try {
+      const { error } = await supabase.from("job_processes").update({ notes }).eq("id", process.id);
+      if (error) throw error;
+      fetchProductionQueue();
+    } catch (err) {
+      console.error("Failed to save note:", err);
       alert("That didn't save — check your connection and try again.");
     }
   }
@@ -2127,7 +2237,7 @@ export default function StockControl() {
     }
   }
 
-  async function uploadJobDocument(jobId, file) {
+  async function uploadJobDocument(jobId, file, processName) {
     if (!supabase) return;
     try {
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -2139,9 +2249,11 @@ export default function StockControl() {
         file_name: file.name,
         storage_path: path,
         uploaded_by: roleLabel,
+        process_name: processName || null,
       });
       if (error) throw error;
       refreshJobDetail();
+      if (productionQueue !== null) fetchProductionQueue();
     } catch (err) {
       console.error("Failed to upload document:", err);
       alert("Couldn't upload that file — check your connection and try again.");
@@ -5291,10 +5403,10 @@ export default function StockControl() {
     return (
       <div style={{ ...S.page, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
         <div style={{ maxWidth: 380, textAlign: "center" }}>
-          <div style={{ fontFamily: F.mono, color: C.danger, fontSize: 14, marginBottom: 10 }}>
+          <div style={{ fontFamily: F.mono, color: C.danger, fontSize: 15, marginBottom: 10 }}>
             Couldn't load your data — stopped here rather than risk overwriting anything.
           </div>
-          <div style={{ fontFamily: F.mono, color: C.muted, fontSize: 12, marginBottom: 16 }}>
+          <div style={{ fontFamily: F.mono, color: C.muted, fontSize: 13.5, marginBottom: 16 }}>
             This is usually a brief connection hiccup. Nothing has been changed or lost — refresh to try again.
           </div>
           <button className="stk-btn" style={S.addBtn} onClick={() => window.location.reload()}>
@@ -5330,6 +5442,7 @@ export default function StockControl() {
         .stk-editable { transition: border-color .1s ease, background .1s ease; cursor: text; }
         .stk-editable:hover { border-color: ${C.border} !important; background: ${C.bg}; }
         .stk-editable:focus { border-color: ${C.accentRaw} !important; background: ${C.bg}; }
+        .stk-meta-row > span { border: 1px solid ${C.border}; border-radius: 5px; padding: 2px 7px; display: inline-block; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
 
@@ -5511,9 +5624,6 @@ export default function StockControl() {
                   const isOpen = stockMenuOpen === group.label;
                   rendered.push(
                     <div key={`group-${group.label}`} style={{ position: "relative" }}>
-                      {isOpen && (
-                        <div onClick={() => setStockMenuOpen(null)} style={{ position: "fixed", inset: 0, zIndex: 15 }} />
-                      )}
                       <button
                         className="stk-btn"
                         onClick={() => setStockMenuOpen((o) => (o === group.label ? null : group.label))}
@@ -5589,7 +5699,7 @@ export default function StockControl() {
                           <span style={S.itemName}>{r.itemLabel}</span>
                           <span style={{ ...S.reqStatusTag, ...S["reqStatus_" + r.status] }}>{r.status}</span>
                         </div>
-                        <div style={S.rowMeta}>
+                        <div className="stk-meta-row" style={S.rowMeta}>
                           {canManageRequisitions ? (
                             <span style={S.reqQtyEditRow}>
                               Qty:
@@ -5731,7 +5841,7 @@ export default function StockControl() {
                               {r.status === "fulfilled" ? "fulfilled — back in stock" : r.status}
                             </span>
                           </div>
-                          <div style={S.rowMeta}>
+                          <div className="stk-meta-row" style={S.rowMeta}>
                             <span>Qty: {r.qty}</span>
                             <span>Requested by {r.requestedBy}</span>
                             {r.orderedBy && <span>Ordered by {r.orderedBy} on {new Date(r.dateOrdered).toLocaleDateString()}</span>}
@@ -5785,7 +5895,7 @@ export default function StockControl() {
                     <span style={S.itemName}>{po.poNumber} — {po.supplierName || "No supplier"}</span>
                     <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>R{po.totalValue.toFixed(2)}</span>
                   </div>
-                  <div style={S.rowMeta}>
+                  <div className="stk-meta-row" style={S.rowMeta}>
                     <span>Raised by {po.createdBy}</span>
                     <span>{new Date(po.dateCreated).toLocaleDateString()}</span>
                     <span>{po.lineItems.length} line{po.lineItems.length === 1 ? "" : "s"}</span>
@@ -5826,7 +5936,7 @@ export default function StockControl() {
                         <span style={S.itemName}>{po.poNumber} — {po.supplierName || "No supplier"}</span>
                         <span style={{ ...S.reqStatusTag, ...S.reqStatus_received }}>R{po.totalValue.toFixed(2)}</span>
                       </div>
-                      <div style={S.rowMeta}>
+                      <div className="stk-meta-row" style={S.rowMeta}>
                         <span>Raised by {po.createdBy}</span>
                         <span>{new Date(po.dateCreated).toLocaleDateString()}</span>
                         <span>Received by {po.receivedBy} on {new Date(po.receivedDate).toLocaleDateString()}</span>
@@ -5862,7 +5972,7 @@ export default function StockControl() {
                     <span style={S.itemName}>{po.poNumber} — {po.supplierName || "No supplier"}</span>
                     <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>R{po.totalValue.toFixed(2)}</span>
                   </div>
-                  <div style={S.rowMeta}>
+                  <div className="stk-meta-row" style={S.rowMeta}>
                     <span>Raised by {po.createdBy}</span>
                     <span>{new Date(po.dateCreated).toLocaleDateString()}</span>
                     <span>{po.lineItems.length} line{po.lineItems.length === 1 ? "" : "s"}</span>
@@ -5901,7 +6011,7 @@ export default function StockControl() {
                       {job.status === "in_progress" ? "In Progress" : "Complete"}
                     </span>
                   </div>
-                  <div style={S.rowMeta}>
+                  <div className="stk-meta-row" style={S.rowMeta}>
                     <span>Sales rep: {job.sales_rep}</span>
                     {job.due_date && <span>Due {new Date(job.due_date).toLocaleDateString()}</span>}
                     {job.quote_reference && <span>Quote: {job.quote_reference}</span>}
@@ -5950,7 +6060,7 @@ export default function StockControl() {
                     <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
                     <span style={{ ...S.reqStatusTag, ...S.reqStatus_received }}>Invoiced</span>
                   </div>
-                  <div style={S.rowMeta}>
+                  <div className="stk-meta-row" style={S.rowMeta}>
                     <span>Invoice #{job.invoice_number}</span>
                     <span>{job.invoiced_by} on {new Date(job.invoiced_at).toLocaleDateString()}</span>
                   </div>
@@ -5966,9 +6076,25 @@ export default function StockControl() {
         </div>
       ) : tab === "production" ? (
         <div style={S.list}>
+          <input
+            style={S.input}
+            value={productionSearchQuery}
+            onChange={(e) => setProductionSearchQuery(e.target.value)}
+            placeholder="Search job number or SigmaNest number…"
+          />
           {productionLoading && <div style={S.empty}>Loading…</div>}
           {!productionLoading && Object.keys(productionQueue || {}).length === 0 && <div style={S.empty}>Nothing outstanding right now.</div>}
-          {Object.entries(productionQueue || {}).map(([procType, entries]) => (
+          {Object.entries(productionQueue || {}).map(([procType, allEntries]) => {
+            const q = productionSearchQuery.trim().toLowerCase();
+            const entries = q
+              ? allEntries.filter(
+                  ({ job }) =>
+                    (job.job_number || "").toLowerCase().includes(q) || (job.laser_job_reference || "").toLowerCase().includes(q)
+                )
+              : allEntries;
+            if (q && entries.length === 0) return null;
+            const isOpen = q ? true : productionExpanded[procType] === true;
+            return (
             <div key={procType} style={{ marginTop: 14 }}>
               <button
                 type="button"
@@ -5978,12 +6104,12 @@ export default function StockControl() {
               >
                 <span>{procType}</span>
                 <span style={S.gradeCount}>{entries.length}</span>
-                <ChevronDown size={14} style={{ transform: productionExpanded[procType] === false ? "none" : "rotate(180deg)" }} />
+                <ChevronDown size={14} style={{ transform: isOpen ? "rotate(180deg)" : "none" }} />
               </button>
-              {productionExpanded[procType] !== false && (
+              {isOpen && (
                 <div style={{ ...S.gradeItems, marginTop: 8 }}>
                   {entries.length === 0 && <div style={S.empty}>Nothing outstanding for {procType}.</div>}
-                  {entries.map(({ job, process, isReady, quoteItems }) => {
+                  {entries.map(({ job, process, isReady, quoteItems, documents }) => {
                     const drawingsForJob = quoteItems
                       .map((it) => {
                         const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
@@ -6007,7 +6133,7 @@ export default function StockControl() {
                           </span>
                         </div>
                         {job.description && <div style={S.roleHint}>{job.description}</div>}
-                        <div style={S.rowMeta}>
+                        <div className="stk-meta-row" style={S.rowMeta}>
                           {totalQty > 0 && <span>Qty: {totalQty}</span>}
                           {job.laser_job_reference && <span>SigmaNest: {job.laser_job_reference}</span>}
                           {job.due_date && <span>Due {new Date(job.due_date).toLocaleDateString()}</span>}
@@ -6069,13 +6195,47 @@ export default function StockControl() {
                             </div>
                           </div>
                         )}
+                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
+                          <ExpandableProcessNotes value={process.notes} onCommit={(notes) => saveProcessNote(process, notes)} />
+                        </div>
+                        {process.process_name === "Nesting" && (
+                          <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
+                            <label style={S.label}>Nesting document</label>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+                              {documents.map((doc) => (
+                                <button
+                                  key={doc.id}
+                                  type="button"
+                                  className="stk-btn"
+                                  style={S.reqActionBtnMuted}
+                                  onClick={() => viewJobDocument(doc)}
+                                >
+                                  <FileText size={12} /> {doc.file_name}
+                                </button>
+                              ))}
+                              <label style={{ ...S.reqActionBtnMuted, display: "inline-flex", cursor: "pointer", width: "fit-content" }}>
+                                <Upload size={12} /> Upload document
+                                <input
+                                  type="file"
+                                  style={{ display: "none" }}
+                                  onChange={(e) => {
+                                    const file = e.target.files[0];
+                                    if (file) uploadJobDocument(job.id, file, "Nesting");
+                                    e.target.value = "";
+                                  }}
+                                />
+                              </label>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       ) : tab === "notifications" ? (
         <div style={S.list}>
@@ -6088,10 +6248,10 @@ export default function StockControl() {
                 style={{ ...S.reqCard, ...(n.is_read ? {} : { borderLeft: `3px solid ${C.accentRaw}` }) }}
                 onClick={() => !n.is_read && markNotificationRead(n.id)}
               >
-                <div style={S.rowMeta}>
+                <div className="stk-meta-row" style={S.rowMeta}>
                   <span>{new Date(n.created_at).toLocaleString()}</span>
                 </div>
-                <div style={{ ...S.itemName, fontSize: 13.5, marginTop: 2 }}>{n.message}</div>
+                <div style={{ ...S.itemName, fontSize: 14.5, marginTop: 2 }}>{n.message}</div>
               </div>
             ))}
           </div>
@@ -6113,7 +6273,7 @@ export default function StockControl() {
                   <div style={S.reqCardTop}>
                     <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
                   </div>
-                  <div style={S.rowMeta}>
+                  <div className="stk-meta-row" style={S.rowMeta}>
                     <span>Sales rep: {job.sales_rep}</span>
                     {job.quoted_value != null && <span>Quoted: R {Number(job.quoted_value).toFixed(2)}</span>}
                   </div>
@@ -6160,7 +6320,7 @@ export default function StockControl() {
                     <div style={S.reqCardTop}>
                       <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
                     </div>
-                    <div style={S.rowMeta}>
+                    <div className="stk-meta-row" style={S.rowMeta}>
                       <span>Invoiced by {job.invoiced_by} on {new Date(job.invoiced_at).toLocaleDateString()}</span>
                     </div>
                     <div style={S.reqActions}>
@@ -6238,7 +6398,7 @@ export default function StockControl() {
                           <span style={S.itemName}>{u.itemName}</span>
                           <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>+{u.qty}</span>
                         </div>
-                        <div style={S.rowMeta}>
+                        <div className="stk-meta-row" style={S.rowMeta}>
                           <span>By {u.by}</span>
                           <span>{new Date(u.timestamp).toLocaleString()}</span>
                         </div>
@@ -6274,7 +6434,7 @@ export default function StockControl() {
                             <span style={S.itemName}>{u.itemName}</span>
                             {canSeeValue && <span style={S.itemName}>R{(u.lineCost || 0).toFixed(2)}</span>}
                           </div>
-                          <div style={S.rowMeta}>
+                          <div className="stk-meta-row" style={S.rowMeta}>
                             <span>Qty: {u.qty}</span>
                             <span>By {u.by}</span>
                             <span>{new Date(u.timestamp).toLocaleDateString()}</span>
@@ -6357,7 +6517,7 @@ export default function StockControl() {
                         : `${u.direction === "use" ? "Used" : "Added"} ${u.qty}`}
                     </span>
                   </div>
-                  <div style={S.rowMeta}>
+                  <div className="stk-meta-row" style={S.rowMeta}>
                     <span>By {u.by}</span>
                     <span>{new Date(u.timestamp).toLocaleString()}</span>
                     {u.jobNumber && <span>Job: {u.jobNumber}</span>}
@@ -6439,7 +6599,7 @@ export default function StockControl() {
                         {current.customer_revision ? `Rev ${current.customer_revision}` : `Rev ${current.internal_revision}`}
                       </span>
                     </div>
-                    <div style={S.rowMeta}>
+                    <div className="stk-meta-row" style={S.rowMeta}>
                       {current.customer && <span>Customer: {current.customer}</span>}
                       {current.description && <span>{current.description}</span>}
                       {current.linked_item_id && <span style={{ color: C.accentFinished }}>Linked to Stock Codes</span>}
@@ -6470,7 +6630,7 @@ export default function StockControl() {
                       <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
                         {history.map((rev) => (
                           <div key={rev.id} style={S.managerRow}>
-                            <span style={{ fontSize: 12, color: C.muted }}>
+                            <span style={{ fontSize: 13.5, color: C.muted }}>
                               {rev.customer_revision ? `Rev ${rev.customer_revision}` : `Rev ${rev.internal_revision}`} —{" "}
                               {new Date(rev.created_at).toLocaleDateString()} · {rev.uploaded_by}
                             </span>
@@ -6688,42 +6848,84 @@ export default function StockControl() {
       )}
 
       {(tab === "custom" || tab === "stores" || tab === "fasteners") && (
-        <div style={S.chipRow}>
+        <div style={{ marginBottom: 4 }}>
           <button
             className="stk-btn"
-            style={{ ...S.chip, ...((tab === "fasteners" ? !filterFastenerType : !customerFilter) ? S.chipActive : {}) }}
-            onClick={() => (tab === "fasteners" ? setFilterFastenerType("") : setCustomerFilter(null))}
+            style={{ ...S.roleChip, ...(showCustomerChips ? { borderColor: C.accentRaw, color: C.accentRaw } : {}) }}
+            onClick={() => setShowCustomerChips((v) => !v)}
           >
-            All
+            <FilterIcon size={13} strokeWidth={2.5} />
+            {tab === "fasteners" ? filterFastenerType || "All types" : customerFilter || "All customers"}
+            <ChevronDown size={13} style={{ transform: showCustomerChips ? "rotate(180deg)" : "none" }} />
           </button>
-          {(tab === "custom" ? master.customers : tab === "fasteners" ? master.fastenerCategories : master.storeCategories).map((c) => (
-            <button
-              key={c}
-              className="stk-btn"
-              style={{ ...S.chip, ...((tab === "fasteners" ? filterFastenerType === c : customerFilter === c) ? S.chipActive : {}) }}
-              onClick={() => (tab === "fasteners" ? setFilterFastenerType(c) : setCustomerFilter(c))}
-            >
-              {c}
-            </button>
-          ))}
+          {showCustomerChips && (
+            <div style={{ ...S.chipRow, marginTop: 6 }}>
+              <button
+                className="stk-btn"
+                style={{ ...S.chip, ...((tab === "fasteners" ? !filterFastenerType : !customerFilter) ? S.chipActive : {}) }}
+                onClick={() => {
+                  tab === "fasteners" ? setFilterFastenerType("") : setCustomerFilter(null);
+                  setShowCustomerChips(false);
+                }}
+              >
+                All
+              </button>
+              {(tab === "custom" ? master.customers : tab === "fasteners" ? master.fastenerCategories : master.storeCategories).map((c) => (
+                <button
+                  key={c}
+                  className="stk-btn"
+                  style={{ ...S.chip, ...((tab === "fasteners" ? filterFastenerType === c : customerFilter === c) ? S.chipActive : {}) }}
+                  onClick={() => {
+                    tab === "fasteners" ? setFilterFastenerType(c) : setCustomerFilter(c);
+                    setShowCustomerChips(false);
+                  }}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
       {tab === "structural" && master.sectionTypes.length > 0 && (
-        <div style={S.chipRow}>
-          <button className="stk-btn" style={{ ...S.chip, ...(!sectionTypeFilter ? S.chipActive : {}) }} onClick={() => setSectionTypeFilter(null)}>
-            All types
+        <div style={{ marginBottom: 4 }}>
+          <button
+            className="stk-btn"
+            style={{ ...S.roleChip, ...(showCustomerChips ? { borderColor: C.accentRaw, color: C.accentRaw } : {}) }}
+            onClick={() => setShowCustomerChips((v) => !v)}
+          >
+            <FilterIcon size={13} strokeWidth={2.5} />
+            {sectionTypeFilter || "All types"}
+            <ChevronDown size={13} style={{ transform: showCustomerChips ? "rotate(180deg)" : "none" }} />
           </button>
-          {master.sectionTypes.map((t) => (
-            <button
-              key={t}
-              className="stk-btn"
-              style={{ ...S.chip, ...(sectionTypeFilter === t ? S.chipActive : {}) }}
-              onClick={() => setSectionTypeFilter(t)}
-            >
-              {t}
-            </button>
-          ))}
+          {showCustomerChips && (
+            <div style={{ ...S.chipRow, marginTop: 6 }}>
+              <button
+                className="stk-btn"
+                style={{ ...S.chip, ...(!sectionTypeFilter ? S.chipActive : {}) }}
+                onClick={() => {
+                  setSectionTypeFilter(null);
+                  setShowCustomerChips(false);
+                }}
+              >
+                All types
+              </button>
+              {master.sectionTypes.map((t) => (
+                <button
+                  key={t}
+                  className="stk-btn"
+                  style={{ ...S.chip, ...(sectionTypeFilter === t ? S.chipActive : {}) }}
+                  onClick={() => {
+                    setSectionTypeFilter(t);
+                    setShowCustomerChips(false);
+                  }}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -6802,7 +7004,7 @@ export default function StockControl() {
                             </div>
                           )}
                           {it.comment && <div style={S.itemComment}>{it.comment}</div>}
-                          <div style={S.rowMeta}>
+                          <div className="stk-meta-row" style={S.rowMeta}>
                             {tab === "plate" && it.sheetName && <span>{it.sheetName}</span>}
                             {(tab === "plate" || tab === "structural") && it.stockType === "offcut" && (
                               <span style={S.offcutTag}>Offcut</span>
@@ -6936,7 +7138,7 @@ export default function StockControl() {
                         </span>
                         <span style={{ ...S.reqStatusTag, ...S.reqStatus_cancelled }}>{it.removedReason}</span>
                       </div>
-                      <div style={S.rowMeta}>
+                      <div className="stk-meta-row" style={S.rowMeta}>
                         {it.manufacturer && <span>{it.manufacturer}</span>}
                         {it.serialNumber && <span>SN: {it.serialNumber}</span>}
                         <span>Removed by {it.removedBy}</span>
@@ -8238,7 +8440,7 @@ export default function StockControl() {
                   {master.customers.map((cust) => (
                     <div key={cust} style={S.deptCard}>
                       <div style={S.deptCardHead}>
-                        <EditableName value={cust} onCommit={(v) => renameMasterEntry("customers", cust, v)} style={{ fontWeight: 600, fontSize: 14 }} />
+                        <EditableName value={cust} onCommit={(v) => renameMasterEntry("customers", cust, v)} style={{ fontWeight: 600, fontSize: 15 }} />
                         <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeMasterEntry(cust)}>
                           <Trash2 size={13} />
                         </button>
@@ -8317,7 +8519,7 @@ export default function StockControl() {
                             <ImageIcon size={16} color={C.muted} />
                           </div>
                         )}
-                        <EditableName value={s.name} onCommit={(v) => updateSupplierField(s.id, "name", v)} style={{ fontWeight: 600, fontSize: 14 }} />
+                        <EditableName value={s.name} onCommit={(v) => updateSupplierField(s.id, "name", v)} style={{ fontWeight: 600, fontSize: 15 }} />
                         <label className="stk-btn" style={S.managerDelete} title="Upload logo">
                           <Paperclip size={13} />
                           <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleSupplierLogoSelect(s.id, e)} />
@@ -8474,11 +8676,11 @@ export default function StockControl() {
                     <div key={p.id} style={S.deptCard}>
                       <div style={S.deptCardHead}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center" }}>
+                          <div style={{ fontWeight: 600, fontSize: 15, display: "flex", alignItems: "center" }}>
                             {p.name}
                             <SavedCheck fieldKey={`person-${p.id}`} />
                           </div>
-                          <div style={{ fontFamily: F.mono, fontSize: 11, color: C.muted }}>{p.email}</div>
+                          <div style={{ fontFamily: F.mono, fontSize: 12.5, color: C.muted }}>{p.email}</div>
                         </div>
                         <label style={{ ...S.deptToggleItem, flexShrink: 0 }}>
                           <input type="checkbox" checked={p.isAdmin} onChange={(e) => updatePersonField(p.id, "isAdmin", e.target.checked)} />
@@ -8975,7 +9177,7 @@ export default function StockControl() {
                       </button>
                     )}
                   </div>
-                  <div style={S.rowMeta}>
+                  <div className="stk-meta-row" style={S.rowMeta}>
                     <span>{entry.logged_by}</span>
                     <span>{new Date(entry.created_at).toLocaleString()}</span>
                   </div>
@@ -9162,19 +9364,19 @@ export default function StockControl() {
                     {drawingUploadFiles.map((entry, idx) => (
                       <div key={idx} style={{ ...S.managerRow, opacity: entry.skip ? 0.6 : 1 }}>
                         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                          <span style={{ fontSize: 12, color: entry.partNumber ? C.text : C.danger }}>
+                          <span style={{ fontSize: 13.5, color: entry.partNumber ? C.text : C.danger }}>
                             {entry.file.name} → <strong>{entry.partNumber || "no part number"}</strong>
                           </span>
                           {entry.matchedStockCode ? (
-                            <span style={{ fontSize: 11, color: C.accentFinished }}>
+                            <span style={{ fontSize: 12.5, color: C.accentFinished }}>
                               ✓ Links to existing stock code — {entry.matchedStockCode.description || "no description"}
                             </span>
                           ) : entry.skip ? (
-                            <span style={{ fontSize: 11, color: C.danger }}>
+                            <span style={{ fontSize: 12.5, color: C.danger }}>
                               ✕ No matching stock code for this customer — won't be uploaded
                             </span>
                           ) : (
-                            <span style={{ fontSize: 11, color: C.muted }}>No matching stock code — uploading unlinked (internal drawing)</span>
+                            <span style={{ fontSize: 12.5, color: C.muted }}>No matching stock code — uploading unlinked (internal drawing)</span>
                           )}
                         </div>
                         <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeDrawingUploadFile(idx)}>
@@ -9230,7 +9432,7 @@ export default function StockControl() {
               </div>
             </div>
 
-            <div style={S.rowMeta}>
+            <div className="stk-meta-row" style={S.rowMeta}>
               <span>Sales rep: {jobDetail.job.sales_rep}</span>
               {jobDetail.job.due_date && <span>Due {new Date(jobDetail.job.due_date).toLocaleDateString()}</span>}
               {jobDetail.job.quote_reference && <span>Quote: {jobDetail.job.quote_reference}</span>}
@@ -9318,17 +9520,17 @@ export default function StockControl() {
                             onChange={(e) => setInvoiceQty(it.id, e.target.value)}
                             placeholder="Qty"
                             title={`Qty to invoice or deliver — up to ${remaining} remaining`}
-                            style={{ ...S.input, width: 64, fontSize: 12, padding: "5px 6px", marginTop: 1 }}
+                            style={{ ...S.input, width: 64, fontSize: 13.5, padding: "5px 6px", marginTop: 1 }}
                           />
                         )}
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 8 }}>
-                            <span style={{ fontSize: 12.5, fontWeight: 600 }}>{it.qty}×</span>
+                          <div style={{ fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ fontSize: 14, fontWeight: 600 }}>{it.qty}×</span>
                             {it.description}
                             <SavedCheck fieldKey={`quoteitem-${it.id}`} />
                             <SavedCheck fieldKey={`quoteitem-price-${it.id}`} />
                             {status === "out_external" && (
-                              <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 600, color: C.danger }}>Out — external</span>
+                              <span style={{ marginLeft: 6, fontSize: 12, fontWeight: 600, color: C.danger }}>Out — external</span>
                             )}
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
@@ -9406,7 +9608,7 @@ export default function StockControl() {
                     {materialsUsed.map((u) => (
                       <div key={u.id} style={S.managerRow}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12.5 }}>{u.itemName}</div>
+                          <div style={{ fontSize: 14 }}>{u.itemName}</div>
                           <div style={S.roleHint}>
                             {u.qty} — R{Number(u.lineCost || 0).toFixed(2)} — {u.by} on {new Date(u.timestamp).toLocaleDateString()}
                           </div>
@@ -9453,19 +9655,19 @@ export default function StockControl() {
                       {canEditThisJob && (
                         <div style={{ display: "flex", gap: 6, marginTop: 4, marginLeft: 22 }}>
                           <input
-                            style={{ ...S.input, fontSize: 12, padding: "5px 8px" }}
+                            style={{ ...S.input, fontSize: 13.5, padding: "5px 8px" }}
                             defaultValue={p.operator || ""}
                             onBlur={(e) => updateJobProcessField(p, "operator", e.target.value)}
                             placeholder="Operator/Supplier"
                           />
                           <input
-                            style={{ ...S.input, fontSize: 12, padding: "5px 8px" }}
+                            style={{ ...S.input, fontSize: 13.5, padding: "5px 8px" }}
                             defaultValue={p.notes || ""}
                             onBlur={(e) => updateJobProcessField(p, "notes", e.target.value)}
                             placeholder="Notes"
                           />
                           <select
-                            style={{ ...S.input, fontSize: 12, padding: "5px 8px" }}
+                            style={{ ...S.input, fontSize: 13.5, padding: "5px 8px" }}
                             value={p.external_supplier || ""}
                             onChange={(e) => updateJobProcessField(p, "external_supplier", e.target.value)}
                           >
@@ -9772,7 +9974,7 @@ export default function StockControl() {
                 Export
               </button>
             </div>
-            {importFileLabel && <div style={{ fontFamily: F.mono, fontSize: 11, color: C.muted, marginTop: 4 }}>{importFileLabel}</div>}
+            {importFileLabel && <div style={{ fontFamily: F.mono, fontSize: 12.5, color: C.muted, marginTop: 4 }}>{importFileLabel}</div>}
             <label style={{ ...S.checkRow, marginTop: 8 }}>
               <input type="checkbox" checked={importReplaceAll} onChange={(e) => setImportReplaceAll(e.target.checked)} />
               Replace the whole list with this file, instead of updating/adding
@@ -10109,7 +10311,7 @@ export default function StockControl() {
                   </datalist>
                   {newJobForm.selectedProcesses.map((sp) => (
                     <div key={sp.name} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                      <span style={{ fontSize: 12.5, width: 140, flexShrink: 0 }}>{sp.name}</span>
+                      <span style={{ fontSize: 14, width: 140, flexShrink: 0 }}>{sp.name}</span>
                       <input
                         style={S.input}
                         list="job-operator-people"
@@ -10167,13 +10369,13 @@ export default function StockControl() {
                 return (
                   <div key={idx} style={S.managerRow}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
-                      <span style={{ fontSize: 12.5 }}>{line.description}</span>
-                      <span style={{ fontSize: 11, color: line.linkedItemId ? C.accentFinished : C.danger }}>
+                      <span style={{ fontSize: 14 }}>{line.description}</span>
+                      <span style={{ fontSize: 12.5, color: line.linkedItemId ? C.accentFinished : C.danger }}>
                         {line.linkedItemId ? "Linked to stock — will update automatically" : "No linked stock item — won't auto-update, add manually"}
                       </span>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontSize: 11, color: C.muted }}>Ordered {line.orderedQty}</span>
+                      <span style={{ fontSize: 12.5, color: C.muted }}>Ordered {line.orderedQty}</span>
                       {isAdjusting ? (
                         <input
                           autoFocus
@@ -10188,7 +10390,7 @@ export default function StockControl() {
                         />
                       ) : (
                         <>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: qtyDiffers ? C.accentRaw : C.text }}>
+                          <span style={{ fontSize: 14, fontWeight: 600, color: qtyDiffers ? C.accentRaw : C.text }}>
                             Received {line.receivedQty}
                           </span>
                           <button
@@ -10436,7 +10638,7 @@ export default function StockControl() {
                               Add stock
                             </button>
                           ) : (
-                            <span style={{ ...S.qtyNum, fontSize: 14, color: C.danger }}>{it.qty}</span>
+                            <span style={{ ...S.qtyNum, fontSize: 15, color: C.danger }}>{it.qty}</span>
                           )}
                         </div>
                       ))}
@@ -10555,7 +10757,7 @@ const S = {
     border: `1px solid ${C.danger}`,
     color: C.danger,
     fontFamily: F.mono,
-    fontSize: 12.5,
+    fontSize: 14,
   },
   saveErrorRetry: {
     marginLeft: "auto",
@@ -10565,11 +10767,11 @@ const S = {
     background: "transparent",
     color: C.danger,
     fontFamily: F.mono,
-    fontSize: 11.5,
+    fontSize: 13,
   },
   eyebrow: {
     fontFamily: F.mono,
-    fontSize: 11,
+    fontSize: 12.5,
     letterSpacing: "0.14em",
     color: C.accentRaw,
     marginBottom: 4,
@@ -10587,7 +10789,7 @@ const S = {
     alignItems: "center",
     gap: 5,
     fontFamily: F.mono,
-    fontSize: 12,
+    fontSize: 13.5,
     color: C.danger,
     background: C.dangerTint,
     border: `1px solid ${C.danger}55`,
@@ -10597,7 +10799,7 @@ const S = {
   },
   totalValueBadge: {
     fontFamily: F.mono,
-    fontSize: 12,
+    fontSize: 13.5,
     fontWeight: 600,
     color: C.accentRaw,
     background: C.accentTint,
@@ -10610,7 +10812,7 @@ const S = {
     alignItems: "center",
     gap: 5,
     fontFamily: F.mono,
-    fontSize: 12,
+    fontSize: 13.5,
     fontWeight: 600,
     color: C.accentFinished,
     background: "#16302C",
@@ -10624,7 +10826,7 @@ const S = {
     alignItems: "center",
     gap: 6,
     fontFamily: F.mono,
-    fontSize: 12,
+    fontSize: 13.5,
     color: C.text,
     background: C.surface,
     border: `1px solid ${C.border}`,
@@ -10638,7 +10840,7 @@ const S = {
     alignItems: "center",
     gap: 6,
     fontFamily: F.mono,
-    fontSize: 12,
+    fontSize: 13.5,
     fontWeight: 700,
     color: C.bg,
     background: C.accentRaw,
@@ -10658,7 +10860,7 @@ const S = {
     borderRadius: 8,
     background: C.danger,
     color: "#fff",
-    fontSize: 10,
+    fontSize: 11.5,
     fontWeight: 700,
   },
   mainTabs: {
@@ -10678,7 +10880,7 @@ const S = {
     color: C.muted,
     borderRadius: 6,
     padding: "9px 8px",
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: 500,
     cursor: "pointer",
   },
@@ -10691,7 +10893,7 @@ const S = {
     border: `1px solid ${C.border}`,
     borderRadius: 20,
     padding: "10px 16px",
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: 600,
     color: C.text,
     cursor: "pointer",
@@ -10717,7 +10919,7 @@ const S = {
     color: C.text,
     borderRadius: 6,
     padding: "8px 10px",
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: 500,
     textAlign: "left",
     cursor: "pointer",
@@ -10742,7 +10944,7 @@ const S = {
   },
   loginPromptText: {
     color: C.muted,
-    fontSize: 14,
+    fontSize: 15,
     fontFamily: F.mono,
   },
   authTabs: {
@@ -10760,7 +10962,7 @@ const S = {
     color: C.muted,
     borderRadius: 6,
     padding: "9px 8px",
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: 500,
     cursor: "pointer",
   },
@@ -10771,7 +10973,7 @@ const S = {
   },
   summaryBanner: {
     fontFamily: F.mono,
-    fontSize: 12,
+    fontSize: 13.5,
     color: C.accentRaw,
     background: C.accentTint,
     border: `1px solid ${C.accentRaw}44`,
@@ -10799,7 +11001,7 @@ const S = {
     color: C.muted,
     borderRadius: 20,
     padding: "6px 13px",
-    fontSize: 12.5,
+    fontSize: 14,
     fontWeight: 500,
     cursor: "pointer",
   },
@@ -10825,7 +11027,7 @@ const S = {
     background: "transparent",
     border: "none",
     color: C.accentRaw,
-    fontSize: 12,
+    fontSize: 13.5,
     fontFamily: F.mono,
     cursor: "pointer",
     textDecoration: "underline",
@@ -10846,7 +11048,7 @@ const S = {
     border: "none",
     outline: "none",
     color: C.text,
-    fontSize: 14,
+    fontSize: 15,
     width: "100%",
   },
   addBtn: {
@@ -10858,7 +11060,7 @@ const S = {
     border: "none",
     borderRadius: 8,
     padding: "9px 14px",
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: 600,
     cursor: "pointer",
     whiteSpace: "nowrap",
@@ -10868,13 +11070,13 @@ const S = {
     alignItems: "center",
     gap: 6,
     fontFamily: F.mono,
-    fontSize: 11,
+    fontSize: 12.5,
     color: C.muted,
   },
   list: { display: "flex", flexDirection: "column", gap: 14 },
   empty: {
     color: C.muted,
-    fontSize: 13,
+    fontSize: 14,
     padding: "32px 8px",
     textAlign: "center",
     fontFamily: F.mono,
@@ -10900,7 +11102,7 @@ const S = {
   },
   gradeCount: {
     fontFamily: F.mono,
-    fontSize: 11,
+    fontSize: 12.5,
     color: C.muted,
     background: C.surface,
     border: `1px solid ${C.border}`,
@@ -10917,11 +11119,11 @@ const S = {
     overflow: "hidden",
   },
   rowMain: { padding: "11px 12px", minWidth: 0 },
-  itemName: { fontSize: 14, fontWeight: 500, color: C.text },
-  itemComment: { fontSize: 11.5, color: C.muted, fontStyle: "italic", marginTop: 2 },
+  itemName: { fontSize: 15, fontWeight: 600, color: C.text, letterSpacing: 0.2 },
+  itemComment: { fontSize: 13, color: C.muted, fontStyle: "italic", marginTop: 2 },
   partTag: {
     fontFamily: F.mono,
-    fontSize: 10.5,
+    fontSize: 12,
     color: C.accentRaw,
     background: C.accentTint,
     border: `1px solid ${C.accentRaw}44`,
@@ -10949,7 +11151,7 @@ const S = {
     color: C.text,
     borderRadius: 6,
     padding: "8px 12px",
-    fontSize: 13,
+    fontSize: 14,
     cursor: "pointer",
   },
   attachmentChip: {
@@ -10963,7 +11165,7 @@ const S = {
   },
   attachmentName: {
     flex: 1,
-    fontSize: 13,
+    fontSize: 14,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
@@ -10986,14 +11188,14 @@ const S = {
     marginTop: 10,
     color: C.accentRaw,
     fontFamily: F.mono,
-    fontSize: 12,
+    fontSize: 13.5,
     textDecoration: "underline",
   },
   rowMeta: {
     display: "flex",
     gap: 12,
     marginTop: 5,
-    fontSize: 11,
+    fontSize: 12.5,
     color: C.muted,
     fontFamily: F.mono,
     flexWrap: "wrap",
@@ -11007,7 +11209,7 @@ const S = {
   customerTag: {
     display: "inline-flex",
     alignItems: "center",
-    fontSize: 12.5,
+    fontSize: 14,
     fontWeight: 700,
     color: C.accentRaw,
     background: C.accentTint,
@@ -11018,7 +11220,7 @@ const S = {
   salesTag: {
     display: "inline-flex",
     alignItems: "center",
-    fontSize: 12.5,
+    fontSize: 14,
     fontWeight: 600,
     color: C.accentFinished,
     background: "#16302C",
@@ -11030,7 +11232,7 @@ const S = {
     display: "inline-flex",
     alignItems: "center",
     gap: 5,
-    fontSize: 12.5,
+    fontSize: 14,
     fontWeight: 700,
     color: "#3B82F6",
     background: "#1B2A4A",
@@ -11042,7 +11244,7 @@ const S = {
   lowTag: { display: "flex", alignItems: "center", gap: 4, color: C.danger },
   offcutTag: {
     fontFamily: F.mono,
-    fontSize: 10,
+    fontSize: 11.5,
     color: C.accentRaw,
     background: C.accentTint,
     border: `1px solid ${C.accentRaw}44`,
@@ -11081,14 +11283,14 @@ const S = {
   },
   qtyDisplay: { display: "flex", flexDirection: "column", alignItems: "center", minWidth: 40 },
   qtyNum: { fontFamily: F.mono, fontSize: 17, fontWeight: 600, lineHeight: 1 },
-  qtyUnit: { fontFamily: F.mono, fontSize: 10, color: C.muted, marginTop: 2 },
+  qtyUnit: { fontFamily: F.mono, fontSize: 11.5, color: C.muted, marginTop: 2 },
   usageBtnUse: {
     padding: "8px 14px",
     borderRadius: 7,
     border: `1px solid ${C.danger}55`,
     background: C.dangerTint,
     color: C.danger,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: 600,
     cursor: "pointer",
     flexShrink: 0,
@@ -11099,7 +11301,7 @@ const S = {
     border: `1px solid ${C.accentFinished}55`,
     background: "#16302C",
     color: C.accentFinished,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: 600,
     cursor: "pointer",
     flexShrink: 0,
@@ -11199,7 +11401,7 @@ const S = {
   },
   label: {
     fontFamily: F.mono,
-    fontSize: 10.5,
+    fontSize: 12,
     letterSpacing: "0.06em",
     color: C.muted,
     marginTop: 10,
@@ -11209,7 +11411,7 @@ const S = {
     display: "flex",
     alignItems: "center",
     gap: 8,
-    fontSize: 12.5,
+    fontSize: 14,
     color: C.text,
     marginTop: 12,
     cursor: "pointer",
@@ -11221,7 +11423,7 @@ const S = {
     borderRadius: 6,
     padding: "8px 10px",
     color: C.text,
-    fontSize: 14,
+    fontSize: 15,
     outline: "none",
   },
   segRow: { display: "flex", gap: 6, flexWrap: "wrap" },
@@ -11232,7 +11434,7 @@ const S = {
     color: C.muted,
     borderRadius: 6,
     padding: "8px 6px",
-    fontSize: 12.5,
+    fontSize: 14,
     cursor: "pointer",
   },
   formGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 },
@@ -11243,7 +11445,7 @@ const S = {
     border: "none",
     borderRadius: 7,
     padding: "11px",
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: 600,
     cursor: "pointer",
   },
@@ -11260,7 +11462,7 @@ const S = {
     border: `1px solid ${C.danger}55`,
     borderRadius: 6,
     padding: "8px 10px",
-    fontSize: 12,
+    fontSize: 13.5,
     color: C.danger,
     marginTop: 8,
   },
@@ -11270,7 +11472,7 @@ const S = {
     border: "none",
     color: C.danger,
     textDecoration: "underline",
-    fontSize: 12,
+    fontSize: 13.5,
     cursor: "pointer",
     flexShrink: 0,
   },
@@ -11282,7 +11484,7 @@ const S = {
     border: `1px solid ${C.border}`,
     borderRadius: 7,
     padding: "10px 12px",
-    fontSize: 13,
+    fontSize: 14,
     color: C.text,
     cursor: "pointer",
   },
@@ -11292,14 +11494,14 @@ const S = {
   },
   roleHint: {
     fontFamily: F.mono,
-    fontSize: 10.5,
+    fontSize: 12,
     color: C.muted,
     marginTop: 8,
     lineHeight: 1.5,
   },
   pinError: {
     fontFamily: F.mono,
-    fontSize: 11,
+    fontSize: 12.5,
     color: C.danger,
   },
   backupRow: {
@@ -11316,7 +11518,7 @@ const S = {
     border: `1px solid ${C.border}`,
     borderRadius: 6,
     padding: "7px 12px",
-    fontSize: 12,
+    fontSize: 13.5,
     color: C.text,
     cursor: "pointer",
   },
@@ -11337,7 +11539,7 @@ const S = {
     color: C.muted,
     borderRadius: 5,
     padding: "7px 8px",
-    fontSize: 11.5,
+    fontSize: 13,
     fontWeight: 500,
     cursor: "pointer",
     whiteSpace: "nowrap",
@@ -11392,13 +11594,13 @@ const S = {
   },
   lowStockThreshold: {
     fontFamily: F.mono,
-    fontSize: 11,
+    fontSize: 12.5,
     color: C.muted,
     marginTop: 2,
   },
   managerGroupHeader: {
     fontFamily: F.mono,
-    fontSize: 10.5,
+    fontSize: 12,
     letterSpacing: "0.06em",
     color: C.accentRaw,
     textTransform: "uppercase",
@@ -11434,10 +11636,13 @@ const S = {
     justifyContent: "space-between",
     alignItems: "center",
     gap: 8,
+    paddingBottom: 7,
+    marginBottom: 2,
+    borderBottom: `2px solid ${C.accentRaw}55`,
   },
   reqStatusTag: {
     fontFamily: F.mono,
-    fontSize: 10,
+    fontSize: 11.5,
     textTransform: "uppercase",
     borderRadius: 4,
     padding: "2px 7px",
@@ -11465,7 +11670,7 @@ const S = {
   },
   reqFlag: {
     fontFamily: F.mono,
-    fontSize: 10,
+    fontSize: 11.5,
     fontWeight: 700,
     textTransform: "uppercase",
     borderRadius: 4,
@@ -11490,7 +11695,7 @@ const S = {
   },
   reqPriceLabel: {
     fontFamily: F.mono,
-    fontSize: 11,
+    fontSize: 12.5,
     color: C.muted,
   },
   reqPriceMissing: {
@@ -11509,7 +11714,7 @@ const S = {
     borderRadius: 4,
     padding: "2px 5px",
     color: C.text,
-    fontSize: 12,
+    fontSize: 13.5,
     fontFamily: F.mono,
   },
   poSelectBar: {
@@ -11522,7 +11727,7 @@ const S = {
     border: `1px solid ${C.accentRaw}55`,
     borderRadius: 8,
     padding: "10px 14px",
-    fontSize: 13,
+    fontSize: 14,
     color: C.accentRaw,
     fontWeight: 500,
   },
@@ -11530,7 +11735,7 @@ const S = {
     display: "flex",
     alignItems: "center",
     gap: 5,
-    fontSize: 12,
+    fontSize: 13.5,
     color: C.muted,
     whiteSpace: "nowrap",
   },
@@ -11567,7 +11772,7 @@ const S = {
     border: "none",
     borderRadius: 6,
     padding: "6px 10px",
-    fontSize: 12,
+    fontSize: 13.5,
     fontWeight: 600,
     cursor: "pointer",
   },
@@ -11580,7 +11785,7 @@ const S = {
     border: `1px solid ${C.border}`,
     borderRadius: 6,
     padding: "6px 10px",
-    fontSize: 12,
+    fontSize: 13.5,
     cursor: "pointer",
   },
   deptCard: {
@@ -11608,7 +11813,7 @@ const S = {
     borderRadius: 5,
     padding: "4px 6px",
     color: C.text,
-    fontSize: 12,
+    fontSize: 13.5,
     fontFamily: F.mono,
   },
   deptPermGrid: {
@@ -11616,11 +11821,11 @@ const S = {
     gridTemplateColumns: "1fr 50px 60px",
     alignItems: "center",
     rowGap: 6,
-    fontSize: 12.5,
+    fontSize: 14,
   },
   deptPermHead: {
     fontFamily: F.mono,
-    fontSize: 10,
+    fontSize: 11.5,
     color: C.muted,
     textAlign: "center",
   },
@@ -11634,13 +11839,13 @@ const S = {
     marginTop: 10,
     paddingTop: 10,
     borderTop: `1px solid ${C.border}`,
-    fontSize: 12,
+    fontSize: 13.5,
     color: C.muted,
     cursor: "pointer",
   },
   deptCoreTag: {
     fontFamily: F.mono,
-    fontSize: 9.5,
+    fontSize: 11,
     color: C.accentRaw,
     background: C.accentTint,
     border: `1px solid ${C.accentRaw}44`,
@@ -11681,7 +11886,7 @@ const S = {
     display: "flex",
     alignItems: "center",
     gap: 6,
-    fontSize: 12,
+    fontSize: 13.5,
     color: C.muted,
     cursor: "pointer",
   },
@@ -11695,7 +11900,7 @@ const S = {
     border: `1px solid ${C.border}`,
     borderRadius: 6,
     padding: "8px 10px",
-    fontSize: 13,
+    fontSize: 14,
   },
   editableName: {
     flex: 1,
@@ -11704,7 +11909,7 @@ const S = {
     borderRadius: 4,
     padding: "3px 5px",
     color: C.text,
-    fontSize: 13,
+    fontSize: 14,
     outline: "none",
   },
   managerFactorInput: {
@@ -11714,7 +11919,7 @@ const S = {
     borderRadius: 5,
     padding: "5px 7px",
     color: C.text,
-    fontSize: 12,
+    fontSize: 13.5,
     fontFamily: F.mono,
   },
   managerDelete: {
@@ -11729,7 +11934,7 @@ const S = {
     marginTop: 20,
     textAlign: "center",
     fontFamily: F.mono,
-    fontSize: 11,
+    fontSize: 12.5,
     color: C.muted,
   },
 };
