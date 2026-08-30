@@ -675,6 +675,10 @@ export default function StockControl() {
   async function loadAllData(isInitialLoad) {
     let loadedItems = null; // shared across the items/master blocks below, so
     // the Stock Codes → real item migration (further down) can see both.
+    let hadError = false; // tracked locally rather than read back from
+    // loadError state, since state updates from setLoadError calls below
+    // haven't flushed yet by the time this function returns — a caller
+    // checking loadError immediately after awaiting this would race it.
     try {
       const res = await window.storage.get("stock-items-v3", true);
       if (res && res.value) {
@@ -704,13 +708,18 @@ export default function StockControl() {
           it.mainCat === "stores" && it.customer === "Fasteners" ? { ...it, mainCat: "fasteners", customer: "" } : it
         );
         setItems(loadedItems);
+        setLoadError((prev) => ({ ...prev, items: false }));
       } else if (isInitialLoad) {
         console.error("Items came back empty on load — refusing to seed example data over real data.");
         setLoadError((prev) => ({ ...prev, items: true }));
+        hadError = true;
       }
     } catch (err) {
       console.error("Failed to load items:", err);
-      if (isInitialLoad) setLoadError((prev) => ({ ...prev, items: true }));
+      if (isInitialLoad) {
+        setLoadError((prev) => ({ ...prev, items: true }));
+        hadError = true;
+      }
     }
     try {
       const res = await window.storage.get("stock-master-data-v2", true);
@@ -791,48 +800,72 @@ export default function StockControl() {
           }
         }
         setMaster(loaded);
+        setLoadError((prev) => ({ ...prev, master: false }));
       } else if (isInitialLoad) {
         console.error("Master data came back empty on load — refusing to reset to defaults over real data.");
         setLoadError((prev) => ({ ...prev, master: true }));
+        hadError = true;
       }
     } catch (err) {
       console.error("Failed to load master data:", err);
-      if (isInitialLoad) setLoadError((prev) => ({ ...prev, master: true }));
+      if (isInitialLoad) {
+        setLoadError((prev) => ({ ...prev, master: true }));
+        hadError = true;
+      }
     }
     try {
       const res = await window.storage.get("stock-requisitions-v1", true);
-      if (res && res.value) setRequisitions(JSON.parse(res.value));
-      else if (isInitialLoad) {
+      if (res && res.value) {
+        setRequisitions(JSON.parse(res.value));
+        setLoadError((prev) => ({ ...prev, requisitions: false }));
+      } else if (isInitialLoad) {
         console.error("Requisitions came back empty on load — refusing to reset to empty over real data.");
         setLoadError((prev) => ({ ...prev, requisitions: true }));
+        hadError = true;
       }
     } catch (err) {
       console.error("Failed to load requisitions:", err);
-      if (isInitialLoad) setLoadError((prev) => ({ ...prev, requisitions: true }));
+      if (isInitialLoad) {
+        setLoadError((prev) => ({ ...prev, requisitions: true }));
+        hadError = true;
+      }
     }
     try {
       const res = await window.storage.get("stock-purchase-orders-v1", true);
-      if (res && res.value) setPurchaseOrders(JSON.parse(res.value));
-      else if (isInitialLoad) {
+      if (res && res.value) {
+        setPurchaseOrders(JSON.parse(res.value));
+        setLoadError((prev) => ({ ...prev, purchaseOrders: false }));
+      } else if (isInitialLoad) {
         console.error("Purchase orders came back empty on load — refusing to reset to empty over real data.");
         setLoadError((prev) => ({ ...prev, purchaseOrders: true }));
+        hadError = true;
       }
     } catch (err) {
       console.error("Failed to load purchase orders:", err);
-      if (isInitialLoad) setLoadError((prev) => ({ ...prev, purchaseOrders: true }));
+      if (isInitialLoad) {
+        setLoadError((prev) => ({ ...prev, purchaseOrders: true }));
+        hadError = true;
+      }
     }
     try {
       const res = await window.storage.get("stock-usage-log-v1", true);
-      if (res && res.value) setUsageLog(JSON.parse(res.value));
-      else if (isInitialLoad) {
+      if (res && res.value) {
+        setUsageLog(JSON.parse(res.value));
+        setLoadError((prev) => ({ ...prev, usageLog: false }));
+      } else if (isInitialLoad) {
         console.error("Usage log came back empty on load — refusing to reset to empty over real data.");
         setLoadError((prev) => ({ ...prev, usageLog: true }));
+        hadError = true;
       }
     } catch (err) {
       console.error("Failed to load usage log:", err);
-      if (isInitialLoad) setLoadError((prev) => ({ ...prev, usageLog: true }));
+      if (isInitialLoad) {
+        setLoadError((prev) => ({ ...prev, usageLog: true }));
+        hadError = true;
+      }
     }
     setLastRefreshedAt(new Date());
+    return hadError;
   }
 
   async function manualRefresh() {
@@ -841,8 +874,24 @@ export default function StockControl() {
     setIsRefreshing(false);
   }
 
+  // Retries the initial load several times with a pause before showing the
+  // blocking "couldn't load" screen — on a slow-but-working connection, 5
+  // separate requests all needing to succeed in one pass can need more
+  // than a couple of quick tries to all land.
   useEffect(() => {
-    loadAllData(true);
+    let cancelled = false;
+    async function loadWithRetry() {
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const hadError = await loadAllData(true);
+        if (cancelled) return;
+        if (!hadError) return;
+        if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, 2500));
+      }
+    }
+    loadWithRetry();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Automatic background refresh — every 60 seconds, only while the tab is
