@@ -391,6 +391,46 @@ function EditableName({ value, onCommit, style }) {
   );
 }
 
+// "Each"-tracked process control — a running count against the item's
+// total quantity, not a checkbox. Logging a batch subtracts against the
+// remaining total; the process completes itself once the count reaches it.
+function QtyProgressControl({ process, job, totalQty, isReady, onSubmit }) {
+  const [input, setInput] = useState("");
+  const done = Number(process.qty_complete) || 0;
+  const remaining = Math.max(totalQty - done, 0);
+  if (process.is_complete) {
+    return <span style={{ ...S.roleHint, color: C.accentFinished, fontWeight: 600 }}>Complete — {done}/{totalQty}</span>;
+  }
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <span style={{ fontSize: 13, fontWeight: 600 }}>{done}/{totalQty}</span>
+      <input
+        type="number"
+        min="0"
+        max={remaining}
+        disabled={!isReady}
+        style={{ ...S.input, width: 64, fontSize: 12, padding: "5px 6px" }}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        placeholder="Qty"
+      />
+      <button
+        type="button"
+        className="stk-btn"
+        style={S.reqActionBtn}
+        disabled={!isReady}
+        onClick={() => {
+          const qty = Math.min(parseFloat(input) || 0, remaining);
+          if (qty > 0) onSubmit(process, job, qty, totalQty);
+          setInput("");
+        }}
+      >
+        Log
+      </button>
+    </div>
+  );
+}
+
 const REQ_FLAG_LABEL = { pending: "Ordering", ordered: "On order", received: "Arrived" };
 
 function ReqFlag({ req, onClick }) {
@@ -439,6 +479,7 @@ export default function StockControl() {
   const [assetHistoryBusy, setAssetHistoryBusy] = useState(false);
   const [jobsList, setJobsList] = useState(null);
   const [productionQueue, setProductionQueue] = useState(null);
+  const [invoicedSectionOpen, setInvoicedSectionOpen] = useState(false);
   const [productionExpanded, setProductionExpanded] = useState({});
   const [shortageModal, setShortageModal] = useState(null);
   const [productionLoading, setProductionLoading] = useState(false);
@@ -1361,7 +1402,7 @@ export default function StockControl() {
       ...f,
       selectedProcesses: f.selectedProcesses.some((p) => p.name === processName)
         ? f.selectedProcesses.filter((p) => p.name !== processName)
-        : [...f.selectedProcesses, { name: processName, operator: "", externalSupplier: "" }],
+        : [...f.selectedProcesses, { name: processName, operator: "", trackingMode: "batch" }],
     }));
   }
 
@@ -1372,10 +1413,10 @@ export default function StockControl() {
     }));
   }
 
-  function updateNewJobProcessSupplier(processName, externalSupplier) {
+  function updateNewJobProcessTrackingMode(processName, trackingMode) {
     setNewJobForm((f) => ({
       ...f,
-      selectedProcesses: f.selectedProcesses.map((p) => (p.name === processName ? { ...p, externalSupplier } : p)),
+      selectedProcesses: f.selectedProcesses.map((p) => (p.name === processName ? { ...p, trackingMode } : p)),
     }));
   }
 
@@ -1563,7 +1604,7 @@ export default function StockControl() {
           job_id: job.id,
           process_name: p.name,
           operator: p.operator || "",
-          external_supplier: p.externalSupplier || "",
+          tracking_mode: p.trackingMode || "batch",
           sort_order: idx,
         }));
         const { error: procError } = await supabase.from("job_processes").insert(processRows);
@@ -1768,6 +1809,39 @@ export default function StockControl() {
     } catch (err) {
       console.error("Failed to clear shortage:", err);
       alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  // "Each"-tracked processes complete themselves once the running count
+  // reaches the job's total quantity — no separate manual complete step.
+  async function submitProcessQtyProgress(process, job, qtyAdded, totalQty) {
+    if (!qtyAdded || qtyAdded <= 0) return;
+    const newCount = Number(process.qty_complete) + qtyAdded;
+    const nowComplete = newCount >= totalQty;
+    try {
+      const { error } = await supabase
+        .from("job_processes")
+        .update({
+          qty_complete: Math.min(newCount, totalQty),
+          is_complete: nowComplete,
+          completed_by: nowComplete ? roleLabel : null,
+          completed_at: nowComplete ? new Date().toISOString() : null,
+        })
+        .eq("id", process.id);
+      if (error) throw error;
+      if (nowComplete && job.sales_rep) {
+        await supabase.from("job_notifications").insert({
+          job_id: job.id,
+          job_number: job.job_number,
+          sales_rep: job.sales_rep,
+          message: `${process.process_name} marked complete by ${roleLabel} on ${job.job_number} (${job.customer || "no customer"})`,
+        });
+      }
+      if (jobDetail?.job.id === job.id) refreshJobDetail();
+      if (productionQueue !== null) fetchProductionQueue();
+    } catch (err) {
+      console.error("Failed to log progress:", err);
+      alert("Couldn't save that — check your connection and try again.");
     }
   }
 
@@ -1981,7 +2055,7 @@ export default function StockControl() {
             job_id: newJob.id,
             process_name: p.process_name,
             operator: p.operator,
-            external_supplier: "",
+            tracking_mode: p.tracking_mode || "batch",
             sort_order: p.sort_order,
           }))
         );
@@ -5935,6 +6009,7 @@ export default function StockControl() {
                         {job.description && <div style={S.roleHint}>{job.description}</div>}
                         <div style={S.rowMeta}>
                           {totalQty > 0 && <span>Qty: {totalQty}</span>}
+                          {job.laser_job_reference && <span>SigmaNest: {job.laser_job_reference}</span>}
                           {job.due_date && <span>Due {new Date(job.due_date).toLocaleDateString()}</span>}
                           {process.is_urgent && <span style={{ color: C.danger, fontWeight: 600 }}>Urgent</span>}
                         </div>
@@ -5943,16 +6018,26 @@ export default function StockControl() {
                             ⚠ Shortage: {process.shortage_note} — flagged by {process.shortage_flagged_by}
                           </div>
                         )}
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-                          <label style={{ ...S.checkRow, fontWeight: 600 }}>
-                            <input
-                              type="checkbox"
-                              checked={process.is_complete}
-                              disabled={!isReady}
-                              onChange={() => toggleJobProcessComplete(process, job)}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8, alignItems: "center" }}>
+                          {process.tracking_mode === "each" ? (
+                            <QtyProgressControl
+                              process={process}
+                              job={job}
+                              totalQty={totalQty}
+                              isReady={isReady}
+                              onSubmit={submitProcessQtyProgress}
                             />
-                            Complete
-                          </label>
+                          ) : (
+                            <label style={{ ...S.checkRow, fontWeight: 600 }}>
+                              <input
+                                type="checkbox"
+                                checked={process.is_complete}
+                                disabled={!isReady}
+                                onChange={() => toggleJobProcessComplete(process, job)}
+                              />
+                              Complete
+                            </label>
+                          )}
                           <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => toggleProcessUrgent(process)}>
                             {process.is_urgent ? "Unmark urgent" : "Mark urgent"}
                           </button>
@@ -6056,26 +6141,37 @@ export default function StockControl() {
               ))}
           </div>
 
-          <label style={{ ...S.label, marginTop: 16, display: "block" }}>Invoiced</label>
-          <div style={{ ...S.gradeItems, marginTop: 6 }}>
-            {(jobsList || [])
-              .filter((j) => j.status === "invoiced")
-              .map((job) => (
-                <div key={job.id} style={S.reqCard}>
-                  <div style={S.reqCardTop}>
-                    <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
+          <button
+            type="button"
+            className="stk-btn"
+            style={{ ...S.productionPill, marginTop: 16 }}
+            onClick={() => setInvoicedSectionOpen((o) => !o)}
+          >
+            <span>Invoiced</span>
+            <span style={S.gradeCount}>{(jobsList || []).filter((j) => j.status === "invoiced").length}</span>
+            <ChevronDown size={14} style={{ transform: invoicedSectionOpen ? "rotate(180deg)" : "none" }} />
+          </button>
+          {invoicedSectionOpen && (
+            <div style={{ ...S.gradeItems, marginTop: 6 }}>
+              {(jobsList || [])
+                .filter((j) => j.status === "invoiced")
+                .map((job) => (
+                  <div key={job.id} style={S.reqCard}>
+                    <div style={S.reqCardTop}>
+                      <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
+                    </div>
+                    <div style={S.rowMeta}>
+                      <span>Invoiced by {job.invoiced_by} on {new Date(job.invoiced_at).toLocaleDateString()}</span>
+                    </div>
+                    <div style={S.reqActions}>
+                      <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openJobDetail(job)}>
+                        <ClipboardList size={13} /> Open
+                      </button>
+                    </div>
                   </div>
-                  <div style={S.rowMeta}>
-                    <span>Invoiced by {job.invoiced_by} on {new Date(job.invoiced_at).toLocaleDateString()}</span>
-                  </div>
-                  <div style={S.reqActions}>
-                    <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openJobDetail(job)}>
-                      <ClipboardList size={13} /> Open
-                    </button>
-                  </div>
-                </div>
-              ))}
-          </div>
+                ))}
+            </div>
+          )}
         </div>
       ) : tab === "usageLog" ? (
         <div style={S.list}>
@@ -8708,7 +8804,10 @@ export default function StockControl() {
       )}
 
       {previewItem && (
-        <div style={S.modalOverlay} onClick={closePreview}>
+        // Higher z-index than the standard modal overlay — this can open
+        // while Job Detail (or another modal) is already open behind it,
+        // same fix as the New Stock Item modal needed for the same reason.
+        <div style={{ ...S.modalOverlay, zIndex: 30 }} onClick={closePreview}>
           <div style={{ ...S.modal, maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>{previewItem.attachmentName || "Attachment"}</span>
@@ -10019,15 +10118,13 @@ export default function StockControl() {
                         placeholder="Pick a person or type a name"
                       />
                       <select
-                        style={S.input}
-                        value={sp.externalSupplier}
-                        onChange={(e) => updateNewJobProcessSupplier(sp.name, e.target.value)}
-                        title="External supplier for this process, if any"
+                        style={{ ...S.input, width: 110, flexShrink: 0 }}
+                        value={sp.trackingMode}
+                        onChange={(e) => updateNewJobProcessTrackingMode(sp.name, e.target.value)}
+                        title="Batch: one tick completes the whole line. Each: a running count against the item's quantity."
                       >
-                        <option value="">No external supplier</option>
-                        {master.suppliers.map((s) => (
-                          <option key={s.id} value={s.name}>{s.name}</option>
-                        ))}
+                        <option value="batch">Batch</option>
+                        <option value="each">Each</option>
                       </select>
                     </div>
                   ))}
