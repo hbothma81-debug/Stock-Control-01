@@ -2691,7 +2691,14 @@ export default function StockControl() {
       doc.text(`Buy-out notes: ${job.buy_out_notes}`, leftX, finalY);
     }
 
-    doc.save(`${job.job_number}.pdf`);
+    // Opens in the same preview modal as every other document, rather than
+    // forcing a direct download — gives the same view-first experience,
+    // with download/print available from there once they've actually seen
+    // it.
+    const blobUrl = doc.output("bloburl");
+    setPreviewItem({ attachmentType: "pdf", attachmentName: `${job.job_number}.pdf` });
+    setPreviewData(blobUrl);
+    setPreviewLoading(false);
   }
 
   async function updateJobStatus(jobId, status) {
@@ -9776,30 +9783,31 @@ export default function StockControl() {
                           {p.completed_by} — {new Date(p.completed_at).toLocaleString()}
                         </div>
                       )}
-                      {p.external_supplier && <div style={{ ...S.roleHint, marginLeft: 22 }}>External supplier: {p.external_supplier}</div>}
+                      {p.tracking_mode === "each" && p.qty_complete > 0 && (
+                        <div style={{ ...S.roleHint, marginLeft: 22 }}>Progress: {p.qty_complete} logged so far</div>
+                      )}
                       {canEditThisJob && (
-                        <div style={{ display: "flex", gap: 6, marginTop: 4, marginLeft: 22 }}>
+                        <div style={{ display: "flex", gap: 6, marginTop: 4, marginLeft: 22, flexWrap: "wrap" }}>
                           <input
-                            style={{ ...S.input, fontSize: 13.5, padding: "5px 8px" }}
+                            style={{ ...S.input, fontSize: 13.5, padding: "5px 8px", flex: "1 1 140px" }}
                             defaultValue={p.operator || ""}
                             onBlur={(e) => updateJobProcessField(p, "operator", e.target.value)}
-                            placeholder="Operator/Supplier"
+                            placeholder="Operator"
                           />
                           <input
-                            style={{ ...S.input, fontSize: 13.5, padding: "5px 8px" }}
+                            style={{ ...S.input, fontSize: 13.5, padding: "5px 8px", flex: "1 1 140px" }}
                             defaultValue={p.notes || ""}
                             onBlur={(e) => updateJobProcessField(p, "notes", e.target.value)}
                             placeholder="Notes"
                           />
                           <select
-                            style={{ ...S.input, fontSize: 13.5, padding: "5px 8px" }}
-                            value={p.external_supplier || ""}
-                            onChange={(e) => updateJobProcessField(p, "external_supplier", e.target.value)}
+                            style={{ ...S.input, fontSize: 13.5, padding: "5px 8px", width: 100, flexShrink: 0 }}
+                            value={p.tracking_mode || "batch"}
+                            onChange={(e) => updateJobProcessField(p, "tracking_mode", e.target.value)}
+                            title="Batch: one tick completes the whole line. Each: a running count against the item's quantity."
                           >
-                            <option value="">No external supplier</option>
-                            {master.suppliers.map((s) => (
-                              <option key={s.id} value={s.name}>{s.name}</option>
-                            ))}
+                            <option value="batch">Batch</option>
+                            <option value="each">Each</option>
                           </select>
                         </div>
                       )}
@@ -10435,24 +10443,26 @@ export default function StockControl() {
                     ))}
                   </datalist>
                   {newJobForm.selectedProcesses.map((sp) => (
-                    <div key={sp.name} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                      <span style={{ fontSize: 14, width: 140, flexShrink: 0 }}>{sp.name}</span>
-                      <input
-                        style={S.input}
-                        list="job-operator-people"
-                        value={sp.operator}
-                        onChange={(e) => updateNewJobProcessOperator(sp.name, e.target.value)}
-                        placeholder="Pick a person or type a name"
-                      />
-                      <select
-                        style={{ ...S.input, width: 110, flexShrink: 0 }}
-                        value={sp.trackingMode}
-                        onChange={(e) => updateNewJobProcessTrackingMode(sp.name, e.target.value)}
-                        title="Batch: one tick completes the whole line. Each: a running count against the item's quantity."
-                      >
-                        <option value="batch">Batch</option>
-                        <option value="each">Each</option>
-                      </select>
+                    <div key={sp.name} style={{ marginBottom: 4 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600 }}>{sp.name}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+                        <input
+                          style={{ ...S.input, flex: "1 1 180px" }}
+                          list="job-operator-people"
+                          value={sp.operator}
+                          onChange={(e) => updateNewJobProcessOperator(sp.name, e.target.value)}
+                          placeholder="Pick a person or type a name"
+                        />
+                        <select
+                          style={{ ...S.input, width: 110, flexShrink: 0 }}
+                          value={sp.trackingMode}
+                          onChange={(e) => updateNewJobProcessTrackingMode(sp.name, e.target.value)}
+                          title="Batch: one tick completes the whole line. Each: a running count against the item's quantity."
+                        >
+                          <option value="batch">Batch</option>
+                          <option value="each">Each</option>
+                        </select>
+                      </div>
                     </div>
                   ))}
                 </div>
