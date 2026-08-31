@@ -400,39 +400,62 @@ function EditableName({ value, onCommit, style }) {
 // "Each"-tracked process control — a running count against the item's
 // total quantity, not a checkbox. Logging a batch subtracts against the
 // remaining total; the process completes itself once the count reaches it.
-function QtyProgressControl({ process, job, totalQty, isReady, onSubmit }) {
-  const [input, setInput] = useState("");
-  const done = Number(process.qty_complete) || 0;
-  const remaining = Math.max(totalQty - done, 0);
+// "Each"-tracked process control — one row per item on the job, matching
+// the printed process sheet, each with its own running count against that
+// item's own quantity. Never lumps different items into one shared total.
+function QtyProgressControl({ process, job, quoteItems, itemProgress, isReady, onSubmit }) {
+  const [inputs, setInputs] = useState({});
   if (process.is_complete) {
-    return <span style={{ ...S.roleHint, color: C.accentFinished, fontWeight: 600 }}>Complete — {done}/{totalQty}</span>;
+    return <span style={{ ...S.roleHint, color: C.accentFinished, fontWeight: 600 }}>Complete — all items</span>;
+  }
+  if (!quoteItems || quoteItems.length === 0) {
+    return <span style={S.roleHint}>No items listed on this job yet.</span>;
   }
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <span style={{ fontSize: 14, fontWeight: 600 }}>{done}/{totalQty}</span>
-      <input
-        type="number"
-        min="0"
-        max={remaining}
-        disabled={!isReady}
-        style={{ ...S.input, width: 64, fontSize: 13.5, padding: "5px 6px" }}
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        placeholder="Qty"
-      />
-      <button
-        type="button"
-        className="stk-btn"
-        style={S.reqActionBtn}
-        disabled={!isReady}
-        onClick={() => {
-          const qty = Math.min(parseFloat(input) || 0, remaining);
-          if (qty > 0) onSubmit(process, job, qty, totalQty);
-          setInput("");
-        }}
-      >
-        Log
-      </button>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {quoteItems.map((item) => {
+        const progress = itemProgress.find((ip) => ip.job_quote_item_id === item.id);
+        const done = Number(progress?.qty_complete) || 0;
+        const itemQty = Number(item.qty) || 0;
+        const remaining = Math.max(itemQty - done, 0);
+        const itemDone = remaining === 0 && itemQty > 0;
+        return (
+          <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13, flex: "1 1 140px", color: itemDone ? C.accentFinished : C.text }}>
+              {item.description || "Item"} — {done}/{itemQty}
+            </span>
+            {itemDone ? (
+              <span style={{ fontSize: 12, color: C.accentFinished, fontWeight: 600 }}>Done</span>
+            ) : (
+              <>
+                <input
+                  type="number"
+                  min="0"
+                  max={remaining}
+                  disabled={!isReady}
+                  style={{ ...S.input, width: 64, fontSize: 13.5, padding: "5px 6px" }}
+                  value={inputs[item.id] || ""}
+                  onChange={(e) => setInputs((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                  placeholder="Qty"
+                />
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={S.reqActionBtn}
+                  disabled={!isReady}
+                  onClick={() => {
+                    const qty = Math.min(parseFloat(inputs[item.id]) || 0, remaining);
+                    if (qty > 0) onSubmit(process, job, item, qty, progress, quoteItems, itemProgress);
+                    setInputs((prev) => ({ ...prev, [item.id]: "" }));
+                  }}
+                >
+                  Log
+                </button>
+              </>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1781,7 +1804,7 @@ export default function StockControl() {
           if (quoteItemError) throw quoteItemError;
         }
 
-        if (newJobForm.quoteExcelFile) await uploadJobDocument(job.id, newJobForm.quoteExcelFile);
+        if (newJobForm.quoteExcelFile) await uploadJobDocument(job.id, newJobForm.quoteExcelFile, null, true);
       } catch (innerErr) {
         // Something after the job itself failed — clean up the orphaned
         // job row (its processes/quote items cascade-delete with it)
@@ -1876,6 +1899,20 @@ export default function StockControl() {
       if (qiError) throw qiError;
       if (docError) throw docError;
 
+      // Each-mode progress is tracked per item, not lumped into one
+      // combined count — needs the process ids from the fetch above
+      // before it can be filtered, so it can't join the Promise.all.
+      const processIds = (allProcesses || []).map((p) => p.id);
+      let allItemProgress = [];
+      if (processIds.length > 0) {
+        const { data: progressData, error: progressError } = await supabase
+          .from("job_process_item_progress")
+          .select("*")
+          .in("job_process_id", processIds);
+        if (progressError) throw progressError;
+        allItemProgress = progressData || [];
+      }
+
       // Grouped by process type, one "pill box" per type the person has
       // access to — every job with that process still outstanding shows
       // up, not just the ones ready right now, so a department can see
@@ -1894,6 +1931,7 @@ export default function StockControl() {
             isReady: isProcessActionable(p, jobProcesses),
             quoteItems: jobQuoteItems,
             documents: (allDocs || []).filter((d) => d.job_id === job.id && d.process_name === p.process_name),
+            itemProgress: allItemProgress.filter((ip) => ip.job_process_id === p.id),
           });
         }
       }
@@ -2000,28 +2038,47 @@ export default function StockControl() {
 
   // "Each"-tracked processes complete themselves once the running count
   // reaches the job's total quantity — no separate manual complete step.
-  async function submitProcessQtyProgress(process, job, qtyAdded, totalQty) {
+  // Each item on the job is tracked separately — logging progress against
+  // one item never touches another's count, matching how the process
+  // sheet lists them individually rather than as one lumped total.
+  async function submitProcessItemProgress(process, job, quoteItem, qtyAdded, existingProgress, allQuoteItems, allProgressForProcess) {
     if (!qtyAdded || qtyAdded <= 0) return;
-    const newCount = Number(process.qty_complete) + qtyAdded;
-    const nowComplete = newCount >= totalQty;
+    const currentDone = Number(existingProgress?.qty_complete) || 0;
+    const newDone = Math.min(currentDone + qtyAdded, Number(quoteItem.qty) || 0);
     try {
       const { error } = await supabase
-        .from("job_processes")
-        .update({
-          qty_complete: Math.min(newCount, totalQty),
-          is_complete: nowComplete,
-          completed_by: nowComplete ? roleLabel : null,
-          completed_at: nowComplete ? new Date().toISOString() : null,
-        })
-        .eq("id", process.id);
+        .from("job_process_item_progress")
+        .upsert(
+          { job_process_id: process.id, job_quote_item_id: quoteItem.id, qty_complete: newDone, updated_at: new Date().toISOString() },
+          { onConflict: "job_process_id,job_quote_item_id" }
+        );
       if (error) throw error;
-      if (nowComplete && job.sales_rep) {
-        await supabase.from("job_notifications").insert({
-          job_id: job.id,
-          job_number: job.job_number,
-          sales_rep: job.sales_rep,
-          message: `${process.process_name} marked complete by ${roleLabel} on ${job.job_number} (${job.customer || "no customer"})`,
-        });
+
+      // Whole process only completes once every item on the job has
+      // individually reached its own quantity.
+      const updatedProgress = [
+        ...allProgressForProcess.filter((p) => p.job_quote_item_id !== quoteItem.id),
+        { job_quote_item_id: quoteItem.id, qty_complete: newDone },
+      ];
+      const allItemsDone = allQuoteItems.every((it) => {
+        const p = updatedProgress.find((up) => up.job_quote_item_id === it.id);
+        return (Number(p?.qty_complete) || 0) >= (Number(it.qty) || 0);
+      });
+
+      if (allItemsDone) {
+        const { error: procError } = await supabase
+          .from("job_processes")
+          .update({ is_complete: true, completed_by: roleLabel, completed_at: new Date().toISOString() })
+          .eq("id", process.id);
+        if (procError) throw procError;
+        if (job.sales_rep) {
+          await supabase.from("job_notifications").insert({
+            job_id: job.id,
+            job_number: job.job_number,
+            sales_rep: job.sales_rep,
+            message: `${process.process_name} marked complete by ${roleLabel} on ${job.job_number} (${job.customer || "no customer"})`,
+          });
+        }
       }
       if (jobDetail?.job.id === job.id) refreshJobDetail();
       if (productionQueue !== null) fetchProductionQueue();
@@ -2313,7 +2370,7 @@ export default function StockControl() {
     }
   }
 
-  async function uploadJobDocument(jobId, file, processName) {
+  async function uploadJobDocument(jobId, file, processName, isQuoteFile) {
     if (!supabase) return;
     try {
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -2326,6 +2383,7 @@ export default function StockControl() {
         storage_path: path,
         uploaded_by: roleLabel,
         process_name: processName || null,
+        is_quote_file: !!isQuoteFile,
       });
       if (error) throw error;
       refreshJobDetail();
@@ -2611,7 +2669,12 @@ export default function StockControl() {
 
   // A printable job sheet — same purpose as the paper process sheet, but
   // only ever shows the processes this job actually needs, not all twenty.
-  function printJobSheet(job, processes) {
+  // Uploads the generated PDF to real storage and previews via its signed
+  // URL, rather than a blob: URL — a blob URL is only valid in the tab that
+  // created it, so the PDF viewer's own built-in "open in new tab" button
+  // was failing silently on it. A real signed URL works exactly like any
+  // other attached document, including that button.
+  async function printJobSheet(job, processes, quoteItems) {
     const doc = new jsPDF();
     const company = master.companyDetails || {};
     const leftX = 14;
@@ -2652,6 +2715,21 @@ export default function StockControl() {
       y += 5;
     });
 
+    // Items being made on this job — description and quantity only, no
+    // pricing, since this sheet goes to the floor, not accounts.
+    if (quoteItems?.length) {
+      y += 3;
+      autoTable(doc, {
+        startY: y,
+        head: [["Item", "Qty"]],
+        body: quoteItems.map((it) => [it.description || "", it.qty ?? ""]),
+        theme: "grid",
+        headStyles: { fillColor: [27, 29, 31] },
+        margin: { left: leftX },
+      });
+      y = doc.lastAutoTable.finalY + 5;
+    }
+
     const materials = [1, 2, 3]
       .map((n) => ({ grade: job[`material_${n}_grade`], qty: job[`material_${n}_qty`] }))
       .filter((m) => m.grade);
@@ -2691,14 +2769,26 @@ export default function StockControl() {
       doc.text(`Buy-out notes: ${job.buy_out_notes}`, leftX, finalY);
     }
 
-    // Opens in the same preview modal as every other document, rather than
-    // forcing a direct download — gives the same view-first experience,
-    // with download/print available from there once they've actually seen
-    // it.
-    const blobUrl = doc.output("bloburl");
+    setPreviewLoading(true);
     setPreviewItem({ attachmentType: "pdf", attachmentName: `${job.job_number}.pdf` });
-    setPreviewData(blobUrl);
-    setPreviewLoading(false);
+    setPreviewData(null);
+    try {
+      const blob = doc.output("blob");
+      const path = `${job.id}/process-sheet.pdf`;
+      const { error: upError } = await supabase.storage.from("job-documents").upload(path, blob, { upsert: true, contentType: "application/pdf" });
+      if (upError) throw upError;
+      const { data, error } = await supabase.storage.from("job-documents").createSignedUrl(path, 3600);
+      if (error) throw error;
+      setPreviewData(data.signedUrl);
+      setPreviewLoading(false);
+    } catch (err) {
+      console.error("Failed to prepare process sheet:", err);
+      // Storage failed for some reason — fall back to a blob URL so the
+      // sheet is still viewable, even if the viewer's own "open in new
+      // tab" button won't work on it.
+      setPreviewData(doc.output("bloburl"));
+      setPreviewLoading(false);
+    }
   }
 
   async function updateJobStatus(jobId, status) {
@@ -6190,7 +6280,7 @@ export default function StockControl() {
               {isOpen && (
                 <div style={{ ...S.gradeItems, marginTop: 8 }}>
                   {entries.length === 0 && <div style={S.empty}>Nothing outstanding for {procType}.</div>}
-                  {entries.map(({ job, process, isReady, quoteItems, documents }) => {
+                  {entries.map(({ job, process, isReady, quoteItems, documents, itemProgress }) => {
                     const drawingsForJob = quoteItems
                       .map((it) => {
                         const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
@@ -6228,6 +6318,7 @@ export default function StockControl() {
                         )}
                         {job.description && <div style={S.roleHint}>{job.description}</div>}
                         <div className="stk-meta-row" style={S.rowMeta}>
+                          {process.operator && <span>Assigned: {process.operator}</span>}
                           {totalQty > 0 && <span>Qty: {totalQty}</span>}
                           {job.laser_job_reference && <span>SigmaNest: {job.laser_job_reference}</span>}
                           {job.due_date && <span>Due {new Date(job.due_date).toLocaleDateString()}</span>}
@@ -6257,9 +6348,10 @@ export default function StockControl() {
                             <QtyProgressControl
                               process={process}
                               job={job}
-                              totalQty={totalQty}
+                              quoteItems={quoteItems}
+                              itemProgress={itemProgress}
                               isReady={isReady}
-                              onSubmit={submitProcessQtyProgress}
+                              onSubmit={submitProcessItemProgress}
                             />
                           ) : (
                             <label style={{ ...S.checkRow, fontWeight: 600 }}>
@@ -9553,7 +9645,7 @@ export default function StockControl() {
                   type="button"
                   className="stk-btn"
                   style={S.iconBtn}
-                  onClick={() => printJobSheet(jobDetail.job, jobDetail.processes)}
+                  onClick={() => printJobSheet(jobDetail.job, jobDetail.processes, jobDetail.quoteItems)}
                   title="Print job sheet"
                 >
                   <FileText size={18} />
@@ -9783,8 +9875,8 @@ export default function StockControl() {
                           {p.completed_by} — {new Date(p.completed_at).toLocaleString()}
                         </div>
                       )}
-                      {p.tracking_mode === "each" && p.qty_complete > 0 && (
-                        <div style={{ ...S.roleHint, marginLeft: 22 }}>Progress: {p.qty_complete} logged so far</div>
+                      {p.tracking_mode === "each" && !p.is_complete && (
+                        <div style={{ ...S.roleHint, marginLeft: 22 }}>Each-mode progress is tracked per item on the Production tab.</div>
                       )}
                       {canEditThisJob && (
                         <div style={{ display: "flex", gap: 6, marginTop: 4, marginLeft: 22, flexWrap: "wrap" }}>
@@ -9836,7 +9928,9 @@ export default function StockControl() {
                 )}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-                {jobDetail.documents.map((doc) => (
+                {jobDetail.documents
+                  .filter((doc) => !doc.is_quote_file || isAdmin || profile?.isSalesPerson)
+                  .map((doc) => (
                   <div key={doc.id} style={S.managerRow}>
                     <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1, justifyContent: "flex-start" }} onClick={() => viewJobDocument(doc)}>
                       <Paperclip size={13} /> {doc.file_name}
@@ -9848,7 +9942,9 @@ export default function StockControl() {
                     )}
                   </div>
                 ))}
-                {jobDetail.documents.length === 0 && <div style={S.empty}>No documents yet.</div>}
+                {jobDetail.documents.filter((doc) => !doc.is_quote_file || isAdmin || profile?.isSalesPerson).length === 0 && (
+                  <div style={S.empty}>No documents yet.</div>
+                )}
               </div>
             </div>
           </div>
