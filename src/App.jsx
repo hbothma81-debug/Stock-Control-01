@@ -2363,7 +2363,9 @@ export default function StockControl() {
     try {
       const { data, error } = await supabase.storage.from("job-invoices").createSignedUrl(request.storage_path, 3600);
       if (error) throw error;
-      window.open(data.signedUrl, "_blank");
+      setPreviewItem({ attachmentType: "pdf", attachmentName: request.file_name || "Invoice request.pdf" });
+      setPreviewData(data.signedUrl);
+      setPreviewLoading(false);
     } catch (err) {
       console.error("Couldn't open invoice request:", err);
       alert("Couldn't open that document — check your connection and try again.");
@@ -2477,9 +2479,10 @@ export default function StockControl() {
           message: `${m.itemsWithQty.length} item(s) sent out on ${noteNumber} to ${m.recipientName.trim()} on ${m.job.job_number} (${m.job.customer || "no customer"})`,
         });
       }
-      buildDeliveryNoteDoc(
+      await buildDeliveryNoteDoc(
         { delivery_note_number: noteNumber, direction: m.direction, recipient_name: m.recipientName.trim(), recipient_address: recipientAddress, created_at: new Date().toISOString() },
-        m.itemsWithQty.map(({ item, qty }) => ({ description: item.description, qty }))
+        m.itemsWithQty.map(({ item, qty }) => ({ description: item.description, qty })),
+        m.job
       );
       setInvoiceQtyInputs({});
       setDeliveryNoteBatchModal(null);
@@ -2491,9 +2494,12 @@ export default function StockControl() {
   }
 
 
-  // Two copies on one document — recipient copy on top, our copy below,
-  // both signable — same physical purpose as a paper delivery note.
-  function buildDeliveryNoteDoc(note, lineItems) {
+  // Uploads to real storage and previews via signed URL, rather than
+  // doc.save() forcing an immediate download with nothing kept — same fix
+  // as the process sheet needed, for the same reason: the document needs
+  // to still be there to open later, both from the job page generally and
+  // specifically when checking external items back in.
+  async function buildDeliveryNoteDoc(note, lineItems, job) {
     const doc = new jsPDF();
     const company = master.companyDetails || {};
     const leftX = 14;
@@ -2570,7 +2576,42 @@ export default function StockControl() {
     doc.setLineDashPattern([], 0);
     renderCopy(166, "Our Copy");
 
-    doc.save(`${note.delivery_note_number}.pdf`);
+    setPreviewLoading(true);
+    setPreviewItem({ attachmentType: "pdf", attachmentName: `${note.delivery_note_number}.pdf` });
+    setPreviewData(null);
+    try {
+      const blob = doc.output("blob");
+      // Deterministic path from job id + note number — every delivery_notes
+      // row for this note (one per item) shares one PDF, and it can always
+      // be found again later without needing to store the path anywhere.
+      const path = `${job.id}/delivery-note-${note.delivery_note_number}.pdf`;
+      const { error: upError } = await supabase.storage.from("job-documents").upload(path, blob, { upsert: true, contentType: "application/pdf" });
+      if (upError) throw upError;
+      const { data, error } = await supabase.storage.from("job-documents").createSignedUrl(path, 3600);
+      if (error) throw error;
+      setPreviewData(data.signedUrl);
+      setPreviewLoading(false);
+    } catch (err) {
+      console.error("Failed to prepare delivery note:", err);
+      setPreviewData(doc.output("bloburl"));
+      setPreviewLoading(false);
+    }
+  }
+
+  // Reopens a delivery note's PDF later — same deterministic path used
+  // when it was first created, so no separate lookup is needed.
+  async function viewDeliveryNoteDocument(job, note) {
+    try {
+      const path = `${job.id}/delivery-note-${note.delivery_note_number}.pdf`;
+      const { data, error } = await supabase.storage.from("job-documents").createSignedUrl(path, 3600);
+      if (error) throw error;
+      setPreviewItem({ attachmentType: "pdf", attachmentName: `${note.delivery_note_number}.pdf` });
+      setPreviewData(data.signedUrl);
+      setPreviewLoading(false);
+    } catch (err) {
+      console.error("Failed to open delivery note:", err);
+      alert("Couldn't open that document — check your connection and try again.");
+    }
   }
 
   async function checkInDeliveryNote(job, note, quoteItem) {
@@ -6365,7 +6406,7 @@ export default function StockControl() {
                             </label>
                           )}
                         </div>
-                        {drawingsForJob.length > 0 && (
+                        {drawingsForJob.length > 0 && canView("drawings") && (
                           <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
                             <label style={S.label}>Drawings</label>
                             <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
@@ -6466,10 +6507,7 @@ export default function StockControl() {
                     {job.quoted_value != null && <span>Quoted: R {Number(job.quoted_value).toFixed(2)}</span>}
                   </div>
                   <div style={S.reqActions}>
-                    <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openJobDetail(job)}>
-                      <ClipboardList size={13} /> Open
-                    </button>
-                    {jobInvoiceRequests.find((r) => r.job_id === job.id) && (
+                    {jobInvoiceRequests.find((r) => r.job_id === job.id) ? (
                       <button
                         type="button"
                         className="stk-btn"
@@ -6478,6 +6516,8 @@ export default function StockControl() {
                       >
                         <FileText size={13} /> Open Invoice
                       </button>
+                    ) : (
+                      <span style={S.roleHint}>No invoice request submitted yet</span>
                     )}
                     {isAdmin || !!profile?.canManageInvoicing && (
                       <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => openMarkInvoicedModal(job)}>
@@ -6512,9 +6552,18 @@ export default function StockControl() {
                       <span>Invoiced by {job.invoiced_by} on {new Date(job.invoiced_at).toLocaleDateString()}</span>
                     </div>
                     <div style={S.reqActions}>
-                      <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openJobDetail(job)}>
-                        <ClipboardList size={13} /> Open
-                      </button>
+                      {jobInvoiceRequests.find((r) => r.job_id === job.id) ? (
+                        <button
+                          type="button"
+                          className="stk-btn"
+                          style={S.reqActionBtnMuted}
+                          onClick={() => viewJobInvoiceRequest(jobInvoiceRequests.find((r) => r.job_id === job.id))}
+                        >
+                          <FileText size={13} /> Open Invoice
+                        </button>
+                      ) : (
+                        <span style={S.roleHint}>No invoice request on file</span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -7179,7 +7228,7 @@ export default function StockControl() {
                                 <span style={S.customerTag}>{it.customer}</span>
                               )}
                               {it.salesPerson && <span style={S.salesTag}>{it.salesPerson}</span>}
-                              {it.partNumber && drawingLookup[it.partNumber.trim()] && (
+                              {it.partNumber && drawingLookup[it.partNumber.trim()] && canView("drawings") && (
                                 <button
                                   type="button"
                                   className="stk-btn"
@@ -9773,15 +9822,35 @@ export default function StockControl() {
                               )}
                             </div>
                           )}
-                          {status === "out_external" && openDeliveryNote && canEditThisJob && (
+                          {revision && canView("drawings") && (
                             <button
                               type="button"
                               className="stk-btn"
-                              style={{ ...S.reqActionBtn, marginTop: 6 }}
-                              onClick={() => checkInDeliveryNote(jobDetail.job, openDeliveryNote, it)}
+                              style={{ ...S.reqActionBtnMuted, marginTop: 4 }}
+                              onClick={() => openDrawingPreviewByPartNumber(linkedItem.partNumber.trim())}
                             >
-                              Check back in ({openDeliveryNote.delivery_note_number})
+                              <FileText size={12} /> View drawing
                             </button>
+                          )}
+                          {status === "out_external" && openDeliveryNote && canEditThisJob && (
+                            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                              <button
+                                type="button"
+                                className="stk-btn"
+                                style={S.reqActionBtnMuted}
+                                onClick={() => viewDeliveryNoteDocument(jobDetail.job, openDeliveryNote)}
+                              >
+                                <FileText size={13} /> View document
+                              </button>
+                              <button
+                                type="button"
+                                className="stk-btn"
+                                style={S.reqActionBtn}
+                                onClick={() => checkInDeliveryNote(jobDetail.job, openDeliveryNote, it)}
+                              >
+                                Check back in ({openDeliveryNote.delivery_note_number})
+                              </button>
+                            </div>
                           )}
                         </div>
                         {remaining <= 0 && (
@@ -9816,6 +9885,52 @@ export default function StockControl() {
                 {jobDetail.job.quoted_value != null && (
                   <div style={{ ...S.roleHint, marginTop: 6 }}>Quoted value: R {Number(jobDetail.job.quoted_value).toFixed(2)}</div>
                 )}
+              </div>
+            )}
+
+            {jobDetail.deliveryNotes.length > 0 && (
+              <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+                <label style={S.label}>Delivery notes</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                  {Object.values(
+                    jobDetail.deliveryNotes.reduce((groups, dn) => {
+                      (groups[dn.delivery_note_number] = groups[dn.delivery_note_number] || []).push(dn);
+                      return groups;
+                    }, {})
+                  ).map((group) => {
+                    const first = group[0];
+                    return (
+                      <div key={first.delivery_note_number} style={S.reqCard}>
+                        <div style={S.reqCardTop}>
+                          <span style={S.itemName}>{first.delivery_note_number}</span>
+                          <span style={S.roleHint}>{first.direction === "to_supplier" ? "To supplier" : "To customer"}</span>
+                        </div>
+                        <div style={S.roleHint}>{first.recipient_name}</div>
+                        <div className="stk-meta-row" style={S.rowMeta}>
+                          <span>Sent by {first.created_by}</span>
+                          <span>{new Date(first.created_at).toLocaleDateString()}</span>
+                        </div>
+                        {group.map((dn) => (
+                          <div key={dn.id} style={{ ...S.roleHint, marginTop: 4 }}>
+                            {dn.checked_back_in_at
+                              ? `✓ Received by ${dn.checked_back_in_by} on ${new Date(dn.checked_back_in_at).toLocaleString()}`
+                              : dn.direction === "to_supplier"
+                              ? "Not yet checked back in"
+                              : null}
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          className="stk-btn"
+                          style={{ ...S.reqActionBtnMuted, marginTop: 8 }}
+                          onClick={() => viewDeliveryNoteDocument(jobDetail.job, first)}
+                        >
+                          <FileText size={13} /> View document
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
@@ -10362,14 +10477,27 @@ export default function StockControl() {
                           newCustomerName: matchedCustomer ? "" : parsed.customer,
                           newCustomerContactName: matchedCustomer ? f.newCustomerContactName : parsed.contact,
                           quoteReference: parsed.quoteNumber || f.quoteReference,
-                          quoteItems: parsed.quoteItems.map((it) => ({
-                            id: uid(),
-                            description: it.description,
-                            qty: String(it.qty),
-                            unitPrice: String(it.unitPrice),
-                            priceNeedsReview: it.priceNeedsReview,
-                            linkedItemId: null,
-                          })),
+                          quoteItems: parsed.quoteItems.map((it) => {
+                            // Same match as manual entry uses on blur — exact
+                            // name match within the same customer's existing
+                            // Customer Stock. Doing it here too means an
+                            // imported item with a drawing already on file
+                            // picks it up automatically, instead of only
+                            // working when someone types the item by hand.
+                            const stockMatch = matchedCustomer
+                              ? (items || []).find(
+                                  (si) => si.mainCat === "custom" && si.customer === matchedCustomer && si.name.trim().toLowerCase() === it.description.trim().toLowerCase()
+                                )
+                              : null;
+                            return {
+                              id: uid(),
+                              description: it.description,
+                              qty: String(it.qty),
+                              unitPrice: String(it.unitPrice),
+                              priceNeedsReview: it.priceNeedsReview,
+                              linkedItemId: stockMatch?.id || null,
+                            };
+                          }),
                         }));
                         const reviewFlags = parsed.quoteItems.filter((it) => it.priceNeedsReview).length;
                         alert(
