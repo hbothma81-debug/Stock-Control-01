@@ -548,6 +548,7 @@ export default function StockControl() {
   const [jobsList, setJobsList] = useState(null);
   const [productionQueue, setProductionQueue] = useState(null);
   const [invoicedSectionOpen, setInvoicedSectionOpen] = useState(false);
+  const [notificationsViewedOpen, setNotificationsViewedOpen] = useState(false);
   const [productionExpanded, setProductionExpanded] = useState({});
   const [productionSearchQuery, setProductionSearchQuery] = useState("");
   const [shortageModal, setShortageModal] = useState(null);
@@ -1279,7 +1280,7 @@ export default function StockControl() {
   // Loaded eagerly (not just when the tab's opened) so the unread badge on
   // the header button is accurate the moment someone signs in.
   useEffect(() => {
-    if (profile?.isSalesPerson && notificationsList === null) fetchNotifications();
+    if (profile && notificationsList === null) fetchNotifications();
   }, [profile]);
 
   // Belt-and-suspenders on top of the immediate saves above: the moment this
@@ -1741,14 +1742,21 @@ export default function StockControl() {
       ...f,
       selectedProcesses: f.selectedProcesses.some((p) => p.name === processName)
         ? f.selectedProcesses.filter((p) => p.name !== processName)
-        : [...f.selectedProcesses, { name: processName, operator: "", trackingMode: "batch" }],
+        : [...f.selectedProcesses, { name: processName, operator: "", assignedToId: null, trackingMode: "batch" }],
     }));
   }
 
-  function updateNewJobProcessOperator(processName, operator) {
+  // Sets both the real person link (assignedToId, what makes a genuine
+  // notification possible) and the plain operator text alongside it, so
+  // anything that still displays operator as text keeps working exactly
+  // as before, without needing every display spot updated at once.
+  function updateNewJobProcessAssignee(processName, personId) {
+    const person = (people || []).find((p) => p.id === personId);
     setNewJobForm((f) => ({
       ...f,
-      selectedProcesses: f.selectedProcesses.map((p) => (p.name === processName ? { ...p, operator } : p)),
+      selectedProcesses: f.selectedProcesses.map((p) =>
+        p.name === processName ? { ...p, assignedToId: personId || null, operator: person?.name || "" } : p
+      ),
     }));
   }
 
@@ -1943,11 +1951,27 @@ export default function StockControl() {
           job_id: job.id,
           process_name: p.name,
           operator: p.operator || "",
+          assigned_to: p.assignedToId || null,
           tracking_mode: p.trackingMode || "batch",
           sort_order: idx,
         }));
         const { error: procError } = await supabase.from("job_processes").insert(processRows);
         if (procError) throw procError;
+
+        // A real, accountable assignment is what makes this notification
+        // possible at all — this couldn't exist back when it was just a
+        // free-text name with no actual link to a person.
+        const assignedRows = newJobForm.selectedProcesses.filter((p) => p.assignedToId);
+        if (assignedRows.length) {
+          await supabase.from("job_notifications").insert(
+            assignedRows.map((p) => ({
+              job_id: job.id,
+              job_number: job.job_number,
+              recipient_id: p.assignedToId,
+              message: `You've been assigned to ${p.name} on ${job.job_number} (${job.customer || "no customer"})`,
+            }))
+          );
+        }
 
         const validQuoteItems = newJobForm.quoteItems.filter((it) => it.description.trim() && Number(it.qty) > 0);
         if (validQuoteItems.length) {
@@ -2363,6 +2387,35 @@ export default function StockControl() {
       flashSaved(`process-${process.id}`);
     } catch (err) {
       console.error("Failed to update process field:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  // Sets both the real person link and the plain operator text alongside
+  // it, same as job creation — and fires a real notification, but only
+  // when the assignment actually changes to a genuinely different person,
+  // not on every unrelated save of this process.
+  async function updateJobProcessAssignee(process, job, personId) {
+    if (!supabase) return;
+    const person = (people || []).find((p) => p.id === personId);
+    try {
+      const { error } = await supabase
+        .from("job_processes")
+        .update({ assigned_to: personId || null, operator: person?.name || "" })
+        .eq("id", process.id);
+      if (error) throw error;
+      flashSaved(`process-${process.id}`);
+      if (personId && personId !== process.assigned_to) {
+        await supabase.from("job_notifications").insert({
+          job_id: job.id,
+          job_number: job.job_number,
+          recipient_id: personId,
+          message: `You've been assigned to ${process.process_name} on ${job.job_number} (${job.customer || "no customer"})`,
+        });
+      }
+      refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to update assignee:", err);
       alert("That didn't save — check your connection and try again.");
     }
   }
@@ -3256,15 +3309,22 @@ export default function StockControl() {
   // ---- Notifications ----
 
   async function fetchNotifications() {
-    if (!supabase || !profile?.isSalesPerson) return;
+    if (!supabase || !profile) return;
     try {
-      const { data, error } = await supabase
-        .from("job_notifications")
-        .select("*")
-        .eq("sales_rep", roleLabel)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      setNotificationsList(data || []);
+      // Two separate, properly-parameterized queries rather than a single
+      // .or() built from a string-interpolated name — a name containing a
+      // comma or other special character could otherwise break that
+      // filter syntax outright.
+      const [{ data: bySalesRep, error: err1 }, { data: byRecipient, error: err2 }] = await Promise.all([
+        supabase.from("job_notifications").select("*").eq("sales_rep", roleLabel),
+        supabase.from("job_notifications").select("*").eq("recipient_id", profile.id),
+      ]);
+      if (err1) throw err1;
+      if (err2) throw err2;
+      const byId = new Map();
+      for (const n of [...(bySalesRep || []), ...(byRecipient || [])]) byId.set(n.id, n);
+      const merged = [...byId.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      setNotificationsList(merged);
     } catch (err) {
       console.error("Failed to load notifications:", err);
       setNotificationsList([]);
@@ -3685,7 +3745,7 @@ export default function StockControl() {
     if (section === "purchaseOrders") return !!profile?.canManageRequisitions || !!profile?.canRaisePO;
     if (section === "receiving") return !!profile?.canMarkReceived;
     if (section === "invoicing") return !!profile?.canManageInvoicing;
-    if (section === "notifications") return !!profile?.isSalesPerson;
+    if (section === "notifications") return !!profile;
     if (section === "production") return !!profile?.allowedProcessTypes?.length;
     if (section === "usageLog") return !!profile?.canViewUsageLog;
     return profile ? !!profile.permissions?.[section]?.view : false;
@@ -6042,7 +6102,7 @@ export default function StockControl() {
               {requisitions.filter((r) => r.status === "pending").length} requests
             </button>
           )}
-          {profile?.isSalesPerson && (
+          {profile && (
             <button className="stk-btn" style={S.roleChip} onClick={() => setTab("notifications")}>
               <AlertTriangle size={13} strokeWidth={2.5} />
               Notifications
@@ -6812,21 +6872,54 @@ export default function StockControl() {
       ) : tab === "notifications" ? (
         <div style={S.list}>
           {notificationsList === null && <div style={S.empty}>Loading…</div>}
-          {notificationsList?.length === 0 && <div style={S.empty}>Nothing yet — you'll see it here when a process wraps up on one of your jobs.</div>}
-          <div style={{ ...S.gradeItems, marginTop: 10 }}>
-            {(notificationsList || []).map((n) => (
-              <div
-                key={n.id}
-                style={{ ...S.reqCard, ...(n.is_read ? {} : { borderLeft: `3px solid ${C.accentRaw}` }) }}
-                onClick={() => !n.is_read && markNotificationRead(n.id)}
-              >
-                <div className="stk-meta-row" style={S.rowMeta}>
-                  <span>{new Date(n.created_at).toLocaleString()}</span>
+          {notificationsList?.length === 0 && <div style={S.empty}>Nothing yet — you'll see it here when something's assigned to you or a process wraps up on one of your jobs.</div>}
+          {(() => {
+            const unread = (notificationsList || []).filter((n) => !n.is_read);
+            const viewed = (notificationsList || []).filter((n) => n.is_read);
+            return (
+              <>
+                {notificationsList?.length > 0 && unread.length === 0 && (
+                  <div style={S.empty}>Nothing new — everything's in "Already viewed" below.</div>
+                )}
+                <div style={{ ...S.gradeItems, marginTop: 10 }}>
+                  {unread.map((n) => (
+                    <div key={n.id} style={{ ...S.reqCard, borderLeft: `3px solid ${C.accentRaw}` }} onClick={() => markNotificationRead(n.id)}>
+                      <div className="stk-meta-row" style={S.rowMeta}>
+                        <span>{new Date(n.created_at).toLocaleString()}</span>
+                      </div>
+                      <div style={{ ...S.itemName, fontSize: 14.5, marginTop: 2 }}>{n.message}</div>
+                    </div>
+                  ))}
                 </div>
-                <div style={{ ...S.itemName, fontSize: 14.5, marginTop: 2 }}>{n.message}</div>
-              </div>
-            ))}
-          </div>
+                {viewed.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={{ ...S.productionPill, marginTop: 16 }}
+                      onClick={() => setNotificationsViewedOpen((o) => !o)}
+                    >
+                      <span>Already viewed</span>
+                      <span style={S.gradeCount}>{viewed.length}</span>
+                      <ChevronDown size={14} style={{ transform: notificationsViewedOpen ? "rotate(180deg)" : "none" }} />
+                    </button>
+                    {notificationsViewedOpen && (
+                      <div style={{ ...S.gradeItems, marginTop: 6 }}>
+                        {viewed.map((n) => (
+                          <div key={n.id} style={S.reqCard}>
+                            <div className="stk-meta-row" style={S.rowMeta}>
+                              <span>{new Date(n.created_at).toLocaleString()}</span>
+                            </div>
+                            <div style={{ ...S.itemName, fontSize: 14.5, marginTop: 2 }}>{n.message}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            );
+          })()}
         </div>
       ) : tab === "invoicing" ? (
         <div style={S.list}>
@@ -10635,12 +10728,16 @@ export default function StockControl() {
                       )}
                       {canEditThisJob && (
                         <div style={{ display: "flex", gap: 6, marginTop: 4, marginLeft: 22, flexWrap: "wrap" }}>
-                          <input
+                          <select
                             style={{ ...S.input, fontSize: 13.5, padding: "5px 8px", flex: "1 1 140px" }}
-                            defaultValue={p.operator || ""}
-                            onBlur={(e) => updateJobProcessField(p, "operator", e.target.value)}
-                            placeholder="Operator"
-                          />
+                            value={p.assigned_to || ""}
+                            onChange={(e) => updateJobProcessAssignee(p, jobDetail.job, e.target.value)}
+                          >
+                            <option value="">Not assigned yet</option>
+                            {(people || []).map((person) => (
+                              <option key={person.id} value={person.id}>{person.name}</option>
+                            ))}
+                          </select>
                           <input
                             style={{ ...S.input, fontSize: 13.5, padding: "5px 8px", flex: "1 1 140px" }}
                             defaultValue={p.notes || ""}
@@ -11378,22 +11475,20 @@ export default function StockControl() {
               </div>
               {newJobForm.selectedProcesses.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
-                  <datalist id="job-operator-people">
-                    {(people || []).map((person) => (
-                      <option key={person.id} value={person.name} />
-                    ))}
-                  </datalist>
                   {newJobForm.selectedProcesses.map((sp) => (
                     <div key={sp.name} style={{ marginBottom: 4 }}>
                       <span style={{ fontSize: 14, fontWeight: 600 }}>{sp.name}</span>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
-                        <input
+                        <select
                           style={{ ...S.input, flex: "1 1 180px" }}
-                          list="job-operator-people"
-                          value={sp.operator}
-                          onChange={(e) => updateNewJobProcessOperator(sp.name, e.target.value)}
-                          placeholder="Pick a person or type a name"
-                        />
+                          value={sp.assignedToId || ""}
+                          onChange={(e) => updateNewJobProcessAssignee(sp.name, e.target.value)}
+                        >
+                          <option value="">Not assigned yet</option>
+                          {(people || []).map((person) => (
+                            <option key={person.id} value={person.id}>{person.name}</option>
+                          ))}
+                        </select>
                         <select
                           style={{ ...S.input, width: 110, flexShrink: 0 }}
                           value={sp.trackingMode}
