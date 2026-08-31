@@ -964,14 +964,43 @@ export default function StockControl() {
       setSession(null);
       return;
     }
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session || null);
-      setAuthLoading(false);
-    });
+    let settled = false;
+    // A network hiccup exactly during this initial check previously left
+    // the app stuck on "Checking your session…" forever — getSession()
+    // had no .catch() and nothing timed it out, so a failure here meant
+    // no login page ever appeared, with no way out but a manual refresh.
+    const timeoutId = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        console.error("Session check timed out — falling back to signed-out state.");
+        setSession(null);
+        setAuthLoading(false);
+      }
+    }, 10000);
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        setSession(data.session || null);
+        setAuthLoading(false);
+      })
+      .catch((err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        console.error("Failed to check session:", err);
+        setSession(null);
+        setAuthLoading(false);
+      });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession || null);
     });
-    return () => sub.subscription.unsubscribe();
+    return () => {
+      clearTimeout(timeoutId);
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
