@@ -37,6 +37,10 @@ const NAV_TABS = [
   { key: "purchaseOrders", label: "Purchase Orders" },
   { key: "receiving", label: "Receiving" },
   { key: "invoicing", label: "Invoicing" },
+  { key: "deliveryNotes", label: "Delivery Notes" },
+  { key: "invoiceRequests", label: "Invoice Requests" },
+  { key: "processSheets", label: "Process Sheets" },
+  { key: "poReports", label: "PO Reports" },
   { key: "usageLog", label: "Usage Log" },
   { key: "drawings", label: "Drawings" },
 ];
@@ -48,7 +52,7 @@ const NAV_TABS = [
 const TAB_GROUPS = [
   { label: "Stock", keys: ["plate", "structural", "cncBar", "custom", "fasteners", "stores", "assets"] },
   { label: "Procurement", keys: ["requisitions", "purchaseOrders", "receiving"] },
-  { label: "Records", keys: ["invoicing", "usageLog", "drawings"] },
+  { label: "Records", keys: ["invoicing", "deliveryNotes", "invoiceRequests", "processSheets", "poReports", "usageLog", "drawings"] },
 ];
 
 // Jobs and Notifications still need a canView() entry (for the header
@@ -56,7 +60,7 @@ const TAB_GROUPS = [
 // tab row — this covers that without duplicating them into NAV_TABS.
 const EXTRA_SECTIONS = [{ key: "notifications", label: "Notifications" }];
 
-const SECTIONS = ["plate", "structural", "cncBar", "custom", "stores", "fasteners", "assets", "drawings", "jobs"];
+const SECTIONS = ["plate", "structural", "cncBar", "custom", "stores", "fasteners", "assets", "drawings", "deliveryNotes", "invoiceRequests", "processSheets", "poReports", "jobs"];
 
 const MANAGER_TABS = [
   { key: "sizes", label: "Sheet Sizes" },
@@ -549,6 +553,19 @@ export default function StockControl() {
   const [shortageModal, setShortageModal] = useState(null);
   const [productionLoading, setProductionLoading] = useState(false);
   const [jobInvoiceRequests, setJobInvoiceRequests] = useState([]);
+  const [allDeliveryNotes, setAllDeliveryNotes] = useState([]);
+  const [generatedDocuments, setGeneratedDocuments] = useState(null);
+  const [deliveryNotesSearchQuery, setDeliveryNotesSearchQuery] = useState("");
+  const [deliveryNotesDateFrom, setDeliveryNotesDateFrom] = useState("");
+  const [deliveryNotesDateTo, setDeliveryNotesDateTo] = useState("");
+  const [invoiceRequestsSearchQuery, setInvoiceRequestsSearchQuery] = useState("");
+  const [invoiceRequestsDateFrom, setInvoiceRequestsDateFrom] = useState("");
+  const [invoiceRequestsDateTo, setInvoiceRequestsDateTo] = useState("");
+  const [processSheetsSearchQuery, setProcessSheetsSearchQuery] = useState("");
+  const [processSheetsDateFrom, setProcessSheetsDateFrom] = useState("");
+  const [processSheetsDateTo, setProcessSheetsDateTo] = useState("");
+  const [poReportsDateFrom, setPoReportsDateFrom] = useState("");
+  const [poReportsDateTo, setPoReportsDateTo] = useState("");
   const [allJobQuoteItems, setAllJobQuoteItems] = useState([]);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [jobDetail, setJobDetail] = useState(null); // { job, processes, documents }
@@ -1084,6 +1101,10 @@ export default function StockControl() {
     if (tab === "production" && productionQueue === null && profile?.allowedProcessTypes?.length) fetchProductionQueue();
   }, [tab, profile]);
 
+  useEffect(() => {
+    if ((tab === "processSheets" || tab === "poReports") && generatedDocuments === null && supabase) fetchGeneratedDocuments();
+  }, [tab]);
+
   // Makes the phone/browser back action close whatever's open (Job Detail,
   // a preview, any modal) instead of leaving the app entirely — the app
   // wasn't registering these as a "page" the browser knew how to step back
@@ -1439,17 +1460,20 @@ export default function StockControl() {
     if (!supabase) return;
     setJobsLoading(true);
     try {
-      const [{ data, error }, { data: invoiceRequests, error: invError }, { data: allQuoteItems, error: qiError }] = await Promise.all([
+      const [{ data, error }, { data: invoiceRequests, error: invError }, { data: allQuoteItems, error: qiError }, { data: allDeliveryNotes, error: dnError }] = await Promise.all([
         supabase.from("jobs").select("*").order("created_at", { ascending: false }),
         supabase.from("job_invoice_requests").select("*").order("submitted_at", { ascending: false }),
         supabase.from("job_quote_items").select("id, job_id, item_status, qty, qty_invoiced"),
+        supabase.from("delivery_notes").select("*").order("delivery_note_number", { ascending: false }),
       ]);
       if (error) throw error;
       if (invError) throw invError;
       if (qiError) throw qiError;
+      if (dnError) throw dnError;
       setJobsList(data || []);
       setJobInvoiceRequests(invoiceRequests || []);
       setAllJobQuoteItems(allQuoteItems || []);
+      setAllDeliveryNotes(allDeliveryNotes || []);
     } catch (err) {
       console.error("Failed to load jobs:", err);
       setJobsList([]);
@@ -1875,6 +1899,18 @@ export default function StockControl() {
   // this is every job currently sitting at a stage that's actually theirs
   // to work on right now — not the whole job, not stages still waiting on
   // something earlier in the sequence.
+  async function fetchGeneratedDocuments() {
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase.from("generated_documents").select("*").order("generated_at", { ascending: false });
+      if (error) throw error;
+      setGeneratedDocuments(data || []);
+    } catch (err) {
+      console.error("Failed to load generated documents:", err);
+      setGeneratedDocuments([]);
+    }
+  }
+
   async function fetchProductionQueue() {
     if (!supabase || !profile?.allowedProcessTypes?.length) return;
     setProductionLoading(true);
@@ -2183,10 +2219,17 @@ export default function StockControl() {
     const doc = buildDraftInvoiceDoc(job, lines);
     const totalAmount = lines.reduce((sum, li) => sum + li.qty * li.unitPrice, 0);
     const fileName = `Invoice-Request-${job.job_number}-${Date.now()}.pdf`;
-    const blob = doc.output("blob");
     const path = `${job.id}/${fileName}`;
-    const { error: upError } = await supabase.storage.from("job-invoices").upload(path, blob);
-    if (upError) throw upError;
+    const stored = await generateAndStoreDocument({
+      doc,
+      documentType: "invoice_request",
+      bucket: "job-invoices",
+      path,
+      fileName,
+      jobId: job.id,
+      showPreview: false,
+    });
+    if (!stored) return;
     const { error: reqError } = await supabase.from("job_invoice_requests").insert({
       job_id: job.id,
       storage_path: path,
@@ -2493,6 +2536,79 @@ export default function StockControl() {
     }
   }
 
+  // Shared by every PDF generator in the app — the same proportional-sizing
+  // logic was independently copy-pasted into each one (with a bug slipping
+  // into at least one of those copies over time). Draws the logo at (x, y)
+  // scaled to fit within maxW × maxH without ever distorting it, and
+  // returns the actual rendered size so the caller can lay out whatever
+  // comes next around it. Does nothing if there's no logo or it fails to
+  // load — never worth failing the whole document over.
+  function addCompanyLogo(doc, company, x, y, maxW, maxH) {
+    if (!company?.logo) return { width: 0, height: 0 };
+    try {
+      const imgProps = doc.getImageProperties(company.logo);
+      let logoW = maxW;
+      let logoH = (imgProps.height / imgProps.width) * logoW;
+      if (logoH > maxH) {
+        logoH = maxH;
+        logoW = (imgProps.width / imgProps.height) * logoH;
+      }
+      doc.addImage(company.logo, "JPEG", x, y, logoW, logoH);
+      return { width: logoW, height: logoH };
+    } catch {
+      return { width: 0, height: 0 };
+    }
+  }
+
+  // The one place every generated document gets uploaded, logged, and
+  // (usually) previewed — every generator in the app calls this rather
+  // than handling storage itself, so the upload/preview/fallback mechanics
+  // only exist once and can't independently drift or break per document
+  // type the way they did before. `relatedId` is whatever ties this back
+  // to its own specific record — a delivery note number, a PO number —
+  // for cross-referencing from the audit log; it's fine to leave blank for
+  // something like a report that isn't tied to one specific record.
+  async function generateAndStoreDocument({ doc, documentType, bucket, path, fileName, jobId, relatedId, showPreview = true }) {
+    if (showPreview) {
+      setPreviewLoading(true);
+      setPreviewItem({ attachmentType: "pdf", attachmentName: fileName });
+      setPreviewData(null);
+    }
+    try {
+      const blob = doc.output("blob");
+      const { error: upError } = await supabase.storage.from(bucket).upload(path, blob, { upsert: true, contentType: "application/pdf" });
+      if (upError) throw upError;
+      await supabase.from("generated_documents").insert({
+        document_type: documentType,
+        bucket,
+        storage_path: path,
+        file_name: fileName,
+        job_id: jobId || null,
+        related_id: relatedId ? String(relatedId) : null,
+        generated_by: roleLabel,
+      });
+      if (showPreview) {
+        const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 3600);
+        if (error) throw error;
+        setPreviewData(data.signedUrl);
+        setPreviewLoading(false);
+      }
+      return { bucket, path };
+    } catch (err) {
+      console.error(`Failed to generate ${documentType}:`, err);
+      if (showPreview) {
+        // Storage failed — still show something rather than nothing, even
+        // though this fallback can't be reopened later the way a real
+        // stored copy can.
+        setPreviewData(doc.output("bloburl"));
+        setPreviewLoading(false);
+      } else {
+        alert("Couldn't save that document — check your connection and try again.");
+      }
+      return null;
+    }
+  }
+
 
   // Uploads to real storage and previews via signed URL, rather than
   // doc.save() forcing an immediate download with nothing kept — same fix
@@ -2507,26 +2623,10 @@ export default function StockControl() {
 
     const renderCopy = (topY, copyLabel) => {
       let y = topY;
-      let textX = leftX;
       // Logo, sized to its real proportions — never forced into a square,
       // same fix applied to every other document that has one.
-      if (company.logo) {
-        try {
-          const imgProps = doc.getImageProperties(company.logo);
-          const maxW = 26;
-          const maxH = 14;
-          let logoW = maxW;
-          let logoH = (imgProps.height / imgProps.width) * logoW;
-          if (logoH > maxH) {
-            logoH = maxH;
-            logoW = (imgProps.width / imgProps.height) * logoH;
-          }
-          doc.addImage(company.logo, "JPEG", leftX, y - 8, logoW, logoH);
-          textX = leftX + logoW + 6;
-        } catch {
-          // bad image data — skip rather than fail the whole document
-        }
-      }
+      const { width: logoW } = addCompanyLogo(doc, company, leftX, y - 8, 26, 14);
+      const textX = leftX + (logoW ? logoW + 6 : 0);
       doc.setFontSize(9);
       doc.setFont(undefined, "bold");
       doc.text(copyLabel, rightX, y - 6, { align: "right" });
@@ -2576,26 +2676,18 @@ export default function StockControl() {
     doc.setLineDashPattern([], 0);
     renderCopy(166, "Our Copy");
 
-    setPreviewLoading(true);
-    setPreviewItem({ attachmentType: "pdf", attachmentName: `${note.delivery_note_number}.pdf` });
-    setPreviewData(null);
-    try {
-      const blob = doc.output("blob");
-      // Deterministic path from job id + note number — every delivery_notes
-      // row for this note (one per item) shares one PDF, and it can always
-      // be found again later without needing to store the path anywhere.
-      const path = `${job.id}/delivery-note-${note.delivery_note_number}.pdf`;
-      const { error: upError } = await supabase.storage.from("job-documents").upload(path, blob, { upsert: true, contentType: "application/pdf" });
-      if (upError) throw upError;
-      const { data, error } = await supabase.storage.from("job-documents").createSignedUrl(path, 3600);
-      if (error) throw error;
-      setPreviewData(data.signedUrl);
-      setPreviewLoading(false);
-    } catch (err) {
-      console.error("Failed to prepare delivery note:", err);
-      setPreviewData(doc.output("bloburl"));
-      setPreviewLoading(false);
-    }
+    // Deterministic path from job id + note number — every delivery_notes
+    // row for this note (one per item) shares one PDF, and it can always
+    // be found again later without needing to store the path anywhere.
+    await generateAndStoreDocument({
+      doc,
+      documentType: "delivery_note",
+      bucket: "job-documents",
+      path: `${job.id}/delivery-note-${note.delivery_note_number}.pdf`,
+      fileName: `${note.delivery_note_number}.pdf`,
+      jobId: job.id,
+      relatedId: note.delivery_note_number,
+    });
   }
 
   // Reopens a delivery note's PDF later — same deterministic path used
@@ -2610,6 +2702,22 @@ export default function StockControl() {
       setPreviewLoading(false);
     } catch (err) {
       console.error("Failed to open delivery note:", err);
+      alert("Couldn't open that document — check your connection and try again.");
+    }
+  }
+
+  // Opens any row from the generated_documents audit log — works for
+  // every document type, since they all record their own real bucket and
+  // path when they're first generated.
+  async function viewGeneratedDocument(record) {
+    try {
+      const { data, error } = await supabase.storage.from(record.bucket).createSignedUrl(record.storage_path, 3600);
+      if (error) throw error;
+      setPreviewItem({ attachmentType: "pdf", attachmentName: record.file_name });
+      setPreviewData(data.signedUrl);
+      setPreviewLoading(false);
+    } catch (err) {
+      console.error("Failed to open document:", err);
       alert("Couldn't open that document — check your connection and try again.");
     }
   }
@@ -2659,23 +2767,8 @@ export default function StockControl() {
     doc.setTextColor(0, 0, 0);
     y += 10;
     let textX = leftX;
-    if (company.logo) {
-      try {
-        const imgProps = doc.getImageProperties(company.logo);
-        const maxW = 26;
-        const maxH = 14;
-        let logoW = maxW;
-        let logoH = (imgProps.height / imgProps.width) * logoW;
-        if (logoH > maxH) {
-          logoH = maxH;
-          logoW = (imgProps.width / imgProps.height) * logoH;
-        }
-        doc.addImage(company.logo, "JPEG", leftX, y - 8, logoW, logoH);
-        textX = leftX + logoW + 6;
-      } catch {
-        // bad image data — skip rather than fail the whole document
-      }
-    }
+    const { width: invLogoW } = addCompanyLogo(doc, company, leftX, y - 8, 26, 14);
+    if (invLogoW) textX = leftX + invLogoW + 6;
     doc.setFontSize(16);
     doc.text("INVOICE REQUEST", rightX, y, { align: "right" });
     doc.setFontSize(12);
@@ -2715,28 +2808,12 @@ export default function StockControl() {
   // created it, so the PDF viewer's own built-in "open in new tab" button
   // was failing silently on it. A real signed URL works exactly like any
   // other attached document, including that button.
-  async function printJobSheet(job, processes, quoteItems) {
+  async function printJobSheet(job, processes, quoteItems, deliveryNotes) {
     const doc = new jsPDF();
     const company = master.companyDetails || {};
     const leftX = 14;
-    let y = 18;
-    if (company.logo) {
-      try {
-        const imgProps = doc.getImageProperties(company.logo);
-        const maxW = 26;
-        const maxH = 14;
-        let logoW = maxW;
-        let logoH = (imgProps.height / imgProps.width) * logoW;
-        if (logoH > maxH) {
-          logoH = maxH;
-          logoW = (imgProps.width / imgProps.height) * logoH;
-        }
-        doc.addImage(company.logo, "JPEG", leftX, 10, logoW, logoH);
-        y = 10 + logoH + 6;
-      } catch {
-        // bad image data — skip rather than fail the whole document
-      }
-    }
+    const { height: logoH } = addCompanyLogo(doc, company, leftX, 10, 26, 14);
+    let y = logoH ? 10 + logoH + 6 : 18;
     doc.setFontSize(16);
     doc.setFont(undefined, "bold");
     doc.text(`Job ${job.job_number}`, leftX, y);
@@ -2756,14 +2833,21 @@ export default function StockControl() {
       y += 5;
     });
 
-    // Items being made on this job — description and quantity only, no
-    // pricing, since this sheet goes to the floor, not accounts.
+    // Items being made on this job — description, quantity, and current
+    // invoiced/outstanding progress, no pricing (this sheet goes to the
+    // floor, not accounts). Pulls from the same qty_invoiced tracking used
+    // everywhere else, so reprinting partway through a longer job shows
+    // where things actually stand, not just what was originally quoted.
     if (quoteItems?.length) {
       y += 3;
       autoTable(doc, {
         startY: y,
-        head: [["Item", "Qty"]],
-        body: quoteItems.map((it) => [it.description || "", it.qty ?? ""]),
+        head: [["Item", "Qty", "Invoiced", "Outstanding"]],
+        body: quoteItems.map((it) => {
+          const qty = Number(it.qty) || 0;
+          const invoiced = Number(it.qty_invoiced) || 0;
+          return [it.description || "", qty, invoiced, Math.max(qty - invoiced, 0)];
+        }),
         theme: "grid",
         headStyles: { fillColor: [27, 29, 31] },
         margin: { left: leftX },
@@ -2810,26 +2894,101 @@ export default function StockControl() {
       doc.text(`Buy-out notes: ${job.buy_out_notes}`, leftX, finalY);
     }
 
-    setPreviewLoading(true);
-    setPreviewItem({ attachmentType: "pdf", attachmentName: `${job.job_number}.pdf` });
-    setPreviewData(null);
-    try {
-      const blob = doc.output("blob");
-      const path = `${job.id}/process-sheet.pdf`;
-      const { error: upError } = await supabase.storage.from("job-documents").upload(path, blob, { upsert: true, contentType: "application/pdf" });
-      if (upError) throw upError;
-      const { data, error } = await supabase.storage.from("job-documents").createSignedUrl(path, 3600);
-      if (error) throw error;
-      setPreviewData(data.signedUrl);
-      setPreviewLoading(false);
-    } catch (err) {
-      console.error("Failed to prepare process sheet:", err);
-      // Storage failed for some reason — fall back to a blob URL so the
-      // sheet is still viewable, even if the viewer's own "open in new
-      // tab" button won't work on it.
-      setPreviewData(doc.output("bloburl"));
-      setPreviewLoading(false);
+    // Job history — everything that happened on this job from start to
+    // invoicing, so it can be printed at the end and filed or referred
+    // back to if a problem comes up later. No values or prices anywhere
+    // here — just what was done.
+    doc.addPage();
+    let hy = 18;
+    doc.setFontSize(14);
+    doc.setFont(undefined, "bold");
+    doc.text(`Job History — ${job.job_number}`, leftX, hy);
+    hy += 10;
+    doc.setFont(undefined, "normal");
+
+    const dnGroups = Object.values(
+      (deliveryNotes || []).reduce((acc, dn) => {
+        (acc[dn.delivery_note_number] = acc[dn.delivery_note_number] || []).push(dn);
+        return acc;
+      }, {})
+    );
+    doc.setFontSize(11);
+    doc.setFont(undefined, "bold");
+    doc.text("Delivery notes", leftX, hy);
+    doc.setFont(undefined, "normal");
+    hy += 6;
+    if (dnGroups.length === 0) {
+      doc.setFontSize(9);
+      doc.text("None issued.", leftX, hy);
+      hy += 8;
+    } else {
+      autoTable(doc, {
+        startY: hy,
+        head: [["Number", "Direction", "Date"]],
+        body: dnGroups.map((g) => [g[0].delivery_note_number, g[0].direction === "to_supplier" ? "To supplier" : "To customer", new Date(g[0].created_at).toLocaleDateString()]),
+        theme: "grid",
+        headStyles: { fillColor: [27, 29, 31] },
+        margin: { left: leftX },
+      });
+      hy = doc.lastAutoTable.finalY + 8;
     }
+
+    const requestsForJob = jobInvoiceRequests.filter((r) => r.job_id === job.id);
+    doc.setFontSize(11);
+    doc.setFont(undefined, "bold");
+    doc.text("Invoicing", leftX, hy);
+    doc.setFont(undefined, "normal");
+    hy += 6;
+    doc.setFontSize(9);
+    if (job.invoice_number) {
+      doc.text(`Invoice #${job.invoice_number} — ${job.invoiced_at ? new Date(job.invoiced_at).toLocaleDateString() : ""}`, leftX, hy);
+      hy += 6;
+    }
+    if (requestsForJob.length === 0 && !job.invoice_number) {
+      doc.text("No invoicing activity yet.", leftX, hy);
+      hy += 8;
+    } else if (requestsForJob.length > 0) {
+      autoTable(doc, {
+        startY: hy,
+        head: [["Submitted", "Date"]],
+        body: requestsForJob.map((r) => [r.submitted_by, new Date(r.submitted_at).toLocaleDateString()]),
+        theme: "grid",
+        headStyles: { fillColor: [27, 29, 31] },
+        margin: { left: leftX },
+      });
+      hy = doc.lastAutoTable.finalY + 8;
+    }
+
+    const materialsUsed = (usageLog || []).filter((u) => u.direction === "use" && u.jobNumber === job.job_number);
+    doc.setFontSize(11);
+    doc.setFont(undefined, "bold");
+    doc.text("Materials used", leftX, hy);
+    doc.setFont(undefined, "normal");
+    hy += 6;
+    if (materialsUsed.length === 0) {
+      doc.setFontSize(9);
+      doc.text("None logged.", leftX, hy);
+      hy += 8;
+    } else {
+      autoTable(doc, {
+        startY: hy,
+        head: [["Item", "Qty", "By", "Date"]],
+        body: materialsUsed.map((u) => [u.itemName, u.qty, u.by, new Date(u.timestamp).toLocaleDateString()]),
+        theme: "grid",
+        headStyles: { fillColor: [27, 29, 31] },
+        margin: { left: leftX },
+      });
+      hy = doc.lastAutoTable.finalY + 8;
+    }
+
+    await generateAndStoreDocument({
+      doc,
+      documentType: "process_sheet",
+      bucket: "job-documents",
+      path: `${job.id}/process-sheet.pdf`,
+      fileName: `${job.job_number}.pdf`,
+      jobId: job.id,
+    });
   }
 
   async function updateJobStatus(jobId, status) {
@@ -4062,25 +4221,9 @@ export default function StockControl() {
     // real proportions — a fixed square box would squish anything that
     // isn't already perfectly square, so the size is derived from the
     // logo's actual width/height instead. ----
-    let logoY = 10;
     const textX = leftX;
-    if (company.logo) {
-      try {
-        const imgProps = doc.getImageProperties(company.logo);
-        const maxW = 45;
-        const maxH = 22;
-        let logoW = maxW;
-        let logoH = (imgProps.height / imgProps.width) * logoW;
-        if (logoH > maxH) {
-          logoH = maxH;
-          logoW = (imgProps.width / imgProps.height) * logoH;
-        }
-        doc.addImage(company.logo, "JPEG", leftX, logoY, logoW, logoH);
-        logoY += logoH + 6;
-      } catch {
-        // bad image data — just skip it rather than fail the whole PDF
-      }
-    }
+    const { height: poLogoH } = addCompanyLogo(doc, company, leftX, 10, 45, 22);
+    let logoY = 10 + (poLogoH ? poLogoH + 6 : 0);
     let headerY = logoY + 4;
     doc.setFontSize(13);
     doc.setFont(undefined, "bold");
@@ -4385,22 +4528,27 @@ export default function StockControl() {
     closeReceiving();
   }
 
-  function downloadPoPdf(po) {
-    buildPoDoc(po).save(`${po.poNumber}.pdf`);
-  }
-
   // Opens the PO in the same inline viewer already used for drawing/photo
-  // attachments — no forced download just to look at something.
-  function viewPoPdf(po) {
+  // attachments, and stores it properly so it can be reopened later
+  // instead of only existing for this one moment — same fix as every
+  // other document generator needed. This replaces the old separate
+  // "Download" action too: the viewer already has its own download link,
+  // so a second, differently-behaving button next to it was redundant.
+  async function viewPoPdf(po) {
     const doc = buildPoDoc(po);
-    setPreviewItem({ id: po.id, attachmentType: "pdf", attachmentName: `${po.poNumber}.pdf` });
-    setPreviewData(doc.output("datauristring"));
-    setPreviewLoading(false);
+    await generateAndStoreDocument({
+      doc,
+      documentType: "purchase_order",
+      bucket: "job-documents",
+      path: `po/${po.id}/${po.poNumber}.pdf`,
+      fileName: `${po.poNumber}.pdf`,
+      relatedId: po.poNumber,
+    });
   }
 
   // A summary-table report across many POs at once — for spend review, not
   // for sending to a supplier, so this is a plain table, not a letterhead.
-  function generatePoReport() {
+  async function generatePoReport() {
     const matches = purchaseOrders
       .filter((po) => !poReportSupplier || po.supplierId === poReportSupplier)
       .filter((po) => !poReportStatus || (poReportStatus === "received" ? po.status === "received" : po.status !== "received"))
@@ -4415,24 +4563,8 @@ export default function StockControl() {
 
     const doc = new jsPDF();
     const company = master.companyDetails || {};
-    let textX = 14;
-    if (company.logo) {
-      try {
-        const imgProps = doc.getImageProperties(company.logo);
-        const maxW = 26;
-        const maxH = 14;
-        let logoW = maxW;
-        let logoH = (imgProps.height / imgProps.width) * logoW;
-        if (logoH > maxH) {
-          logoH = maxH;
-          logoW = (imgProps.width / imgProps.height) * logoH;
-        }
-        doc.addImage(company.logo, "JPEG", 14, 10, logoW, logoH);
-        textX = 14 + logoW + 6;
-      } catch {
-        // bad image data — skip rather than fail the whole document
-      }
-    }
+    const { width: reportLogoW } = addCompanyLogo(doc, company, 14, 10, 26, 14);
+    const textX = reportLogoW ? 14 + reportLogoW + 6 : 14;
     doc.setFontSize(14);
     doc.setFont(undefined, "bold");
     doc.text(`${company.name || "Purchase Order Report"}`, textX, 18);
@@ -4462,7 +4594,17 @@ export default function StockControl() {
       footStyles: { fillColor: [242, 169, 0], textColor: [27, 29, 31], fontStyle: "bold" },
     });
 
-    doc.save(`PO-Report-${new Date().toISOString().slice(0, 10)}.pdf`);
+    // Not tied to one job or PO — each run is its own dated snapshot for
+    // whatever filter was used, so it gets its own timestamped path rather
+    // than overwriting a previous report.
+    const fileName = `PO-Report-${new Date().toISOString().slice(0, 10)}-${Date.now()}.pdf`;
+    await generateAndStoreDocument({
+      doc,
+      documentType: "po_report",
+      bucket: "job-documents",
+      path: `po-reports/${fileName}`,
+      fileName,
+    });
     setShowPoReport(false);
   }
 
@@ -6117,9 +6259,6 @@ export default function StockControl() {
                     <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => viewPoPdf(po)}>
                       <FileText size={13} /> View PDF
                     </button>
-                    <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => downloadPoPdf(po)}>
-                      <Download size={13} /> Download
-                    </button>
                     {canMarkReceivedPerm && (
                       <button type="button" className="stk-btn" style={{ ...S.reqActionBtn, background: C.accentFinished }} onClick={() => openReceiving(po)}>
                         <Check size={13} /> Receive
@@ -6568,6 +6707,230 @@ export default function StockControl() {
                   </div>
                 ))}
             </div>
+          )}
+        </div>
+      ) : tab === "deliveryNotes" ? (
+        <div style={S.list}>
+          <div style={S.roleHint}>
+            Every delivery note across every job, in sequence — like a delivery note book, so nothing issued ever goes untracked.
+          </div>
+          <div style={S.filterBar}>
+            <div>
+              <label style={S.label}>From</label>
+              <input type="date" style={S.input} value={deliveryNotesDateFrom} onChange={(e) => setDeliveryNotesDateFrom(e.target.value)} />
+            </div>
+            <div>
+              <label style={S.label}>To</label>
+              <input type="date" style={S.input} value={deliveryNotesDateTo} onChange={(e) => setDeliveryNotesDateTo(e.target.value)} />
+            </div>
+            <input
+              style={S.input}
+              value={deliveryNotesSearchQuery}
+              onChange={(e) => setDeliveryNotesSearchQuery(e.target.value)}
+              placeholder="Search job number…"
+            />
+          </div>
+          {(() => {
+            const groups = Object.values(
+              allDeliveryNotes.reduce((acc, dn) => {
+                (acc[dn.delivery_note_number] = acc[dn.delivery_note_number] || []).push(dn);
+                return acc;
+              }, {})
+            )
+              .map((group) => {
+                const first = group[0];
+                const job = (jobsList || []).find((j) => j.id === first.job_id);
+                return { group, first, job };
+              })
+              .filter(({ first }) => !deliveryNotesDateFrom || new Date(first.created_at) >= new Date(deliveryNotesDateFrom))
+              .filter(({ first }) => !deliveryNotesDateTo || new Date(first.created_at) <= new Date(deliveryNotesDateTo + "T23:59:59"))
+              .filter(({ job }) => !deliveryNotesSearchQuery.trim() || (job?.job_number || "").toLowerCase().includes(deliveryNotesSearchQuery.trim().toLowerCase()))
+              .sort((a, b) => {
+                const numA = parseInt((a.first.delivery_note_number || "").replace(/\D/g, ""), 10) || 0;
+                const numB = parseInt((b.first.delivery_note_number || "").replace(/\D/g, ""), 10) || 0;
+                return numB - numA;
+              });
+            return (
+              <div style={{ ...S.gradeItems, marginTop: 10 }}>
+                {groups.length === 0 && <div style={S.empty}>No delivery notes match that search.</div>}
+                {groups.map(({ group, first, job }) => (
+                  <div key={first.delivery_note_number} style={S.reqCard}>
+                    <div style={S.reqCardTop}>
+                      <span style={S.itemName}>{first.delivery_note_number}</span>
+                      <span style={S.roleHint}>{first.direction === "to_supplier" ? "To supplier" : "To customer"}</span>
+                    </div>
+                    <div className="stk-meta-row" style={S.rowMeta}>
+                      <span>{job ? `${job.job_number} — ${job.customer || "No customer"}` : "Job not found"}</span>
+                      <span>{first.recipient_name}</span>
+                      <span>Sent by {first.created_by}</span>
+                      <span>{new Date(first.created_at).toLocaleDateString()}</span>
+                    </div>
+                    {group.map((dn) => (
+                      <div key={dn.id} style={{ ...S.roleHint, marginTop: 4 }}>
+                        {dn.checked_back_in_at
+                          ? `✓ Received by ${dn.checked_back_in_by} on ${new Date(dn.checked_back_in_at).toLocaleString()}`
+                          : dn.direction === "to_supplier"
+                          ? "Not yet checked back in"
+                          : null}
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={{ ...S.reqActionBtnMuted, marginTop: 8 }}
+                      onClick={() => job && viewDeliveryNoteDocument(job, first)}
+                      disabled={!job}
+                    >
+                      <FileText size={13} /> View document
+                    </button>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+      ) : tab === "invoiceRequests" ? (
+        <div style={S.list}>
+          <div style={S.roleHint}>Every invoice request document generated across every job — its own book, separate from the Invoicing workflow itself.</div>
+          <div style={S.filterBar}>
+            <div>
+              <label style={S.label}>From</label>
+              <input type="date" style={S.input} value={invoiceRequestsDateFrom} onChange={(e) => setInvoiceRequestsDateFrom(e.target.value)} />
+            </div>
+            <div>
+              <label style={S.label}>To</label>
+              <input type="date" style={S.input} value={invoiceRequestsDateTo} onChange={(e) => setInvoiceRequestsDateTo(e.target.value)} />
+            </div>
+            <input
+              style={S.input}
+              value={invoiceRequestsSearchQuery}
+              onChange={(e) => setInvoiceRequestsSearchQuery(e.target.value)}
+              placeholder="Search job number…"
+            />
+          </div>
+          {(() => {
+            const rows = jobInvoiceRequests
+              .map((r) => ({ r, job: (jobsList || []).find((j) => j.id === r.job_id) }))
+              .filter(({ r }) => !invoiceRequestsDateFrom || new Date(r.submitted_at) >= new Date(invoiceRequestsDateFrom))
+              .filter(({ r }) => !invoiceRequestsDateTo || new Date(r.submitted_at) <= new Date(invoiceRequestsDateTo + "T23:59:59"))
+              .filter(({ job }) => !invoiceRequestsSearchQuery.trim() || (job?.job_number || "").toLowerCase().includes(invoiceRequestsSearchQuery.trim().toLowerCase()))
+              .sort((a, b) => new Date(b.r.submitted_at) - new Date(a.r.submitted_at));
+            return (
+              <div style={{ ...S.gradeItems, marginTop: 10 }}>
+                {rows.length === 0 && <div style={S.empty}>No invoice requests match that search.</div>}
+                {rows.map(({ r, job }) => (
+                  <div key={r.id} style={S.reqCard}>
+                    <div style={S.reqCardTop}>
+                      <span style={S.itemName}>{r.file_name}</span>
+                      {r.total_amount != null && <span style={S.roleHint}>R {Number(r.total_amount).toFixed(2)}</span>}
+                    </div>
+                    <div className="stk-meta-row" style={S.rowMeta}>
+                      <span>{job ? `${job.job_number} — ${job.customer || "No customer"}` : "Job not found"}</span>
+                      <span>Submitted by {r.submitted_by}</span>
+                      <span>{new Date(r.submitted_at).toLocaleDateString()}</span>
+                    </div>
+                    <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 8 }} onClick={() => viewJobInvoiceRequest(r)}>
+                      <FileText size={13} /> View document
+                    </button>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+      ) : tab === "processSheets" ? (
+        <div style={S.list}>
+          <div style={S.roleHint}>Every process sheet ever printed, with its job number — a running record, not just the latest reprint.</div>
+          <div style={S.filterBar}>
+            <div>
+              <label style={S.label}>From</label>
+              <input type="date" style={S.input} value={processSheetsDateFrom} onChange={(e) => setProcessSheetsDateFrom(e.target.value)} />
+            </div>
+            <div>
+              <label style={S.label}>To</label>
+              <input type="date" style={S.input} value={processSheetsDateTo} onChange={(e) => setProcessSheetsDateTo(e.target.value)} />
+            </div>
+            <input
+              style={S.input}
+              value={processSheetsSearchQuery}
+              onChange={(e) => setProcessSheetsSearchQuery(e.target.value)}
+              placeholder="Search job number…"
+            />
+          </div>
+          {generatedDocuments === null ? (
+            <div style={S.empty}>Loading…</div>
+          ) : (
+            (() => {
+              const rows = generatedDocuments
+                .filter((d) => d.document_type === "process_sheet")
+                .map((d) => ({ d, job: (jobsList || []).find((j) => j.id === d.job_id) }))
+                .filter(({ d }) => !processSheetsDateFrom || new Date(d.generated_at) >= new Date(processSheetsDateFrom))
+                .filter(({ d }) => !processSheetsDateTo || new Date(d.generated_at) <= new Date(processSheetsDateTo + "T23:59:59"))
+                .filter(({ job }) => !processSheetsSearchQuery.trim() || (job?.job_number || "").toLowerCase().includes(processSheetsSearchQuery.trim().toLowerCase()));
+              return (
+                <div style={{ ...S.gradeItems, marginTop: 10 }}>
+                  {rows.length === 0 && <div style={S.empty}>No process sheets match that search.</div>}
+                  {rows.map(({ d, job }) => (
+                    <div key={d.id} style={S.reqCard}>
+                      <div style={S.reqCardTop}>
+                        <span style={S.itemName}>{d.file_name}</span>
+                      </div>
+                      <div className="stk-meta-row" style={S.rowMeta}>
+                        <span>{job ? `${job.job_number} — ${job.customer || "No customer"}` : "Job not found"}</span>
+                        <span>Printed by {d.generated_by}</span>
+                        <span>{new Date(d.generated_at).toLocaleString()}</span>
+                      </div>
+                      <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 8 }} onClick={() => viewGeneratedDocument(d)}>
+                        <FileText size={13} /> View document
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()
+          )}
+        </div>
+      ) : tab === "poReports" ? (
+        <div style={S.list}>
+          <div style={S.roleHint}>Every PO spend report ever generated — each run is its own dated snapshot, not overwritten by the next one.</div>
+          <div style={S.filterBar}>
+            <div>
+              <label style={S.label}>From</label>
+              <input type="date" style={S.input} value={poReportsDateFrom} onChange={(e) => setPoReportsDateFrom(e.target.value)} />
+            </div>
+            <div>
+              <label style={S.label}>To</label>
+              <input type="date" style={S.input} value={poReportsDateTo} onChange={(e) => setPoReportsDateTo(e.target.value)} />
+            </div>
+          </div>
+          {generatedDocuments === null ? (
+            <div style={S.empty}>Loading…</div>
+          ) : (
+            (() => {
+              const rows = generatedDocuments
+                .filter((d) => d.document_type === "po_report")
+                .filter((d) => !poReportsDateFrom || new Date(d.generated_at) >= new Date(poReportsDateFrom))
+                .filter((d) => !poReportsDateTo || new Date(d.generated_at) <= new Date(poReportsDateTo + "T23:59:59"));
+              return (
+                <div style={{ ...S.gradeItems, marginTop: 10 }}>
+                  {rows.length === 0 && <div style={S.empty}>No PO reports match that range.</div>}
+                  {rows.map((d) => (
+                    <div key={d.id} style={S.reqCard}>
+                      <div style={S.reqCardTop}>
+                        <span style={S.itemName}>{d.file_name}</span>
+                      </div>
+                      <div className="stk-meta-row" style={S.rowMeta}>
+                        <span>Generated by {d.generated_by}</span>
+                        <span>{new Date(d.generated_at).toLocaleString()}</span>
+                      </div>
+                      <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 8 }} onClick={() => viewGeneratedDocument(d)}>
+                        <FileText size={13} /> View document
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()
           )}
         </div>
       ) : tab === "usageLog" ? (
@@ -9694,7 +10057,7 @@ export default function StockControl() {
                   type="button"
                   className="stk-btn"
                   style={S.iconBtn}
-                  onClick={() => printJobSheet(jobDetail.job, jobDetail.processes, jobDetail.quoteItems)}
+                  onClick={() => printJobSheet(jobDetail.job, jobDetail.processes, jobDetail.quoteItems, jobDetail.deliveryNotes)}
                   title="Print job sheet"
                 >
                   <FileText size={18} />
@@ -9933,6 +10296,38 @@ export default function StockControl() {
                 </div>
               </div>
             )}
+
+            {(() => {
+              const requestsForJob = jobInvoiceRequests.filter((r) => r.job_id === jobDetail.job.id);
+              if (requestsForJob.length === 0) return null;
+              return (
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+                  <label style={S.label}>Invoice requests</label>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                    {requestsForJob.map((req) => (
+                      <div key={req.id} style={S.reqCard}>
+                        <div style={S.reqCardTop}>
+                          <span style={S.itemName}>{req.file_name}</span>
+                          {req.total_amount != null && <span style={S.roleHint}>R {Number(req.total_amount).toFixed(2)}</span>}
+                        </div>
+                        <div className="stk-meta-row" style={S.rowMeta}>
+                          <span>Submitted by {req.submitted_by}</span>
+                          <span>{new Date(req.submitted_at).toLocaleDateString()}</span>
+                        </div>
+                        <button
+                          type="button"
+                          className="stk-btn"
+                          style={{ ...S.reqActionBtnMuted, marginTop: 8 }}
+                          onClick={() => viewJobInvoiceRequest(req)}
+                        >
+                          <FileText size={13} /> View document
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {(() => {
               const materialsUsed = (usageLog || []).filter(
