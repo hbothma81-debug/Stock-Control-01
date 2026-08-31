@@ -927,6 +927,7 @@ export default function StockControl() {
   // the very first failure, hiding the retry loop's entire benefit behind
   // a scary screen the user saw well before the app had actually given up.
   useEffect(() => {
+    if (!session?.user) return;
     let cancelled = false;
     async function loadWithRetry() {
       for (let attempt = 0; attempt < 6; attempt++) {
@@ -944,7 +945,7 @@ export default function StockControl() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [session]);
 
   // Automatic background refresh — every 60 seconds, only while the tab is
   // actually visible, so a phone with the app backgrounded isn't quietly
