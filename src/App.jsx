@@ -625,6 +625,7 @@ export default function StockControl() {
   const [authBusy, setAuthBusy] = useState(false);
   const [tab, setTab] = useState("jobs");
   const [stockMenuOpen, setStockMenuOpen] = useState(null); // holds the open group's label, or null
+  const mainTabsRef = useRef(null);
   const [query, setQuery] = useState("");
   const [customerFilter, setCustomerFilter] = useState(null);
   const [sectionTypeFilter, setSectionTypeFilter] = useState(null);
@@ -680,6 +681,7 @@ export default function StockControl() {
 
   const [showFilters, setShowFilters] = useState(false);
   const [showCustomerChips, setShowCustomerChips] = useState(false);
+  const customerChipsRef = useRef(null);
   const [filterGrade, setFilterGrade] = useState("");
   const [filterFastenerType, setFilterFastenerType] = useState("");
   const [filterFastenerDiameter, setFilterFastenerDiameter] = useState("");
@@ -1131,6 +1133,25 @@ export default function StockControl() {
   useEffect(() => {
     if (tab === "production" && productionQueue === null && profile?.allowedProcessTypes?.length) fetchProductionQueue();
   }, [tab, profile]);
+
+  // Dropdown menus (the Stock/Procurement/Records group menus, the
+  // customer/section-type filter) should always close on an outside
+  // click, same as any standard dropdown — unlike modals, there's no data
+  // entry to lose here, so this is safe to do automatically. Real click
+  // detection via a ref, not the old blanket invisible-overlay approach,
+  // which was catching clicks too broadly and closing menus unexpectedly.
+  useEffect(() => {
+    function handleOutsideClick(e) {
+      if (stockMenuOpen && mainTabsRef.current && !mainTabsRef.current.contains(e.target)) {
+        setStockMenuOpen(null);
+      }
+      if (showCustomerChips && customerChipsRef.current && !customerChipsRef.current.contains(e.target)) {
+        setShowCustomerChips(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, [stockMenuOpen, showCustomerChips]);
 
   useEffect(() => {
     if ((tab === "processSheets" || tab === "poReports") && generatedDocuments === null && supabase) fetchGeneratedDocuments();
@@ -6008,7 +6029,7 @@ export default function StockControl() {
         </div>
       ) : (
         <>
-          <div style={S.mainTabs}>
+          <div style={S.mainTabs} ref={mainTabsRef}>
             {(() => {
               const rendered = [];
               const groupsShown = new Set();
@@ -7492,7 +7513,7 @@ export default function StockControl() {
       )}
 
       {(tab === "custom" || tab === "stores" || tab === "fasteners") && (
-        <div style={{ marginBottom: 4 }}>
+        <div style={{ marginBottom: 4 }} ref={customerChipsRef}>
           <button
             className="stk-btn"
             style={{ ...S.roleChip, ...(showCustomerChips ? { borderColor: C.accentRaw, color: C.accentRaw } : {}) }}
@@ -7533,7 +7554,7 @@ export default function StockControl() {
       )}
 
       {tab === "structural" && master.sectionTypes.length > 0 && (
-        <div style={{ marginBottom: 4 }}>
+        <div style={{ marginBottom: 4 }} ref={customerChipsRef}>
           <button
             className="stk-btn"
             style={{ ...S.roleChip, ...(showCustomerChips ? { borderColor: C.accentRaw, color: C.accentRaw } : {}) }}
@@ -8792,7 +8813,7 @@ export default function StockControl() {
       )}
 
       {showManager && canAccessStockManager && (
-        <div style={S.modalOverlay} onClick={() => { setShowManager(false); setManagerTab(null); }}>
+        <div style={S.modalOverlay}>
           <div style={S.managerModal} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Stock Manager</span>
@@ -9679,7 +9700,7 @@ export default function StockControl() {
         // Higher z-index than the standard modal overlay — this can open
         // while Job Detail (or another modal) is already open behind it,
         // same fix as the New Stock Item modal needed for the same reason.
-        <div style={{ ...S.modalOverlay, zIndex: 30 }} onClick={closePreview}>
+        <div style={{ ...S.modalOverlay, zIndex: 30 }}>
           <div style={{ ...S.modal, maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>{previewItem.attachmentName || "Attachment"}</span>
@@ -9722,7 +9743,7 @@ export default function StockControl() {
       )}
 
       {assetRemoveModal && (
-        <div style={S.modalOverlay} onClick={closeAssetRemoveModal}>
+        <div style={S.modalOverlay}>
           <form style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()} onSubmit={submitAssetRemoveModal}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Remove asset</span>
@@ -9761,7 +9782,7 @@ export default function StockControl() {
       )}
 
       {assetHistoryItem && (
-        <div style={S.modalOverlay} onClick={closeAssetHistory}>
+        <div style={S.modalOverlay}>
           <div style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>{assetHistoryItem.name}</span>
@@ -9874,7 +9895,7 @@ export default function StockControl() {
       )}
 
       {usageModal && (
-        <div style={S.modalOverlay} onClick={closeUsageModal}>
+        <div style={S.modalOverlay}>
           <form style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()} onSubmit={submitUsageModal}>
             {(() => {
               const isCncCut = usageModal.item.mainCat === "cncBar" && usageModal.direction === "use";
@@ -9997,7 +10018,7 @@ export default function StockControl() {
       )}
 
       {showDrawingUpload && (
-        <div style={S.modalOverlay} onClick={drawingUploadBusy ? undefined : closeDrawingUpload}>
+        <div style={S.modalOverlay}>
           <div style={{ ...S.modal, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Upload Drawings</span>
@@ -10092,7 +10113,7 @@ export default function StockControl() {
       )}
 
       {jobDetail && (
-        <div style={S.modalOverlay} onClick={closeJobDetail}>
+        <div style={S.modalOverlay}>
           <div style={{ ...S.modal, maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>{jobDetail.job.job_number} — {jobDetail.job.customer || "No customer"}</span>
@@ -10506,7 +10527,7 @@ export default function StockControl() {
       )}
 
       {showAddStockItemModal && (
-        <div style={{ ...S.modalOverlay, zIndex: 30 }} onClick={() => setShowAddStockItemModal(false)}>
+        <div style={{ ...S.modalOverlay, zIndex: 30 }}>
           <div style={{ ...S.modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Add Customer Stock Item</span>
@@ -10567,7 +10588,7 @@ export default function StockControl() {
       )}
 
       {shortageModal && (
-        <div style={{ ...S.modalOverlay, zIndex: 30 }} onClick={() => setShortageModal(null)}>
+        <div style={{ ...S.modalOverlay, zIndex: 30 }}>
           <div style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Flag Shortage — {shortageModal.process.process_name}</span>
@@ -10596,7 +10617,7 @@ export default function StockControl() {
       )}
 
       {copyJobModal && (
-        <div style={{ ...S.modalOverlay, zIndex: 30 }} onClick={() => setCopyJobModal(null)}>
+        <div style={{ ...S.modalOverlay, zIndex: 30 }}>
           <div style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Copy {copyJobModal.job.job_number}</span>
@@ -10625,7 +10646,7 @@ export default function StockControl() {
       )}
 
       {markInvoicedModal && (
-        <div style={{ ...S.modalOverlay, zIndex: 30 }} onClick={() => setMarkInvoicedModal(null)}>
+        <div style={{ ...S.modalOverlay, zIndex: 30 }}>
           <div style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Mark {markInvoicedModal.job.job_number} as Invoiced</span>
@@ -10652,7 +10673,7 @@ export default function StockControl() {
       )}
 
       {deliveryNoteBatchModal && (
-        <div style={{ ...S.modalOverlay, zIndex: 30 }} onClick={() => setDeliveryNoteBatchModal(null)}>
+        <div style={{ ...S.modalOverlay, zIndex: 30 }}>
           <div style={{ ...S.modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Create Delivery Note</span>
@@ -10721,7 +10742,7 @@ export default function StockControl() {
       )}
 
       {showStockImportModal && (
-        <div style={{ ...S.modalOverlay, zIndex: 30 }} onClick={() => setShowStockImportModal(false)}>
+        <div style={{ ...S.modalOverlay, zIndex: 30 }}>
           <div style={{ ...S.modal, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Import / Export Customer Stock</span>
@@ -10782,7 +10803,7 @@ export default function StockControl() {
         // while the New Job modal is already open behind it, and without
         // this, the later-rendered New Job overlay paints on top and hides
         // this one completely even though it's genuinely open.
-        <div style={{ ...S.modalOverlay, zIndex: 30 }} onClick={() => setNewStockItemModal(null)}>
+        <div style={{ ...S.modalOverlay, zIndex: 30 }}>
           <div style={{ ...S.modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Add to Customer Stock</span>
@@ -10836,7 +10857,7 @@ export default function StockControl() {
       )}
 
       {showNewJob && newJobForm && (
-        <div style={S.modalOverlay} onClick={closeNewJob}>
+        <div style={S.modalOverlay}>
           <div style={{ ...S.modal, maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>New Job</span>
@@ -11175,7 +11196,7 @@ export default function StockControl() {
       )}
 
       {receivingPo && (
-        <div style={S.modalOverlay} onClick={closeReceiving}>
+        <div style={S.modalOverlay}>
           <div style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Receive {receivingPo.poNumber}</span>
@@ -11250,7 +11271,7 @@ export default function StockControl() {
       )}
 
       {showPoReport && (
-        <div style={S.modalOverlay} onClick={() => setShowPoReport(false)}>
+        <div style={S.modalOverlay}>
           <div style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Generate PO Report</span>
@@ -11294,7 +11315,7 @@ export default function StockControl() {
       )}
 
       {poBuilder && (
-        <div style={S.modalOverlay} onClick={closePoBuilder}>
+        <div style={S.modalOverlay}>
           <form style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()} onSubmit={submitPurchaseOrder}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Raise Purchase Order</span>
@@ -11426,7 +11447,7 @@ export default function StockControl() {
       )}
 
       {showLowStock && (
-        <div style={S.modalOverlay} onClick={() => setShowLowStock(false)}>
+        <div style={S.modalOverlay}>
           <div style={{ ...S.modal, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Low stock — {lowCount}</span>
@@ -11484,7 +11505,7 @@ export default function StockControl() {
       )}
 
       {requisitionTarget && (
-        <div style={S.modalOverlay} onClick={closeRequisition}>
+        <div style={S.modalOverlay}>
           <form style={S.modal} onClick={(e) => e.stopPropagation()} onSubmit={submitRequisition}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Request stock</span>
