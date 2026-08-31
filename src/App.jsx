@@ -666,7 +666,7 @@ export default function StockControl() {
   const [managerSearchQuery, setManagerSearchQuery] = useState("");
   const [sectionTypeFilterInManager, setSectionTypeFilterInManager] = useState("");
   const [scForm, setScForm] = useState({ stockCode: "", description: "", price: "", recommendedStock: "", customer: "", revision: "" });
-  const [scCatalogForm, setScCatalogForm] = useState({ name: "", category: "", price: "" });
+  const [scCatalogForm, setScCatalogForm] = useState({ code: "", name: "", category: "", supplier: "", price: "" });
   const [storesCatalogQuery, setStoresCatalogQuery] = useState("");
   const [newSupplierName, setNewSupplierName] = useState("");
   const [importFileLabel, setImportFileLabel] = useState("");
@@ -5783,10 +5783,17 @@ export default function StockControl() {
       ...prev,
       storesCatalog: [
         ...(prev.storesCatalog || []),
-        { id: uid(), name: scCatalogForm.name.trim(), category: scCatalogForm.category || (prev.storeCategories[0] || ""), price: parseFloat(scCatalogForm.price) || 0 },
+        {
+          id: uid(),
+          code: scCatalogForm.code.trim(),
+          name: scCatalogForm.name.trim(),
+          category: scCatalogForm.category || (prev.storeCategories[0] || ""),
+          supplier: scCatalogForm.supplier || "",
+          price: parseFloat(scCatalogForm.price) || 0,
+        },
       ],
     }));
-    setScCatalogForm({ name: "", category: scCatalogForm.category, price: "" });
+    setScCatalogForm({ code: "", name: "", category: scCatalogForm.category, supplier: scCatalogForm.supplier, price: "" });
   }
 
   function handleImportFile(e) {
@@ -8335,6 +8342,8 @@ export default function StockControl() {
                             ...f,
                             name: hit.name,
                             value: String(hit.price || ""),
+                            partNumber: hit.code || f.partNumber,
+                            supplier: hit.supplier || f.supplier,
                             ...(catResolved ? { customer: catResolved.field, customCustomer: catResolved.custom } : {}),
                           }));
                         }
@@ -9127,6 +9136,12 @@ export default function StockControl() {
                 </div>
                 <div style={{ ...S.managerAddRow, marginTop: 10 }}>
                   <input
+                    style={{ ...S.input, flex: 1 }}
+                    value={scCatalogForm.code}
+                    onChange={(e) => setScCatalogForm({ ...scCatalogForm, code: e.target.value })}
+                    placeholder="Stock code"
+                  />
+                  <input
                     style={{ ...S.input, flex: 2 }}
                     value={scCatalogForm.name}
                     onChange={(e) => setScCatalogForm({ ...scCatalogForm, name: e.target.value })}
@@ -9144,6 +9159,16 @@ export default function StockControl() {
                   </select>
                 </div>
                 <div style={{ ...S.managerAddRow, marginTop: 6 }}>
+                  <select
+                    style={{ ...S.input, flex: 1 }}
+                    value={scCatalogForm.supplier}
+                    onChange={(e) => setScCatalogForm({ ...scCatalogForm, supplier: e.target.value })}
+                  >
+                    <option value="">Supplier…</option>
+                    {master.suppliers.map((s) => (
+                      <option key={s.id} value={s.name}>{s.name}</option>
+                    ))}
+                  </select>
                   <input
                     style={{ ...S.input, flex: 1 }}
                     type="number"
@@ -9206,6 +9231,7 @@ export default function StockControl() {
                         </button>
                         {list.map((r) => (
                           <div key={r.id} style={S.managerRow}>
+                            <EditableName value={r.code || ""} onCommit={(v) => updateStoresCatalogRow(r.id, "code", v)} style={{ maxWidth: 90 }} />
                             <EditableName value={r.name} onCommit={(v) => updateStoresCatalogRow(r.id, "name", v)} />
                             <select
                               value={r.category || ""}
@@ -9214,6 +9240,16 @@ export default function StockControl() {
                             >
                               {master.storeCategories.map((c) => (
                                 <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                            <select
+                              value={r.supplier || ""}
+                              onChange={(e) => updateStoresCatalogRow(r.id, "supplier", e.target.value)}
+                              style={{ ...S.managerFactorInput, width: 130 }}
+                            >
+                              <option value="">No supplier</option>
+                              {master.suppliers.map((s) => (
+                                <option key={s.id} value={s.name}>{s.name}</option>
                               ))}
                             </select>
                             <input
