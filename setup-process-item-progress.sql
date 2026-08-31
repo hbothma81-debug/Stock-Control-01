@@ -13,3 +13,13 @@ create table if not exists job_process_item_progress (
 );
 
 create index if not exists job_process_item_progress_process_idx on job_process_item_progress(job_process_id);
+
+-- Same access pattern as every other table in this app: RLS on, any
+-- signed-in user has full access. Without this, RLS with no policy at
+-- all blocks everyone, including the app itself.
+alter table job_process_item_progress enable row level security;
+
+create policy "Signed-in users can read process item progress" on job_process_item_progress for select using (auth.role() = 'authenticated');
+create policy "Signed-in users can add process item progress" on job_process_item_progress for insert with check (auth.role() = 'authenticated');
+create policy "Signed-in users can update process item progress" on job_process_item_progress for update using (auth.role() = 'authenticated');
+create policy "Signed-in users can delete process item progress" on job_process_item_progress for delete using (auth.role() = 'authenticated');
