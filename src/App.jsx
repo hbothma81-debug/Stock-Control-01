@@ -576,6 +576,7 @@ export default function StockControl() {
   const [invoiceQtyInputs, setInvoiceQtyInputs] = useState({}); // { [quoteItemId]: "3" }
   const [deliveryNoteBatchModal, setDeliveryNoteBatchModal] = useState(null);
   const [copyJobModal, setCopyJobModal] = useState(null);
+  const [editProcessesModal, setEditProcessesModal] = useState(null); // { job, selected: Set<string> }
   const [showAddStockItemModal, setShowAddStockItemModal] = useState(false);
   const [showStockImportModal, setShowStockImportModal] = useState(false);
   const [newJobForm, setNewJobForm] = useState(null);
@@ -1168,7 +1169,7 @@ export default function StockControl() {
   const anyModalOpen = !!(
     usageModal || assetRemoveModal || shortageModal || jobDetail || newStockItemModal ||
     markInvoicedModal || deliveryNoteBatchModal || copyJobModal || previewItem ||
-    showAddStockItemModal || showStockImportModal
+    showAddStockItemModal || showStockImportModal || editProcessesModal
   );
   const modalWasOpenRef = useRef(false);
   const closingViaBackRef = useRef(false);
@@ -1185,6 +1186,7 @@ export default function StockControl() {
     setPreviewItem(null);
     setShowAddStockItemModal(false);
     setShowStockImportModal(false);
+    setEditProcessesModal(null);
   }
 
   useEffect(() => {
@@ -2186,6 +2188,68 @@ export default function StockControl() {
     } catch (err) {
       console.error("Failed to log progress:", err);
       alert("Couldn't save that — check your connection and try again.");
+    }
+  }
+
+  function openEditProcessesModal(job, processes) {
+    setEditProcessesModal({ job, selected: new Set(processes.map((p) => p.process_name)) });
+  }
+
+  function toggleEditProcessesSelection(name) {
+    setEditProcessesModal((m) => {
+      if (!m) return m;
+      const next = new Set(m.selected);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return { ...m, selected: next };
+    });
+  }
+
+  async function saveEditProcesses() {
+    const { job, selected } = editProcessesModal;
+    const existing = jobDetail?.processes || [];
+    const existingNames = new Set(existing.map((p) => p.process_name));
+    const toAdd = [...selected].filter((name) => !existingNames.has(name));
+    // Completed processes are hard-protected in the UI itself (checkbox
+    // disabled, can't reach here unchecked). Anything else being removed
+    // still gets a plain confirmation first — an Each-mode process with
+    // partial progress logged doesn't show that here reliably (its
+    // progress lives in a separate per-item table this editor doesn't
+    // load), so a confirmation covers that gap honestly instead of
+    // guessing at a check that could miss it.
+    const toRemove = existing.filter((p) => !selected.has(p.process_name));
+    if (toRemove.length > 0) {
+      const names = toRemove.map((p) => p.process_name).join(", ");
+      if (!window.confirm(`Remove ${names} from this job? Any notes, urgent flag, or logged progress on it will be lost.`)) {
+        return;
+      }
+    }
+    try {
+      if (toAdd.length > 0) {
+        const maxSort = existing.reduce((max, p) => Math.max(max, p.sort_order ?? 0), -1);
+        const newRows = toAdd.map((name, idx) => ({
+          job_id: job.id,
+          process_name: name,
+          operator: "",
+          tracking_mode: "batch",
+          sort_order: maxSort + 1 + idx,
+        }));
+        const { error: addError } = await supabase.from("job_processes").insert(newRows);
+        if (addError) throw addError;
+      }
+      if (toRemove.length > 0) {
+        const { error: removeError } = await supabase
+          .from("job_processes")
+          .delete()
+          .in("id", toRemove.map((p) => p.id));
+        if (removeError) throw removeError;
+      }
+      setEditProcessesModal(null);
+      refreshJobDetail();
+      if (productionQueue !== null) fetchProductionQueue();
+    } catch (err) {
+      console.error("Failed to update processes:", err);
+      alert("That didn't save — check your connection and try again.");
     }
   }
 
@@ -10429,7 +10493,19 @@ export default function StockControl() {
             })()}
 
             <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-              <label style={S.label}>Process checklist</label>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <label style={S.label}>Process checklist</label>
+                {(isAdmin || profile?.isSalesPerson) && !jobIsLocked && (
+                  <button
+                    type="button"
+                    className="stk-btn"
+                    style={S.reqActionBtnMuted}
+                    onClick={() => openEditProcessesModal(jobDetail.job, jobDetail.processes)}
+                  >
+                    <Pencil size={12} /> Edit processes
+                  </button>
+                )}
+              </div>
               {jobDetailLoading && <div style={S.empty}>Loading…</div>}
               <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
                 {jobDetail.processes.map((p) => (
@@ -10640,6 +10716,48 @@ export default function StockControl() {
             </div>
             <button type="button" className="stk-btn" style={S.submitBtn} onClick={submitCopyJob}>
               Create Copy
+            </button>
+          </div>
+        </div>
+      )}
+
+      {editProcessesModal && (
+        <div style={{ ...S.modalOverlay, zIndex: 30 }}>
+          <div style={{ ...S.modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Edit processes — {editProcessesModal.job.job_number}</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setEditProcessesModal(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={S.roleHint}>Check what this job needs. Unchecking removes a process — completed ones can't be removed.</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+              {master.jobProcessTypes.map((name) => {
+                const existingProcess = (jobDetail?.processes || []).find((p) => p.process_name === name);
+                const locked = existingProcess?.is_complete;
+                const checked = editProcessesModal.selected.has(name);
+                return (
+                  <button
+                    type="button"
+                    key={name}
+                    className="stk-btn"
+                    disabled={locked}
+                    onClick={() => toggleEditProcessesSelection(name)}
+                    title={locked ? "Already marked complete — can't be removed here" : undefined}
+                    style={{
+                      ...S.segBtn,
+                      ...(checked ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                      ...(locked ? { opacity: 0.6, cursor: "not-allowed" } : {}),
+                    }}
+                  >
+                    {name}
+                    {locked && " 🔒"}
+                  </button>
+                );
+              })}
+            </div>
+            <button type="button" className="stk-btn" style={{ ...S.submitBtn, marginTop: 14 }} onClick={saveEditProcesses}>
+              Save
             </button>
           </div>
         </div>
