@@ -579,6 +579,7 @@ export default function StockControl() {
   const [showAddStockItemModal, setShowAddStockItemModal] = useState(false);
   const [showStockImportModal, setShowStockImportModal] = useState(false);
   const [newJobForm, setNewJobForm] = useState(null);
+  const [newJobItemSuggestOpen, setNewJobItemSuggestOpen] = useState(null); // which quote item row index has its suggestion dropdown open
   const [notificationsList, setNotificationsList] = useState(null);
   const [drawingSearchQuery, setDrawingSearchQuery] = useState("");
   const [drawingSearchResults, setDrawingSearchResults] = useState(null);
@@ -1571,6 +1572,19 @@ export default function StockControl() {
         quoteItems: f.quoteItems.map((it, i) => (i === idx ? { ...it, linkedItemId: match.id, unitPrice: String(match.value ?? "") } : it)),
       };
     });
+  }
+
+  // Picking a suggestion directly from the dropdown links it immediately,
+  // rather than waiting for onBlur to try to find the same match by exact
+  // text — same linking outcome, just from the tap itself.
+  function selectNewJobQuoteItemSuggestion(idx, stockItem) {
+    setNewJobForm((f) => ({
+      ...f,
+      quoteItems: f.quoteItems.map((it, i) =>
+        i === idx ? { ...it, description: stockItem.name, linkedItemId: stockItem.id, unitPrice: String(stockItem.value ?? "") } : it
+      ),
+    }));
+    setNewJobItemSuggestOpen(null);
   }
 
   // The description didn't match anything — add it to Customer Stock right
@@ -10984,16 +10998,21 @@ export default function StockControl() {
                   <Plus size={12} /> Add line
                 </button>
               </div>
-              <datalist id="job-customer-stock-items">
-                {(items || [])
-                  .filter((it) => it.mainCat === "custom" && it.customer === newJobForm.customer)
-                  .map((it) => (
-                    <option key={it.id} value={it.name} />
-                  ))}
-              </datalist>
               {newJobForm.quoteItems.map((it, idx) => {
                 const linkedItem = it.linkedItemId ? (items || []).find((i) => i.id === it.linkedItemId) : null;
                 const revision = linkedItem?.partNumber ? drawingLookup[linkedItem.partNumber.trim()] : null;
+                const q = it.description.trim().toLowerCase();
+                const suggestions =
+                  newJobItemSuggestOpen === idx && q
+                    ? (items || [])
+                        .filter(
+                          (si) =>
+                            si.mainCat === "custom" &&
+                            si.customer === newJobForm.customer &&
+                            ((si.partNumber || "").toLowerCase().includes(q) || si.name.toLowerCase().includes(q))
+                        )
+                        .slice(0, 8)
+                    : [];
                 return (
                   <div key={idx} style={{ marginTop: 6 }}>
                     {it.priceNeedsReview && (
@@ -11002,14 +11021,44 @@ export default function StockControl() {
                       </div>
                     )}
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <input
-                        style={{ ...S.input, flex: 2 }}
-                        list="job-customer-stock-items"
-                        value={it.description}
-                        onChange={(e) => updateNewJobQuoteItem(idx, "description", e.target.value)}
-                        onBlur={() => matchNewJobQuoteItemToStock(idx)}
-                        placeholder="Start typing to match Customer Stock…"
-                      />
+                      <div style={{ position: "relative", flex: 2 }}>
+                        <input
+                          style={S.input}
+                          value={it.description}
+                          onChange={(e) => {
+                            updateNewJobQuoteItem(idx, "description", e.target.value);
+                            setNewJobItemSuggestOpen(idx);
+                          }}
+                          onFocus={() => setNewJobItemSuggestOpen(idx)}
+                          onBlur={() => {
+                            matchNewJobQuoteItemToStock(idx);
+                            // Slight delay so a tap on a suggestion below
+                            // registers (via onMouseDown) before this closes
+                            // the list out from under it.
+                            setTimeout(() => setNewJobItemSuggestOpen((v) => (v === idx ? null : v)), 150);
+                          }}
+                          placeholder="Part number or description — start typing to match Customer Stock…"
+                        />
+                        {suggestions.length > 0 && (
+                          <div style={S.suggestDropdown}>
+                            {suggestions.map((si) => (
+                              <button
+                                key={si.id}
+                                type="button"
+                                className="stk-btn"
+                                style={S.suggestItem}
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  selectNewJobQuoteItemSuggestion(idx, si);
+                                }}
+                              >
+                                <span style={{ fontWeight: 600 }}>{si.partNumber || "—"}</span>
+                                <span style={{ color: C.muted }}> — {si.name}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                       <input
                         style={{ ...S.input, width: 60 }}
                         type="number"
@@ -12209,6 +12258,32 @@ const S = {
     color: C.text,
     fontSize: 15,
     outline: "none",
+  },
+  suggestDropdown: {
+    position: "absolute",
+    top: "100%",
+    left: 0,
+    right: 0,
+    zIndex: 25,
+    background: C.surface,
+    border: `1px solid ${C.border}`,
+    borderRadius: 6,
+    marginTop: 2,
+    maxHeight: 220,
+    overflowY: "auto",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+  },
+  suggestItem: {
+    display: "block",
+    width: "100%",
+    textAlign: "left",
+    background: "transparent",
+    border: "none",
+    borderBottom: `1px solid ${C.border}`,
+    padding: "8px 10px",
+    fontSize: 13.5,
+    color: C.text,
+    cursor: "pointer",
   },
   segRow: { display: "flex", gap: 6, flexWrap: "wrap" },
   segBtn: {
