@@ -1050,59 +1050,122 @@ export default function StockControl() {
     };
   }, [session]);
 
+  // Shared by every save-on-change effect below. None of this shared data
+  // is stored as individual database rows — each one is a single blob, so
+  // a naive save overwrites the whole thing with this browser's local
+  // copy. If anyone else changed something in the time since this copy
+  // was last refreshed, a plain save would silently erase that change —
+  // not corrupt it, just gone, with no error anywhere. That happened in
+  // practice with stock items, not just in theory.
+  //
+  // The fix: work out exactly what changed locally since the last save,
+  // re-fetch the current shared version fresh, and apply only that
+  // specific change on top of it — so anything anyone else changed in
+  // between survives, and only this browser's own intended edit lands.
+  // `byId: true` merges arrays of objects (each with an id) item by item;
+  // `byId: false` merges a plain object key by key at the top level.
+  async function saveWithMerge(storageKey, prevRef, newValue, byId) {
+    const prev = prevRef.current;
+    let toSave = newValue;
+    if (prev !== null && JSON.stringify(prev) !== JSON.stringify(newValue)) {
+      const fresh = await window.storage.get(storageKey, true);
+      const freshValue = fresh?.value ? JSON.parse(fresh.value) : newValue;
+      if (byId) {
+        const prevById = new Map(prev.map((it) => [it.id, it]));
+        const nextById = new Map(newValue.map((it) => [it.id, it]));
+        const added = newValue.filter((it) => !prevById.has(it.id));
+        const removedIds = prev.filter((it) => !nextById.has(it.id)).map((it) => it.id);
+        const modified = newValue.filter((it) => prevById.has(it.id) && JSON.stringify(prevById.get(it.id)) !== JSON.stringify(it));
+        const freshById = new Map((freshValue || []).map((it) => [it.id, it]));
+        for (const id of removedIds) freshById.delete(id);
+        for (const it of modified) freshById.set(it.id, it);
+        for (const it of added) freshById.set(it.id, it);
+        toSave = [...freshById.values()];
+      } else {
+        toSave = { ...freshValue };
+        for (const key of Object.keys(newValue)) {
+          if (JSON.stringify(prev[key]) !== JSON.stringify(newValue[key])) toSave[key] = newValue[key];
+        }
+      }
+    }
+    await window.storage.set(storageKey, JSON.stringify(toSave), true);
+    prevRef.current = toSave;
+    return toSave;
+  }
+
   // Saves happen immediately, not debounced — a delay here is exactly what
   // can get lost if a phone locks or a tab gets backgrounded right after
   // adding something. Immediate writes close that window entirely.
+  const lastSavedItemsRef = useRef(null);
   useEffect(() => {
     if (items === null) return;
     setSaveState("saving");
-    window.storage
-      .set("stock-items-v3", JSON.stringify(items), true)
-      .then(() => { setSaveState("saved"); flashSaved("core"); })
+    saveWithMerge("stock-items-v3", lastSavedItemsRef, items, true)
+      .then((merged) => {
+        if (JSON.stringify(merged) !== JSON.stringify(items)) setItems(merged);
+        setSaveState("saved");
+        flashSaved("core");
+      })
       .catch((err) => {
         console.error("Failed to save items:", err);
         setSaveState("error");
       });
   }, [items]);
 
+  const lastSavedMasterRef = useRef(null);
   useEffect(() => {
     if (master === null) return;
-    window.storage
-      .set("stock-master-data-v2", JSON.stringify(master), true)
-      .then(() => { setSaveState("saved"); flashSaved("core"); })
+    saveWithMerge("stock-master-data-v2", lastSavedMasterRef, master, false)
+      .then((merged) => {
+        if (JSON.stringify(merged) !== JSON.stringify(master)) setMaster(merged);
+        setSaveState("saved");
+        flashSaved("core");
+      })
       .catch((err) => {
         console.error("Failed to save master data:", err);
         setSaveState("error");
       });
   }, [master]);
 
+  const lastSavedRequisitionsRef = useRef(null);
   useEffect(() => {
     if (requisitions === null) return;
-    window.storage
-      .set("stock-requisitions-v1", JSON.stringify(requisitions), true)
-      .then(() => { setSaveState("saved"); flashSaved("core"); })
+    saveWithMerge("stock-requisitions-v1", lastSavedRequisitionsRef, requisitions, true)
+      .then((merged) => {
+        if (JSON.stringify(merged) !== JSON.stringify(requisitions)) setRequisitions(merged);
+        setSaveState("saved");
+        flashSaved("core");
+      })
       .catch((err) => {
         console.error("Failed to save requisitions:", err);
         setSaveState("error");
       });
   }, [requisitions]);
 
+  const lastSavedPurchaseOrdersRef = useRef(null);
   useEffect(() => {
     if (purchaseOrders === null) return;
-    window.storage
-      .set("stock-purchase-orders-v1", JSON.stringify(purchaseOrders), true)
-      .then(() => { setSaveState("saved"); flashSaved("core"); })
+    saveWithMerge("stock-purchase-orders-v1", lastSavedPurchaseOrdersRef, purchaseOrders, true)
+      .then((merged) => {
+        if (JSON.stringify(merged) !== JSON.stringify(purchaseOrders)) setPurchaseOrders(merged);
+        setSaveState("saved");
+        flashSaved("core");
+      })
       .catch((err) => {
         console.error("Failed to save purchase orders:", err);
         setSaveState("error");
       });
   }, [purchaseOrders]);
 
+  const lastSavedUsageLogRef = useRef(null);
   useEffect(() => {
     if (usageLog === null) return;
-    window.storage
-      .set("stock-usage-log-v1", JSON.stringify(usageLog), true)
-      .then(() => { setSaveState("saved"); flashSaved("core"); })
+    saveWithMerge("stock-usage-log-v1", lastSavedUsageLogRef, usageLog, true)
+      .then((merged) => {
+        if (JSON.stringify(merged) !== JSON.stringify(usageLog)) setUsageLog(merged);
+        setSaveState("saved");
+        flashSaved("core");
+      })
       .catch((err) => {
         console.error("Failed to save usage log:", err);
         setSaveState("error");
