@@ -1287,6 +1287,11 @@ export default function StockControl() {
   // closing the tab — re-fire every save with whatever's current right then.
   // Covers the (much smaller) remaining risk of a save being mid-flight
   // right when that happens.
+  //
+  // This goes through the same saveWithMerge logic as the primary saves,
+  // not a direct write — a raw write here would bypass the merge
+  // protection entirely and could reintroduce the exact "overwrites
+  // someone else's recent change" bug in this one specific timing window.
   const itemsRef = useRef(items);
   const masterRef = useRef(master);
   const requisitionsRef = useRef(requisitions);
@@ -1300,13 +1305,13 @@ export default function StockControl() {
 
   useEffect(() => {
     function flushAll() {
-      if (itemsRef.current !== null) window.storage.set("stock-items-v3", JSON.stringify(itemsRef.current), true).catch(() => {});
-      if (masterRef.current !== null) window.storage.set("stock-master-data-v2", JSON.stringify(masterRef.current), true).catch(() => {});
+      if (itemsRef.current !== null) saveWithMerge("stock-items-v3", lastSavedItemsRef, itemsRef.current, true).catch(() => {});
+      if (masterRef.current !== null) saveWithMerge("stock-master-data-v2", lastSavedMasterRef, masterRef.current, false).catch(() => {});
       if (requisitionsRef.current !== null)
-        window.storage.set("stock-requisitions-v1", JSON.stringify(requisitionsRef.current), true).catch(() => {});
+        saveWithMerge("stock-requisitions-v1", lastSavedRequisitionsRef, requisitionsRef.current, true).catch(() => {});
       if (purchaseOrdersRef.current !== null)
-        window.storage.set("stock-purchase-orders-v1", JSON.stringify(purchaseOrdersRef.current), true).catch(() => {});
-      if (usageLogRef.current !== null) window.storage.set("stock-usage-log-v1", JSON.stringify(usageLogRef.current), true).catch(() => {});
+        saveWithMerge("stock-purchase-orders-v1", lastSavedPurchaseOrdersRef, purchaseOrdersRef.current, true).catch(() => {});
+      if (usageLogRef.current !== null) saveWithMerge("stock-usage-log-v1", lastSavedUsageLogRef, usageLogRef.current, true).catch(() => {});
     }
     document.addEventListener("visibilitychange", flushAll);
     window.addEventListener("pagehide", flushAll);
