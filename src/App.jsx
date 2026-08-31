@@ -109,6 +109,41 @@ function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+// stock_items is a real table (snake_case columns); everywhere else in the
+// app works with items as camelCase JS objects, exactly as it always has —
+// these are the only two places that need to know the table's column
+// names at all. The third element is the column's real type, so a missing
+// field gets the correct default (0 / false / "") rather than guessing
+// from a value that's already absent.
+const ITEM_DB_FIELDS = [
+  ["mainCat", "main_cat", "text"], ["loc", "loc", "text"], ["low", "low", "num"], ["salesPerson", "sales_person", "text"],
+  ["customer", "customer", "text"], ["supplier", "supplier", "text"], ["grade", "grade", "text"], ["size", "size", "text"],
+  ["thickness", "thickness", "text"], ["name", "name", "text"], ["sheetName", "sheet_name", "text"], ["stockType", "stock_type", "text"],
+  ["comment", "comment", "text"], ["unit", "unit", "text"], ["trackLength", "track_length", "bool"], ["length", "length", "num"],
+  ["qty", "qty", "num"], ["diameter", "diameter", "text"], ["partNumber", "part_number", "text"], ["manufacturer", "manufacturer", "text"],
+  ["serialNumber", "serial_number", "text"], ["purchaseDate", "purchase_date", "text"], ["value", "value", "num"],
+  ["serviceMode", "service_mode", "text"], ["serviceIntervalMonths", "service_interval_months", "num"],
+  ["serviceIntervalHours", "service_interval_hours", "num"], ["serviceIntervalKm", "service_interval_km", "num"],
+  ["lastServiceDate", "last_service_date", "text"], ["lastServiceReading", "last_service_reading", "num"],
+  ["currentReading", "current_reading", "num"], ["status", "status", "text"], ["fastenerType", "fastener_type", "text"],
+  ["fastenerGrade", "fastener_grade", "text"], ["finish", "finish", "text"], ["attachmentType", "attachment_type", "text"],
+  ["attachmentName", "attachment_name", "text"], ["storesKind", "stores_kind", "text"],
+];
+function dbRowToItem(row) {
+  const item = { id: row.id };
+  for (const [jsKey, dbKey] of ITEM_DB_FIELDS) item[jsKey] = row[dbKey];
+  return item;
+}
+function itemToDbRow(item) {
+  const row = { id: item.id };
+  for (const [jsKey, dbKey, type] of ITEM_DB_FIELDS) {
+    const v = item[jsKey];
+    const fallback = type === "num" ? 0 : type === "bool" ? false : "";
+    row[dbKey] = v === undefined || v === null ? fallback : v;
+  }
+  return row;
+}
+
 function formatToolNumber(n) {
   return "ERT-" + String(n).padStart(4, "0");
 }
@@ -726,9 +761,10 @@ export default function StockControl() {
     // haven't flushed yet by the time this function returns — a caller
     // checking loadError immediately after awaiting this would race it.
     try {
-      const res = await window.storage.get("stock-items-v3", true);
-      if (res && res.value) {
-        loadedItems = JSON.parse(res.value);
+      const { data: itemRows, error: itemsError } = await supabase.from("stock_items").select("*");
+      if (itemsError) throw itemsError;
+      if (itemRows && itemRows.length > 0) {
+        loadedItems = itemRows.map(dbRowToItem);
         // Migration: Tools used to live in Stores as a "storesKind" — they
         // now have their own Assets category with different fields
         // (manufacturer, serial number, purchase date, one-at-a-time
@@ -1094,16 +1130,39 @@ export default function StockControl() {
     return toSave;
   }
 
-  // Saves happen immediately, not debounced — a delay here is exactly what
-  // can get lost if a phone locks or a tab gets backgrounded right after
-  // adding something. Immediate writes close that window entirely.
+  // stock_items is a real table now — each row is independent, so unlike
+  // the shared-blob data below, there's no whole-dataset overwrite risk to
+  // guard against here at all. This only needs to work out this specific
+  // change (added / removed / edited, by id) since the last save, and
+  // apply exactly that as its own targeted insert/update/delete — nothing
+  // here can ever collide with or erase a change someone else made.
   const lastSavedItemsRef = useRef(null);
+  async function saveItemsToDb(prevRef, newItems) {
+    const prev = prevRef.current;
+    if (prev === null) {
+      prevRef.current = newItems;
+      return;
+    }
+    const prevById = new Map(prev.map((it) => [it.id, it]));
+    const nextById = new Map(newItems.map((it) => [it.id, it]));
+    const added = newItems.filter((it) => !prevById.has(it.id));
+    const removedIds = prev.filter((it) => !nextById.has(it.id)).map((it) => it.id);
+    const modified = newItems.filter((it) => prevById.has(it.id) && JSON.stringify(prevById.get(it.id)) !== JSON.stringify(it));
+    prevRef.current = newItems;
+    if (added.length || modified.length) {
+      const { error } = await supabase.from("stock_items").upsert([...added, ...modified].map(itemToDbRow));
+      if (error) throw error;
+    }
+    if (removedIds.length) {
+      const { error } = await supabase.from("stock_items").delete().in("id", removedIds);
+      if (error) throw error;
+    }
+  }
   useEffect(() => {
     if (items === null) return;
     setSaveState("saving");
-    saveWithMerge("stock-items-v3", lastSavedItemsRef, items, true)
-      .then((merged) => {
-        if (JSON.stringify(merged) !== JSON.stringify(items)) setItems(merged);
+    saveItemsToDb(lastSavedItemsRef, items)
+      .then(() => {
         setSaveState("saved");
         flashSaved("core");
       })
@@ -1306,7 +1365,7 @@ export default function StockControl() {
 
   useEffect(() => {
     function flushAll() {
-      if (itemsRef.current !== null) saveWithMerge("stock-items-v3", lastSavedItemsRef, itemsRef.current, true).catch(() => {});
+      if (itemsRef.current !== null) saveItemsToDb(lastSavedItemsRef, itemsRef.current).catch(() => {});
       if (masterRef.current !== null) saveWithMerge("stock-master-data-v2", lastSavedMasterRef, masterRef.current, false).catch(() => {});
       if (requisitionsRef.current !== null)
         saveWithMerge("stock-requisitions-v1", lastSavedRequisitionsRef, requisitionsRef.current, true).catch(() => {});
