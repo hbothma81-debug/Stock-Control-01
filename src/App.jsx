@@ -794,6 +794,13 @@ export default function StockControl() {
   const [serviceNowFile, setServiceNowFile] = useState(null);
   const [serviceNowNote, setServiceNowNote] = useState("");
   const [serviceNowBusy, setServiceNowBusy] = useState(false);
+  // Set while the Add Item form is open specifically to create a new
+  // Stores item for a service consumable that wasn't in Stores yet — on
+  // save, the new item is linked into serviceNowConsumables as a real,
+  // stock-deducting entry instead of the normal add-item flow (open a
+  // requisition for a zero-qty item, etc). The qty they wanted is held
+  // here since the Add Item form itself doesn't carry it.
+  const [addingServiceConsumableQty, setAddingServiceConsumableQty] = useState(null);
   // Repair list — per-asset, like History, but with real open/resolved
   // state rather than being a permanent log.
   const [repairListItem, setRepairListItem] = useState(null);
@@ -2111,6 +2118,7 @@ export default function StockControl() {
     setServiceNowReading("");
     setServiceNowFile(null);
     setServiceNowNote("");
+    setAddingServiceConsumableQty(null);
   }
 
   function addServiceConsumableFromStores(it) {
@@ -2123,9 +2131,16 @@ export default function StockControl() {
 
   function addServiceConsumableCustom() {
     const name = serviceNowCustomName.trim();
-    const qty = serviceNowCustomQty.trim();
     if (!name) return;
-    setServiceNowConsumables((prev) => [...prev, { source: "custom", itemId: null, name, qty: qty || "1", unit: "" }]);
+    // Opens the real Add Item form, pre-filled for Stores — not the
+    // current tab, since servicing an asset happens from the Assets tab.
+    // On successful save, this new item gets linked into the consumables
+    // list as a real, stock-deducting entry rather than a throwaway note.
+    setAddingServiceConsumableQty(serviceNowCustomQty.trim() || "1");
+    setForm({ ...emptyForm, id: uid(), mainCat: "stores", name });
+    setEditingId(null);
+    setAllowDuplicate(false);
+    setShowAdd(true);
     setServiceNowCustomName("");
     setServiceNowCustomQty("");
   }
@@ -6269,11 +6284,22 @@ export default function StockControl() {
       const newItem = { ...payload, id: form.id || uid() };
       setItems((prev) => [...prev, newItem]);
       closeAdd();
-      // A brand-new item saved at zero stock would otherwise vanish from the
-      // home page the instant it's added (zero-qty items only stay visible
-      // once a requisition is tracking them) — so if this login can request
-      // stock, walk straight into that instead of leaving the item stranded.
-      if (Number(newItem.qty) === 0 && canRequisition && newItem.mainCat !== "custom") {
+      if (addingServiceConsumableQty !== null) {
+        // This item was created specifically for a service consumable
+        // that wasn't in Stores yet — link it straight in as a real,
+        // stock-deducting entry rather than dropping the user back at an
+        // empty stock list with no memory of what they were doing.
+        setServiceNowConsumables((prev) => [
+          ...prev,
+          { source: "stores", itemId: newItem.id, name: newItem.name, qty: addingServiceConsumableQty, unit: newItem.unit || "" },
+        ]);
+        setAddingServiceConsumableQty(null);
+      } else if (Number(newItem.qty) === 0 && canRequisition && newItem.mainCat !== "custom") {
+        // A brand-new item saved at zero stock would otherwise vanish from
+        // the home page the instant it's added (zero-qty items only stay
+        // visible once a requisition is tracking them) — so if this login
+        // can request stock, walk straight into that instead of leaving
+        // the item stranded.
         openRequisition(newItem);
       }
     }
@@ -6439,6 +6465,7 @@ export default function StockControl() {
     setEditingId(null);
     setAllowDuplicate(false);
     setShowAdd(false);
+    setAddingServiceConsumableQty(null);
   }
 
   function jumpToMatch() {
@@ -11561,7 +11588,7 @@ export default function StockControl() {
         </div>
       )}
 
-      {serviceNowItem && (
+      {serviceNowItem && !showAdd && (
         <div style={S.modalOverlay}>
           <form style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()} onSubmit={submitServiceNow}>
             <div style={S.modalHead}>
@@ -11640,12 +11667,13 @@ export default function StockControl() {
                 )}
               </div>
 
-              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+              <div style={{ ...S.roleHint, marginTop: 10 }}>Not in Stores yet? Type its name below — this creates a real Stores item and uses it.</div>
+              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                 <input
                   style={{ ...S.input, flex: 2 }}
                   value={serviceNowCustomName}
                   onChange={(e) => setServiceNowCustomName(e.target.value)}
-                  placeholder="Or type a custom item not in Stores…"
+                  placeholder="New item name…"
                 />
                 <input
                   type="number"
@@ -11656,7 +11684,7 @@ export default function StockControl() {
                   onChange={(e) => setServiceNowCustomQty(e.target.value)}
                   placeholder="Qty"
                 />
-                <button type="button" className="stk-btn" style={S.addBtn} onClick={addServiceConsumableCustom}>
+                <button type="button" className="stk-btn" style={S.addBtn} onClick={addServiceConsumableCustom} disabled={!serviceNowCustomName.trim()}>
                   <Plus size={15} strokeWidth={2.5} />
                 </button>
               </div>
