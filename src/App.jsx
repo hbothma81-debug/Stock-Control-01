@@ -712,6 +712,20 @@ export default function StockControl() {
   const [requisitions, setRequisitions] = useState(null);
   const [purchaseOrders, setPurchaseOrders] = useState(null);
   const [usageLog, setUsageLog] = useState(null);
+  // These track each dataset's last-known-saved state, for the diff-based
+  // saves below. Declared here, immediately after their state, rather
+  // than lower in the file near the save functions that primarily use
+  // them — deliberately, after finding a real bug from exactly the
+  // opposite choice: a background refresh needs to update these directly
+  // (see loadAllData) to correctly tell "the source of truth just
+  // changed" apart from "the person changed something that needs saving"
+  // — and every place that touches them needs to close over the same
+  // ref, regardless of where in the file it's defined.
+  const lastSavedItemsRef = useRef(null);
+  const lastSavedMasterRef = useRef(null);
+  const lastSavedRequisitionsRef = useRef(null);
+  const lastSavedPurchaseOrdersRef = useRef(null);
+  const lastSavedUsageLogRef = useRef(null);
   const [usageModal, setUsageModal] = useState(null); // { item, direction: "add" | "use", qty, jobNumber, customer, note }
   const [assetRemoveModal, setAssetRemoveModal] = useState(null); // { item, reason, date }
   const [showAssetArchive, setShowAssetArchive] = useState(false);
@@ -955,6 +969,7 @@ export default function StockControl() {
           it.mainCat === "stores" && it.customer === "Fasteners" ? { ...it, mainCat: "fasteners", customer: "" } : it
         );
         setItems(loadedItems);
+        lastSavedItemsRef.current = loadedItems;
         setLoadError((prev) => ({ ...prev, items: false }));
       } else {
         // A real table now, not the old shared blob — a successful query
@@ -963,6 +978,7 @@ export default function StockControl() {
         // it used to be. Nothing left to silently overwrite by trusting
         // it, so there's nothing to refuse here anymore.
         setItems(loadedItems || []);
+        lastSavedItemsRef.current = loadedItems || [];
         setLoadError((prev) => ({ ...prev, items: false }));
       }
     } catch (err) {
@@ -977,6 +993,7 @@ export default function StockControl() {
       // Same reasoning as items above — a real set of tables now, so an
       // empty result is trustworthy on its own, not something to refuse.
       setMaster(loadedMaster);
+      lastSavedMasterRef.current = loadedMaster;
       setLoadError((prev) => ({ ...prev, master: false }));
     } catch (err) {
       console.error("Failed to load master data:", err);
@@ -988,7 +1005,9 @@ export default function StockControl() {
     try {
       const { data: reqRows, error: reqError } = await supabase.from("requisitions").select("*");
       if (reqError) throw reqError;
-      setRequisitions((reqRows || []).map(dbRowToRequisition));
+      const loadedReqs = (reqRows || []).map(dbRowToRequisition);
+      setRequisitions(loadedReqs);
+      lastSavedRequisitionsRef.current = loadedReqs;
       setLoadError((prev) => ({ ...prev, requisitions: false }));
     } catch (err) {
       console.error("Failed to load requisitions:", err);
@@ -1000,7 +1019,9 @@ export default function StockControl() {
     try {
       const { data: poRows, error: poError } = await supabase.from("purchase_orders").select("*");
       if (poError) throw poError;
-      setPurchaseOrders((poRows || []).map(dbRowToPo));
+      const loadedPos = (poRows || []).map(dbRowToPo);
+      setPurchaseOrders(loadedPos);
+      lastSavedPurchaseOrdersRef.current = loadedPos;
       setLoadError((prev) => ({ ...prev, purchaseOrders: false }));
     } catch (err) {
       console.error("Failed to load purchase orders:", err);
@@ -1012,7 +1033,9 @@ export default function StockControl() {
     try {
       const { data: usageRows, error: usageError } = await supabase.from("usage_log").select("*");
       if (usageError) throw usageError;
-      setUsageLog((usageRows || []).map(dbRowToUsageLogEntry));
+      const loadedUsage = (usageRows || []).map(dbRowToUsageLogEntry);
+      setUsageLog(loadedUsage);
+      lastSavedUsageLogRef.current = loadedUsage;
       setLoadError((prev) => ({ ...prev, usageLog: false }));
     } catch (err) {
       console.error("Failed to load usage log:", err);
@@ -1170,7 +1193,6 @@ export default function StockControl() {
   // change (added / removed / edited, by id) since the last save, and
   // apply exactly that as its own targeted insert/update/delete — nothing
   // here can ever collide with or erase a change someone else made.
-  const lastSavedItemsRef = useRef(null);
   async function saveItemsToDb(prevRef, newItems) {
     const prev = prevRef.current;
     if (prev === null) {
@@ -1206,7 +1228,6 @@ export default function StockControl() {
       });
   }, [items]);
 
-  const lastSavedMasterRef = useRef(null);
   async function saveMasterToTables(prevRef, newMaster) {
     const prev = prevRef.current;
     if (prev === null) {
@@ -1357,7 +1378,6 @@ export default function StockControl() {
   // requisitions is a real table now — same reasoning and same pattern as
   // stock_items above: each row is independent, so this only needs to work
   // out this specific change since the last save and apply it directly.
-  const lastSavedRequisitionsRef = useRef(null);
   async function saveRequisitionsToDb(prevRef, newList) {
     const prev = prevRef.current;
     if (prev === null) {
@@ -1395,7 +1415,6 @@ export default function StockControl() {
   // purchase_orders is a real table now — same pattern as requisitions and
   // stock_items: each PO is independent, so this only needs to work out
   // this specific change since the last save and apply it directly.
-  const lastSavedPurchaseOrdersRef = useRef(null);
   async function savePurchaseOrdersToDb(prevRef, newList) {
     const prev = prevRef.current;
     if (prev === null) {
@@ -1435,7 +1454,6 @@ export default function StockControl() {
   // removes an existing entry), but the same generic add/remove/modify
   // diff is used anyway for consistency — it costs nothing extra and
   // stays correct if that ever changes.
-  const lastSavedUsageLogRef = useRef(null);
   async function saveUsageLogToDb(prevRef, newList) {
     const prev = prevRef.current;
     if (prev === null) {
