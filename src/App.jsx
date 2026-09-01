@@ -844,6 +844,13 @@ export default function StockControl() {
   const [requisitionQty, setRequisitionQty] = useState("");
   const [requisitionNotes, setRequisitionNotes] = useState("");
   const [requisitionSupplier, setRequisitionSupplier] = useState("");
+  // A dedicated way to start a requisition for an item that isn't visible
+  // in the normal browsing list — most notably anything already at zero
+  // quantity, which is exactly the case that most needs a new request but
+  // is hidden from the everyday view by design. Search here is
+  // deliberately unfiltered by quantity, unlike the tab list.
+  const [showRequisitionPicker, setShowRequisitionPicker] = useState(false);
+  const [requisitionPickerQuery, setRequisitionPickerQuery] = useState("");
   const [showArchive, setShowArchive] = useState(false);
   const [showLowStock, setShowLowStock] = useState(false);
   const [archiveTypeFilter, setArchiveTypeFilter] = useState("");
@@ -913,7 +920,6 @@ export default function StockControl() {
   const [managerFactor, setManagerFactor] = useState("");
   const [managerShortName, setManagerShortName] = useState("");
   const [managerPrice, setManagerPrice] = useState("");
-  const [managerType, setManagerType] = useState("");
   const [stockCodeQuery, setStockCodeQuery] = useState("");
   const [stockCodeCustomerFilter, setStockCodeCustomerFilter] = useState("");
   const [storesCatalogCategoryFilter, setStoresCatalogCategoryFilter] = useState("");
@@ -1584,7 +1590,7 @@ export default function StockControl() {
     usageModal || assetRemoveModal || shortageModal || jobDetail || newStockItemModal ||
     markInvoicedModal || deliveryNoteBatchModal || copyJobModal || previewItem ||
     showAddStockItemModal || showStockImportModal || editProcessesModal || productionSelectedDept ||
-    productionSelectedProcessId
+    productionSelectedProcessId || showManager || requisitionTarget || showRequisitionPicker
   );
   const modalWasOpenRef = useRef(false);
   const closingViaBackRef = useRef(false);
@@ -1604,6 +1610,10 @@ export default function StockControl() {
     setEditProcessesModal(null);
     setProductionSelectedDept(null);
     setProductionSelectedProcessId(null);
+    setShowManager(false);
+    setManagerTab(null);
+    closeRequisition();
+    closeRequisitionPicker();
   }
 
   useEffect(() => {
@@ -4844,6 +4854,24 @@ export default function StockControl() {
     setRequisitionSupplier(it.supplier || "");
   }
 
+  function openRequisitionPicker() {
+    setShowRequisitionPicker(true);
+    setRequisitionPickerQuery("");
+  }
+
+  function closeRequisitionPicker() {
+    setShowRequisitionPicker(false);
+    setRequisitionPickerQuery("");
+  }
+
+  // Picking an item from the search hands straight off into the same
+  // request form every other requisition uses — this only replaces how
+  // the item gets found, not what happens once it's chosen.
+  function pickItemForRequisition(it) {
+    closeRequisitionPicker();
+    openRequisition(it);
+  }
+
   function closeRequisition() {
     setRequisitionTarget(null);
     setRequisitionQty("");
@@ -6070,7 +6098,9 @@ export default function StockControl() {
     if (managerIsFactorTable) {
       const factor = parseFloat(managerFactor) || 0;
       const price = parseFloat(managerPrice) || 0;
-      const extra = managerTab === "sections" ? { type: managerType } : managerTab === "grades" ? { shortName: managerShortName.trim() } : {};
+      // Adding a section always happens from within a specific type's
+      // detail view now, so that type is always known here.
+      const extra = managerTab === "sections" ? { type: sectionTypeFilterInManager } : managerTab === "grades" ? { shortName: managerShortName.trim() } : {};
       setMaster((prev) => {
         const list = prev[managerTab] || [];
         if (list.some((x) => x.name.toLowerCase() === val.toLowerCase())) return prev;
@@ -6078,7 +6108,6 @@ export default function StockControl() {
       });
       setManagerFactor("");
       setManagerPrice("");
-      setManagerType("");
       setManagerShortName("");
     } else {
       setMaster((prev) => {
@@ -6790,7 +6819,12 @@ export default function StockControl() {
 
       {tab === "requisitions" ? (
         <div style={S.list}>
-          {requisitions.length === 0 && <div style={S.empty}>No requisitions yet.</div>}
+          {canRequisition && (
+            <button type="button" className="stk-btn" style={S.addBtn} onClick={openRequisitionPicker}>
+              <Plus size={15} strokeWidth={2.5} /> New requisition
+            </button>
+          )}
+          {requisitions.length === 0 && <div style={{ ...S.empty, marginTop: 10 }}>No requisitions yet.</div>}
           {["pending", "ordered"].map((status) => {
             const list = requisitions
               .filter((r) => r.status === status)
@@ -8314,6 +8348,12 @@ export default function StockControl() {
             Sales adds new items
           </div>
         )}
+        {canRequisition && tab !== "custom" && (
+          <button className="stk-btn" style={S.roleChip} onClick={openRequisitionPicker} title="Request stock for any item, including anything at zero">
+            <ClipboardList size={13} strokeWidth={2.5} />
+            Request stock
+          </button>
+        )}
       </div>
 
       {showFilters && tab !== "custom" && tab !== "stores" && (
@@ -9760,8 +9800,7 @@ export default function StockControl() {
       )}
 
       {showManager && canAccessStockManager && (
-        <div style={S.modalOverlay}>
-          <div style={S.managerModal} onClick={(e) => e.stopPropagation()}>
+        <div style={S.managerFullPage} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Stock Manager</span>
               <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => { setShowManager(false); setManagerTab(null); }}>
@@ -9804,8 +9843,8 @@ export default function StockControl() {
               </div>
             ) : (
               <>
-                <button type="button" className="stk-btn" style={S.managerBackBtn} onClick={() => setManagerTab(null)}>
-                  <ChevronDown size={14} style={{ transform: "rotate(90deg)" }} /> Back to Stock Manager
+                <button type="button" className="stk-btn" style={{ ...S.prominentBackBtn, marginBottom: 10 }} onClick={() => setManagerTab(null)}>
+                  <ChevronLeft size={18} strokeWidth={2.5} /> Back to Stock Manager
                 </button>
 
                 {managerTab === "stockCodes" ? (
@@ -10538,6 +10577,128 @@ export default function StockControl() {
               </>
             ) : managerTab === "departments" ? (
               <div style={S.empty}>User Management is Admin-only.</div>
+            ) : managerTab === "sections" ? (
+              // Sections collapse into their type groups (e.g. "Equal
+              // Angle") — selecting one opens a dedicated view for just
+              // that group's individual sizes, rather than mixing every
+              // size from every type into one long list.
+              !sectionTypeFilterInManager ? (
+                <div style={S.managerList}>
+                  {master.sections.length === 0 && <div style={S.empty}>Nothing here yet.</div>}
+                  {Object.entries(
+                    master.sections.reduce((acc, s) => {
+                      const k = s.type || "Ungrouped";
+                      (acc[k] = acc[k] || []).push(s);
+                      return acc;
+                    }, {})
+                  )
+                    .sort((a, b) => a[0].localeCompare(b[0]))
+                    .map(([groupName, list]) => (
+                      <button
+                        key={groupName}
+                        type="button"
+                        className="stk-btn"
+                        style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                        onClick={() => setSectionTypeFilterInManager(groupName)}
+                      >
+                        <span style={S.itemName}>{groupName}</span>
+                        <span style={S.gradeCount}>{list.length}</span>
+                      </button>
+                    ))}
+                </div>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="stk-btn"
+                    style={{ ...S.prominentBackBtn, marginBottom: 10 }}
+                    onClick={() => setSectionTypeFilterInManager("")}
+                  >
+                    <ChevronLeft size={18} strokeWidth={2.5} /> Back to Sections
+                  </button>
+                  <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>{sectionTypeFilterInManager}</div>
+
+                  <div style={S.managerAddRow}>
+                    <input
+                      style={{ ...S.input, flex: 2 }}
+                      value={managerInput}
+                      onChange={(e) => setManagerInput(e.target.value)}
+                      placeholder="Add a new size…"
+                    />
+                    <input
+                      style={{ ...S.input, flex: 1 }}
+                      type="number"
+                      step="0.01"
+                      value={managerFactor}
+                      onChange={(e) => setManagerFactor(e.target.value)}
+                      placeholder="kg/m"
+                    />
+                    <input
+                      style={{ ...S.input, flex: 1 }}
+                      type="number"
+                      step="0.01"
+                      value={managerPrice}
+                      onChange={(e) => setManagerPrice(e.target.value)}
+                      placeholder="R/m"
+                    />
+                    <button type="button" className="stk-btn" style={S.addBtn} onClick={addMasterEntry}>
+                      <Plus size={15} strokeWidth={2.5} />
+                      Add
+                    </button>
+                  </div>
+
+                  {master.sections.filter((s) => (s.type || "Ungrouped") === sectionTypeFilterInManager).length > 8 && (
+                    <input
+                      style={{ ...S.input, marginTop: 10 }}
+                      value={managerSearchQuery}
+                      onChange={(e) => setManagerSearchQuery(e.target.value)}
+                      placeholder="Search sizes…"
+                    />
+                  )}
+
+                  <div style={S.managerList}>
+                    {master.sections
+                      .filter((s) => (s.type || "Ungrouped") === sectionTypeFilterInManager)
+                      .filter((s) => s.name.toLowerCase().includes(managerSearchQuery.toLowerCase()))
+                      .map((entry) => (
+                        <div key={entry.name} style={S.managerRow}>
+                          <EditableName value={entry.name} onCommit={(v) => renameMasterEntry(managerTab, entry.name, v)} />
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={entry.factor === 0 ? "" : entry.factor}
+                            placeholder="0"
+                            onChange={(e) => updateFactorField(entry.name, "factor", e.target.value)}
+                            style={S.managerFactorInput}
+                            title="kg/m"
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={!entry.price ? "" : entry.price}
+                            placeholder="0"
+                            onChange={(e) => updateFactorField(entry.name, "price", e.target.value)}
+                            style={S.managerFactorInput}
+                            title="R/m"
+                          />
+                          <select
+                            value={entry.type || ""}
+                            onChange={(e) => updateSectionType(entry.name, e.target.value)}
+                            style={{ ...S.managerFactorInput, width: 130 }}
+                          >
+                            <option value="">No type</option>
+                            {master.sectionTypes.map((t) => (
+                              <option key={t} value={t}>{t}</option>
+                            ))}
+                          </select>
+                          <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeMasterEntry(entry)}>
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      ))}
+                  </div>
+                </>
+              )
             ) : (
               <>
                 <div style={S.managerAddRow}>
@@ -10556,7 +10717,7 @@ export default function StockControl() {
                         step="0.01"
                         value={managerFactor}
                         onChange={(e) => setManagerFactor(e.target.value)}
-                        placeholder={managerTab !== "sections" ? "Density g/cm³" : "kg/m"}
+                        placeholder="Density g/cm³"
                       />
                       <input
                         style={{ ...S.input, flex: 1 }}
@@ -10564,7 +10725,7 @@ export default function StockControl() {
                         step="0.01"
                         value={managerPrice}
                         onChange={(e) => setManagerPrice(e.target.value)}
-                        placeholder={managerTab !== "sections" ? "R/kg" : "R/m"}
+                        placeholder="R/kg"
                       />
                       {managerTab === "grades" && (
                         <input
@@ -10581,16 +10742,6 @@ export default function StockControl() {
                     Add
                   </button>
                 </div>
-                {managerTab === "sections" && (
-                  <div style={{ ...S.managerAddRow, marginTop: 6 }}>
-                    <select style={S.input} value={managerType} onChange={(e) => setManagerType(e.target.value)}>
-                      <option value="">New section's type — none yet</option>
-                      {master.sectionTypes.map((t) => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
 
                 {master[managerTab].length > 8 && (
                   <input
@@ -10604,83 +10755,42 @@ export default function StockControl() {
                 <div style={S.managerList}>
                   {master[managerTab].length === 0 && <div style={S.empty}>Nothing here yet — add one above.</div>}
                   {managerIsFactorTable
-                    ? (managerTab === "sections"
-                        ? Object.entries(
-                            master.sections
-                              .filter((s) => s.name.toLowerCase().includes(managerSearchQuery.toLowerCase()))
-                              .filter((s) => !sectionTypeFilterInManager || (s.type || "Ungrouped") === sectionTypeFilterInManager)
-                              .reduce((acc, s) => {
-                              const k = s.type || "Ungrouped";
-                              (acc[k] = acc[k] || []).push(s);
-                              return acc;
-                            }, {})
-                          ).sort((a, b) => a[0].localeCompare(b[0]))
-                        : [[null, master[managerTab].filter((e) => e.name.toLowerCase().includes(managerSearchQuery.toLowerCase()))]]
-                      ).map(([groupName, list]) => (
-                        <div key={groupName || "flat"}>
-                          {groupName && (
-                            <button
-                              type="button"
-                              className="stk-btn"
-                              style={{
-                                ...S.managerGroupHeader,
-                                ...S.managerGroupHeaderBtn,
-                                ...(sectionTypeFilterInManager === groupName ? S.managerGroupHeaderActive : {}),
-                              }}
-                              onClick={() => setSectionTypeFilterInManager((prev) => (prev === groupName ? "" : groupName))}
-                              title={sectionTypeFilterInManager === groupName ? "Showing only this type — tap to show all" : "Tap to show only this type"}
-                            >
-                              {groupName} · {list.length}
+                    ? master[managerTab]
+                        .filter((e) => e.name.toLowerCase().includes(managerSearchQuery.toLowerCase()))
+                        .map((entry) => (
+                          <div key={entry.name} style={S.managerRow}>
+                            <EditableName value={entry.name} onCommit={(v) => renameMasterEntry(managerTab, entry.name, v)} />
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={entry.factor === 0 ? "" : entry.factor}
+                              placeholder="0"
+                              onChange={(e) => updateFactorField(entry.name, "factor", e.target.value)}
+                              style={S.managerFactorInput}
+                              title="Density g/cm³"
+                            />
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={!entry.price ? "" : entry.price}
+                              placeholder="0"
+                              onChange={(e) => updateFactorField(entry.name, "price", e.target.value)}
+                              style={S.managerFactorInput}
+                              title="R/kg"
+                            />
+                            {managerTab === "grades" && (
+                              <input
+                                value={entry.shortName || ""}
+                                placeholder="Short name"
+                                onChange={(e) => updateGradeShortName(entry.name, e.target.value)}
+                                style={{ ...S.managerFactorInput, width: 130 }}
+                              />
+                            )}
+                            <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeMasterEntry(entry)}>
+                              <Trash2 size={13} />
                             </button>
-                          )}
-                          {list.map((entry) => (
-                            <div key={entry.name} style={S.managerRow}>
-                              <EditableName value={entry.name} onCommit={(v) => renameMasterEntry(managerTab, entry.name, v)} />
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={entry.factor === 0 ? "" : entry.factor}
-                                placeholder="0"
-                                onChange={(e) => updateFactorField(entry.name, "factor", e.target.value)}
-                                style={S.managerFactorInput}
-                                title={managerTab !== "sections" ? "Density g/cm³" : "kg/m"}
-                              />
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={!entry.price ? "" : entry.price}
-                                placeholder="0"
-                                onChange={(e) => updateFactorField(entry.name, "price", e.target.value)}
-                                style={S.managerFactorInput}
-                                title={managerTab !== "sections" ? "R/kg" : "R/m"}
-                              />
-                              {managerTab === "sections" && (
-                                <select
-                                  value={entry.type || ""}
-                                  onChange={(e) => updateSectionType(entry.name, e.target.value)}
-                                  style={{ ...S.managerFactorInput, width: 130 }}
-                                >
-                                  <option value="">No type</option>
-                                  {master.sectionTypes.map((t) => (
-                                    <option key={t} value={t}>{t}</option>
-                                  ))}
-                                </select>
-                              )}
-                              {managerTab === "grades" && (
-                                <input
-                                  value={entry.shortName || ""}
-                                  placeholder="Short name"
-                                  onChange={(e) => updateGradeShortName(entry.name, e.target.value)}
-                                  style={{ ...S.managerFactorInput, width: 130 }}
-                                />
-                              )}
-                              <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeMasterEntry(entry)}>
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      ))
+                          </div>
+                        ))
                     : master[managerTab]
                         .filter((entry) => entry.toLowerCase().includes(managerSearchQuery.toLowerCase()))
                         .map((entry) => (
@@ -10696,7 +10806,6 @@ export default function StockControl() {
             )}
               </>
             )}
-          </div>
         </div>
       )}
 
@@ -12636,6 +12745,61 @@ export default function StockControl() {
         </div>
       )}
 
+      {showRequisitionPicker && (
+        <div style={S.modalOverlay}>
+          <div style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Request stock</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeRequisitionPicker}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={S.roleHint}>Find the item to request — this searches everything, including items already at zero.</div>
+            <input
+              autoFocus
+              style={{ ...S.input, marginTop: 10 }}
+              value={requisitionPickerQuery}
+              onChange={(e) => setRequisitionPickerQuery(e.target.value)}
+              placeholder="Search by name, grade, or customer…"
+            />
+            <div style={{ ...S.managerList, marginTop: 10, maxHeight: "60vh", overflowY: "auto" }}>
+              {(() => {
+                const q = requisitionPickerQuery.trim().toLowerCase();
+                if (!q) return <div style={S.empty}>Start typing to search.</div>;
+                const matches = (items || [])
+                  .filter((it) => it.mainCat !== "custom")
+                  .filter(
+                    (it) =>
+                      (it.name || "").toLowerCase().includes(q) ||
+                      (it.grade || "").toLowerCase().includes(q) ||
+                      (it.customer || "").toLowerCase().includes(q) ||
+                      (it.partNumber || "").toLowerCase().includes(q)
+                  )
+                  .slice(0, 50);
+                if (matches.length === 0) return <div style={S.empty}>No matching items.</div>;
+                return matches.map((it) => (
+                  <button
+                    key={it.id}
+                    type="button"
+                    className="stk-btn"
+                    style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer" }}
+                    onClick={() => pickItemForRequisition(it)}
+                  >
+                    <div style={S.reqCardTop}>
+                      <span style={S.itemName}>{it.grade ? `${it.grade} — ` : ""}{it.name}</span>
+                      <span style={{ ...S.reqStatusTag, ...(Number(it.qty) > 0 ? S.reqStatus_received : S.reqStatus_ordered) }}>
+                        {Number(it.qty) > 0 ? `${it.qty} in stock` : "0 in stock"}
+                      </span>
+                    </div>
+                    {it.customer && <div className="stk-meta-row" style={S.rowMeta}><span>{it.customer}</span></div>}
+                  </button>
+                ));
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
       {requisitionTarget && (
         <div style={S.modalOverlay}>
           <form style={S.modal} onClick={(e) => e.stopPropagation()} onSubmit={submitRequisition}>
@@ -13420,6 +13584,20 @@ const S = {
     display: "flex",
     flexDirection: "column",
     gap: 4,
+  },
+  // Full page, not a popup — fills the whole viewport rather than floating
+  // as a centered, size-constrained overlay on top of whatever tab was
+  // open underneath. No backdrop needed since there's nothing left showing
+  // behind it to dim.
+  managerFullPage: {
+    position: "fixed",
+    inset: 0,
+    background: C.surface,
+    zIndex: 10,
+    overflowY: "auto",
+    display: "flex",
+    flexDirection: "column",
+    padding: 18,
   },
   modalHead: {
     display: "flex",
