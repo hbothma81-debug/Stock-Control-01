@@ -776,6 +776,31 @@ export default function StockControl() {
   const [assetHistoryFile, setAssetHistoryFile] = useState(null);
   const [assetHistoryReading, setAssetHistoryReading] = useState("");
   const [assetHistoryBusy, setAssetHistoryBusy] = useState(false);
+  // Assets tab navigation: manufacturer list -> that manufacturer's assets
+  // -> one asset's own full detail page. Same list-then-detail pattern as
+  // Production, Sections, and Stock Manager elsewhere in the app.
+  const [assetManufacturerOpen, setAssetManufacturerOpen] = useState(null);
+  const [assetDetailOpen, setAssetDetailOpen] = useState(null);
+  // "Service now" — records a completed service: consumables used (from
+  // Stores, deducting real stock, or typed as custom entries that don't
+  // touch stock), an optional document, and for hours/km-tracked assets,
+  // the reading at time of service (the new baseline for the interval).
+  const [serviceNowItem, setServiceNowItem] = useState(null);
+  const [serviceNowConsumables, setServiceNowConsumables] = useState([]);
+  const [serviceNowConsumableSearch, setServiceNowConsumableSearch] = useState("");
+  const [serviceNowCustomName, setServiceNowCustomName] = useState("");
+  const [serviceNowCustomQty, setServiceNowCustomQty] = useState("");
+  const [serviceNowReading, setServiceNowReading] = useState("");
+  const [serviceNowFile, setServiceNowFile] = useState(null);
+  const [serviceNowNote, setServiceNowNote] = useState("");
+  const [serviceNowBusy, setServiceNowBusy] = useState(false);
+  // Repair list — per-asset, like History, but with real open/resolved
+  // state rather than being a permanent log.
+  const [repairListItem, setRepairListItem] = useState(null);
+  const [repairListEntries, setRepairListEntries] = useState(null);
+  const [repairListDescription, setRepairListDescription] = useState("");
+  const [repairListBusy, setRepairListBusy] = useState(false);
+  const [repairListResolvedOpen, setRepairListResolvedOpen] = useState(false);
   const [jobsList, setJobsList] = useState(null);
   const [productionQueue, setProductionQueue] = useState(null);
   const [invoicedSectionOpen, setInvoicedSectionOpen] = useState(false);
@@ -1554,6 +1579,8 @@ export default function StockControl() {
   // elsewhere in the app.
   useEffect(() => {
     setSelectedItemDetail(null);
+    setAssetManufacturerOpen(null);
+    setAssetDetailOpen(null);
   }, [tab]);
 
   // The part-number → drawing lookup is used on Customer Stock rows and the
@@ -1608,7 +1635,8 @@ export default function StockControl() {
     usageModal || assetRemoveModal || shortageModal || jobDetail || newStockItemModal ||
     markInvoicedModal || deliveryNoteBatchModal || copyJobModal || previewItem ||
     showAddStockItemModal || showStockImportModal || editProcessesModal || productionSelectedDept ||
-    productionSelectedProcessId || showManager || requisitionTarget || showRequisitionPicker
+    productionSelectedProcessId || showManager || requisitionTarget || showRequisitionPicker ||
+    assetManufacturerOpen || assetDetailOpen || serviceNowItem || repairListItem
   );
   const modalWasOpenRef = useRef(false);
   const closingViaBackRef = useRef(false);
@@ -1632,6 +1660,10 @@ export default function StockControl() {
     setManagerTab(null);
     closeRequisition();
     closeRequisitionPicker();
+    setAssetManufacturerOpen(null);
+    setAssetDetailOpen(null);
+    closeServiceNow();
+    closeRepairList();
   }
 
   useEffect(() => {
@@ -1922,7 +1954,7 @@ export default function StockControl() {
     return data.signedUrl;
   }
 
-  async function addAssetHistoryEntry({ itemId, entryType, note, reading, attachmentFile, serviceMode }) {
+  async function addAssetHistoryEntry({ itemId, entryType, note, reading, attachmentFile, serviceMode, consumables }) {
     if (!supabase) return;
     let attachmentPath = null;
     let attachmentName = null;
@@ -1939,6 +1971,7 @@ export default function StockControl() {
       attachment_path: attachmentPath,
       attachment_name: attachmentName,
       logged_by: roleLabel,
+      consumables: consumables && consumables.length ? consumables : null,
     };
     const { error } = await supabase.from("asset_history").insert(row);
     if (error) throw error;
@@ -1963,6 +1996,217 @@ export default function StockControl() {
       alert("Couldn't delete that entry — check your connection and try again.");
       return false;
     }
+  }
+
+  // ---- Asset repair list — per-asset, open/resolved, separate from the
+  // permanent History log above ----
+
+  async function fetchAssetRepairs(itemId) {
+    if (!supabase) return [];
+    const { data, error } = await supabase
+      .from("asset_repairs")
+      .select("*")
+      .eq("item_id", itemId)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function openRepairList(item) {
+    setRepairListItem(item);
+    setRepairListEntries(null);
+    setRepairListDescription("");
+    setRepairListResolvedOpen(false);
+    try {
+      setRepairListEntries(await fetchAssetRepairs(item.id));
+    } catch (err) {
+      console.error("Failed to load repair list:", err);
+      setRepairListEntries([]);
+    }
+  }
+
+  function closeRepairList() {
+    setRepairListItem(null);
+    setRepairListEntries(null);
+    setRepairListDescription("");
+  }
+
+  async function refreshRepairList() {
+    if (!repairListItem) return;
+    try {
+      setRepairListEntries(await fetchAssetRepairs(repairListItem.id));
+    } catch (err) {
+      console.error("Failed to refresh repair list:", err);
+    }
+  }
+
+  async function submitRepairEntry(e) {
+    e.preventDefault();
+    if (!repairListDescription.trim()) return;
+    setRepairListBusy(true);
+    try {
+      const { error } = await supabase.from("asset_repairs").insert({
+        item_id: repairListItem.id,
+        description: repairListDescription.trim(),
+        status: "open",
+        logged_by: roleLabel,
+      });
+      if (error) throw error;
+      setRepairListDescription("");
+      await refreshRepairList();
+    } catch (err) {
+      console.error("Failed to add repair entry:", err);
+      alert("Couldn't save that — check your connection and try again.");
+    }
+    setRepairListBusy(false);
+  }
+
+  async function resolveRepairEntry(entry) {
+    try {
+      const { error } = await supabase
+        .from("asset_repairs")
+        .update({ status: "resolved", resolved_by: roleLabel, resolved_at: new Date().toISOString() })
+        .eq("id", entry.id);
+      if (error) throw error;
+      await refreshRepairList();
+    } catch (err) {
+      console.error("Failed to resolve repair entry:", err);
+      alert("Couldn't save that — check your connection and try again.");
+    }
+  }
+
+  async function deleteRepairEntry(entry) {
+    const ok = window.confirm("Delete this repair note permanently? This can't be undone.");
+    if (!ok) return;
+    try {
+      const { error } = await supabase.from("asset_repairs").delete().eq("id", entry.id);
+      if (error) throw error;
+      await refreshRepairList();
+    } catch (err) {
+      console.error("Failed to delete repair entry:", err);
+      alert("Couldn't delete that — check your connection and try again.");
+    }
+  }
+
+  // ---- "Service now" — records a completed service, deducts any Stores
+  // consumables used from real stock, and advances the service interval ----
+
+  function openServiceNow(item) {
+    setServiceNowItem(item);
+    setServiceNowConsumables([]);
+    setServiceNowConsumableSearch("");
+    setServiceNowCustomName("");
+    setServiceNowCustomQty("");
+    setServiceNowReading(String(item.currentReading || ""));
+    setServiceNowFile(null);
+    setServiceNowNote("");
+  }
+
+  function closeServiceNow() {
+    setServiceNowItem(null);
+    setServiceNowConsumables([]);
+    setServiceNowConsumableSearch("");
+    setServiceNowCustomName("");
+    setServiceNowCustomQty("");
+    setServiceNowReading("");
+    setServiceNowFile(null);
+    setServiceNowNote("");
+  }
+
+  function addServiceConsumableFromStores(it) {
+    setServiceNowConsumables((prev) => [
+      ...prev,
+      { source: "stores", itemId: it.id, name: it.name, qty: "1", unit: it.unit || "" },
+    ]);
+    setServiceNowConsumableSearch("");
+  }
+
+  function addServiceConsumableCustom() {
+    const name = serviceNowCustomName.trim();
+    const qty = serviceNowCustomQty.trim();
+    if (!name) return;
+    setServiceNowConsumables((prev) => [...prev, { source: "custom", itemId: null, name, qty: qty || "1", unit: "" }]);
+    setServiceNowCustomName("");
+    setServiceNowCustomQty("");
+  }
+
+  function updateServiceConsumableQty(idx, qty) {
+    setServiceNowConsumables((prev) => prev.map((c, i) => (i === idx ? { ...c, qty } : c)));
+  }
+
+  function removeServiceConsumable(idx) {
+    setServiceNowConsumables((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  async function submitServiceNow(e) {
+    e.preventDefault();
+    if (!serviceNowItem) return;
+    setServiceNowBusy(true);
+    try {
+      const item = serviceNowItem;
+      const nowIso = new Date().toISOString();
+
+      // Deduct real stock for every Stores consumable used — same effect
+      // as a normal "Use" action, logged the same way, for the same
+      // reason: this is genuine stock leaving the shelf, not just a note.
+      const storesUsed = serviceNowConsumables.filter((c) => c.source === "stores");
+      if (storesUsed.length > 0) {
+        setItems((prev) =>
+          prev.map((it) => {
+            const used = storesUsed.find((c) => c.itemId === it.id);
+            return used ? { ...it, qty: Math.max(0, Number(it.qty) - (Number(used.qty) || 0)) } : it;
+          })
+        );
+        setUsageLog((prev) => [
+          ...prev,
+          ...storesUsed.map((c) => ({
+            id: uid(),
+            itemId: c.itemId,
+            itemName: c.name,
+            mainCat: "stores",
+            qty: Number(c.qty) || 0,
+            direction: "use",
+            by: roleLabel,
+            jobNumber: "",
+            customer: "",
+            note: `Used servicing ${item.name} (${item.partNumber || "no part number"})`,
+            lineCost: 0,
+            timestamp: nowIso,
+          })),
+        ]);
+      }
+
+      // Log the service itself as a history entry, carrying the full
+      // consumables list (Stores and custom together) and any document.
+      await addAssetHistoryEntry({
+        itemId: item.id,
+        entryType: "service",
+        note: serviceNowNote.trim(),
+        attachmentFile: serviceNowFile,
+        consumables: serviceNowConsumables,
+      });
+
+      // Advance the service interval — by-date resets the last-serviced
+      // date to now; by-hours/km takes the reading entered here as the new
+      // baseline the next interval counts from.
+      const reading = parseFloat(serviceNowReading);
+      setItems((prev) =>
+        prev.map((it) => {
+          if (it.id !== item.id) return it;
+          if (it.serviceMode === "months") return { ...it, lastServiceDate: nowIso.slice(0, 10) };
+          if ((it.serviceMode === "hours" || it.serviceMode === "km") && !isNaN(reading)) {
+            return { ...it, lastServiceReading: reading, currentReading: reading };
+          }
+          return it;
+        })
+      );
+
+      closeServiceNow();
+    } catch (err) {
+      console.error("Failed to record service:", err);
+      alert("Couldn't save that — check your connection and try again.");
+    }
+    setServiceNowBusy(false);
   }
 
   // ---- Jobs ----
@@ -8650,6 +8894,190 @@ export default function StockControl() {
       )}
 
       <div style={S.list}>
+        {tab === "assets" ? (
+          !assetManufacturerOpen ? (
+            // Level 1: manufacturers, collapsed into groups — same pattern
+            // as Sections. The removed/archive list stays here too, since
+            // it's not scoped to any one manufacturer.
+            <>
+              <div style={S.managerListFullPage}>
+                {Object.entries(
+                  items
+                    .filter((it) => it.mainCat === "assets" && it.status !== "removed")
+                    .reduce((acc, it) => {
+                      const k = it.manufacturer || "Other";
+                      (acc[k] = acc[k] || []).push(it);
+                      return acc;
+                    }, {})
+                )
+                  .sort((a, b) => a[0].localeCompare(b[0]))
+                  .map(([mfr, list]) => (
+                    <button
+                      key={mfr}
+                      type="button"
+                      className="stk-btn"
+                      style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                      onClick={() => setAssetManufacturerOpen(mfr)}
+                    >
+                      <span style={S.itemName}>{mfr}</span>
+                      <span style={S.gradeCount}>{list.length}</span>
+                    </button>
+                  ))}
+                {items.filter((it) => it.mainCat === "assets" && it.status !== "removed").length === 0 && (
+                  <div style={S.empty}>Nothing here yet — add an item to get started.</div>
+                )}
+              </div>
+
+              <div style={{ ...S.gradeBlock, marginTop: 14 }}>
+                <button className="stk-grade" style={S.gradeHeader} onClick={() => setShowAssetArchive((v) => !v)}>
+                  <ChevronDown size={15} style={{ transform: showAssetArchive ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
+                  <span style={S.gradeTitle}>Removed / Archive</span>
+                  <span style={S.gradeCount}>{items.filter((it) => it.mainCat === "assets" && it.status === "removed").length}</span>
+                </button>
+                {showAssetArchive && (
+                  <div style={S.gradeItems}>
+                    {items
+                      .filter((it) => it.mainCat === "assets" && it.status === "removed")
+                      .sort((a, b) => new Date(b.removedDate || 0) - new Date(a.removedDate || 0))
+                      .map((it) => (
+                        <div key={it.id} style={S.reqCard}>
+                          <div style={S.reqCardTop}>
+                            <span style={S.itemName}>
+                              {it.partNumber ? `${it.partNumber} — ` : ""}
+                              {it.name}
+                            </span>
+                            <span style={{ ...S.reqStatusTag, ...S.reqStatus_cancelled }}>{it.removedReason}</span>
+                          </div>
+                          <div className="stk-meta-row" style={S.rowMeta}>
+                            {it.manufacturer && <span>{it.manufacturer}</span>}
+                            {it.serialNumber && <span>SN: {it.serialNumber}</span>}
+                            <span>Removed by {it.removedBy}</span>
+                            {it.removedDate && <span>{new Date(it.removedDate).toLocaleDateString()}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    {items.filter((it) => it.mainCat === "assets" && it.status === "removed").length === 0 && (
+                      <div style={S.empty}>Nothing removed yet.</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : !assetDetailOpen ? (
+            // Level 2: this manufacturer's assets, compact cards.
+            <>
+              <button
+                type="button"
+                className="stk-btn"
+                style={{ ...S.prominentBackBtn, marginBottom: 10 }}
+                onClick={() => setAssetManufacturerOpen(null)}
+              >
+                <ChevronLeft size={18} strokeWidth={2.5} /> Back to Manufacturers
+              </button>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>{assetManufacturerOpen}</div>
+              <div style={S.managerListFullPage}>
+                {items
+                  .filter((it) => it.mainCat === "assets" && it.status !== "removed" && (it.manufacturer || "Other") === assetManufacturerOpen)
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .map((it) => {
+                    const svc = getServiceStatus(it);
+                    return (
+                      <button
+                        key={it.id}
+                        type="button"
+                        className="stk-btn"
+                        style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer" }}
+                        onClick={() => setAssetDetailOpen(it.id)}
+                      >
+                        <div style={S.reqCardTop}>
+                          <span style={S.itemName}>{it.partNumber ? `${it.partNumber} — ` : ""}{it.name}</span>
+                          {svc && (
+                            <span style={{ ...S.reqStatusTag, ...(svc.level === "overdue" ? S.reqStatus_cancelled : svc.level === "soon" ? S.reqStatus_ordered : S.reqStatus_received) }}>
+                              {svc.level === "overdue" ? "Service overdue" : svc.level === "soon" ? "Service due soon" : "Service OK"}
+                            </span>
+                          )}
+                        </div>
+                        {it.serialNumber && <div className="stk-meta-row" style={S.rowMeta}><span>SN: {it.serialNumber}</span></div>}
+                      </button>
+                    );
+                  })}
+              </div>
+            </>
+          ) : (
+            // Level 3: one asset's full detail page.
+            (() => {
+              const it = items.find((x) => x.id === assetDetailOpen);
+              if (!it) return null;
+              const svc = getServiceStatus(it);
+              return (
+                <>
+                  <button
+                    type="button"
+                    className="stk-btn"
+                    style={{ ...S.prominentBackBtn, marginBottom: 10 }}
+                    onClick={() => setAssetDetailOpen(null)}
+                  >
+                    <ChevronLeft size={18} strokeWidth={2.5} /> Back to {assetManufacturerOpen}
+                  </button>
+                  <div style={S.deptCard}>
+                    <div style={S.deptCardHead}>
+                      <span style={{ fontWeight: 600, fontSize: 16 }}>{it.name}</span>
+                      {canEditItems && (
+                        <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => openEdit(it)} title="Edit item">
+                          <Pencil size={13} />
+                        </button>
+                      )}
+                    </div>
+                    <div className="stk-meta-row" style={{ ...S.rowMeta, marginTop: 6 }}>
+                      {it.partNumber && <span>Part #: {it.partNumber}</span>}
+                      {it.manufacturer && <span>{it.manufacturer}</span>}
+                      {it.serialNumber && <span>SN: {it.serialNumber}</span>}
+                    </div>
+                    <div className="stk-meta-row" style={S.rowMeta}>
+                      {it.purchaseDate && <span>Bought {new Date(it.purchaseDate).toLocaleDateString()}</span>}
+                      {it.supplier && <span>Supplier: {it.supplier}</span>}
+                      {it.loc && <span>{it.loc}</span>}
+                      {canSeeValue && Number(it.value || 0) > 0 && <span>R{Number(it.value).toFixed(2)}</span>}
+                    </div>
+                    {svc && (
+                      <div
+                        style={{
+                          ...S.roleHint,
+                          marginTop: 8,
+                          padding: "6px 10px",
+                          borderRadius: 6,
+                          background: svc.level === "overdue" ? C.dangerTint : svc.level === "soon" ? C.accentTint : C.bg,
+                          color: svc.level === "overdue" ? C.danger : svc.level === "soon" ? C.accentRaw : C.muted,
+                        }}
+                      >
+                        {svc.level === "overdue" ? "Service overdue" : svc.level === "soon" ? "Service due soon" : "Service on track"} — {svc.detail}
+                      </div>
+                    )}
+                    <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+                      {canEditQty("assets") && it.serviceMode && it.serviceMode !== "none" && (
+                        <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => openServiceNow(it)}>
+                          <Check size={13} /> Service now
+                        </button>
+                      )}
+                      <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openRepairList(it)}>
+                        <AlertTriangle size={13} /> Repair list
+                      </button>
+                      <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openAssetHistory(it)}>
+                        History
+                      </button>
+                      {canEditQty("assets") && (
+                        <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openAssetRemoveModal(it)}>
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </>
+              );
+            })()
+          )
+        ) : (
+          <>
         {grouped.length === 0 && (
           <div style={S.empty}>
             {query ? "Nothing matches that search." : "Nothing here yet — add an item to get started."}
@@ -8836,42 +9264,7 @@ export default function StockControl() {
             </div>
           );
         })}
-
-        {tab === "assets" && (
-          <div style={S.gradeBlock}>
-            <button className="stk-grade" style={S.gradeHeader} onClick={() => setShowAssetArchive((v) => !v)}>
-              <ChevronDown size={15} style={{ transform: showAssetArchive ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
-              <span style={S.gradeTitle}>Removed / Archive</span>
-              <span style={S.gradeCount}>{items.filter((it) => it.mainCat === "assets" && it.status === "removed").length}</span>
-            </button>
-            {showAssetArchive && (
-              <div style={S.gradeItems}>
-                {items
-                  .filter((it) => it.mainCat === "assets" && it.status === "removed")
-                  .sort((a, b) => new Date(b.removedDate || 0) - new Date(a.removedDate || 0))
-                  .map((it) => (
-                    <div key={it.id} style={S.reqCard}>
-                      <div style={S.reqCardTop}>
-                        <span style={S.itemName}>
-                          {it.partNumber ? `${it.partNumber} — ` : ""}
-                          {it.name}
-                        </span>
-                        <span style={{ ...S.reqStatusTag, ...S.reqStatus_cancelled }}>{it.removedReason}</span>
-                      </div>
-                      <div className="stk-meta-row" style={S.rowMeta}>
-                        {it.manufacturer && <span>{it.manufacturer}</span>}
-                        {it.serialNumber && <span>SN: {it.serialNumber}</span>}
-                        <span>Removed by {it.removedBy}</span>
-                        {it.removedDate && <span>{new Date(it.removedDate).toLocaleDateString()}</span>}
-                      </div>
-                    </div>
-                  ))}
-                {items.filter((it) => it.mainCat === "assets" && it.status === "removed").length === 0 && (
-                  <div style={S.empty}>Nothing removed yet.</div>
-                )}
-              </div>
-            )}
-          </div>
+          </>
         )}
       </div>
         </>
@@ -11137,6 +11530,8 @@ export default function StockControl() {
                     <span style={S.itemName}>
                       {entry.entry_type === "meter_reading"
                         ? `Reading logged: ${entry.hours_reading ?? entry.km_reading}${entry.hours_reading != null ? "hrs" : "km"}`
+                        : entry.entry_type === "service"
+                        ? `Serviced${entry.note ? " — " + entry.note : ""}`
                         : entry.note}
                     </span>
                     {isAdmin && (
@@ -11149,6 +11544,11 @@ export default function StockControl() {
                     <span>{entry.logged_by}</span>
                     <span>{new Date(entry.created_at).toLocaleString()}</span>
                   </div>
+                  {entry.entry_type === "service" && entry.consumables && entry.consumables.length > 0 && (
+                    <div style={{ ...S.roleHint, marginTop: 4 }}>
+                      Used: {entry.consumables.map((c) => `${c.name} × ${c.qty}${c.unit || ""}`).join(", ")}
+                    </div>
+                  )}
                   {entry.attachment_path && (
                     <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 6 }} onClick={() => viewAssetAttachment(entry)}>
                       <Paperclip size={13} /> {entry.attachment_name}
@@ -11157,6 +11557,225 @@ export default function StockControl() {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {serviceNowItem && (
+        <div style={S.modalOverlay}>
+          <form style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()} onSubmit={submitServiceNow}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Service now — {serviceNowItem.name}</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeServiceNow}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={S.roleHint}>Recording this updates the service counter and works out the next due date automatically.</div>
+
+            {(serviceNowItem.serviceMode === "hours" || serviceNowItem.serviceMode === "km") && (
+              <div style={{ marginTop: 10 }}>
+                <label style={S.label}>Reading at time of service ({serviceNowItem.serviceMode === "hours" ? "hours" : "km"})</label>
+                <input
+                  type="number"
+                  min="0"
+                  style={S.input}
+                  value={serviceNowReading}
+                  onChange={(e) => setServiceNowReading(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+            )}
+
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+              <label style={S.label}>Consumables used</label>
+              {serviceNowConsumables.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                  {serviceNowConsumables.map((c, idx) => (
+                    <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <span style={{ flex: 1, fontSize: 13.5 }}>
+                        {c.name} {c.source === "stores" && <span style={{ color: C.muted }}>(Stores)</span>}
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        style={{ ...S.managerFactorInput, width: 70 }}
+                        value={c.qty}
+                        onChange={(e) => updateServiceConsumableQty(idx, e.target.value)}
+                      />
+                      <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeServiceConsumable(idx)}>
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ marginTop: 8 }}>
+                <input
+                  style={S.input}
+                  value={serviceNowConsumableSearch}
+                  onChange={(e) => setServiceNowConsumableSearch(e.target.value)}
+                  placeholder="Search Stores to add a consumable…"
+                />
+                {serviceNowConsumableSearch.trim() && (
+                  <div style={{ ...S.managerList, marginTop: 6, maxHeight: 160 }}>
+                    {items
+                      .filter((it) => it.mainCat === "stores")
+                      .filter((it) => it.name.toLowerCase().includes(serviceNowConsumableSearch.trim().toLowerCase()))
+                      .slice(0, 20)
+                      .map((it) => (
+                        <button
+                          key={it.id}
+                          type="button"
+                          className="stk-btn"
+                          style={{ ...S.reqActionBtnMuted, justifyContent: "space-between", width: "100%" }}
+                          onClick={() => addServiceConsumableFromStores(it)}
+                        >
+                          <span>{it.name}</span>
+                          <span style={{ color: C.muted }}>{it.qty} {it.unit} in stock</span>
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                <input
+                  style={{ ...S.input, flex: 2 }}
+                  value={serviceNowCustomName}
+                  onChange={(e) => setServiceNowCustomName(e.target.value)}
+                  placeholder="Or type a custom item not in Stores…"
+                />
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  style={{ ...S.input, flex: 1 }}
+                  value={serviceNowCustomQty}
+                  onChange={(e) => setServiceNowCustomQty(e.target.value)}
+                  placeholder="Qty"
+                />
+                <button type="button" className="stk-btn" style={S.addBtn} onClick={addServiceConsumableCustom}>
+                  <Plus size={15} strokeWidth={2.5} />
+                </button>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 12 }}>
+              <label style={S.label}>Note (optional)</label>
+              <input
+                style={S.input}
+                value={serviceNowNote}
+                onChange={(e) => setServiceNowNote(e.target.value)}
+                placeholder="e.g. Full service, replaced filters"
+              />
+            </div>
+
+            <div style={{ marginTop: 8 }}>
+              <label className="stk-btn" style={{ ...S.reqActionBtnMuted, cursor: "pointer" }}>
+                <Paperclip size={13} /> {serviceNowFile ? serviceNowFile.name : "Attach document (optional)"}
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  style={{ display: "none" }}
+                  onChange={(e) => setServiceNowFile(e.target.files[0] || null)}
+                />
+              </label>
+            </div>
+
+            <button type="submit" className="stk-btn" style={S.submitBtn} disabled={serviceNowBusy}>
+              {serviceNowBusy ? "Saving…" : "Mark serviced"}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {repairListItem && (
+        <div style={S.modalOverlay}>
+          <div style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Repair list — {repairListItem.name}</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeRepairList}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={S.roleHint}>Small problems to come back to later — not urgent enough to stop using it now.</div>
+
+            {canEditQty("assets") && (
+              <form onSubmit={submitRepairEntry} style={{ marginTop: 10, display: "flex", gap: 8 }}>
+                <input
+                  style={{ ...S.input, flex: 1 }}
+                  value={repairListDescription}
+                  onChange={(e) => setRepairListDescription(e.target.value)}
+                  placeholder="e.g. Guard is loose, needs a new bolt"
+                />
+                <button type="submit" className="stk-btn" style={S.addBtn} disabled={repairListBusy || !repairListDescription.trim()}>
+                  <Plus size={15} strokeWidth={2.5} />
+                </button>
+              </form>
+            )}
+
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 8 }}>
+              {repairListEntries === null && <div style={S.empty}>Loading…</div>}
+              {repairListEntries?.filter((e) => e.status === "open").length === 0 && repairListEntries !== null && (
+                <div style={S.empty}>Nothing outstanding.</div>
+              )}
+              {repairListEntries?.filter((e) => e.status === "open").map((entry) => (
+                <div key={entry.id} style={S.reqCard}>
+                  <div style={S.reqCardTop}>
+                    <span style={S.itemName}>{entry.description}</span>
+                    {isAdmin && (
+                      <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => deleteRepairEntry(entry)}>
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                  <div className="stk-meta-row" style={S.rowMeta}>
+                    <span>{entry.logged_by}</span>
+                    <span>{new Date(entry.created_at).toLocaleString()}</span>
+                  </div>
+                  {canEditQty("assets") && (
+                    <button type="button" className="stk-btn" style={{ ...S.reqActionBtn, marginTop: 6 }} onClick={() => resolveRepairEntry(entry)}>
+                      <Check size={13} /> Mark fixed
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {repairListEntries?.some((e) => e.status === "resolved") && (
+              <div style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={S.reqActionBtnMuted}
+                  onClick={() => setRepairListResolvedOpen((v) => !v)}
+                >
+                  {repairListResolvedOpen ? "Hide" : "Show"} fixed ({repairListEntries.filter((e) => e.status === "resolved").length})
+                </button>
+                {repairListResolvedOpen && (
+                  <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                    {repairListEntries.filter((e) => e.status === "resolved").map((entry) => (
+                      <div key={entry.id} style={{ ...S.reqCard, opacity: 0.7 }}>
+                        <div style={S.reqCardTop}>
+                          <span style={S.itemName}>{entry.description}</span>
+                          {isAdmin && (
+                            <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => deleteRepairEntry(entry)}>
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                        <div className="stk-meta-row" style={S.rowMeta}>
+                          <span>Fixed by {entry.resolved_by}</span>
+                          <span>{new Date(entry.resolved_at).toLocaleString()}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
