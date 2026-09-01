@@ -207,7 +207,12 @@ async function loadMasterFromTables() {
   for (const listName of MASTER_FACTOR_LISTS) {
     result[listName] = (factorItems.data || [])
       .filter((r) => r.list_name === listName)
-      .map((r) => (r.type != null ? { name: r.name, factor: Number(r.factor), price: Number(r.price), type: r.type } : { name: r.name, factor: Number(r.factor), price: Number(r.price) }));
+      .map((r) => {
+        const entry = { name: r.name, factor: Number(r.factor), price: Number(r.price) };
+        if (r.type != null) entry.type = r.type;
+        if (r.short_name) entry.shortName = r.short_name;
+        return entry;
+      });
   }
 
   const contactsBySupplier = {};
@@ -1297,7 +1302,7 @@ export default function StockControl() {
       const modified = nextList.filter((e) => prevByName.has(e.name) && JSON.stringify(prevByName.get(e.name)) !== JSON.stringify(e));
       if (added.length) {
         ops.push(
-          supabase.from("master_factor_items").insert(added.map((e) => ({ id: uid(), list_name: listName, name: e.name, factor: e.factor || 0, price: e.price || 0, type: e.type ?? null })))
+          supabase.from("master_factor_items").insert(added.map((e) => ({ id: uid(), list_name: listName, name: e.name, factor: e.factor || 0, price: e.price || 0, type: e.type ?? null, short_name: e.shortName || null })))
         );
       }
       if (removedNames.length) {
@@ -1305,7 +1310,7 @@ export default function StockControl() {
       }
       for (const e of modified) {
         ops.push(
-          supabase.from("master_factor_items").update({ factor: e.factor || 0, price: e.price || 0, type: e.type ?? null }).eq("list_name", listName).eq("name", e.name)
+          supabase.from("master_factor_items").update({ factor: e.factor || 0, price: e.price || 0, type: e.type ?? null, short_name: e.shortName || null }).eq("list_name", listName).eq("name", e.name)
         );
       }
     }
