@@ -8943,7 +8943,7 @@ export default function StockControl() {
                       key={mfr}
                       type="button"
                       className="stk-btn"
-                      style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                      style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
                       onClick={() => setAssetManufacturerOpen(mfr)}
                     >
                       <span style={S.itemName}>{mfr}</span>
@@ -10637,7 +10637,7 @@ export default function StockControl() {
                         key={cust}
                         type="button"
                         className="stk-btn"
-                        style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                        style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
                         onClick={() => setManagerCustomerOpen(cust)}
                       >
                         <span style={S.itemName}>{cust}</span>
@@ -10747,7 +10747,7 @@ export default function StockControl() {
                         key={s.id}
                         type="button"
                         className="stk-btn"
-                        style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}
+                        style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", flexDirection: "row", alignItems: "center", gap: 10 }}
                         onClick={() => setManagerSupplierOpen(s.id)}
                       >
                         {s.logo ? (
@@ -11172,7 +11172,7 @@ export default function StockControl() {
                         key={groupName}
                         type="button"
                         className="stk-btn"
-                        style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                        style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
                         onClick={() => setSectionTypeFilterInManager(groupName)}
                       >
                         <span style={S.itemName}>{groupName}</span>
