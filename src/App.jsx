@@ -5,7 +5,7 @@ import autoTable from "jspdf-autotable";
 import { supabase } from "./lib/supabaseClient.js";
 import {
   Plus, Minus, Search, Trash2, PackagePlus, AlertTriangle, X,
-  ChevronDown, ChevronRight, User, UserCheck, ShieldCheck, Lock, Database, Truck,
+  ChevronDown, ChevronRight, ChevronLeft, User, UserCheck, ShieldCheck, Lock, Database, Truck,
   Download, Pencil, Copy, Filter as FilterIcon, Paperclip, FileText, Image as ImageIcon,
   Wrench, Users, Eye, EyeOff, ShoppingCart, ClipboardList, Check, Package, Upload, RefreshCw,
 } from "lucide-react";
@@ -152,6 +152,34 @@ const MASTER_STRING_LISTS = [
 const MASTER_FACTOR_LISTS = ["sections", "grades", "cncGrades"];
 const MASTER_COUNTERS = ["nextJobNumber", "nextDeliveryNoteNumber", "nextFastenerNumber", "nextToolNumber", "nextPoNumber"];
 const EMPTY_COMPANY_DETAILS = { name: "", address: "", phone: "", email: "", vatNumber: "", regNumber: "" };
+
+// Supabase (via PostgREST) silently caps any plain .select() at 1000 rows
+// — no error, just a truncated result — unless the query explicitly pages
+// through with .range(). This shop's stock_items table alone already
+// holds over 1000 rows, so an unpaginated select was quietly dropping
+// everything past that cutoff on every single load — which is exactly
+// what made specific categories (structural, stores) appear to vanish
+// entirely: they simply never made it into the fetch to begin with.
+// Every table here that can plausibly grow past 1000 rows over time uses
+// this helper instead of a bare .select(), so this can't recur elsewhere
+// as any of them grow. Requires a stable sort column (defaults to "id")
+// — .range() pagination isn't reliable page-to-page without one, since
+// Postgres doesn't otherwise guarantee the same row order twice.
+async function fetchAllRows(table, { select = "*", orderBy = "id", ascending = true, filter = null } = {}) {
+  const pageSize = 1000;
+  let allRows = [];
+  let from = 0;
+  while (true) {
+    let q = supabase.from(table).select(select).order(orderBy, { ascending }).range(from, from + pageSize - 1);
+    if (filter) q = filter(q);
+    const { data, error } = await q;
+    if (error) throw error;
+    allRows = allRows.concat(data || []);
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return allRows;
+}
 
 // master lives across 8 real tables now, grouped by shape rather than one
 // table per field — this is the only place that needs to know that. Once
@@ -750,6 +778,12 @@ export default function StockControl() {
   const [jobsCompletedSectionOpen, setJobsCompletedSectionOpen] = useState(false);
   const [shortagesResolvedOpen, setShortagesResolvedOpen] = useState(false);
   const [productionSelectedDept, setProductionSelectedDept] = useState(null);
+  // Which specific job card is open within the current department — null
+  // shows the compact list (job number, SigmaNest number, customer, sales
+  // rep only); selecting a card opens that one job's full management view
+  // in its own right. This is a pattern to reuse across other tabs going
+  // forward too, not just here.
+  const [productionSelectedProcessId, setProductionSelectedProcessId] = useState(null);
   const [personExpanded, setPersonExpanded] = useState({});
   const [productionSearchQuery, setProductionSearchQuery] = useState("");
   const [shortageModal, setShortageModal] = useState(null);
@@ -940,8 +974,7 @@ export default function StockControl() {
     // haven't flushed yet by the time this function returns — a caller
     // checking loadError immediately after awaiting this would race it.
     try {
-      const { data: itemRows, error: itemsError } = await supabase.from("stock_items").select("*");
-      if (itemsError) throw itemsError;
+      const itemRows = await fetchAllRows("stock_items");
       if (itemRows && itemRows.length > 0) {
         loadedItems = itemRows.map(dbRowToItem);
         // Migration: Tools used to live in Stores as a "storesKind" — they
@@ -1003,8 +1036,7 @@ export default function StockControl() {
       }
     }
     try {
-      const { data: reqRows, error: reqError } = await supabase.from("requisitions").select("*");
-      if (reqError) throw reqError;
+      const reqRows = await fetchAllRows("requisitions");
       const loadedReqs = (reqRows || []).map(dbRowToRequisition);
       setRequisitions(loadedReqs);
       lastSavedRequisitionsRef.current = loadedReqs;
@@ -1017,8 +1049,7 @@ export default function StockControl() {
       }
     }
     try {
-      const { data: poRows, error: poError } = await supabase.from("purchase_orders").select("*");
-      if (poError) throw poError;
+      const poRows = await fetchAllRows("purchase_orders");
       const loadedPos = (poRows || []).map(dbRowToPo);
       setPurchaseOrders(loadedPos);
       lastSavedPurchaseOrdersRef.current = loadedPos;
@@ -1031,8 +1062,7 @@ export default function StockControl() {
       }
     }
     try {
-      const { data: usageRows, error: usageError } = await supabase.from("usage_log").select("*");
-      if (usageError) throw usageError;
+      const usageRows = await fetchAllRows("usage_log");
       const loadedUsage = (usageRows || []).map(dbRowToUsageLogEntry);
       setUsageLog(loadedUsage);
       lastSavedUsageLogRef.current = loadedUsage;
@@ -1548,7 +1578,8 @@ export default function StockControl() {
   const anyModalOpen = !!(
     usageModal || assetRemoveModal || shortageModal || jobDetail || newStockItemModal ||
     markInvoicedModal || deliveryNoteBatchModal || copyJobModal || previewItem ||
-    showAddStockItemModal || showStockImportModal || editProcessesModal || productionSelectedDept
+    showAddStockItemModal || showStockImportModal || editProcessesModal || productionSelectedDept ||
+    productionSelectedProcessId
   );
   const modalWasOpenRef = useRef(false);
   const closingViaBackRef = useRef(false);
@@ -1567,6 +1598,7 @@ export default function StockControl() {
     setShowStockImportModal(false);
     setEditProcessesModal(null);
     setProductionSelectedDept(null);
+    setProductionSelectedProcessId(null);
   }
 
   useEffect(() => {
@@ -1913,34 +1945,34 @@ export default function StockControl() {
     // exactly why it could keep working while this combined fetch was
     // failing as a whole and silently showing nothing.
     const [jobsResult, invReqResult, quoteItemsResult, deliveryNotesResult] = await Promise.allSettled([
-      supabase.from("jobs").select("*").order("created_at", { ascending: false }),
-      supabase.from("job_invoice_requests").select("*").order("submitted_at", { ascending: false }),
-      supabase.from("job_quote_items").select("id, job_id, item_status, qty, qty_invoiced"),
-      supabase.from("delivery_notes").select("*").order("delivery_note_number", { ascending: false }),
+      fetchAllRows("jobs", { orderBy: "created_at", ascending: false }),
+      fetchAllRows("job_invoice_requests", { orderBy: "submitted_at", ascending: false }),
+      fetchAllRows("job_quote_items", { select: "id, job_id, item_status, qty, qty_invoiced" }),
+      fetchAllRows("delivery_notes", { orderBy: "delivery_note_number", ascending: false }),
     ]);
 
-    if (jobsResult.status === "fulfilled" && !jobsResult.value.error) {
-      setJobsList(jobsResult.value.data || []);
+    if (jobsResult.status === "fulfilled") {
+      setJobsList(jobsResult.value || []);
     } else {
-      console.error("Failed to load jobs:", jobsResult.status === "fulfilled" ? jobsResult.value.error : jobsResult.reason);
+      console.error("Failed to load jobs:", jobsResult.reason);
       setJobsList([]);
     }
-    if (invReqResult.status === "fulfilled" && !invReqResult.value.error) {
-      setJobInvoiceRequests(invReqResult.value.data || []);
+    if (invReqResult.status === "fulfilled") {
+      setJobInvoiceRequests(invReqResult.value || []);
     } else {
-      console.error("Failed to load invoice requests:", invReqResult.status === "fulfilled" ? invReqResult.value.error : invReqResult.reason);
+      console.error("Failed to load invoice requests:", invReqResult.reason);
       setJobInvoiceRequests([]);
     }
-    if (quoteItemsResult.status === "fulfilled" && !quoteItemsResult.value.error) {
-      setAllJobQuoteItems(quoteItemsResult.value.data || []);
+    if (quoteItemsResult.status === "fulfilled") {
+      setAllJobQuoteItems(quoteItemsResult.value || []);
     } else {
-      console.error("Failed to load quote items:", quoteItemsResult.status === "fulfilled" ? quoteItemsResult.value.error : quoteItemsResult.reason);
+      console.error("Failed to load quote items:", quoteItemsResult.reason);
       setAllJobQuoteItems([]);
     }
-    if (deliveryNotesResult.status === "fulfilled" && !deliveryNotesResult.value.error) {
-      setAllDeliveryNotes(deliveryNotesResult.value.data || []);
+    if (deliveryNotesResult.status === "fulfilled") {
+      setAllDeliveryNotes(deliveryNotesResult.value || []);
     } else {
-      console.error("Failed to load delivery notes:", deliveryNotesResult.status === "fulfilled" ? deliveryNotesResult.value.error : deliveryNotesResult.reason);
+      console.error("Failed to load delivery notes:", deliveryNotesResult.reason);
       setAllDeliveryNotes([]);
     }
     setJobsLoading(false);
@@ -2403,8 +2435,7 @@ export default function StockControl() {
   async function fetchGeneratedDocuments() {
     if (!supabase) return;
     try {
-      const { data, error } = await supabase.from("generated_documents").select("*").order("generated_at", { ascending: false });
-      if (error) throw error;
+      const data = await fetchAllRows("generated_documents", { orderBy: "generated_at", ascending: false });
       setGeneratedDocuments(data || []);
     } catch (err) {
       console.error("Failed to load generated documents:", err);
@@ -7179,7 +7210,10 @@ export default function StockControl() {
                     type="button"
                     className="stk-btn"
                     style={S.productionDeptCard}
-                    onClick={() => setProductionSelectedDept(procType)}
+                    onClick={() => {
+                      setProductionSelectedDept(procType);
+                      setProductionSelectedProcessId(null);
+                    }}
                   >
                     {hasPendingShortage && (
                       <span style={{ width: 10, height: 10, borderRadius: "50%", background: C.danger, flexShrink: 0 }} title="Shortage needs attention" />
@@ -7197,10 +7231,13 @@ export default function StockControl() {
             <button
               type="button"
               className="stk-btn"
-              style={{ ...S.reqActionBtnMuted, marginBottom: 10 }}
-              onClick={() => setProductionSelectedDept(null)}
+              style={{ ...S.prominentBackBtn, marginBottom: 10 }}
+              onClick={() => {
+                setProductionSelectedDept(null);
+                setProductionSelectedProcessId(null);
+              }}
             >
-              <ChevronDown size={14} style={{ transform: "rotate(90deg)" }} /> All departments
+              <ChevronLeft size={18} strokeWidth={2.5} /> All departments
             </button>
             <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 10 }}>{productionSelectedDept}</div>
             <input
@@ -7268,128 +7305,186 @@ export default function StockControl() {
                       );
                     })()}
                   {entries.length === 0 && <div style={S.empty}>Nothing outstanding for {procType}.</div>}
-                  {entries.map(({ job, process, isReady, quoteItems, documents, itemProgress }) => {
-                    const drawingsForJob = quoteItems
-                      .map((it) => {
-                        const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
-                        const drawing = linkedItem?.partNumber ? drawingLookup[linkedItem.partNumber.trim()] : null;
-                        return drawing ? { description: it.description, partNumber: linkedItem.partNumber, drawing } : null;
-                      })
-                      .filter(Boolean);
-                    const totalQty = quoteItems.reduce((sum, it) => sum + Number(it.qty || 0), 0);
-                    return (
-                      <div key={process.id} style={S.reqCard}>
-                        <div style={S.reqCardTop}>
-                          <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
-                          <span style={{ ...S.reqStatusTag, ...(isReady ? S.reqStatus_received : S.reqStatus_ordered) }}>
-                            {isReady ? "Ready" : "Waiting"}
-                          </span>
-                        </div>
-                        {process.process_name === "Nesting" && (
-                          <div style={{ marginBottom: 4 }}>
-                            <label style={S.label}>SigmaNest job number</label>
-                            <input
-                              style={{ ...S.input, marginTop: 4 }}
-                              defaultValue={job.laser_job_reference || ""}
-                              placeholder="Not filled in yet"
-                              onBlur={(e) => {
-                                if (e.target.value !== (job.laser_job_reference || "")) saveJobSigmaNestNumber(job, e.target.value.trim());
-                              }}
-                            />
+                  {productionSelectedProcessId ? (
+                    (() => {
+                      const selected = allEntries.find(({ process }) => process.id === productionSelectedProcessId);
+                      if (!selected) {
+                        // The job this was pointing at is no longer in the
+                        // queue (completed, reassigned elsewhere, etc.) —
+                        // always leave a way back rather than a dead end.
+                        return (
+                          <div>
+                            <button
+                              type="button"
+                              className="stk-btn"
+                              style={{ ...S.prominentBackBtn, marginBottom: 10 }}
+                              onClick={() => setProductionSelectedProcessId(null)}
+                            >
+                              <ChevronLeft size={18} strokeWidth={2.5} /> Back to {procType} list
+                            </button>
+                            <div style={S.empty}>This job isn't in the queue anymore.</div>
                           </div>
-                        )}
-                        {job.description && <div style={S.roleHint}>{job.description}</div>}
-                        <div className="stk-meta-row" style={S.rowMeta}>
-                          {process.operator && <span>Assigned: {process.operator}</span>}
-                          {totalQty > 0 && <span>Qty: {totalQty}</span>}
-                          {job.laser_job_reference && <span>SigmaNest: {job.laser_job_reference}</span>}
-                          {job.due_date && <span>Due {new Date(job.due_date).toLocaleDateString()}</span>}
-                          {process.is_urgent && <span style={{ color: C.danger, fontWeight: 600 }}>Urgent</span>}
-                        </div>
-                        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                          <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => toggleProcessUrgent(process)}>
-                            {process.is_urgent ? "Unmark urgent" : "Mark urgent"}
+                        );
+                      }
+                      const { job, process, isReady, quoteItems, documents, itemProgress } = selected;
+                      const drawingsForJob = quoteItems
+                        .map((it) => {
+                          const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
+                          const drawing = linkedItem?.partNumber ? drawingLookup[linkedItem.partNumber.trim()] : null;
+                          return drawing ? { description: it.description, partNumber: linkedItem.partNumber, drawing } : null;
+                        })
+                        .filter(Boolean);
+                      const totalQty = quoteItems.reduce((sum, it) => sum + Number(it.qty || 0), 0);
+                      return (
+                        <div>
+                          <button
+                            type="button"
+                            className="stk-btn"
+                            style={{ ...S.prominentBackBtn, marginBottom: 10 }}
+                            onClick={() => setProductionSelectedProcessId(null)}
+                          >
+                            <ChevronLeft size={18} strokeWidth={2.5} /> Back to {procType} list
                           </button>
-                          <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => openShortageFlagModal(job, process)}>
-                            Flag shortage
-                          </button>
-                        </div>
-                        <div style={{ marginTop: 6 }}>
-                          {process.tracking_mode === "each" ? (
-                            <QtyProgressControl
-                              process={process}
-                              job={job}
-                              quoteItems={quoteItems}
-                              itemProgress={itemProgress}
-                              isReady={isReady}
-                              onSubmit={submitProcessItemProgress}
-                            />
-                          ) : (
-                            <label style={{ ...S.checkRow, fontWeight: 600 }}>
-                              <input
-                                type="checkbox"
-                                checked={process.is_complete}
-                                disabled={!isReady}
-                                onChange={() => toggleJobProcessComplete(process, job)}
-                              />
-                              Complete
-                            </label>
-                          )}
-                        </div>
-                        {drawingsForJob.length > 0 && canView("drawings") && (
-                          <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
-                            <label style={S.label}>Drawings</label>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
-                              {drawingsForJob.map((d, idx) => (
-                                <button
-                                  key={idx}
-                                  type="button"
-                                  className="stk-btn"
-                                  style={S.reqActionBtnMuted}
-                                  onClick={() => openDrawingPreviewByPartNumber(d.partNumber)}
-                                >
-                                  <FileText size={12} /> {d.description}
-                                </button>
-                              ))}
+                          <div style={S.reqCard}>
+                            <div style={S.reqCardTop}>
+                              <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
+                              <span style={{ ...S.reqStatusTag, ...(isReady ? S.reqStatus_received : S.reqStatus_ordered) }}>
+                                {isReady ? "Ready" : "Waiting"}
+                              </span>
                             </div>
-                          </div>
-                        )}
-                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
-                          <ExpandableProcessNotes value={process.notes} onCommit={(notes) => saveProcessNote(process, notes)} />
-                        </div>
-                        {process.process_name === "Nesting" && (
-                          <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
-                            <label style={S.label}>Nesting document</label>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
-                              {documents.map((doc) => (
-                                <button
-                                  key={doc.id}
-                                  type="button"
-                                  className="stk-btn"
-                                  style={S.reqActionBtnMuted}
-                                  onClick={() => viewJobDocument(doc)}
-                                >
-                                  <FileText size={12} /> {doc.file_name}
-                                </button>
-                              ))}
-                              <label style={{ ...S.reqActionBtnMuted, display: "inline-flex", cursor: "pointer", width: "fit-content" }}>
-                                <Upload size={12} /> Upload document
+                            {process.process_name === "Nesting" && (
+                              <div style={{ marginBottom: 4 }}>
+                                <label style={S.label}>SigmaNest job number</label>
                                 <input
-                                  type="file"
-                                  style={{ display: "none" }}
-                                  onChange={(e) => {
-                                    const file = e.target.files[0];
-                                    if (file) uploadJobDocument(job.id, file, "Nesting");
-                                    e.target.value = "";
+                                  style={{ ...S.input, marginTop: 4 }}
+                                  defaultValue={job.laser_job_reference || ""}
+                                  placeholder="Not filled in yet"
+                                  onBlur={(e) => {
+                                    if (e.target.value !== (job.laser_job_reference || "")) saveJobSigmaNestNumber(job, e.target.value.trim());
                                   }}
                                 />
-                              </label>
+                              </div>
+                            )}
+                            {job.description && <div style={S.roleHint}>{job.description}</div>}
+                            <div className="stk-meta-row" style={S.rowMeta}>
+                              {process.operator && <span>Assigned: {process.operator}</span>}
+                              {totalQty > 0 && <span>Qty: {totalQty}</span>}
+                              {job.laser_job_reference && <span>SigmaNest: {job.laser_job_reference}</span>}
+                              {job.due_date && <span>Due {new Date(job.due_date).toLocaleDateString()}</span>}
+                              {process.is_urgent && <span style={{ color: C.danger, fontWeight: 600 }}>Urgent</span>}
                             </div>
+                            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                              <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => toggleProcessUrgent(process)}>
+                                {process.is_urgent ? "Unmark urgent" : "Mark urgent"}
+                              </button>
+                              <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => openShortageFlagModal(job, process)}>
+                                Flag shortage
+                              </button>
+                            </div>
+                            <div style={{ marginTop: 6 }}>
+                              {process.tracking_mode === "each" ? (
+                                <QtyProgressControl
+                                  process={process}
+                                  job={job}
+                                  quoteItems={quoteItems}
+                                  itemProgress={itemProgress}
+                                  isReady={isReady}
+                                  onSubmit={submitProcessItemProgress}
+                                />
+                              ) : (
+                                <label style={{ ...S.checkRow, fontWeight: 600 }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={process.is_complete}
+                                    disabled={!isReady}
+                                    onChange={() => toggleJobProcessComplete(process, job)}
+                                  />
+                                  Complete
+                                </label>
+                              )}
+                            </div>
+                            {drawingsForJob.length > 0 && canView("drawings") && (
+                              <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
+                                <label style={S.label}>Drawings</label>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+                                  {drawingsForJob.map((d, idx) => (
+                                    <button
+                                      key={idx}
+                                      type="button"
+                                      className="stk-btn"
+                                      style={S.reqActionBtnMuted}
+                                      onClick={() => openDrawingPreviewByPartNumber(d.partNumber)}
+                                    >
+                                      <FileText size={12} /> {d.description}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
+                              <ExpandableProcessNotes value={process.notes} onCommit={(notes) => saveProcessNote(process, notes)} />
+                            </div>
+                            {process.process_name === "Nesting" && (
+                              <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
+                                <label style={S.label}>Nesting document</label>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+                                  {documents.map((doc) => (
+                                    <button
+                                      key={doc.id}
+                                      type="button"
+                                      className="stk-btn"
+                                      style={S.reqActionBtnMuted}
+                                      onClick={() => viewJobDocument(doc)}
+                                    >
+                                      <FileText size={12} /> {doc.file_name}
+                                    </button>
+                                  ))}
+                                  <label style={{ ...S.reqActionBtnMuted, display: "inline-flex", cursor: "pointer", width: "fit-content" }}>
+                                    <Upload size={12} /> Upload document
+                                    <input
+                                      type="file"
+                                      style={{ display: "none" }}
+                                      onChange={(e) => {
+                                        const file = e.target.files[0];
+                                        if (file) uploadJobDocument(job.id, file, "Nesting");
+                                        e.target.value = "";
+                                      }}
+                                    />
+                                  </label>
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    entries.map(({ job, process, isReady, quoteItems }) => {
+                      const totalQty = quoteItems.reduce((sum, it) => sum + Number(it.qty || 0), 0);
+                      return (
+                        <button
+                          key={process.id}
+                          type="button"
+                          className="stk-btn"
+                          style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer" }}
+                          onClick={() => setProductionSelectedProcessId(process.id)}
+                        >
+                          <div style={S.reqCardTop}>
+                            <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
+                            <span style={{ ...S.reqStatusTag, ...(isReady ? S.reqStatus_received : S.reqStatus_ordered) }}>
+                              {isReady ? "Ready" : "Waiting"}
+                            </span>
+                          </div>
+                          <div className="stk-meta-row" style={S.rowMeta}>
+                            {job.sales_rep && <span>Sales: {job.sales_rep}</span>}
+                            {job.laser_job_reference && <span>SigmaNest: {job.laser_job_reference}</span>}
+                            {totalQty > 0 && <span>Qty: {totalQty}</span>}
+                            {process.is_urgent && <span style={{ color: C.danger, fontWeight: 600 }}>Urgent</span>}
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
                 </div>
               );
             })()}
@@ -13733,6 +13828,22 @@ const S = {
     borderRadius: 6,
     padding: "6px 10px",
     fontSize: 13.5,
+    cursor: "pointer",
+  },
+  // Deliberately louder than reqActionBtnMuted — a plain, low-contrast
+  // back control was easy to miss, especially on a phone screen. Solid
+  // border, bold text, larger touch target.
+  prominentBackBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    background: C.bg,
+    color: C.text,
+    border: `2px solid ${C.text}`,
+    borderRadius: 8,
+    padding: "10px 14px",
+    fontSize: 14.5,
+    fontWeight: 700,
     cursor: "pointer",
   },
   deptCard: {
