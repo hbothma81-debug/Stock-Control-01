@@ -851,6 +851,11 @@ export default function StockControl() {
   // deliberately unfiltered by quantity, unlike the tab list.
   const [showRequisitionPicker, setShowRequisitionPicker] = useState(false);
   const [requisitionPickerQuery, setRequisitionPickerQuery] = useState("");
+  // Which customer/supplier is currently open in its own detail view within
+  // Stock Manager — null shows the plain list of names, matching the same
+  // list-then-detail pattern used for Sections and Production.
+  const [managerCustomerOpen, setManagerCustomerOpen] = useState(null);
+  const [managerSupplierOpen, setManagerSupplierOpen] = useState(null);
   const [showArchive, setShowArchive] = useState(false);
   const [showLowStock, setShowLowStock] = useState(false);
   const [archiveTypeFilter, setArchiveTypeFilter] = useState("");
@@ -9821,7 +9826,7 @@ export default function StockControl() {
             )}
 
             {!managerTab ? (
-              <div style={S.managerList}>
+              <div style={S.managerListFullPage}>
                 {MANAGER_TABS.filter((t) => t.key !== "departments" || isAdmin).map((t) => (
                   <button
                     key={t.key}
@@ -9834,6 +9839,8 @@ export default function StockControl() {
                       setManagerFactor("");
                       setManagerSearchQuery("");
                       setSectionTypeFilterInManager("");
+                      setManagerCustomerOpen(null);
+                      setManagerSupplierOpen(null);
                     }}
                   >
                     <span>{t.label}</span>
@@ -9887,7 +9894,7 @@ export default function StockControl() {
                   )}
                 </div>
 
-                <div style={S.managerList}>
+                <div style={S.managerListFullPage}>
                   {(items || [])
                     .filter((it) => it.mainCat === "custom")
                     .filter((it) => ((it.partNumber || "") + " " + (it.name || "")).toLowerCase().includes(stockCodeQuery.toLowerCase()))
@@ -10052,7 +10059,7 @@ export default function StockControl() {
                   </select>
                 </div>
 
-                <div style={S.managerList}>
+                <div style={S.managerListFullPage}>
                   {Object.entries(
                     (master.storesCatalog || [])
                       .filter((r) => (r.name + " " + r.category).toLowerCase().includes(storesCatalogQuery.toLowerCase()))
@@ -10125,95 +10132,139 @@ export default function StockControl() {
                 </div>
               </>
             ) : managerTab === "customers" ? (
-              <>
-                <div style={{ ...S.managerAddRow, marginTop: 10 }}>
-                  <input
-                    style={{ ...S.input, flex: 1 }}
-                    value={managerInput}
-                    onChange={(e) => setManagerInput(e.target.value)}
-                    placeholder="New customer name…"
-                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addMasterEntry())}
-                  />
-                  <button type="button" className="stk-btn" style={S.addBtn} onClick={addMasterEntry}>
-                    <Plus size={15} strokeWidth={2.5} /> Add
+              !managerCustomerOpen ? (
+                <>
+                  <div style={{ ...S.managerAddRow, marginTop: 10 }}>
+                    <input
+                      style={{ ...S.input, flex: 1 }}
+                      value={managerInput}
+                      onChange={(e) => setManagerInput(e.target.value)}
+                      placeholder="New customer name…"
+                      onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addMasterEntry())}
+                    />
+                    <button type="button" className="stk-btn" style={S.addBtn} onClick={addMasterEntry}>
+                      <Plus size={15} strokeWidth={2.5} /> Add
+                    </button>
+                  </div>
+                  <div style={S.managerListFullPage}>
+                    {master.customers.map((cust) => (
+                      <button
+                        key={cust}
+                        type="button"
+                        className="stk-btn"
+                        style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                        onClick={() => setManagerCustomerOpen(cust)}
+                      >
+                        <span style={S.itemName}>{cust}</span>
+                        <span style={S.gradeCount}>{(master.customerContacts?.[cust] || []).length}</span>
+                      </button>
+                    ))}
+                    {master.customers.length === 0 && <div style={S.empty}>No customers yet — add one above.</div>}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="stk-btn"
+                    style={{ ...S.prominentBackBtn, marginBottom: 10 }}
+                    onClick={() => setManagerCustomerOpen(null)}
+                  >
+                    <ChevronLeft size={18} strokeWidth={2.5} /> Back to Customers
                   </button>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
-                  {master.customers.map((cust) => (
-                    <div key={cust} style={S.deptCard}>
-                      <div style={S.deptCardHead}>
-                        <EditableName value={cust} onCommit={(v) => renameMasterEntry("customers", cust, v)} style={{ fontWeight: 600, fontSize: 15 }} />
-                        <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeMasterEntry(cust)}>
-                          <Trash2 size={13} />
+                  <div style={S.deptCard}>
+                    <div style={S.deptCardHead}>
+                      <EditableName
+                        value={managerCustomerOpen}
+                        onCommit={(v) => {
+                          renameMasterEntry("customers", managerCustomerOpen, v);
+                          setManagerCustomerOpen(v);
+                        }}
+                        style={{ fontWeight: 600, fontSize: 15 }}
+                      />
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={S.managerDelete}
+                        onClick={() => {
+                          removeMasterEntry(managerCustomerOpen);
+                          setManagerCustomerOpen(null);
+                        }}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                    <div style={{ marginTop: 4 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <label style={S.label}>Contact people</label>
+                        <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => addCustomerContact(managerCustomerOpen)}>
+                          <Plus size={12} /> Add contact
                         </button>
                       </div>
-                      <div style={{ marginTop: 4 }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                          <label style={S.label}>Contact people</label>
-                          <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => addCustomerContact(cust)}>
-                            <Plus size={12} /> Add contact
-                          </button>
-                        </div>
-                        {(master.customerContacts?.[cust] || []).map((c) => (
-                          <div key={c.id} style={{ marginTop: 6 }}>
+                      {(master.customerContacts?.[managerCustomerOpen] || []).map((c) => (
+                        <div key={c.id} style={{ marginTop: 6 }}>
+                          <input
+                            style={S.input}
+                            value={c.name}
+                            onChange={(e) => updateCustomerContact(managerCustomerOpen, c.id, "name", e.target.value)}
+                            placeholder="Contact name"
+                          />
+                          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
                             <input
-                              style={S.input}
-                              value={c.name}
-                              onChange={(e) => updateCustomerContact(cust, c.id, "name", e.target.value)}
-                              placeholder="Contact name"
+                              style={{ ...S.input, flex: 1 }}
+                              type="email"
+                              value={c.email}
+                              onChange={(e) => updateCustomerContact(managerCustomerOpen, c.id, "email", e.target.value)}
+                              placeholder="Email"
                             />
-                            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                              <input
-                                style={{ ...S.input, flex: 1 }}
-                                type="email"
-                                value={c.email}
-                                onChange={(e) => updateCustomerContact(cust, c.id, "email", e.target.value)}
-                                placeholder="Email"
-                              />
-                              <input
-                                style={{ ...S.input, flex: 1 }}
-                                type="tel"
-                                value={c.phone || ""}
-                                onChange={(e) => updateCustomerContact(cust, c.id, "phone", e.target.value)}
-                                placeholder="Phone"
-                              />
-                              <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeCustomerContact(cust, c.id)}>
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
+                            <input
+                              style={{ ...S.input, flex: 1 }}
+                              type="tel"
+                              value={c.phone || ""}
+                              onChange={(e) => updateCustomerContact(managerCustomerOpen, c.id, "phone", e.target.value)}
+                              placeholder="Phone"
+                            />
+                            <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeCustomerContact(managerCustomerOpen, c.id)}>
+                              <Trash2 size={13} />
+                            </button>
                           </div>
-                        ))}
-                        {(!master.customerContacts?.[cust] || master.customerContacts[cust].length === 0) && (
-                          <div style={{ ...S.roleHint, marginTop: 4 }}>No contacts added yet.</div>
-                        )}
-                      </div>
+                        </div>
+                      ))}
+                      {(!master.customerContacts?.[managerCustomerOpen] || master.customerContacts[managerCustomerOpen].length === 0) && (
+                        <div style={{ ...S.roleHint, marginTop: 4 }}>No contacts added yet.</div>
+                      )}
                     </div>
-                  ))}
-                  {master.customers.length === 0 && <div style={S.empty}>No customers yet — add one above.</div>}
-                </div>
-              </>
+                  </div>
+                </>
+              )
             ) : managerTab === "suppliers" ? (
-              <>
-                <div style={S.roleHint}>
-                  Add a logo and contact details for any supplier you'll be raising Purchase Orders to — these appear on the
-                  PO document. Suppliers with no email or logo still work fine everywhere else in the app.
-                </div>
-                <div style={{ ...S.managerAddRow, marginTop: 10 }}>
-                  <input
-                    style={{ ...S.input, flex: 1 }}
-                    value={newSupplierName}
-                    onChange={(e) => setNewSupplierName(e.target.value)}
-                    placeholder="New supplier name…"
-                  />
-                  <button type="button" className="stk-btn" style={S.addBtn} onClick={addSupplierRow}>
-                    <Plus size={15} strokeWidth={2.5} />
-                    Add
-                  </button>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
-                  {master.suppliers.map((s) => (
-                    <div key={s.id} style={S.deptCard}>
-                      <div style={S.deptCardHead}>
+              !managerSupplierOpen ? (
+                <>
+                  <div style={S.roleHint}>
+                    Add a logo and contact details for any supplier you'll be raising Purchase Orders to — these appear on the
+                    PO document. Suppliers with no email or logo still work fine everywhere else in the app.
+                  </div>
+                  <div style={{ ...S.managerAddRow, marginTop: 10 }}>
+                    <input
+                      style={{ ...S.input, flex: 1 }}
+                      value={newSupplierName}
+                      onChange={(e) => setNewSupplierName(e.target.value)}
+                      placeholder="New supplier name…"
+                    />
+                    <button type="button" className="stk-btn" style={S.addBtn} onClick={addSupplierRow}>
+                      <Plus size={15} strokeWidth={2.5} />
+                      Add
+                    </button>
+                  </div>
+                  <div style={S.managerListFullPage}>
+                    {master.suppliers.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        className="stk-btn"
+                        style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}
+                        onClick={() => setManagerSupplierOpen(s.id)}
+                      >
                         {s.logo ? (
                           <img src={s.logo} alt="" style={S.supplierLogoPreview} />
                         ) : (
@@ -10221,78 +10272,116 @@ export default function StockControl() {
                             <ImageIcon size={16} color={C.muted} />
                           </div>
                         )}
-                        <EditableName value={s.name} onCommit={(v) => updateSupplierField(s.id, "name", v)} style={{ fontWeight: 600, fontSize: 15 }} />
-                        <label className="stk-btn" style={S.managerDelete} title="Upload logo">
-                          <Paperclip size={13} />
-                          <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleSupplierLogoSelect(s.id, e)} />
-                        </label>
-                        <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeSupplierRow(s.id)}>
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                      <div style={S.formGrid}>
-                        <input
-                          style={S.input}
-                          type="email"
-                          value={s.email}
-                          onChange={(e) => updateSupplierField(s.id, "email", e.target.value)}
-                          placeholder="Email"
-                        />
-                        <input
-                          style={S.input}
-                          value={s.phone}
-                          onChange={(e) => updateSupplierField(s.id, "phone", e.target.value)}
-                          placeholder="Phone"
-                        />
-                      </div>
-                      <input
-                        style={{ ...S.input, marginTop: 8 }}
-                        value={s.address}
-                        onChange={(e) => updateSupplierField(s.id, "address", e.target.value)}
-                        placeholder="Address"
-                      />
-                      <input
-                        style={{ ...S.input, marginTop: 8 }}
-                        value={s.vatNumber || ""}
-                        onChange={(e) => updateSupplierField(s.id, "vatNumber", e.target.value)}
-                        placeholder="VAT number (optional)"
-                      />
-                      <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                          <label style={S.label}>Contact people</label>
-                          <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => addSupplierContact(s.id)}>
-                            <Plus size={12} /> Add contact
+                        <span style={{ ...S.itemName, flex: 1 }}>{s.name}</span>
+                        <span style={S.gradeCount}>{(s.contacts || []).length}</span>
+                      </button>
+                    ))}
+                    {master.suppliers.length === 0 && <div style={S.empty}>No suppliers yet — add one above.</div>}
+                  </div>
+                </>
+              ) : (
+                (() => {
+                  const s = master.suppliers.find((x) => x.id === managerSupplierOpen);
+                  if (!s) return null;
+                  return (
+                    <>
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={{ ...S.prominentBackBtn, marginBottom: 10 }}
+                        onClick={() => setManagerSupplierOpen(null)}
+                      >
+                        <ChevronLeft size={18} strokeWidth={2.5} /> Back to Suppliers
+                      </button>
+                      <div style={S.deptCard}>
+                        <div style={S.deptCardHead}>
+                          {s.logo ? (
+                            <img src={s.logo} alt="" style={S.supplierLogoPreview} />
+                          ) : (
+                            <div style={S.supplierLogoPlaceholder}>
+                              <ImageIcon size={16} color={C.muted} />
+                            </div>
+                          )}
+                          <EditableName value={s.name} onCommit={(v) => updateSupplierField(s.id, "name", v)} style={{ fontWeight: 600, fontSize: 15 }} />
+                          <label className="stk-btn" style={S.managerDelete} title="Upload logo">
+                            <Paperclip size={13} />
+                            <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleSupplierLogoSelect(s.id, e)} />
+                          </label>
+                          <button
+                            type="button"
+                            className="stk-btn"
+                            style={S.managerDelete}
+                            onClick={() => {
+                              removeSupplierRow(s.id);
+                              setManagerSupplierOpen(null);
+                            }}
+                          >
+                            <Trash2 size={13} />
                           </button>
                         </div>
-                        {(s.contacts || []).map((c) => (
-                          <div key={c.id} style={{ ...S.formGrid, marginTop: 6 }}>
-                            <input
-                              style={S.input}
-                              value={c.name}
-                              onChange={(e) => updateSupplierContact(s.id, c.id, "name", e.target.value)}
-                              placeholder="Contact name"
-                            />
-                            <div style={{ display: "flex", gap: 6 }}>
-                              <input
-                                style={{ ...S.input, flex: 1 }}
-                                type="email"
-                                value={c.email}
-                                onChange={(e) => updateSupplierContact(s.id, c.id, "email", e.target.value)}
-                                placeholder="Email"
-                              />
-                              <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeSupplierContact(s.id, c.id)}>
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
+                        <div style={S.formGrid}>
+                          <input
+                            style={S.input}
+                            type="email"
+                            value={s.email}
+                            onChange={(e) => updateSupplierField(s.id, "email", e.target.value)}
+                            placeholder="Email"
+                          />
+                          <input
+                            style={S.input}
+                            value={s.phone}
+                            onChange={(e) => updateSupplierField(s.id, "phone", e.target.value)}
+                            placeholder="Phone"
+                          />
+                        </div>
+                        <input
+                          style={{ ...S.input, marginTop: 8 }}
+                          value={s.address}
+                          onChange={(e) => updateSupplierField(s.id, "address", e.target.value)}
+                          placeholder="Address"
+                        />
+                        <input
+                          style={{ ...S.input, marginTop: 8 }}
+                          value={s.vatNumber || ""}
+                          onChange={(e) => updateSupplierField(s.id, "vatNumber", e.target.value)}
+                          placeholder="VAT number (optional)"
+                        />
+                        <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                            <label style={S.label}>Contact people</label>
+                            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => addSupplierContact(s.id)}>
+                              <Plus size={12} /> Add contact
+                            </button>
                           </div>
-                        ))}
-                        {(!s.contacts || s.contacts.length === 0) && <div style={{ ...S.roleHint, marginTop: 4 }}>No contacts added yet.</div>}
+                          {(s.contacts || []).map((c) => (
+                            <div key={c.id} style={{ ...S.formGrid, marginTop: 6 }}>
+                              <input
+                                style={S.input}
+                                value={c.name}
+                                onChange={(e) => updateSupplierContact(s.id, c.id, "name", e.target.value)}
+                                placeholder="Contact name"
+                              />
+                              <div style={{ display: "flex", gap: 6 }}>
+                                <input
+                                  style={{ ...S.input, flex: 1 }}
+                                  type="email"
+                                  value={c.email}
+                                  onChange={(e) => updateSupplierContact(s.id, c.id, "email", e.target.value)}
+                                  placeholder="Email"
+                                />
+                                <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeSupplierContact(s.id, c.id)}>
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                          {(!s.contacts || s.contacts.length === 0) && <div style={{ ...S.roleHint, marginTop: 4 }}>No contacts added yet.</div>}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                  {master.suppliers.length === 0 && <div style={S.empty}>No suppliers yet — add one above.</div>}
-                </div>
-              </>
+                    </>
+                  );
+                })()
+              )
             ) : managerTab === "companyDetails" ? (
               <>
                 <div style={S.roleHint}>This is your own letterhead — it appears at the top of every Purchase Order.</div>
@@ -10583,7 +10672,7 @@ export default function StockControl() {
               // that group's individual sizes, rather than mixing every
               // size from every type into one long list.
               !sectionTypeFilterInManager ? (
-                <div style={S.managerList}>
+                <div style={S.managerListFullPage}>
                   {master.sections.length === 0 && <div style={S.empty}>Nothing here yet.</div>}
                   {Object.entries(
                     master.sections.reduce((acc, s) => {
@@ -10656,7 +10745,7 @@ export default function StockControl() {
                     />
                   )}
 
-                  <div style={S.managerList}>
+                  <div style={S.managerListFullPage}>
                     {master.sections
                       .filter((s) => (s.type || "Ungrouped") === sectionTypeFilterInManager)
                       .filter((s) => s.name.toLowerCase().includes(managerSearchQuery.toLowerCase()))
@@ -10752,7 +10841,7 @@ export default function StockControl() {
                   />
                 )}
 
-                <div style={S.managerList}>
+                <div style={S.managerListFullPage}>
                   {master[managerTab].length === 0 && <div style={S.empty}>Nothing here yet — add one above.</div>}
                   {managerIsFactorTable
                     ? master[managerTab]
@@ -13829,6 +13918,16 @@ const S = {
     gap: 6,
     maxHeight: 320,
     overflowY: "auto",
+  },
+  // Same list, no inner height cap — for Stock Manager specifically, now
+  // that it's a full page rather than a small popup. The old 320px cap
+  // was sized for the popup it used to live in; left in place here it cut
+  // the list off well before the actual page boundary. The full-page
+  // container itself already scrolls, so this can just grow naturally.
+  managerListFullPage: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
   },
   managerItemRow: {
     display: "flex",
