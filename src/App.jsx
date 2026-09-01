@@ -7199,16 +7199,29 @@ export default function StockControl() {
         productionSelectedDept === null ? (
           <div style={S.list}>
             {productionLoading && <div style={S.empty}>Loading…</div>}
-            {!productionLoading && Object.keys(productionQueue || {}).length === 0 && <div style={S.empty}>Nothing outstanding right now.</div>}
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 6 }}>
-              {Object.entries(productionQueue || {}).map(([procType, allEntries]) => {
-                const readyCount = allEntries.filter(({ process, quoteItems }) => {
-                  const totalQty = (quoteItems || []).reduce((sum, it) => sum + Number(it.qty || 0), 0);
-                  return !!process.assigned_to && totalQty > 0;
-                }).length;
-                const hasPendingShortage =
-                  (procType === "Nesting" && (shortagesList || []).some((s) => s.status === "flagged")) ||
-                  (procType === "Laser Operator" && (shortagesList || []).some((s) => s.status === "nested"));
+            {(() => {
+              const visibleDepts = Object.entries(productionQueue || {})
+                .map(([procType, allEntries]) => {
+                  const readyCount = allEntries.filter(({ process, quoteItems }) => {
+                    const totalQty = (quoteItems || []).reduce((sum, it) => sum + Number(it.qty || 0), 0);
+                    return !!process.assigned_to && totalQty > 0;
+                  }).length;
+                  const hasPendingShortage =
+                    (procType === "Nesting" && (shortagesList || []).some((s) => s.status === "flagged")) ||
+                    (procType === "Laser Operator" && (shortagesList || []).some((s) => s.status === "nested"));
+                  return { procType, readyCount, hasPendingShortage };
+                })
+                // A department with nothing ready and no shortage needing
+                // attention has nothing to actually do right now — hide it
+                // rather than list empty departments alongside real work.
+                // One with a pending shortage stays visible regardless of
+                // readyCount, so that alert is never accidentally hidden.
+                .filter(({ readyCount, hasPendingShortage }) => readyCount > 0 || hasPendingShortage);
+              return (
+                <>
+                  {!productionLoading && visibleDepts.length === 0 && <div style={S.empty}>Nothing outstanding right now.</div>}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 6 }}>
+                    {visibleDepts.map(({ procType, readyCount, hasPendingShortage }) => {
                 return (
                   <button
                     key={procType}
@@ -7228,8 +7241,11 @@ export default function StockControl() {
                     <ChevronRight size={20} />
                   </button>
                 );
-              })}
-            </div>
+                    })}
+                  </div>
+                </>
+              );
+            })()}
           </div>
         ) : (
           <div style={S.list}>
@@ -10955,7 +10971,19 @@ export default function StockControl() {
                   <select
                     style={S.input}
                     value={usageModal.jobNumber}
-                    onChange={(e) => setUsageModal((m) => ({ ...m, jobNumber: e.target.value }))}
+                    onChange={(e) => {
+                      const selectedJobNumber = e.target.value;
+                      const matchedJob = (jobsList || []).find((j) => j.job_number === selectedJobNumber);
+                      setUsageModal((m) => ({
+                        ...m,
+                        jobNumber: selectedJobNumber,
+                        // Selecting a job is a strong signal of which
+                        // customer this usage is actually for — carry it
+                        // over automatically rather than make someone
+                        // retype what the job already knows.
+                        customer: matchedJob ? matchedJob.customer || "" : m.customer,
+                      }));
+                    }}
                   >
                     <option value="">No specific job</option>
                     {(jobsList || [])
@@ -10971,12 +10999,27 @@ export default function StockControl() {
                   <label style={S.label}>Customer</label>
                   <input
                     style={S.input}
+                    list="usage-modal-customer-list"
                     value={usageModal.customer}
                     onChange={(e) => setUsageModal((m) => ({ ...m, customer: e.target.value }))}
                     placeholder="e.g. HPE"
                   />
+                  <datalist id="usage-modal-customer-list">
+                    {master.customers.map((c) => (
+                      <option key={c} value={c} />
+                    ))}
+                  </datalist>
                 </div>
                 <div style={{ ...S.roleHint, marginTop: 6 }}>Job number or customer — at least one is required.</div>
+                <div style={{ marginTop: 10 }}>
+                  <label style={S.label}>Note (optional)</label>
+                  <input
+                    style={S.input}
+                    value={usageModal.note || ""}
+                    onChange={(e) => setUsageModal((m) => ({ ...m, note: e.target.value }))}
+                    placeholder="e.g. damaged during cutting"
+                  />
+                </div>
               </>
             ) : (
               <div style={{ marginTop: 10 }}>
