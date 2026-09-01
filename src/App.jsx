@@ -5,7 +5,7 @@ import autoTable from "jspdf-autotable";
 import { supabase } from "./lib/supabaseClient.js";
 import {
   Plus, Minus, Search, Trash2, PackagePlus, AlertTriangle, X,
-  ChevronDown, User, UserCheck, ShieldCheck, Lock, Database, Truck,
+  ChevronDown, ChevronRight, User, UserCheck, ShieldCheck, Lock, Database, Truck,
   Download, Pencil, Copy, Filter as FilterIcon, Paperclip, FileText, Image as ImageIcon,
   Wrench, Users, Eye, EyeOff, ShoppingCart, ClipboardList, Check, Package, Upload, RefreshCw,
 } from "lucide-react";
@@ -43,6 +43,7 @@ const NAV_TABS = [
   { key: "poReports", label: "PO Reports" },
   { key: "usageLog", label: "Usage Log" },
   { key: "drawings", label: "Drawings" },
+  { key: "shortageCenter", label: "Shortage Center" },
 ];
 
 // The tab bar groups related divisions under a shared dropdown instead of
@@ -51,7 +52,7 @@ const NAV_TABS = [
 // used the most) with everything else folded into a few logical groups.
 const TAB_GROUPS = [
   { label: "Stock", keys: ["plate", "structural", "cncBar", "custom", "fasteners", "stores", "assets"] },
-  { label: "Procurement", keys: ["requisitions", "purchaseOrders", "receiving"] },
+  { label: "Procurement", keys: ["requisitions", "purchaseOrders", "receiving", "shortageCenter"] },
   { label: "Records", keys: ["invoicing", "deliveryNotes", "invoiceRequests", "processSheets", "poReports", "usageLog", "drawings"] },
 ];
 
@@ -735,7 +736,10 @@ export default function StockControl() {
   const [productionQueue, setProductionQueue] = useState(null);
   const [invoicedSectionOpen, setInvoicedSectionOpen] = useState(false);
   const [notificationsViewedOpen, setNotificationsViewedOpen] = useState(false);
-  const [productionExpanded, setProductionExpanded] = useState({});
+  const [jobsCompletedSectionOpen, setJobsCompletedSectionOpen] = useState(false);
+  const [shortagesResolvedOpen, setShortagesResolvedOpen] = useState(false);
+  const [productionSelectedDept, setProductionSelectedDept] = useState(null);
+  const [personExpanded, setPersonExpanded] = useState({});
   const [productionSearchQuery, setProductionSearchQuery] = useState("");
   const [shortageModal, setShortageModal] = useState(null);
   const [productionLoading, setProductionLoading] = useState(false);
@@ -769,6 +773,7 @@ export default function StockControl() {
   const [newJobForm, setNewJobForm] = useState(null);
   const [newJobItemSuggestOpen, setNewJobItemSuggestOpen] = useState(null); // which quote item row index has its suggestion dropdown open
   const [notificationsList, setNotificationsList] = useState(null);
+  const [shortagesList, setShortagesList] = useState(null);
   const [drawingSearchQuery, setDrawingSearchQuery] = useState("");
   const [drawingSearchResults, setDrawingSearchResults] = useState(null);
   const [drawingCustomerFilter, setDrawingCustomerFilter] = useState("");
@@ -1156,6 +1161,7 @@ export default function StockControl() {
                 canManageInvoicing: !!data.can_manage_invoicing,
                 allowedProcessTypes: data.allowed_process_types || [],
                 isSalesPerson: !!data.is_sales_person,
+                isShortageHandler: !!data.is_shortage_handler,
                 department: data.department || "",
               }
             : null
@@ -1532,7 +1538,7 @@ export default function StockControl() {
   const anyModalOpen = !!(
     usageModal || assetRemoveModal || shortageModal || jobDetail || newStockItemModal ||
     markInvoicedModal || deliveryNoteBatchModal || copyJobModal || previewItem ||
-    showAddStockItemModal || showStockImportModal || editProcessesModal
+    showAddStockItemModal || showStockImportModal || editProcessesModal || productionSelectedDept
   );
   const modalWasOpenRef = useRef(false);
   const closingViaBackRef = useRef(false);
@@ -1550,6 +1556,7 @@ export default function StockControl() {
     setShowAddStockItemModal(false);
     setShowStockImportModal(false);
     setEditProcessesModal(null);
+    setProductionSelectedDept(null);
   }
 
   useEffect(() => {
@@ -1580,6 +1587,13 @@ export default function StockControl() {
   // the header button is accurate the moment someone signs in.
   useEffect(() => {
     if (profile && notificationsList === null) fetchNotifications();
+  }, [profile]);
+
+  // Also eager — needed both for Production (to show shortages under
+  // Nesting/Laser Operator) and the Shortage Center tab, so it can't wait
+  // for either to be opened first.
+  useEffect(() => {
+    if (profile && shortagesList === null) fetchShortages();
   }, [profile]);
 
   // Belt-and-suspenders on top of the immediate saves above: the moment this
@@ -2483,49 +2497,103 @@ export default function StockControl() {
     }
   }
 
-  function openShortageModal(job, process) {
-    setShortageModal({ job, process, note: process.shortage_note || "" });
+  // Real, independent shortage tracking — not a flag on the process that
+  // was already completed. A shortage always means the same thing now:
+  // something needs to be re-cut on the laser. It can be flagged from any
+  // department (packing finds one missing, welding finds one damaged),
+  // then runs through two people in sequence — Nesting sets it up, the
+  // Laser Operator actually cuts it — before whoever originally flagged it
+  // gets told it's ready.
+  function openShortageFlagModal(job, process) {
+    setShortageModal({ job, process, boardNumber: "", description: "", qty: "", reason: "short" });
   }
 
-  async function submitShortage() {
-    const { job, process, note } = shortageModal;
+  async function submitNewShortage() {
+    const { job, process, boardNumber, description, qty, reason } = shortageModal;
+    if (!description.trim() || !qty || Number(qty) <= 0) return;
     try {
-      const { error } = await supabase
-        .from("job_processes")
-        .update({
-          has_shortage: true,
-          shortage_note: note.trim(),
-          shortage_flagged_by: roleLabel,
-          shortage_flagged_at: new Date().toISOString(),
-        })
-        .eq("id", process.id);
+      // A direct, fresh lookup rather than relying on productionQueue,
+      // which only ever holds the process types the person flagging this
+      // is themselves allowed to see — a Packer flagging a shortage may
+      // have no Nesting entries loaded there at all.
+      const { data: nestingRows } = await supabase.from("job_processes").select("assigned_to").eq("job_id", job.id).eq("process_name", "Nesting").limit(1);
+      const nestingAssignedTo = nestingRows?.[0]?.assigned_to || null;
+
+      const { error } = await supabase.from("shortages").insert({
+        id: uid(),
+        job_id: job.id,
+        job_number: job.job_number,
+        customer: job.customer || "",
+        flagged_by: roleLabel,
+        flagged_by_id: currentUser?.id || null,
+        flagged_department: process.process_name,
+        board_number: boardNumber.trim(),
+        description: description.trim(),
+        qty: Number(qty),
+        reason,
+        status: "flagged",
+      });
       if (error) throw error;
-      if (job.sales_rep) {
-        await supabase.from("job_notifications").insert({
-          job_id: job.id,
-          job_number: job.job_number,
-          sales_rep: job.sales_rep,
-          message: `Shortage flagged on ${process.process_name} by ${roleLabel} for ${job.job_number} (${job.customer || "no customer"}): ${note.trim()}`,
-        });
+
+      // The designated handler(s) always get told, plus whoever's actually
+      // assigned to Nesting on this specific job right now, if that's a
+      // different person — covers both "the person who always deals with
+      // this" and "the person actually doing the work today."
+      const handlerIds = (people || []).filter((p) => p.isShortageHandler).map((p) => p.id);
+      const recipientIds = new Set(handlerIds);
+      if (nestingAssignedTo) recipientIds.add(nestingAssignedTo);
+      if (recipientIds.size) {
+        await supabase.from("job_notifications").insert(
+          [...recipientIds].map((recipientId) => ({
+            job_id: job.id,
+            job_number: job.job_number,
+            recipient_id: recipientId,
+            message: `Shortage flagged on ${job.job_number} (${job.customer || "no customer"}) by ${roleLabel}: ${description.trim()} × ${qty}`,
+          }))
+        );
       }
       setShortageModal(null);
-      fetchProductionQueue();
+      fetchShortages();
     } catch (err) {
       console.error("Failed to flag shortage:", err);
       alert("That didn't save — check your connection and try again.");
     }
   }
 
-  async function clearShortage(process) {
+  async function markShortageNested(shortage) {
     try {
       const { error } = await supabase
-        .from("job_processes")
-        .update({ has_shortage: false, shortage_note: null })
-        .eq("id", process.id);
+        .from("shortages")
+        .update({ status: "nested", nested_by: roleLabel, nested_at: new Date().toISOString() })
+        .eq("id", shortage.id);
       if (error) throw error;
-      fetchProductionQueue();
+      fetchShortages();
     } catch (err) {
-      console.error("Failed to clear shortage:", err);
+      console.error("Failed to update shortage:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  async function markShortageCut(shortage) {
+    try {
+      const { error } = await supabase
+        .from("shortages")
+        .update({ status: "cut", cut_by: roleLabel, cut_at: new Date().toISOString() })
+        .eq("id", shortage.id);
+      if (error) throw error;
+      // Fully resolved — no one needs to go close this out separately.
+      // The one person still waiting is whoever originally flagged it.
+      if (shortage.flagged_by_id) {
+        await supabase.from("job_notifications").insert({
+          job_id: shortage.job_id,
+          job_number: shortage.job_number,
+          recipient_id: shortage.flagged_by_id,
+          message: `Shortage cut and ready — ${shortage.description} × ${shortage.qty} for ${shortage.job_number} (${shortage.customer || "no customer"})`,
+        });
+      }
+      fetchShortages();
+    } catch (err) {
+      console.error("Failed to update shortage:", err);
       alert("That didn't save — check your connection and try again.");
     }
   }
@@ -3630,6 +3698,18 @@ export default function StockControl() {
     }
   }
 
+  async function fetchShortages() {
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase.from("shortages").select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      setShortagesList(data || []);
+    } catch (err) {
+      console.error("Failed to load shortages:", err);
+      setShortagesList([]);
+    }
+  }
+
   async function markNotificationRead(id) {
     setNotificationsList((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
     try {
@@ -3917,6 +3997,7 @@ export default function StockControl() {
         canManageInvoicing: !!d.can_manage_invoicing,
         allowedProcessTypes: d.allowed_process_types || [],
         isSalesPerson: !!d.is_sales_person,
+        isShortageHandler: !!d.is_shortage_handler,
         department: d.department || "",
       }))
     );
@@ -3936,6 +4017,7 @@ export default function StockControl() {
     canManageInvoicing: "can_manage_invoicing",
     allowedProcessTypes: "allowed_process_types",
     isSalesPerson: "is_sales_person",
+    isShortageHandler: "is_shortage_handler",
     department: "department",
   };
 
@@ -4068,6 +4150,7 @@ export default function StockControl() {
     if (section === "notifications") return !!profile;
     if (section === "production") return !!profile?.allowedProcessTypes?.length;
     if (section === "usageLog") return !!profile?.canViewUsageLog;
+    if (section === "shortageCenter") return !!profile?.isShortageHandler;
     return profile ? !!profile.permissions?.[section]?.view : false;
   }
 
@@ -6985,7 +7068,17 @@ export default function StockControl() {
             )}
           </div>
 
-          <label style={{ ...S.label, marginTop: 16, display: "block" }}>Completed</label>
+          <button
+            type="button"
+            className="stk-btn"
+            style={{ ...S.productionPill, marginTop: 16 }}
+            onClick={() => setJobsCompletedSectionOpen((o) => !o)}
+          >
+            <span>Completed</span>
+            <span style={S.gradeCount}>{(jobsList || []).filter((j) => j.status === "invoiced").length}</span>
+            <ChevronDown size={14} style={{ transform: jobsCompletedSectionOpen ? "rotate(180deg)" : "none" }} />
+          </button>
+          {jobsCompletedSectionOpen && (
           <div style={{ ...S.gradeItems, marginTop: 6 }}>
             {(jobsList || [])
               .filter((j) => j.status === "invoiced")
@@ -7008,41 +7101,116 @@ export default function StockControl() {
               ))}
             {(jobsList || []).filter((j) => j.status === "invoiced").length === 0 && <div style={S.empty}>Nothing completed yet.</div>}
           </div>
+          )}
         </div>
       ) : tab === "production" ? (
-        <div style={S.list}>
-          <input
-            style={S.input}
-            value={productionSearchQuery}
-            onChange={(e) => setProductionSearchQuery(e.target.value)}
-            placeholder="Search job number or SigmaNest number…"
-          />
-          {productionLoading && <div style={S.empty}>Loading…</div>}
-          {!productionLoading && Object.keys(productionQueue || {}).length === 0 && <div style={S.empty}>Nothing outstanding right now.</div>}
-          {Object.entries(productionQueue || {}).map(([procType, allEntries]) => {
-            const q = productionSearchQuery.trim().toLowerCase();
-            const entries = q
-              ? allEntries.filter(
-                  ({ job }) =>
-                    (job.job_number || "").toLowerCase().includes(q) || (job.laser_job_reference || "").toLowerCase().includes(q)
-                )
-              : allEntries;
-            if (q && entries.length === 0) return null;
-            const isOpen = q ? true : productionExpanded[procType] === true;
-            return (
-            <div key={procType} style={{ marginTop: 14 }}>
-              <button
-                type="button"
-                className="stk-btn"
-                style={S.productionPill}
-                onClick={() => setProductionExpanded((prev) => ({ ...prev, [procType]: !prev[procType] }))}
-              >
-                <span>{procType}</span>
-                <span style={S.gradeCount}>{entries.length}</span>
-                <ChevronDown size={14} style={{ transform: isOpen ? "rotate(180deg)" : "none" }} />
-              </button>
-              {isOpen && (
+        productionSelectedDept === null ? (
+          <div style={S.list}>
+            {productionLoading && <div style={S.empty}>Loading…</div>}
+            {!productionLoading && Object.keys(productionQueue || {}).length === 0 && <div style={S.empty}>Nothing outstanding right now.</div>}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 6 }}>
+              {Object.entries(productionQueue || {}).map(([procType, allEntries]) => {
+                const readyCount = allEntries.filter(({ process, quoteItems }) => {
+                  const totalQty = (quoteItems || []).reduce((sum, it) => sum + Number(it.qty || 0), 0);
+                  return !!process.assigned_to && totalQty > 0;
+                }).length;
+                const hasPendingShortage =
+                  (procType === "Nesting" && (shortagesList || []).some((s) => s.status === "flagged")) ||
+                  (procType === "Laser Operator" && (shortagesList || []).some((s) => s.status === "nested"));
+                return (
+                  <button
+                    key={procType}
+                    type="button"
+                    className="stk-btn"
+                    style={S.productionDeptCard}
+                    onClick={() => setProductionSelectedDept(procType)}
+                  >
+                    {hasPendingShortage && (
+                      <span style={{ width: 10, height: 10, borderRadius: "50%", background: C.danger, flexShrink: 0 }} title="Shortage needs attention" />
+                    )}
+                    <span style={{ flex: 1 }}>{procType}</span>
+                    <span style={S.gradeCount}>{readyCount}</span>
+                    <ChevronRight size={20} />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div style={S.list}>
+            <button
+              type="button"
+              className="stk-btn"
+              style={{ ...S.reqActionBtnMuted, marginBottom: 10 }}
+              onClick={() => setProductionSelectedDept(null)}
+            >
+              <ChevronDown size={14} style={{ transform: "rotate(90deg)" }} /> All departments
+            </button>
+            <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 10 }}>{productionSelectedDept}</div>
+            <input
+              style={S.input}
+              value={productionSearchQuery}
+              onChange={(e) => setProductionSearchQuery(e.target.value)}
+              placeholder="Search job number or SigmaNest number…"
+            />
+            {(() => {
+              const procType = productionSelectedDept;
+              const allEntries = productionQueue?.[procType] || [];
+              const q = productionSearchQuery.trim().toLowerCase();
+              let entries = q
+                ? allEntries.filter(
+                    ({ job }) =>
+                      (job.job_number || "").toLowerCase().includes(q) || (job.laser_job_reference || "").toLowerCase().includes(q)
+                  )
+                : allEntries;
+              // Nothing assigned yet, or nothing to actually do yet (zero
+              // quantity) — hide it from the everyday view so the list only
+              // shows work that's genuinely ready to act on. A search is a
+              // deliberate, specific request though, so it isn't filtered by
+              // this — it should always find what you're looking for.
+              if (!q) {
+                entries = entries.filter(({ process, quoteItems }) => {
+                  const totalQty = (quoteItems || []).reduce((sum, it) => sum + Number(it.qty || 0), 0);
+                  return !!process.assigned_to && totalQty > 0;
+                });
+              }
+              return (
                 <div style={{ ...S.gradeItems, marginTop: 8 }}>
+                  {(procType === "Nesting" || procType === "Laser Operator") &&
+                    (() => {
+                      const relevantStatus = procType === "Nesting" ? "flagged" : "nested";
+                      const relevant = (shortagesList || []).filter((s) => s.status === relevantStatus);
+                      if (relevant.length === 0) return null;
+                      return (
+                        <div style={{ marginBottom: 10 }}>
+                          <div style={{ ...S.label, color: C.danger }}>⚠ Shortages needing {procType === "Nesting" ? "nesting" : "cutting"}</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+                            {relevant.map((s) => (
+                              <div key={s.id} style={{ ...S.reqCard, borderColor: C.danger, borderWidth: 2 }}>
+                                <div style={S.reqCardTop}>
+                                  <span style={S.itemName}>{s.job_number} — {s.customer || "No customer"}</span>
+                                </div>
+                                <div style={{ ...S.itemComment, marginTop: 2 }}>
+                                  {s.description} × {s.qty} {s.board_number && `— board ${s.board_number}`}
+                                </div>
+                                <div className="stk-meta-row" style={S.rowMeta}>
+                                  <span>Reason: {s.reason}</span>
+                                  <span>Flagged by {s.flagged_by} ({s.flagged_department})</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="stk-btn"
+                                  style={{ ...S.reqActionBtn, marginTop: 6, width: "100%" }}
+                                  onClick={() => (procType === "Nesting" ? markShortageNested(s) : markShortageCut(s))}
+                                >
+                                  {procType === "Nesting" ? "Shortage nested" : "Shortage cut"}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   {entries.length === 0 && <div style={S.empty}>Nothing outstanding for {procType}.</div>}
                   {entries.map(({ job, process, isReady, quoteItems, documents, itemProgress }) => {
                     const drawingsForJob = quoteItems
@@ -7054,13 +7222,7 @@ export default function StockControl() {
                       .filter(Boolean);
                     const totalQty = quoteItems.reduce((sum, it) => sum + Number(it.qty || 0), 0);
                     return (
-                      <div
-                        key={process.id}
-                        style={{
-                          ...S.reqCard,
-                          ...(process.has_shortage ? { borderColor: C.danger, borderWidth: 2 } : {}),
-                        }}
-                      >
+                      <div key={process.id} style={S.reqCard}>
                         <div style={S.reqCardTop}>
                           <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
                           <span style={{ ...S.reqStatusTag, ...(isReady ? S.reqStatus_received : S.reqStatus_ordered) }}>
@@ -7088,24 +7250,13 @@ export default function StockControl() {
                           {job.due_date && <span>Due {new Date(job.due_date).toLocaleDateString()}</span>}
                           {process.is_urgent && <span style={{ color: C.danger, fontWeight: 600 }}>Urgent</span>}
                         </div>
-                        {process.has_shortage && (
-                          <div style={{ ...S.itemComment, color: C.danger, marginTop: 6 }}>
-                            ⚠ Shortage: {process.shortage_note} — flagged by {process.shortage_flagged_by}
-                          </div>
-                        )}
                         <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
                           <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => toggleProcessUrgent(process)}>
                             {process.is_urgent ? "Unmark urgent" : "Mark urgent"}
                           </button>
-                          {process.has_shortage ? (
-                            <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => clearShortage(process)}>
-                              Clear shortage
-                            </button>
-                          ) : (
-                            <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => openShortageModal(job, process)}>
-                              Flag shortage
-                            </button>
-                          )}
+                          <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => openShortageFlagModal(job, process)}>
+                            Flag shortage
+                          </button>
                         </div>
                         <div style={{ marginTop: 6 }}>
                           {process.tracking_mode === "each" ? (
@@ -7184,11 +7335,10 @@ export default function StockControl() {
                     );
                   })}
                 </div>
-              )}
-            </div>
-            );
-          })}
-        </div>
+              );
+            })()}
+          </div>
+        )
       ) : tab === "notifications" ? (
         <div style={S.list}>
           {notificationsList === null && <div style={S.empty}>Loading…</div>}
@@ -7205,6 +7355,7 @@ export default function StockControl() {
                   {unread.map((n) => (
                     <div key={n.id} style={{ ...S.reqCard, borderLeft: `3px solid ${C.accentRaw}` }} onClick={() => markNotificationRead(n.id)}>
                       <div className="stk-meta-row" style={S.rowMeta}>
+                        {n.job_number && <span style={{ fontWeight: 700, color: C.accentRaw }}>{n.job_number}</span>}
                         <span>{new Date(n.created_at).toLocaleString()}</span>
                       </div>
                       <div style={{ ...S.itemName, fontSize: 14.5, marginTop: 2 }}>{n.message}</div>
@@ -7228,9 +7379,79 @@ export default function StockControl() {
                         {viewed.map((n) => (
                           <div key={n.id} style={S.reqCard}>
                             <div className="stk-meta-row" style={S.rowMeta}>
+                              {n.job_number && <span style={{ fontWeight: 700, color: C.accentRaw }}>{n.job_number}</span>}
                               <span>{new Date(n.created_at).toLocaleString()}</span>
                             </div>
                             <div style={{ ...S.itemName, fontSize: 14.5, marginTop: 2 }}>{n.message}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      ) : tab === "shortageCenter" ? (
+        <div style={S.list}>
+          <div style={S.roleHint}>Every shortage across every job, in one place — flagged, being nested, or ready to cut.</div>
+          {shortagesList === null && <div style={{ ...S.empty, marginTop: 10 }}>Loading…</div>}
+          {shortagesList?.length === 0 && <div style={{ ...S.empty, marginTop: 10 }}>Nothing outstanding right now.</div>}
+          {(() => {
+            const open = (shortagesList || []).filter((s) => s.status !== "cut");
+            const resolved = (shortagesList || []).filter((s) => s.status === "cut");
+            const statusLabel = { flagged: "Needs nesting", nested: "Needs cutting" };
+            return (
+              <>
+                {shortagesList?.length > 0 && open.length === 0 && <div style={{ ...S.empty, marginTop: 10 }}>Nothing open — everything's cut.</div>}
+                <div style={{ ...S.gradeItems, marginTop: 10 }}>
+                  {open.map((s) => (
+                    <div key={s.id} style={{ ...S.reqCard, borderColor: C.danger, borderWidth: 2 }}>
+                      <div style={S.reqCardTop}>
+                        <span style={S.itemName}>{s.job_number} — {s.customer || "No customer"}</span>
+                        <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>{statusLabel[s.status] || s.status}</span>
+                      </div>
+                      <div style={{ ...S.itemComment, marginTop: 2 }}>
+                        {s.description} × {s.qty} {s.board_number && `— board ${s.board_number}`}
+                      </div>
+                      <div className="stk-meta-row" style={S.rowMeta}>
+                        <span>Reason: {s.reason}</span>
+                        <span>Flagged by {s.flagged_by} ({s.flagged_department})</span>
+                        <span>{new Date(s.created_at).toLocaleString()}</span>
+                        {s.status === "nested" && <span>Nested by {s.nested_by}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {resolved.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={{ ...S.productionPill, marginTop: 16 }}
+                      onClick={() => setShortagesResolvedOpen((o) => !o)}
+                    >
+                      <span>Resolved</span>
+                      <span style={S.gradeCount}>{resolved.length}</span>
+                      <ChevronDown size={14} style={{ transform: shortagesResolvedOpen ? "rotate(180deg)" : "none" }} />
+                    </button>
+                    {shortagesResolvedOpen && (
+                      <div style={{ ...S.gradeItems, marginTop: 6 }}>
+                        {resolved.map((s) => (
+                          <div key={s.id} style={S.reqCard}>
+                            <div style={S.reqCardTop}>
+                              <span style={S.itemName}>{s.job_number} — {s.customer || "No customer"}</span>
+                              <span style={{ ...S.reqStatusTag, ...S.reqStatus_received }}>Cut</span>
+                            </div>
+                            <div style={{ ...S.itemComment, marginTop: 2 }}>
+                              {s.description} × {s.qty} {s.board_number && `— board ${s.board_number}`}
+                            </div>
+                            <div className="stk-meta-row" style={S.rowMeta}>
+                              <span>Flagged by {s.flagged_by}</span>
+                              <span>Nested by {s.nested_by}</span>
+                              <span>Cut by {s.cut_by} on {new Date(s.cut_at).toLocaleDateString()}</span>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -9945,6 +10166,15 @@ export default function StockControl() {
                   {(people || []).map((p) => (
                     <div key={p.id} style={S.deptCard}>
                       <div style={S.deptCardHead}>
+                        <button
+                          type="button"
+                          className="stk-btn"
+                          style={S.iconBtn}
+                          onClick={() => setPersonExpanded((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
+                          title={personExpanded[p.id] ? "Collapse" : "Expand to set permissions"}
+                        >
+                          <ChevronDown size={16} style={{ transform: personExpanded[p.id] ? "rotate(180deg)" : "none" }} />
+                        </button>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 600, fontSize: 15, display: "flex", alignItems: "center" }}>
                             {p.name}
@@ -9969,6 +10199,8 @@ export default function StockControl() {
                           <Trash2 size={13} />
                         </button>
                       </div>
+                      {personExpanded[p.id] && (
+                      <>
                       {!p.isAdmin && (
                         <>
                           <div style={S.deptPermGrid}>
@@ -10083,6 +10315,14 @@ export default function StockControl() {
                         />
                         Is a Sales Person (can be assigned to jobs, appears in Sales Person pickers)
                       </label>
+                      <label style={S.deptToggleItem}>
+                        <input
+                          type="checkbox"
+                          checked={!!p.isShortageHandler}
+                          onChange={(e) => updatePersonField(p.id, "isShortageHandler", e.target.checked)}
+                        />
+                        Is a Shortage Handler (always notified of shortages, sees the Shortage Center tab)
+                      </label>
                       <div style={{ marginTop: 8 }}>
                         <label style={S.label}>Department</label>
                         <select
@@ -10117,6 +10357,8 @@ export default function StockControl() {
                           })}
                         </div>
                       </div>
+                      </>
+                      )}
                     </div>
                   ))}
                   {people && people.length === 0 && <div style={S.empty}>Nobody's signed up yet.</div>}
@@ -10717,6 +10959,9 @@ export default function StockControl() {
                 >
                   <FileText size={18} />
                 </button>
+                <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => openCopyJobModal(jobDetail.job)} title="Copy job">
+                  <Copy size={18} />
+                </button>
                 <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeJobDetail}>
                   <X size={18} />
                 </button>
@@ -11195,27 +11440,69 @@ export default function StockControl() {
 
       {shortageModal && (
         <div style={{ ...S.modalOverlay, zIndex: 30 }}>
-          <div style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ ...S.modal, maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
-              <span style={S.modalTitle}>Flag Shortage — {shortageModal.process.process_name}</span>
+              <span style={S.modalTitle}>Flag Shortage</span>
               <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setShortageModal(null)}>
                 <X size={18} />
               </button>
             </div>
             <div style={S.roleHint}>
-              {shortageModal.job.job_number} — {shortageModal.job.customer || "No customer"}. This notifies the sales rep on this job.
+              {shortageModal.job.job_number} — {shortageModal.job.customer || "No customer"}. Sends this straight to Nesting to get
+              re-cut — fill in enough that the laser operator knows exactly what to cut and how many.
             </div>
             <div style={{ marginTop: 10 }}>
-              <label style={S.label}>What's missing</label>
+              <label style={S.label}>Board number</label>
               <input
                 style={S.input}
-                value={shortageModal.note}
-                onChange={(e) => setShortageModal((m) => ({ ...m, note: e.target.value }))}
-                placeholder="e.g. Out of 3mm SS304 sheet"
+                value={shortageModal.boardNumber}
+                onChange={(e) => setShortageModal((m) => ({ ...m, boardNumber: e.target.value }))}
+                placeholder="Which sheet/board this comes from"
                 autoFocus
               />
             </div>
-            <button type="button" className="stk-btn" style={S.submitBtn} onClick={submitShortage}>
+            <div style={{ marginTop: 8 }}>
+              <label style={S.label}>Description</label>
+              <input
+                style={S.input}
+                value={shortageModal.description}
+                onChange={(e) => setShortageModal((m) => ({ ...m, description: e.target.value }))}
+                placeholder="What part needs to be cut"
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <div style={{ flex: 1 }}>
+                <label style={S.label}>Quantity</label>
+                <input
+                  style={S.input}
+                  type="number"
+                  min="1"
+                  value={shortageModal.qty}
+                  onChange={(e) => setShortageModal((m) => ({ ...m, qty: e.target.value }))}
+                  placeholder="How many"
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={S.label}>Reason</label>
+                <select
+                  style={S.input}
+                  value={shortageModal.reason}
+                  onChange={(e) => setShortageModal((m) => ({ ...m, reason: e.target.value }))}
+                >
+                  <option value="short">Short (not enough cut)</option>
+                  <option value="damaged">Damaged</option>
+                  <option value="lost">Lost / misplaced</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="stk-btn"
+              style={S.submitBtn}
+              disabled={!shortageModal.description.trim() || !shortageModal.qty || Number(shortageModal.qty) <= 0}
+              onClick={submitNewShortage}
+            >
               Flag Shortage
             </button>
           </div>
@@ -12395,6 +12682,19 @@ const S = {
     padding: "10px 16px",
     fontSize: 15,
     fontWeight: 600,
+  },
+  productionDeptCard: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    width: "100%",
+    background: C.surface,
+    border: `1px solid ${C.border}`,
+    borderRadius: 14,
+    padding: "18px 20px",
+    fontSize: 18,
+    fontWeight: 700,
+    textAlign: "left",
     color: C.text,
     cursor: "pointer",
   },
