@@ -1905,24 +1905,43 @@ export default function StockControl() {
   async function fetchJobs() {
     if (!supabase) return;
     setJobsLoading(true);
-    try {
-      const [{ data, error }, { data: invoiceRequests, error: invError }, { data: allQuoteItems, error: qiError }, { data: allDeliveryNotes, error: dnError }] = await Promise.all([
-        supabase.from("jobs").select("*").order("created_at", { ascending: false }),
-        supabase.from("job_invoice_requests").select("*").order("submitted_at", { ascending: false }),
-        supabase.from("job_quote_items").select("id, job_id, item_status, qty, qty_invoiced"),
-        supabase.from("delivery_notes").select("*").order("delivery_note_number", { ascending: false }),
-      ]);
-      if (error) throw error;
-      if (invError) throw invError;
-      if (qiError) throw qiError;
-      if (dnError) throw dnError;
-      setJobsList(data || []);
-      setJobInvoiceRequests(invoiceRequests || []);
-      setAllJobQuoteItems(allQuoteItems || []);
-      setAllDeliveryNotes(allDeliveryNotes || []);
-    } catch (err) {
-      console.error("Failed to load jobs:", err);
+    // Four independent queries, run in parallel but each handled on its
+    // own — Promise.allSettled rather than Promise.all specifically so a
+    // failure in one (job_invoice_requests, quote items, or delivery
+    // notes) never masks jobs that loaded successfully. Production's own,
+    // separate query only touches the jobs table directly, which is
+    // exactly why it could keep working while this combined fetch was
+    // failing as a whole and silently showing nothing.
+    const [jobsResult, invReqResult, quoteItemsResult, deliveryNotesResult] = await Promise.allSettled([
+      supabase.from("jobs").select("*").order("created_at", { ascending: false }),
+      supabase.from("job_invoice_requests").select("*").order("submitted_at", { ascending: false }),
+      supabase.from("job_quote_items").select("id, job_id, item_status, qty, qty_invoiced"),
+      supabase.from("delivery_notes").select("*").order("delivery_note_number", { ascending: false }),
+    ]);
+
+    if (jobsResult.status === "fulfilled" && !jobsResult.value.error) {
+      setJobsList(jobsResult.value.data || []);
+    } else {
+      console.error("Failed to load jobs:", jobsResult.status === "fulfilled" ? jobsResult.value.error : jobsResult.reason);
       setJobsList([]);
+    }
+    if (invReqResult.status === "fulfilled" && !invReqResult.value.error) {
+      setJobInvoiceRequests(invReqResult.value.data || []);
+    } else {
+      console.error("Failed to load invoice requests:", invReqResult.status === "fulfilled" ? invReqResult.value.error : invReqResult.reason);
+      setJobInvoiceRequests([]);
+    }
+    if (quoteItemsResult.status === "fulfilled" && !quoteItemsResult.value.error) {
+      setAllJobQuoteItems(quoteItemsResult.value.data || []);
+    } else {
+      console.error("Failed to load quote items:", quoteItemsResult.status === "fulfilled" ? quoteItemsResult.value.error : quoteItemsResult.reason);
+      setAllJobQuoteItems([]);
+    }
+    if (deliveryNotesResult.status === "fulfilled" && !deliveryNotesResult.value.error) {
+      setAllDeliveryNotes(deliveryNotesResult.value.data || []);
+    } else {
+      console.error("Failed to load delivery notes:", deliveryNotesResult.status === "fulfilled" ? deliveryNotesResult.value.error : deliveryNotesResult.reason);
+      setAllDeliveryNotes([]);
     }
     setJobsLoading(false);
   }
