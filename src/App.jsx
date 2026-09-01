@@ -212,10 +212,7 @@ async function loadMasterFromTables() {
 
   result.stockCodes = []; // retired — anything left over was migrated straight into stock_items by the SQL migration
 
-  const totalRows =
-    (stringLists.data?.length || 0) + (factorItems.data?.length || 0) + (suppliers.data?.length || 0) +
-    (storesCatalog.data?.length || 0) + (customerContacts.data?.length || 0) + (companyRows.data?.length || 0) + (counters.data?.length || 0);
-  return { master: result, isEmpty: totalRows === 0 };
+  return { master: result };
 }
 
 // requisitions is a real table now (snake_case columns) — same
@@ -809,6 +806,18 @@ export default function StockControl() {
   const [session, setSession] = useState(undefined); // undefined = still checking, null = signed out
   const [authLoading, setAuthLoading] = useState(true);
   const [profile, setProfile] = useState(null);
+  // Moved this early deliberately, not left where it naturally first got
+  // written — several functions defined well before the old declaration
+  // point reference these via closure (fetchNotifications, shortage
+  // flagging). That's normally fine in JS — a function body only actually
+  // runs after the whole component has rendered once, by which point the
+  // late declaration would already be assigned — but production
+  // minification exposed a real "cannot access before initialization"
+  // error from exactly this ordering. Declaring these immediately after
+  // the state they depend on removes the risk entirely, for every
+  // function that closes over them regardless of where it's defined.
+  const currentUser = session?.user || null;
+  const roleLabel = profile?.name || currentUser?.email || "Someone";
   const [people, setPeople] = useState(null);
   const [authMode, setAuthMode] = useState("signin"); // "signin" | "signup"
   const [authName, setAuthName] = useState("");
@@ -947,10 +956,14 @@ export default function StockControl() {
         );
         setItems(loadedItems);
         setLoadError((prev) => ({ ...prev, items: false }));
-      } else if (isInitialLoad) {
-        console.error("Items came back empty on load — refusing to seed example data over real data.");
-        setLoadError((prev) => ({ ...prev, items: true }));
-        hadError = true;
+      } else {
+        // A real table now, not the old shared blob — a successful query
+        // returning zero rows is a trustworthy, unambiguous answer (there
+        // genuinely aren't any items right now), not the ambiguous signal
+        // it used to be. Nothing left to silently overwrite by trusting
+        // it, so there's nothing to refuse here anymore.
+        setItems(loadedItems || []);
+        setLoadError((prev) => ({ ...prev, items: false }));
       }
     } catch (err) {
       console.error("Failed to load items:", err);
@@ -960,15 +973,11 @@ export default function StockControl() {
       }
     }
     try {
-      const { master: loadedMaster, isEmpty } = await loadMasterFromTables();
-      if (!isEmpty) {
-        setMaster(loadedMaster);
-        setLoadError((prev) => ({ ...prev, master: false }));
-      } else if (isInitialLoad) {
-        console.error("Master data came back empty on load — refusing to reset to defaults over real data.");
-        setLoadError((prev) => ({ ...prev, master: true }));
-        hadError = true;
-      }
+      const { master: loadedMaster } = await loadMasterFromTables();
+      // Same reasoning as items above — a real set of tables now, so an
+      // empty result is trustworthy on its own, not something to refuse.
+      setMaster(loadedMaster);
+      setLoadError((prev) => ({ ...prev, master: false }));
     } catch (err) {
       console.error("Failed to load master data:", err);
       if (isInitialLoad) {
@@ -979,14 +988,8 @@ export default function StockControl() {
     try {
       const { data: reqRows, error: reqError } = await supabase.from("requisitions").select("*");
       if (reqError) throw reqError;
-      if (reqRows && reqRows.length > 0) {
-        setRequisitions(reqRows.map(dbRowToRequisition));
-        setLoadError((prev) => ({ ...prev, requisitions: false }));
-      } else if (isInitialLoad) {
-        console.error("Requisitions came back empty on load — refusing to reset to empty over real data.");
-        setLoadError((prev) => ({ ...prev, requisitions: true }));
-        hadError = true;
-      }
+      setRequisitions((reqRows || []).map(dbRowToRequisition));
+      setLoadError((prev) => ({ ...prev, requisitions: false }));
     } catch (err) {
       console.error("Failed to load requisitions:", err);
       if (isInitialLoad) {
@@ -997,14 +1000,8 @@ export default function StockControl() {
     try {
       const { data: poRows, error: poError } = await supabase.from("purchase_orders").select("*");
       if (poError) throw poError;
-      if (poRows && poRows.length > 0) {
-        setPurchaseOrders(poRows.map(dbRowToPo));
-        setLoadError((prev) => ({ ...prev, purchaseOrders: false }));
-      } else if (isInitialLoad) {
-        console.error("Purchase orders came back empty on load — refusing to reset to empty over real data.");
-        setLoadError((prev) => ({ ...prev, purchaseOrders: true }));
-        hadError = true;
-      }
+      setPurchaseOrders((poRows || []).map(dbRowToPo));
+      setLoadError((prev) => ({ ...prev, purchaseOrders: false }));
     } catch (err) {
       console.error("Failed to load purchase orders:", err);
       if (isInitialLoad) {
@@ -1015,14 +1012,8 @@ export default function StockControl() {
     try {
       const { data: usageRows, error: usageError } = await supabase.from("usage_log").select("*");
       if (usageError) throw usageError;
-      if (usageRows && usageRows.length > 0) {
-        setUsageLog(usageRows.map(dbRowToUsageLogEntry));
-        setLoadError((prev) => ({ ...prev, usageLog: false }));
-      } else if (isInitialLoad) {
-        console.error("Usage log came back empty on load — refusing to reset to empty over real data.");
-        setLoadError((prev) => ({ ...prev, usageLog: true }));
-        hadError = true;
-      }
+      setUsageLog((usageRows || []).map(dbRowToUsageLogEntry));
+      setLoadError((prev) => ({ ...prev, usageLog: false }));
     } catch (err) {
       console.error("Failed to load usage log:", err);
       if (isInitialLoad) {
@@ -1162,6 +1153,7 @@ export default function StockControl() {
                 allowedProcessTypes: data.allowed_process_types || [],
                 isSalesPerson: !!data.is_sales_person,
                 isShortageHandler: !!data.is_shortage_handler,
+                theme: data.theme || "dark",
                 department: data.department || "",
               }
             : null
@@ -4018,6 +4010,7 @@ export default function StockControl() {
     allowedProcessTypes: "allowed_process_types",
     isSalesPerson: "is_sales_person",
     isShortageHandler: "is_shortage_handler",
+    theme: "theme",
     department: "department",
   };
 
@@ -4032,6 +4025,20 @@ export default function StockControl() {
       console.error("Failed to save person field:", err);
       alert("That didn't save — check your connection and try again.");
       loadPeople();
+    }
+  }
+
+  // A personal preference, not something managed through User Management —
+  // this updates the signed-in person's own profile state directly (not
+  // the people list) so the theme actually, visually changes right away.
+  async function setMyTheme(newTheme) {
+    if (!profile) return;
+    setProfile((prev) => ({ ...prev, theme: newTheme }));
+    try {
+      const { error } = await supabase.from("profiles").update({ theme: newTheme }).eq("id", profile.id);
+      if (error) throw error;
+    } catch (err) {
+      console.error("Failed to save theme:", err);
     }
   }
 
@@ -4130,7 +4137,6 @@ export default function StockControl() {
   }
 
   const isAdmin = !!profile?.isAdmin;
-  const currentUser = session?.user || null;
 
   useEffect(() => {
     // Needed by more than just admin/User Management now — the Sales
@@ -6447,12 +6453,12 @@ export default function StockControl() {
   }
 
   const RoleIcon = isAdmin ? ShieldCheck : User;
-  const roleLabel = profile?.name || currentUser?.email || "Someone";
 
   return (
-    <div style={S.page}>
+    <div style={S.page} data-stk-theme={profile?.theme || "dark"}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap');
+        ${THEME_CSS}
         * { box-sizing: border-box; }
         input, select { font-family: inherit; }
         input::placeholder { color: ${C.muted}; }
@@ -6513,6 +6519,19 @@ export default function StockControl() {
                 <span style={S.notifBadgeCount}>{notificationsList.filter((n) => !n.is_read).length}</span>
               )}
             </button>
+          )}
+          {profile && (
+            <select
+              className="stk-btn"
+              style={{ ...S.roleChip, cursor: "pointer" }}
+              value={profile.theme || "dark"}
+              onChange={(e) => setMyTheme(e.target.value)}
+              title="Color theme"
+            >
+              <option value="dark">Dark theme</option>
+              <option value="medium">Medium theme</option>
+              <option value="light">Light theme</option>
+            </select>
           )}
           {canAccessStockManager && (
             <button className="stk-btn" style={S.roleChip} onClick={() => setShowManager(true)}>
@@ -12501,19 +12520,56 @@ const F = {
   mono: "'IBM Plex Mono', monospace",
 };
 
-const C = {
-  bg: "#1B1D1F",
-  surface: "#232629",
-  surfaceHover: "#282C2F",
-  border: "#33383C",
-  text: "#ECEAE4",
-  muted: "#8B9096",
-  accentRaw: "#F2A900",
-  accentTint: "#3A2E10",
-  accentFinished: "#4A9B8E",
-  danger: "#D6543B",
-  dangerTint: "#3A1E17",
+// Real theme values live in CSS custom properties (set below, switched via
+// a data-theme attribute) rather than hardcoded here — that's what lets a
+// theme change take effect everywhere instantly, without needing the
+// entire S object (thousands of lines, used everywhere below) to live
+// inside the component and re-render on every theme change.
+const THEMES = {
+  dark: {
+    bg: "#1B1D1F", surface: "#232629", surfaceHover: "#282C2F", border: "#33383C",
+    text: "#ECEAE4", muted: "#8B9096", accentRaw: "#F2A900", accentTint: "#3A2E10",
+    accentFinished: "#4A9B8E", danger: "#D6543B", dangerTint: "#3A1E17",
+  },
+  medium: {
+    bg: "#4A4A4A", surface: "#565656", surfaceHover: "#616161", border: "#6E6E6E",
+    text: "#F5F5F5", muted: "#B8B8B8", accentRaw: "#F2A900", accentTint: "#5C4A1E",
+    accentFinished: "#4A9B8E", danger: "#D6543B", dangerTint: "#5C3A30",
+  },
+  light: {
+    bg: "#F7F7F5", surface: "#FFFFFF", surfaceHover: "#F0F0EE", border: "#DCDCD8",
+    text: "#1B1D1F", muted: "#6B6F73", accentRaw: "#C98600", accentTint: "#FBEDD1",
+    accentFinished: "#2F7A6E", danger: "#C23D26", dangerTint: "#FBE0DA",
+  },
 };
+
+const C = {
+  bg: "var(--stk-bg)",
+  surface: "var(--stk-surface)",
+  surfaceHover: "var(--stk-surfaceHover)",
+  border: "var(--stk-border)",
+  text: "var(--stk-text)",
+  muted: "var(--stk-muted)",
+  accentRaw: "var(--stk-accentRaw)",
+  accentTint: "var(--stk-accentTint)",
+  accentFinished: "var(--stk-accentFinished)",
+  danger: "var(--stk-danger)",
+  dangerTint: "var(--stk-dangerTint)",
+};
+
+// Generated once from THEMES above, rather than hand-duplicated in CSS —
+// one selector per theme, each setting every custom property at once.
+// Switching themes is just changing the data-stk-theme attribute; every
+// place C.bg (etc.) is used anywhere in the app re-resolves instantly,
+// with no re-render needed at all.
+const THEME_CSS = Object.entries(THEMES)
+  .map(([name, colors]) => {
+    const decls = Object.entries(colors)
+      .map(([key, value]) => `--stk-${key}: ${value};`)
+      .join(" ");
+    return `[data-stk-theme="${name}"] { ${decls} }`;
+  })
+  .join("\n");
 
 const S = {
   page: {
