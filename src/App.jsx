@@ -144,6 +144,157 @@ function itemToDbRow(item) {
   return row;
 }
 
+const MASTER_STRING_LISTS = [
+  "sizes", "sectionTypes", "salesPeople", "customers", "staffDepartments", "jobProcessTypes",
+  "storeCategories", "fastenerCategories", "fastenerGrades", "fastenerFinishes", "sheetNames",
+];
+const MASTER_FACTOR_LISTS = ["sections", "grades", "cncGrades"];
+const MASTER_COUNTERS = ["nextJobNumber", "nextDeliveryNoteNumber", "nextFastenerNumber", "nextToolNumber", "nextPoNumber"];
+const EMPTY_COMPANY_DETAILS = { name: "", address: "", phone: "", email: "", vatNumber: "", regNumber: "" };
+
+// master lives across 8 real tables now, grouped by shape rather than one
+// table per field — this is the only place that needs to know that. Once
+// assembled, the rest of the app sees the exact same master shape it
+// always has.
+async function loadMasterFromTables() {
+  const [stringLists, factorItems, suppliers, supplierContacts, storesCatalog, customerContacts, companyRows, counters] = await Promise.all([
+    supabase.from("master_string_lists").select("*"),
+    supabase.from("master_factor_items").select("*"),
+    supabase.from("master_suppliers").select("*"),
+    supabase.from("master_supplier_contacts").select("*"),
+    supabase.from("master_stores_catalog").select("*"),
+    supabase.from("master_customer_contacts").select("*"),
+    supabase.from("master_company_details").select("*"),
+    supabase.from("master_counters").select("*"),
+  ]);
+  for (const r of [stringLists, factorItems, suppliers, supplierContacts, storesCatalog, customerContacts, companyRows, counters]) {
+    if (r.error) throw r.error;
+  }
+
+  const result = {};
+  for (const listName of MASTER_STRING_LISTS) {
+    result[listName] = (stringLists.data || []).filter((r) => r.list_name === listName).map((r) => r.value);
+  }
+  for (const listName of MASTER_FACTOR_LISTS) {
+    result[listName] = (factorItems.data || [])
+      .filter((r) => r.list_name === listName)
+      .map((r) => (r.type != null ? { name: r.name, factor: Number(r.factor), price: Number(r.price), type: r.type } : { name: r.name, factor: Number(r.factor), price: Number(r.price) }));
+  }
+
+  const contactsBySupplier = {};
+  for (const c of supplierContacts.data || []) {
+    (contactsBySupplier[c.supplier_id] ||= []).push({ id: c.id, name: c.name, email: c.email });
+  }
+  result.suppliers = (suppliers.data || []).map((s) => ({
+    id: s.id, name: s.name, email: s.email, phone: s.phone, address: s.address, logo: s.logo, vatNumber: s.vat_number,
+    contacts: contactsBySupplier[s.id] || [],
+  }));
+
+  result.storesCatalog = (storesCatalog.data || []).map((r) => ({
+    id: r.id, code: r.code, name: r.name, category: r.category, supplier: r.supplier, price: Number(r.price),
+  }));
+
+  const contactsByCustomer = {};
+  for (const c of customerContacts.data || []) {
+    (contactsByCustomer[c.customer_name] ||= []).push({ id: c.id, name: c.name, email: c.email, phone: c.phone });
+  }
+  result.customerContacts = contactsByCustomer;
+
+  const companyRow = (companyRows.data || [])[0];
+  result.companyDetails = companyRow
+    ? { name: companyRow.name, address: companyRow.address, phone: companyRow.phone, email: companyRow.email, vatNumber: companyRow.vat_number, regNumber: companyRow.reg_number }
+    : EMPTY_COMPANY_DETAILS;
+
+  const counterMap = {};
+  for (const c of counters.data || []) counterMap[c.counter_name] = c.value;
+  for (const name of MASTER_COUNTERS) result[name] = counterMap[name] ?? 1;
+
+  result.stockCodes = []; // retired — anything left over was migrated straight into stock_items by the SQL migration
+
+  const totalRows =
+    (stringLists.data?.length || 0) + (factorItems.data?.length || 0) + (suppliers.data?.length || 0) +
+    (storesCatalog.data?.length || 0) + (customerContacts.data?.length || 0) + (companyRows.data?.length || 0) + (counters.data?.length || 0);
+  return { master: result, isEmpty: totalRows === 0 };
+}
+
+// requisitions is a real table now (snake_case columns) — same
+// translation-helper pattern as stock_items above.
+const REQ_DB_FIELDS = [
+  ["mainCat", "main_cat"], ["itemId", "item_id"], ["itemLabel", "item_label"], ["itemGrade", "item_grade"],
+  ["itemRawName", "item_raw_name"], ["qty", "qty"], ["notes", "notes"], ["requestedBy", "requested_by"],
+  ["dateRequested", "date_requested"], ["status", "status"], ["supplier", "supplier"], ["orderedBy", "ordered_by"],
+  ["dateOrdered", "date_ordered"], ["receivedBy", "received_by"], ["dateReceived", "date_received"],
+  ["dateFulfilled", "date_fulfilled"], ["poNumber", "po_number"],
+];
+function dbRowToRequisition(row) {
+  const r = { id: row.id };
+  for (const [jsKey, dbKey] of REQ_DB_FIELDS) r[jsKey] = row[dbKey];
+  return r;
+}
+function requisitionToDbRow(r) {
+  const row = { id: r.id };
+  for (const [jsKey, dbKey] of REQ_DB_FIELDS) row[dbKey] = r[jsKey] ?? "";
+  return row;
+}
+
+// purchase_orders is a real table now — scalar fields translate the same
+// way as requisitions; lineItems / receivedLineItems / linkedRequisitionIds
+// are jsonb columns, so the Supabase client serializes/deserializes those
+// automatically — no manual JSON handling needed for them here.
+const PO_DB_FIELDS = [
+  ["poNumber", "po_number", "text"], ["supplierId", "supplier_id", "text"], ["supplierName", "supplier_name", "text"],
+  ["dateCreated", "date_created", "text"], ["createdBy", "created_by", "text"], ["exclusiveTotal", "exclusive_total", "num"],
+  ["vatRate", "vat_rate", "num"], ["vatTotal", "vat_total", "num"], ["totalValue", "total_value", "num"],
+  ["deliveryDate", "delivery_date", "text"], ["reference", "reference", "text"], ["salesPerson", "sales_person", "text"],
+  ["notes", "notes", "text"], ["status", "status", "text"], ["receivedBy", "received_by", "text"], ["receivedDate", "received_date", "text"],
+  ["deliveryNoteNumber", "delivery_note_number", "text"],
+];
+function dbRowToPo(row) {
+  const po = {
+    id: row.id,
+    lineItems: row.line_items || [],
+    linkedRequisitionIds: row.linked_requisition_ids || [],
+  };
+  if (row.received_line_items != null) po.receivedLineItems = row.received_line_items;
+  for (const [jsKey, dbKey] of PO_DB_FIELDS) po[jsKey] = row[dbKey];
+  return po;
+}
+function poToDbRow(po) {
+  const row = {
+    id: po.id,
+    line_items: po.lineItems || [],
+    linked_requisition_ids: po.linkedRequisitionIds || [],
+    received_line_items: po.receivedLineItems ?? null,
+  };
+  for (const [jsKey, dbKey, type] of PO_DB_FIELDS) {
+    const v = po[jsKey];
+    row[dbKey] = v === undefined || v === null ? (type === "num" ? 0 : "") : v;
+  }
+  return row;
+}
+
+// usage_log is a real table now — same translation-helper pattern as the
+// others above. cutLength/cutPieces are only ever present on entries from
+// the Track Length cutting flow — omit ?? undefined so they don't show up
+// as 0 on every other entry that never had them at all.
+const USAGE_LOG_DB_FIELDS = [
+  ["itemId", "item_id"], ["itemName", "item_name"], ["mainCat", "main_cat"], ["qty", "qty"],
+  ["direction", "direction"], ["by", "by"], ["jobNumber", "job_number"], ["customer", "customer"],
+  ["note", "note"], ["lineCost", "line_cost"], ["timestamp", "timestamp"],
+];
+function dbRowToUsageLogEntry(row) {
+  const e = { id: row.id };
+  for (const [jsKey, dbKey] of USAGE_LOG_DB_FIELDS) e[jsKey] = row[dbKey];
+  if (row.cut_length != null) e.cutLength = row.cut_length;
+  if (row.cut_pieces != null) e.cutPieces = row.cut_pieces;
+  return e;
+}
+function usageLogEntryToDbRow(e) {
+  const row = { id: e.id, cut_length: e.cutLength ?? null, cut_pieces: e.cutPieces ?? null };
+  for (const [jsKey, dbKey] of USAGE_LOG_DB_FIELDS) row[dbKey] = e[jsKey] ?? (jsKey === "qty" || jsKey === "lineCost" ? 0 : "");
+  return row;
+}
+
 function formatToolNumber(n) {
   return "ERT-" + String(n).padStart(4, "0");
 }
@@ -804,84 +955,9 @@ export default function StockControl() {
       }
     }
     try {
-      const res = await window.storage.get("stock-master-data-v2", true);
-      if (res && res.value) {
-        let loaded = { ...DEFAULT_MASTER, ...JSON.parse(res.value) };
-        // Migration: sections saved before the Section Types feature don't have
-        // a `type` field. Backfill it by matching against the default library
-        // so existing data doesn't silently vanish from the filtered picker.
-        if (loaded.sections) {
-          loaded = {
-            ...loaded,
-            sections: loaded.sections.map((s) => {
-              if (s.type) return s;
-              const match = DEFAULT_MASTER.sections.find((d) => d.name.toLowerCase() === s.name.toLowerCase());
-              return { ...s, type: match ? match.type : "" };
-            }),
-          };
-        }
-        // Migration: suppliers used to be a plain list of names before they
-        // gained email/phone/address (for Purchase Orders) — upgrade any
-        // bare strings into proper entries instead of losing them.
-        if (loaded.suppliers) {
-          loaded = {
-            ...loaded,
-            suppliers: loaded.suppliers.map((s) =>
-              typeof s === "string" ? { id: uid(), name: s, email: "", phone: "", address: "" } : s
-            ),
-          };
-        }
-        // Fix-up: a bug briefly let bare strings get added to cncGrades
-        // (which needs {name, factor, price} objects like Material Types) —
-        // upgrade any stragglers instead of leaving them broken.
-        if (loaded.cncGrades) {
-          loaded = {
-            ...loaded,
-            cncGrades: loaded.cncGrades.map((g) => (typeof g === "string" ? { name: g, factor: 0, price: 0 } : g)),
-          };
-        }
-        // Migration: the Stores quick-add catalog used to include a
-        // "Fasteners" category, seeded before Fasteners existed as its own
-        // division — remove it now, since it's redundant with the real one.
-        if (loaded.storesCatalog) {
-          loaded = { ...loaded, storesCatalog: loaded.storesCatalog.filter((r) => r.category !== "Fasteners") };
-        }
-        // Migration: Stock Codes used to be a separate catalog from real
-        // Customer Stock items — now there's only one real source of truth.
-        // Any stock code without a matching real item becomes one, at
-        // qty 0 (we don't know an actual on-hand quantity from a price
-        // list import) — it just won't show in the normal Customer Stock
-        // browsing view until it has real stock, same as any other
-        // zero-qty item, but it's a real, findable, editable record.
-        if (loaded.stockCodes?.length && loadedItems) {
-          const existingKeys = new Set(
-            loadedItems
-              .filter((it) => it.mainCat === "custom")
-              .map((it) => `${(it.partNumber || "").toLowerCase()}|${it.customer || ""}`)
-          );
-          const newItemsFromCodes = loaded.stockCodes
-            .filter((r) => !existingKeys.has(`${(r.stockCode || "").toLowerCase()}|${r.customer || ""}`))
-            .map((r) => ({
-              id: uid(),
-              mainCat: "custom",
-              customer: r.customer || "",
-              partNumber: r.stockCode,
-              name: r.description || r.stockCode,
-              grade: "",
-              qty: 0,
-              value: Number(r.price) || 0,
-              low: Number(r.recommendedStock) || 0,
-              loc: "",
-              comment: "",
-              salesPerson: "",
-              customerRevision: r.revision || "",
-            }));
-          if (newItemsFromCodes.length) {
-            loadedItems = [...loadedItems, ...newItemsFromCodes];
-            setItems(loadedItems);
-          }
-        }
-        setMaster(loaded);
+      const { master: loadedMaster, isEmpty } = await loadMasterFromTables();
+      if (!isEmpty) {
+        setMaster(loadedMaster);
         setLoadError((prev) => ({ ...prev, master: false }));
       } else if (isInitialLoad) {
         console.error("Master data came back empty on load — refusing to reset to defaults over real data.");
@@ -896,9 +972,10 @@ export default function StockControl() {
       }
     }
     try {
-      const res = await window.storage.get("stock-requisitions-v1", true);
-      if (res && res.value) {
-        setRequisitions(JSON.parse(res.value));
+      const { data: reqRows, error: reqError } = await supabase.from("requisitions").select("*");
+      if (reqError) throw reqError;
+      if (reqRows && reqRows.length > 0) {
+        setRequisitions(reqRows.map(dbRowToRequisition));
         setLoadError((prev) => ({ ...prev, requisitions: false }));
       } else if (isInitialLoad) {
         console.error("Requisitions came back empty on load — refusing to reset to empty over real data.");
@@ -913,9 +990,10 @@ export default function StockControl() {
       }
     }
     try {
-      const res = await window.storage.get("stock-purchase-orders-v1", true);
-      if (res && res.value) {
-        setPurchaseOrders(JSON.parse(res.value));
+      const { data: poRows, error: poError } = await supabase.from("purchase_orders").select("*");
+      if (poError) throw poError;
+      if (poRows && poRows.length > 0) {
+        setPurchaseOrders(poRows.map(dbRowToPo));
         setLoadError((prev) => ({ ...prev, purchaseOrders: false }));
       } else if (isInitialLoad) {
         console.error("Purchase orders came back empty on load — refusing to reset to empty over real data.");
@@ -930,9 +1008,10 @@ export default function StockControl() {
       }
     }
     try {
-      const res = await window.storage.get("stock-usage-log-v1", true);
-      if (res && res.value) {
-        setUsageLog(JSON.parse(res.value));
+      const { data: usageRows, error: usageError } = await supabase.from("usage_log").select("*");
+      if (usageError) throw usageError;
+      if (usageRows && usageRows.length > 0) {
+        setUsageLog(usageRows.map(dbRowToUsageLogEntry));
         setLoadError((prev) => ({ ...prev, usageLog: false }));
       } else if (isInitialLoad) {
         console.error("Usage log came back empty on load — refusing to reset to empty over real data.");
@@ -1087,49 +1166,6 @@ export default function StockControl() {
     };
   }, [session]);
 
-  // Shared by every save-on-change effect below. None of this shared data
-  // is stored as individual database rows — each one is a single blob, so
-  // a naive save overwrites the whole thing with this browser's local
-  // copy. If anyone else changed something in the time since this copy
-  // was last refreshed, a plain save would silently erase that change —
-  // not corrupt it, just gone, with no error anywhere. That happened in
-  // practice with stock items, not just in theory.
-  //
-  // The fix: work out exactly what changed locally since the last save,
-  // re-fetch the current shared version fresh, and apply only that
-  // specific change on top of it — so anything anyone else changed in
-  // between survives, and only this browser's own intended edit lands.
-  // `byId: true` merges arrays of objects (each with an id) item by item;
-  // `byId: false` merges a plain object key by key at the top level.
-  async function saveWithMerge(storageKey, prevRef, newValue, byId) {
-    const prev = prevRef.current;
-    let toSave = newValue;
-    if (prev !== null && JSON.stringify(prev) !== JSON.stringify(newValue)) {
-      const fresh = await window.storage.get(storageKey, true);
-      const freshValue = fresh?.value ? JSON.parse(fresh.value) : newValue;
-      if (byId) {
-        const prevById = new Map(prev.map((it) => [it.id, it]));
-        const nextById = new Map(newValue.map((it) => [it.id, it]));
-        const added = newValue.filter((it) => !prevById.has(it.id));
-        const removedIds = prev.filter((it) => !nextById.has(it.id)).map((it) => it.id);
-        const modified = newValue.filter((it) => prevById.has(it.id) && JSON.stringify(prevById.get(it.id)) !== JSON.stringify(it));
-        const freshById = new Map((freshValue || []).map((it) => [it.id, it]));
-        for (const id of removedIds) freshById.delete(id);
-        for (const it of modified) freshById.set(it.id, it);
-        for (const it of added) freshById.set(it.id, it);
-        toSave = [...freshById.values()];
-      } else {
-        toSave = { ...freshValue };
-        for (const key of Object.keys(newValue)) {
-          if (JSON.stringify(prev[key]) !== JSON.stringify(newValue[key])) toSave[key] = newValue[key];
-        }
-      }
-    }
-    await window.storage.set(storageKey, JSON.stringify(toSave), true);
-    prevRef.current = toSave;
-    return toSave;
-  }
-
   // stock_items is a real table now — each row is independent, so unlike
   // the shared-blob data below, there's no whole-dataset overwrite risk to
   // guard against here at all. This only needs to work out this specific
@@ -1173,11 +1209,144 @@ export default function StockControl() {
   }, [items]);
 
   const lastSavedMasterRef = useRef(null);
+  async function saveMasterToTables(prevRef, newMaster) {
+    const prev = prevRef.current;
+    if (prev === null) {
+      prevRef.current = newMaster;
+      return;
+    }
+    prevRef.current = newMaster;
+    const ops = [];
+
+    // Simple string lists: identity is the value itself within its list —
+    // added values get a fresh row, removed values get deleted by match.
+    for (const listName of MASTER_STRING_LISTS) {
+      const prevList = prev[listName] || [];
+      const nextList = newMaster[listName] || [];
+      if (JSON.stringify(prevList) === JSON.stringify(nextList)) continue;
+      const added = nextList.filter((v) => !prevList.includes(v));
+      const removed = prevList.filter((v) => !nextList.includes(v));
+      if (added.length) {
+        ops.push(supabase.from("master_string_lists").insert(added.map((v) => ({ id: uid(), list_name: listName, value: v }))));
+      }
+      if (removed.length) {
+        ops.push(supabase.from("master_string_lists").delete().eq("list_name", listName).in("value", removed));
+      }
+    }
+
+    // name/factor/price lists: identity is the name within its list — a
+    // same-name entry with a changed factor/price/type is a real update,
+    // not a remove+add, so its row (and history) survives in place.
+    for (const listName of MASTER_FACTOR_LISTS) {
+      const prevList = prev[listName] || [];
+      const nextList = newMaster[listName] || [];
+      if (JSON.stringify(prevList) === JSON.stringify(nextList)) continue;
+      const prevByName = new Map(prevList.map((e) => [e.name, e]));
+      const nextByName = new Map(nextList.map((e) => [e.name, e]));
+      const added = nextList.filter((e) => !prevByName.has(e.name));
+      const removedNames = prevList.filter((e) => !nextByName.has(e.name)).map((e) => e.name);
+      const modified = nextList.filter((e) => prevByName.has(e.name) && JSON.stringify(prevByName.get(e.name)) !== JSON.stringify(e));
+      if (added.length) {
+        ops.push(
+          supabase.from("master_factor_items").insert(added.map((e) => ({ id: uid(), list_name: listName, name: e.name, factor: e.factor || 0, price: e.price || 0, type: e.type ?? null })))
+        );
+      }
+      if (removedNames.length) {
+        ops.push(supabase.from("master_factor_items").delete().eq("list_name", listName).in("name", removedNames));
+      }
+      for (const e of modified) {
+        ops.push(
+          supabase.from("master_factor_items").update({ factor: e.factor || 0, price: e.price || 0, type: e.type ?? null }).eq("list_name", listName).eq("name", e.name)
+        );
+      }
+    }
+
+    // Suppliers and their nested contacts — both have real, stable ids
+    // already, same as stock items.
+    if (JSON.stringify(prev.suppliers) !== JSON.stringify(newMaster.suppliers)) {
+      const prevSuppliers = prev.suppliers || [];
+      const nextSuppliers = newMaster.suppliers || [];
+      const prevById = new Map(prevSuppliers.map((s) => [s.id, s]));
+      const nextById = new Map(nextSuppliers.map((s) => [s.id, s]));
+      const toRow = (s) => ({ id: s.id, name: s.name, email: s.email || "", phone: s.phone || "", address: s.address || "", logo: s.logo || "", vat_number: s.vatNumber || "" });
+      const added = nextSuppliers.filter((s) => !prevById.has(s.id));
+      const removedIds = prevSuppliers.filter((s) => !nextById.has(s.id)).map((s) => s.id);
+      const modified = nextSuppliers.filter((s) => {
+        const before = prevById.get(s.id);
+        return before && JSON.stringify({ ...before, contacts: undefined }) !== JSON.stringify({ ...s, contacts: undefined });
+      });
+      if (added.length || modified.length) ops.push(supabase.from("master_suppliers").upsert([...added, ...modified].map(toRow)));
+      if (removedIds.length) ops.push(supabase.from("master_suppliers").delete().in("id", removedIds));
+
+      const prevContacts = prevSuppliers.flatMap((s) => (s.contacts || []).map((c) => ({ ...c, supplierId: s.id })));
+      const nextContacts = nextSuppliers.flatMap((s) => (s.contacts || []).map((c) => ({ ...c, supplierId: s.id })));
+      const prevContactById = new Map(prevContacts.map((c) => [c.id, c]));
+      const nextContactById = new Map(nextContacts.map((c) => [c.id, c]));
+      const addedContacts = nextContacts.filter((c) => !prevContactById.has(c.id));
+      const removedContactIds = prevContacts.filter((c) => !nextContactById.has(c.id)).map((c) => c.id);
+      const modifiedContacts = nextContacts.filter((c) => prevContactById.has(c.id) && JSON.stringify(prevContactById.get(c.id)) !== JSON.stringify(c));
+      const contactRow = (c) => ({ id: c.id, supplier_id: c.supplierId, name: c.name || "", email: c.email || "" });
+      if (addedContacts.length || modifiedContacts.length)
+        ops.push(supabase.from("master_supplier_contacts").upsert([...addedContacts, ...modifiedContacts].map(contactRow)));
+      if (removedContactIds.length) ops.push(supabase.from("master_supplier_contacts").delete().in("id", removedContactIds));
+    }
+
+    // Stores catalog — same real-id pattern as stock items.
+    if (JSON.stringify(prev.storesCatalog) !== JSON.stringify(newMaster.storesCatalog)) {
+      const prevList = prev.storesCatalog || [];
+      const nextList = newMaster.storesCatalog || [];
+      const prevById = new Map(prevList.map((r) => [r.id, r]));
+      const nextById = new Map(nextList.map((r) => [r.id, r]));
+      const added = nextList.filter((r) => !prevById.has(r.id));
+      const removedIds = prevList.filter((r) => !nextById.has(r.id)).map((r) => r.id);
+      const modified = nextList.filter((r) => prevById.has(r.id) && JSON.stringify(prevById.get(r.id)) !== JSON.stringify(r));
+      const toRow = (r) => ({ id: r.id, code: r.code || "", name: r.name || "", category: r.category || "", supplier: r.supplier || "", price: r.price || 0 });
+      if (added.length || modified.length) ops.push(supabase.from("master_stores_catalog").upsert([...added, ...modified].map(toRow)));
+      if (removedIds.length) ops.push(supabase.from("master_stores_catalog").delete().in("id", removedIds));
+    }
+
+    // Customer contacts — a dictionary of arrays; flatten to a single list
+    // (each contact already has its own real id) for the same id-based diff.
+    if (JSON.stringify(prev.customerContacts) !== JSON.stringify(newMaster.customerContacts)) {
+      const flatten = (dict) =>
+        Object.entries(dict || {}).flatMap(([customerName, contacts]) => (contacts || []).map((c) => ({ ...c, customerName })));
+      const prevContacts = flatten(prev.customerContacts);
+      const nextContacts = flatten(newMaster.customerContacts);
+      const prevById = new Map(prevContacts.map((c) => [c.id, c]));
+      const nextById = new Map(nextContacts.map((c) => [c.id, c]));
+      const added = nextContacts.filter((c) => !prevById.has(c.id));
+      const removedIds = prevContacts.filter((c) => !nextById.has(c.id)).map((c) => c.id);
+      const modified = nextContacts.filter((c) => prevById.has(c.id) && JSON.stringify(prevById.get(c.id)) !== JSON.stringify(c));
+      const toRow = (c) => ({ id: c.id, customer_name: c.customerName, name: c.name || "", email: c.email || "", phone: c.phone || "" });
+      if (added.length || modified.length) ops.push(supabase.from("master_customer_contacts").upsert([...added, ...modified].map(toRow)));
+      if (removedIds.length) ops.push(supabase.from("master_customer_contacts").delete().in("id", removedIds));
+    }
+
+    // Company details — a single fixed row.
+    if (JSON.stringify(prev.companyDetails) !== JSON.stringify(newMaster.companyDetails)) {
+      const c = newMaster.companyDetails || EMPTY_COMPANY_DETAILS;
+      ops.push(
+        supabase.from("master_company_details").upsert({ id: 1, name: c.name || "", address: c.address || "", phone: c.phone || "", email: c.email || "", vat_number: c.vatNumber || "", reg_number: c.regNumber || "" })
+      );
+    }
+
+    // Running counters — one row per counter, so bumping the job number
+    // can never touch or race against the PO number.
+    for (const counterName of MASTER_COUNTERS) {
+      if (prev[counterName] !== newMaster[counterName]) {
+        ops.push(supabase.from("master_counters").upsert({ counter_name: counterName, value: newMaster[counterName] ?? 1 }));
+      }
+    }
+
+    for (const op of ops) {
+      const { error } = await op;
+      if (error) throw error;
+    }
+  }
   useEffect(() => {
     if (master === null) return;
-    saveWithMerge("stock-master-data-v2", lastSavedMasterRef, master, false)
-      .then((merged) => {
-        if (JSON.stringify(merged) !== JSON.stringify(master)) setMaster(merged);
+    saveMasterToTables(lastSavedMasterRef, master)
+      .then(() => {
         setSaveState("saved");
         flashSaved("core");
       })
@@ -1187,12 +1356,35 @@ export default function StockControl() {
       });
   }, [master]);
 
+  // requisitions is a real table now — same reasoning and same pattern as
+  // stock_items above: each row is independent, so this only needs to work
+  // out this specific change since the last save and apply it directly.
   const lastSavedRequisitionsRef = useRef(null);
+  async function saveRequisitionsToDb(prevRef, newList) {
+    const prev = prevRef.current;
+    if (prev === null) {
+      prevRef.current = newList;
+      return;
+    }
+    const prevById = new Map(prev.map((it) => [it.id, it]));
+    const nextById = new Map(newList.map((it) => [it.id, it]));
+    const added = newList.filter((it) => !prevById.has(it.id));
+    const removedIds = prev.filter((it) => !nextById.has(it.id)).map((it) => it.id);
+    const modified = newList.filter((it) => prevById.has(it.id) && JSON.stringify(prevById.get(it.id)) !== JSON.stringify(it));
+    prevRef.current = newList;
+    if (added.length || modified.length) {
+      const { error } = await supabase.from("requisitions").upsert([...added, ...modified].map(requisitionToDbRow));
+      if (error) throw error;
+    }
+    if (removedIds.length) {
+      const { error } = await supabase.from("requisitions").delete().in("id", removedIds);
+      if (error) throw error;
+    }
+  }
   useEffect(() => {
     if (requisitions === null) return;
-    saveWithMerge("stock-requisitions-v1", lastSavedRequisitionsRef, requisitions, true)
-      .then((merged) => {
-        if (JSON.stringify(merged) !== JSON.stringify(requisitions)) setRequisitions(merged);
+    saveRequisitionsToDb(lastSavedRequisitionsRef, requisitions)
+      .then(() => {
         setSaveState("saved");
         flashSaved("core");
       })
@@ -1202,12 +1394,35 @@ export default function StockControl() {
       });
   }, [requisitions]);
 
+  // purchase_orders is a real table now — same pattern as requisitions and
+  // stock_items: each PO is independent, so this only needs to work out
+  // this specific change since the last save and apply it directly.
   const lastSavedPurchaseOrdersRef = useRef(null);
+  async function savePurchaseOrdersToDb(prevRef, newList) {
+    const prev = prevRef.current;
+    if (prev === null) {
+      prevRef.current = newList;
+      return;
+    }
+    const prevById = new Map(prev.map((it) => [it.id, it]));
+    const nextById = new Map(newList.map((it) => [it.id, it]));
+    const added = newList.filter((it) => !prevById.has(it.id));
+    const removedIds = prev.filter((it) => !nextById.has(it.id)).map((it) => it.id);
+    const modified = newList.filter((it) => prevById.has(it.id) && JSON.stringify(prevById.get(it.id)) !== JSON.stringify(it));
+    prevRef.current = newList;
+    if (added.length || modified.length) {
+      const { error } = await supabase.from("purchase_orders").upsert([...added, ...modified].map(poToDbRow));
+      if (error) throw error;
+    }
+    if (removedIds.length) {
+      const { error } = await supabase.from("purchase_orders").delete().in("id", removedIds);
+      if (error) throw error;
+    }
+  }
   useEffect(() => {
     if (purchaseOrders === null) return;
-    saveWithMerge("stock-purchase-orders-v1", lastSavedPurchaseOrdersRef, purchaseOrders, true)
-      .then((merged) => {
-        if (JSON.stringify(merged) !== JSON.stringify(purchaseOrders)) setPurchaseOrders(merged);
+    savePurchaseOrdersToDb(lastSavedPurchaseOrdersRef, purchaseOrders)
+      .then(() => {
         setSaveState("saved");
         flashSaved("core");
       })
@@ -1217,12 +1432,37 @@ export default function StockControl() {
       });
   }, [purchaseOrders]);
 
+  // usage_log is a real table now — same pattern as the others above.
+  // Purely append-only in practice (verified: no code path ever edits or
+  // removes an existing entry), but the same generic add/remove/modify
+  // diff is used anyway for consistency — it costs nothing extra and
+  // stays correct if that ever changes.
   const lastSavedUsageLogRef = useRef(null);
+  async function saveUsageLogToDb(prevRef, newList) {
+    const prev = prevRef.current;
+    if (prev === null) {
+      prevRef.current = newList;
+      return;
+    }
+    const prevById = new Map(prev.map((it) => [it.id, it]));
+    const nextById = new Map(newList.map((it) => [it.id, it]));
+    const added = newList.filter((it) => !prevById.has(it.id));
+    const removedIds = prev.filter((it) => !nextById.has(it.id)).map((it) => it.id);
+    const modified = newList.filter((it) => prevById.has(it.id) && JSON.stringify(prevById.get(it.id)) !== JSON.stringify(it));
+    prevRef.current = newList;
+    if (added.length || modified.length) {
+      const { error } = await supabase.from("usage_log").upsert([...added, ...modified].map(usageLogEntryToDbRow));
+      if (error) throw error;
+    }
+    if (removedIds.length) {
+      const { error } = await supabase.from("usage_log").delete().in("id", removedIds);
+      if (error) throw error;
+    }
+  }
   useEffect(() => {
     if (usageLog === null) return;
-    saveWithMerge("stock-usage-log-v1", lastSavedUsageLogRef, usageLog, true)
-      .then((merged) => {
-        if (JSON.stringify(merged) !== JSON.stringify(usageLog)) setUsageLog(merged);
+    saveUsageLogToDb(lastSavedUsageLogRef, usageLog)
+      .then(() => {
         setSaveState("saved");
         flashSaved("core");
       })
@@ -1348,10 +1588,10 @@ export default function StockControl() {
   // Covers the (much smaller) remaining risk of a save being mid-flight
   // right when that happens.
   //
-  // This goes through the same saveWithMerge logic as the primary saves,
-  // not a direct write — a raw write here would bypass the merge
-  // protection entirely and could reintroduce the exact "overwrites
-  // someone else's recent change" bug in this one specific timing window.
+  // This goes through the same real, per-row save functions as the primary
+  // saves, not a direct write of a whole dataset — every one of these five
+  // is a real table now, so there's no shared blob left for a raw write to
+  // risk overwriting in the first place.
   const itemsRef = useRef(items);
   const masterRef = useRef(master);
   const requisitionsRef = useRef(requisitions);
@@ -1366,12 +1606,12 @@ export default function StockControl() {
   useEffect(() => {
     function flushAll() {
       if (itemsRef.current !== null) saveItemsToDb(lastSavedItemsRef, itemsRef.current).catch(() => {});
-      if (masterRef.current !== null) saveWithMerge("stock-master-data-v2", lastSavedMasterRef, masterRef.current, false).catch(() => {});
+      if (masterRef.current !== null) saveMasterToTables(lastSavedMasterRef, masterRef.current).catch(() => {});
       if (requisitionsRef.current !== null)
-        saveWithMerge("stock-requisitions-v1", lastSavedRequisitionsRef, requisitionsRef.current, true).catch(() => {});
+        saveRequisitionsToDb(lastSavedRequisitionsRef, requisitionsRef.current).catch(() => {});
       if (purchaseOrdersRef.current !== null)
-        saveWithMerge("stock-purchase-orders-v1", lastSavedPurchaseOrdersRef, purchaseOrdersRef.current, true).catch(() => {});
-      if (usageLogRef.current !== null) saveWithMerge("stock-usage-log-v1", lastSavedUsageLogRef, usageLogRef.current, true).catch(() => {});
+        savePurchaseOrdersToDb(lastSavedPurchaseOrdersRef, purchaseOrdersRef.current).catch(() => {});
+      if (usageLogRef.current !== null) saveUsageLogToDb(lastSavedUsageLogRef, usageLogRef.current).catch(() => {});
     }
     document.addEventListener("visibilitychange", flushAll);
     window.addEventListener("pagehide", flushAll);
@@ -3783,6 +4023,27 @@ export default function StockControl() {
       console.error("Failed to reset access:", err);
       alert("That didn't save — check your connection and try again.");
       loadPeople();
+    }
+  }
+
+  // Genuinely, permanently removes the person — their login and their
+  // profile both — not just their permissions. This calls a small
+  // server-side function rather than doing it directly, since actually
+  // deleting a login account requires Supabase's admin credentials, which
+  // can never safely live in this app itself.
+  async function deletePersonPermanently(id, name) {
+    const confirmed = window.confirm(
+      `Permanently delete ${name}? This removes their login and profile entirely — they will need a brand new account to sign in again, and this can't be undone. Are you sure?`
+    );
+    if (!confirmed) return;
+    try {
+      const { data, error } = await supabase.functions.invoke("delete-user", { body: { userId: id } });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setPeople((prev) => prev.filter((p) => p.id !== id));
+    } catch (err) {
+      console.error("Failed to delete user:", err);
+      alert(`Couldn't delete that person: ${err.message || "check your connection and try again."}`);
     }
   }
 
@@ -9695,7 +9956,16 @@ export default function StockControl() {
                           <input type="checkbox" checked={p.isAdmin} onChange={(e) => updatePersonField(p.id, "isAdmin", e.target.checked)} />
                           Admin
                         </label>
-                        <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => resetPersonAccess(p.id)} title="Reset all access">
+                        <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => resetPersonAccess(p.id)} title="Reset all access (keeps their login)">
+                          <RefreshCw size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          className="stk-btn"
+                          style={{ ...S.managerDelete, color: C.danger }}
+                          onClick={() => deletePersonPermanently(p.id, p.name)}
+                          title="Permanently delete — removes their login entirely"
+                        >
                           <Trash2 size={13} />
                         </button>
                       </div>
