@@ -856,6 +856,12 @@ export default function StockControl() {
   // list-then-detail pattern used for Sections and Production.
   const [managerCustomerOpen, setManagerCustomerOpen] = useState(null);
   const [managerSupplierOpen, setManagerSupplierOpen] = useState(null);
+  // Which specific item is open in its own full detail view within the
+  // current stock tab — null shows compact cards (name, quantity, and any
+  // low-stock/requisition flags only); selecting one opens everything
+  // about that item — comments, full specs, and every action — on its own,
+  // matching the same list-then-detail pattern used everywhere else now.
+  const [selectedItemDetail, setSelectedItemDetail] = useState(null);
   const [showArchive, setShowArchive] = useState(false);
   const [showLowStock, setShowLowStock] = useState(false);
   const [archiveTypeFilter, setArchiveTypeFilter] = useState("");
@@ -1541,6 +1547,13 @@ export default function StockControl() {
     if (tab === "drawings" && drawingSearchResults === null) {
       refreshDrawings(drawingSearchQuery, drawingCustomerFilter);
     }
+  }, [tab]);
+
+  // A detail view open in one tab shouldn't carry over into a different
+  // one after switching — same reasoning as the department/job navigation
+  // elsewhere in the app.
+  useEffect(() => {
+    setSelectedItemDetail(null);
   }, [tab]);
 
   // The part-number → drawing lookup is used on Customer Stock rows and the
@@ -5432,6 +5445,108 @@ export default function StockControl() {
     openPoBuilder(selected.map((r) => r.id), matched?.id || "", lineItems);
   }
 
+  // One-click version of the same bundling, for an entire supplier's group
+  // of pending requisitions at once — the everyday case this exists for:
+  // several separate requests for the same supplier, submitted together as
+  // one PO instead of raising one at a time throughout the day.
+  function raisePoForSupplierGroup(supplierName, reqList) {
+    if (reqList.length === 0) return;
+    const lineItems = reqList.map((r) => ({
+      description: r.itemLabel,
+      qty: r.qty,
+      unitPrice: resolvePoLineUnitPrice(r),
+    }));
+    const matched = master.suppliers.find((s) => s.name === supplierName);
+    openPoBuilder(reqList.map((r) => r.id), matched?.id || "", lineItems);
+  }
+
+  // Shared by both the supplier-grouped pending list and the flat ordered
+  // list below — same card, just reused rather than duplicated.
+  function renderRequisitionCard(r) {
+    const price = resolveReqPrice(r);
+    return (
+      <div key={r.id} style={S.reqCard}>
+        <div style={S.reqCardTop}>
+          <span style={S.itemName}>{r.itemLabel}</span>
+          <span style={{ ...S.reqStatusTag, ...S["reqStatus_" + r.status] }}>{r.status}</span>
+        </div>
+        <div className="stk-meta-row" style={S.rowMeta}>
+          {canManageRequisitions ? (
+            <span style={S.reqQtyEditRow}>
+              Qty:
+              <input
+                type="number"
+                step="any"
+                min="0"
+                value={r.qty}
+                onChange={(e) => updateRequisition(r.id, { qty: e.target.value })}
+                style={S.reqQtyInput}
+              />
+            </span>
+          ) : (
+            <span>Qty: {r.qty}</span>
+          )}
+          <span>Requested by {r.requestedBy}</span>
+          <span>{new Date(r.dateRequested).toLocaleDateString()}</span>
+          {r.status === "ordered" && r.orderedBy && (
+            <span>Ordered by {r.orderedBy} on {new Date(r.dateOrdered).toLocaleDateString()}</span>
+          )}
+          {r.supplier && <span>Supplier: {r.supplier}</span>}
+        </div>
+        {r.notes && <div style={S.itemComment}>{r.notes}</div>}
+        {canManageRequisitions && r.mainCat !== "custom" && (
+          <div style={S.reqPriceRow}>
+            <span style={S.reqPriceLabel}>
+              Current price ({r.mainCat === "plate" || r.mainCat === "cncBar" ? "R/kg" : r.mainCat === "structural" ? "R/m" : "R/ea"})
+              {price === 0 ? " — not set" : ""}:
+            </span>
+            <input
+              type="number"
+              step="0.01"
+              style={{ ...S.managerFactorInput, ...(price === 0 ? S.reqPriceMissing : {}) }}
+              value={price === 0 ? "" : price}
+              placeholder="0"
+              onChange={(e) => updateReqPrice(r, e.target.value)}
+            />
+          </div>
+        )}
+        {canManageRequisitions && r.status === "pending" && (
+          <div style={S.reqActions}>
+            {canRaisePO && (
+              <label style={S.reqSelectLabel}>
+                <input type="checkbox" checked={selectedReqIds.includes(r.id)} onChange={() => toggleReqSelection(r.id)} />
+                Add to PO
+              </label>
+            )}
+            <select
+              style={{ ...S.input, flex: 1 }}
+              value={r.supplier}
+              onChange={(e) => updateRequisition(r.id, { supplier: e.target.value })}
+            >
+              <option value="">Supplier (optional)</option>
+              {master.suppliers.map((s) => (
+                <option key={s.id} value={s.name}>{s.name}</option>
+              ))}
+            </select>
+            <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => markOrdered(r.id)}>
+              <ShoppingCart size={13} /> Mark ordered
+            </button>
+            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => cancelRequisition(r.id)}>
+              Cancel
+            </button>
+          </div>
+        )}
+        {r.status === "ordered" && canMarkReceivedPerm && (
+          <div style={S.reqActions}>
+            <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => markReceived(r.id)}>
+              <Check size={13} /> Mark received
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function submitPurchaseOrder(e) {
     e.preventDefault();
     if (!poBuilder.supplierId) return;
@@ -6843,90 +6958,40 @@ export default function StockControl() {
                   <span style={S.gradeCount}>{list.length}</span>
                 </div>
                 <div style={S.gradeItems}>
-                  {list.map((r) => {
-                    const price = resolveReqPrice(r);
-                    return (
-                      <div key={r.id} style={S.reqCard}>
-                        <div style={S.reqCardTop}>
-                          <span style={S.itemName}>{r.itemLabel}</span>
-                          <span style={{ ...S.reqStatusTag, ...S["reqStatus_" + r.status] }}>{r.status}</span>
-                        </div>
-                        <div className="stk-meta-row" style={S.rowMeta}>
-                          {canManageRequisitions ? (
-                            <span style={S.reqQtyEditRow}>
-                              Qty:
-                              <input
-                                type="number"
-                                step="any"
-                                min="0"
-                                value={r.qty}
-                                onChange={(e) => updateRequisition(r.id, { qty: e.target.value })}
-                                style={S.reqQtyInput}
-                              />
-                            </span>
-                          ) : (
-                            <span>Qty: {r.qty}</span>
-                          )}
-                          <span>Requested by {r.requestedBy}</span>
-                          <span>{new Date(r.dateRequested).toLocaleDateString()}</span>
-                          {r.status === "ordered" && r.orderedBy && (
-                            <span>Ordered by {r.orderedBy} on {new Date(r.dateOrdered).toLocaleDateString()}</span>
-                          )}
-                          {r.supplier && <span>Supplier: {r.supplier}</span>}
-                        </div>
-                        {r.notes && <div style={S.itemComment}>{r.notes}</div>}
-                        {canManageRequisitions && r.mainCat !== "custom" && (
-                          <div style={S.reqPriceRow}>
-                            <span style={S.reqPriceLabel}>
-                              Current price ({r.mainCat === "plate" || r.mainCat === "cncBar" ? "R/kg" : r.mainCat === "structural" ? "R/m" : "R/ea"})
-                              {price === 0 ? " — not set" : ""}:
-                            </span>
-                            <input
-                              type="number"
-                              step="0.01"
-                              style={{ ...S.managerFactorInput, ...(price === 0 ? S.reqPriceMissing : {}) }}
-                              value={price === 0 ? "" : price}
-                              placeholder="0"
-                              onChange={(e) => updateReqPrice(r, e.target.value)}
-                            />
-                          </div>
-                        )}
-                        {canManageRequisitions && r.status === "pending" && (
-                          <div style={S.reqActions}>
-                            {canRaisePO && (
-                              <label style={S.reqSelectLabel}>
-                                <input type="checkbox" checked={selectedReqIds.includes(r.id)} onChange={() => toggleReqSelection(r.id)} />
-                                Add to PO
-                              </label>
+                  {status === "pending" ? (
+                    // Grouped by supplier — the everyday need this serves:
+                    // several separate requests for the same supplier,
+                    // submitted together as one PO rather than raised one
+                    // at a time throughout the day.
+                    Object.entries(
+                      list.reduce((acc, r) => {
+                        const k = r.supplier || "No supplier set";
+                        (acc[k] = acc[k] || []).push(r);
+                        return acc;
+                      }, {})
+                    )
+                      .sort((a, b) => a[0].localeCompare(b[0]))
+                      .map(([supplierName, supplierReqs]) => (
+                        <div key={supplierName} style={{ marginBottom: 14 }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                            <span style={{ ...S.label, fontWeight: 700 }}>{supplierName} · {supplierReqs.length}</span>
+                            {canRaisePO && supplierName !== "No supplier set" && (
+                              <button
+                                type="button"
+                                className="stk-btn"
+                                style={S.reqActionBtn}
+                                onClick={() => raisePoForSupplierGroup(supplierName, supplierReqs)}
+                              >
+                                <FileText size={13} /> Raise PO for all {supplierReqs.length}
+                              </button>
                             )}
-                            <select
-                              style={{ ...S.input, flex: 1 }}
-                              value={r.supplier}
-                              onChange={(e) => updateRequisition(r.id, { supplier: e.target.value })}
-                            >
-                              <option value="">Supplier (optional)</option>
-                              {master.suppliers.map((s) => (
-                                <option key={s.id} value={s.name}>{s.name}</option>
-                              ))}
-                            </select>
-                            <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => markOrdered(r.id)}>
-                              <ShoppingCart size={13} /> Mark ordered
-                            </button>
-                            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => cancelRequisition(r.id)}>
-                              Cancel
-                            </button>
                           </div>
-                        )}
-                        {r.status === "ordered" && canMarkReceivedPerm && (
-                          <div style={S.reqActions}>
-                            <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => markReceived(r.id)}>
-                              <Check size={13} /> Mark received
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                          {supplierReqs.map(renderRequisitionCard)}
+                        </div>
+                      ))
+                  ) : (
+                    list.map(renderRequisitionCard)
+                  )}
                 </div>
               </div>
             );
