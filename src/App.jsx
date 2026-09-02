@@ -3226,6 +3226,41 @@ export default function StockControl() {
   // isPriority starts true: a shortage means something already promised is
   // missing, so the re-cut is holding up work that was otherwise done.
   // Priority is the normal case here, not the exception.
+  // A photo of the missing or damaged part, taken on the spot. Worth more
+  // than any description a packer can type in a hurry — nesting can see
+  // what they are actually re-cutting.
+  //
+  // Stored in the existing job-documents bucket, under the job, but
+  // deliberately not recorded in job_documents: it belongs to a line on a
+  // shortage, not to the job's paperwork, and listing it there would put
+  // snapshots of broken parts among the drawings and quotes.
+  async function uploadShortagePhoto(jobId, file, onDone) {
+    if (!supabase) return;
+    try {
+      const safeName = (file.name || "photo.jpg").replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `${jobId}/shortages/${Date.now()}-${safeName}`;
+      const { error } = await supabase.storage.from("job-documents").upload(path, file);
+      if (error) throw error;
+      onDone(path);
+    } catch (err) {
+      console.error("Failed to upload shortage photo:", err);
+      alert("Couldn't upload that photo — check your connection and try again.");
+    }
+  }
+
+  async function viewShortagePhoto(path, name) {
+    try {
+      const { data, error } = await supabase.storage.from("job-documents").createSignedUrl(path, 3600);
+      if (error) throw error;
+      setPreviewItem({ id: path, attachmentType: "image", attachmentName: name || "Shortage photo" });
+      setPreviewData(data.signedUrl);
+      setPreviewLoading(false);
+    } catch (err) {
+      console.error("Failed to open shortage photo:", err);
+      alert("Couldn't open that photo — it may have been removed.");
+    }
+  }
+
   function openShortageFlagModal(job, process) {
     setShortageModal({
       job,
@@ -3237,7 +3272,7 @@ export default function StockControl() {
       boardNumber: job.laser_job_reference || "",
       // One line per missing part. Several parts short off the same nest
       // is one shortage to be re-cut together, not several.
-      lines: [{ description: "", qty: "" }],
+      lines: [{ description: "", qty: "", photo: "", photoName: "" }],
       reason: "short",
       isPriority: true,
       priorityNote: "",
@@ -3249,7 +3284,11 @@ export default function StockControl() {
     // Blank rows are ignored rather than rejected — someone adding a line
     // and changing their mind should not have to remove it again.
     const items = (lines || [])
-      .map((l) => ({ description: (l.description || "").trim(), qty: Number(l.qty) || 0 }))
+      .map((l) => ({
+        description: (l.description || "").trim(),
+        qty: Number(l.qty) || 0,
+        ...(l.photo ? { photo: l.photo, photoName: l.photoName || "" } : {}),
+      }))
       .filter((l) => l.description && l.qty > 0);
     if (items.length === 0) return;
     // description and qty carry the first line, so anything reading the
@@ -8603,7 +8642,26 @@ export default function StockControl() {
                                   )}
                                 </div>
                                 <div style={{ ...S.itemComment, marginTop: 2 }}>
-                                  {shortageSummary(s)} {s.board_number && `— SigmaNest ${s.board_number}`}
+                                  {/* Listed line by line rather than as one
+                                      string, so each photo sits with the
+                                      part it belongs to. */}
+                                  {shortageLines(s).map((line, li) => (
+                                    <span key={li} style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 8 }}>
+                                      {line.description} × {line.qty}
+                                      {line.photo && (
+                                        <button
+                                          type="button"
+                                          className="stk-btn"
+                                          style={{ background: "none", border: "none", padding: 0, color: C.accentRaw, cursor: "pointer" }}
+                                          title="See the photo"
+                                          onClick={(e) => { e.stopPropagation(); viewShortagePhoto(line.photo, line.photoName); }}
+                                        >
+                                          <ImageIcon size={13} />
+                                        </button>
+                                      )}
+                                    </span>
+                                  ))}
+                                  {s.board_number && `— SigmaNest ${s.board_number}`}
                                 </div>
                                 <div className="stk-meta-row" style={S.rowMeta}>
                                   <span>Reason: {s.reason}</span>
@@ -8689,7 +8747,22 @@ export default function StockControl() {
                                   ⚠ Shortage re-cut{shortage.is_priority === false ? "" : " · Priority"}
                                 </div>
                                 <div style={{ ...S.itemComment, marginTop: 2 }}>
-                                  {shortageSummary(shortage)}
+                                  {shortageLines(shortage).map((line, li) => (
+                                    <span key={li} style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 8 }}>
+                                      {line.description} × {line.qty}
+                                      {line.photo && (
+                                        <button
+                                          type="button"
+                                          className="stk-btn"
+                                          style={{ background: "none", border: "none", padding: 0, color: C.accentRaw, cursor: "pointer" }}
+                                          title="See the photo"
+                                          onClick={() => viewShortagePhoto(line.photo, line.photoName)}
+                                        >
+                                          <ImageIcon size={13} />
+                                        </button>
+                                      )}
+                                    </span>
+                                  ))}
                                   {shortage.board_number ? ` — SigmaNest ${shortage.board_number}` : ""}
                                 </div>
                                 <div className="stk-meta-row" style={S.rowMeta}>
@@ -13955,6 +14028,33 @@ export default function StockControl() {
                       }
                       placeholder="Qty"
                     />
+                    {/* accept="image/*" alone, with no capture attribute:
+                        a phone then offers both the camera and the gallery,
+                        so a part already photographed is not made to be
+                        photographed again. */}
+                    <label
+                      className="stk-btn"
+                      style={{ ...S.managerDelete, cursor: "pointer", color: l.photo ? C.accentRaw : C.muted }}
+                      title={l.photo ? `Photo attached: ${l.photoName || "photo"} — click to replace` : "Attach a photo of this part"}
+                    >
+                      {l.photo ? <ImageIcon size={14} /> : <Paperclip size={14} />}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          const file = e.target.files[0];
+                          e.target.value = "";
+                          if (!file) return;
+                          uploadShortagePhoto(shortageModal.job.id, file, (path) =>
+                            setShortageModal((m) => ({
+                              ...m,
+                              lines: m.lines.map((x, i) => (i === idx ? { ...x, photo: path, photoName: file.name } : x)),
+                            }))
+                          );
+                        }}
+                      />
+                    </label>
                     <button
                       type="button"
                       className="stk-btn"
