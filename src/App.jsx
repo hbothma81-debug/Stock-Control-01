@@ -4379,7 +4379,11 @@ export default function StockControl() {
     autoTable(doc, {
       startY: y,
       head: [["Process", "Operator/Supplier", "Complete", "Notes"]],
-      body: processes.map((p) => [
+      // The job's own stages only. A shortage's catch-up run is stored
+      // against the same job, so without this the sheet lists nesting
+      // twice with nothing saying why. The runs are summarised under
+      // Shortages instead, where the context is.
+      body: processes.filter((p) => !p.shortage_id).map((p) => [
         p.process_name,
         p.operator || "",
         p.is_complete ? `Yes — ${p.completed_by || ""}` : "",
@@ -4475,6 +4479,56 @@ export default function StockControl() {
         startY: hy,
         head: [["Item", "Qty", "By", "Date"]],
         body: materialsUsed.map((u) => [u.itemName, u.qty, u.by, new Date(u.timestamp).toLocaleDateString()]),
+        theme: "grid",
+        headStyles: { fillColor: [27, 29, 31] },
+        margin: { left: leftX },
+      });
+      hy = doc.lastAutoTable.finalY + 8;
+    }
+
+    // Shortages belong on the job's record as much as its processes do:
+    // they are work that had to be done twice, and the sheet is where
+    // anyone looks back to see what happened on a job.
+    //
+    // Fetched here rather than read from shortagesList, so printing does
+    // not depend on that having loaded, and so the sheet is right even for
+    // a job whose shortages were raised by someone else.
+    let jobShortages = [];
+    try {
+      const { data, error } = await supabase
+        .from("shortages")
+        .select("*")
+        .eq("job_id", job.id)
+        .order("created_at");
+      if (error) throw error;
+      jobShortages = data || [];
+    } catch (err) {
+      // Never fatal. A sheet missing its shortages beats no sheet at all.
+      console.error("Failed to load shortages for the job sheet:", err);
+    }
+
+    doc.setFontSize(11);
+    doc.setFont(undefined, "bold");
+    doc.text("Shortages", leftX, hy);
+    doc.setFont(undefined, "normal");
+    hy += 6;
+    if (jobShortages.length === 0) {
+      doc.setFontSize(9);
+      doc.text("None raised.", leftX, hy);
+      hy += 8;
+    } else {
+      autoTable(doc, {
+        startY: hy,
+        head: [["What was missing", "Reason", "Raised by", "SigmaNest", "Status"]],
+        body: jobShortages.map((s) => [
+          shortageLines(s)
+            .map((l) => `${l.description} × ${l.qty}${l.photo ? " (photo)" : ""}`)
+            .join("\n"),
+          `${s.reason}${s.is_priority === false ? "" : " · priority"}`,
+          `${s.flagged_by}\n${s.flagged_department}`,
+          s.board_number || "—",
+          s.status === "cut" ? "Re-cut complete" : s.status === "nested" ? "Being re-cut" : "Waiting on nesting",
+        ]),
         theme: "grid",
         headStyles: { fillColor: [27, 29, 31] },
         margin: { left: leftX },
