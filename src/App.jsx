@@ -823,6 +823,9 @@ export default function StockControl() {
   // either handing it back or booking it out against its job. { item }
   const [reservedModal, setReservedModal] = useState(null);
   const [reservedUseQty, setReservedUseQty] = useState({});
+  // The operator confirming they've used their material, and saying what
+  // came back. { allocation, item, qty, offcut }
+  const [useAllocationModal, setUseAllocationModal] = useState(null);
   const [assetRemoveModal, setAssetRemoveModal] = useState(null); // { item, reason, date }
   const [showAssetArchive, setShowAssetArchive] = useState(false);
   const [poBuilder, setPoBuilder] = useState(null); // { supplierId, lineItems: [...], linkedRequisitionIds: [...], notes }
@@ -2929,7 +2932,7 @@ export default function StockControl() {
   // This is the only route by which reserved stock can be consumed —
   // ordinary Use is capped at what is free — so the quantity leaving the
   // shelf and the job it left for always agree.
-  async function useAllocation(allocation, qty) {
+  async function useAllocation(allocation, qty, offcutLength = 0) {
     const outstanding = Number(allocation.qty_allocated) - Number(allocation.qty_used);
     const amount = Number(qty);
     if (!amount || amount <= 0) return;
@@ -2940,6 +2943,11 @@ export default function StockControl() {
     const item = (items || []).find((i) => i.id === allocation.item_id);
     if (!item) {
       alert("That stock item no longer exists, so it can't be booked out. Release the allocation instead.");
+      return;
+    }
+    const offcut = Number(offcutLength) || 0;
+    if (offcut > 0 && offcut >= Number(item.length || 0)) {
+      alert(`An offcut of ${offcut}m isn't possible from a ${item.length}m length — it has to be shorter than the piece it came off.`);
       return;
     }
     try {
@@ -2955,7 +2963,19 @@ export default function StockControl() {
 
       // Same two effects as any other usage: the shelf goes down, and the
       // log records what went where. Both save themselves.
-      setItems((prev) => prev.map((it) => (it.id === item.id ? { ...it, qty: Math.max(0, Number(it.qty) - amount) } : it)));
+      //
+      // A returned offcut is filed as its own shorter line rather than
+      // shortening the original, which would quietly change the length of
+      // every other full piece sitting under the same entry. Same approach
+      // the CNC bar cut already takes with its remainder.
+      setItems((prev) => {
+        const reduced = prev.map((it) => (it.id === item.id ? { ...it, qty: Math.max(0, Number(it.qty) - amount) } : it));
+        if (offcut <= 0) return reduced;
+        return [
+          ...reduced,
+          { ...item, id: uid(), qty: 1, length: offcut, stockType: "offcut", low: 0 },
+        ];
+      });
       setUsageLog((prev) => [
         ...prev,
         {
@@ -3373,6 +3393,28 @@ export default function StockControl() {
   async function toggleJobProcessComplete(process, job) {
     if (!supabase || !job) return;
     const nowComplete = !process.is_complete;
+
+    // A finished stage with material still set aside for it leaves that
+    // stock reserved with nothing left to consume it — invisible from the
+    // job, since the stage has gone from the queue, but still held against
+    // everyone else on the stock screens. Ask before that happens.
+    if (nowComplete) {
+      const stranded = (allocationsList || []).filter(
+        (a) => a.process_id === process.id && a.status !== "released" && Number(a.qty_allocated) - Number(a.qty_used) > 0
+      );
+      if (stranded.length > 0) {
+        const detail = stranded
+          .map((a) => `  • ${a.item_name}: ${Number(a.qty_allocated) - Number(a.qty_used)} still reserved`)
+          .join("\n");
+        const proceed = window.confirm(
+          `${process.process_name} still has material set aside for it:\n\n${detail}\n\n` +
+            `Marking it complete leaves that stock reserved and unavailable to anyone else. ` +
+            `Use it or release it first if you can.\n\nMark complete anyway?`
+        );
+        if (!proceed) return;
+      }
+    }
+
     try {
       const { error } = await supabase
         .from("job_processes")
@@ -8510,8 +8552,26 @@ export default function StockControl() {
                                           <div className="stk-meta-row" style={S.rowMeta}>
                                             {a.qty_used > 0 && <span>{a.qty_used} of {a.qty_allocated} already used</span>}
                                             {stockItem?.loc && <span>Location: {stockItem.loc}</span>}
+                                            {stockItem?.trackLength && stockItem.length > 0 && <span>{stockItem.length}m lengths</span>}
                                             <span>Set aside by {a.allocated_by}</span>
                                           </div>
+                                          {outstanding > 0 && (
+                                            <button
+                                              type="button"
+                                              className="stk-btn"
+                                              style={{ ...S.reqActionBtn, marginTop: 6, width: "100%" }}
+                                              onClick={() =>
+                                                setUseAllocationModal({
+                                                  allocation: a,
+                                                  item: stockItem,
+                                                  qty: String(outstanding),
+                                                  offcut: "",
+                                                })
+                                              }
+                                            >
+                                              Use stock
+                                            </button>
+                                          )}
                                         </div>
                                       );
                                     })}
@@ -12472,6 +12532,77 @@ export default function StockControl() {
           the stock table runs to thousands of rows. Handing straight over
           to the usual Use stock form keeps one path for actually booking
           material out, with the job filled in already. */}
+      {/* The operator confirming what they actually used. Long material
+          gets an offcut box, because a 6m length rarely goes into a job
+          whole and the remainder is worth real money — left off, it
+          silently disappears from stock. */}
+      {useAllocationModal && (
+        <div style={{ ...S.modalOverlay, zIndex: 31 }}>
+          <form
+            style={{ ...S.modal, maxWidth: 400 }}
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              useAllocation(useAllocationModal.allocation, useAllocationModal.qty, useAllocationModal.offcut);
+              setUseAllocationModal(null);
+            }}
+          >
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Use stock</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setUseAllocationModal(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={S.roleHint}>
+              {useAllocationModal.allocation.item_name} — set aside for {useAllocationModal.allocation.process_name} on{" "}
+              {useAllocationModal.allocation.job_number}
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>How much did you use</label>
+              <input
+                autoFocus
+                style={S.input}
+                type="number"
+                step="any"
+                min="0"
+                max={Number(useAllocationModal.allocation.qty_allocated) - Number(useAllocationModal.allocation.qty_used)}
+                value={useAllocationModal.qty}
+                onChange={(e) => setUseAllocationModal((m) => ({ ...m, qty: e.target.value }))}
+              />
+              <div style={S.roleHint}>
+                {Number(useAllocationModal.allocation.qty_allocated) - Number(useAllocationModal.allocation.qty_used)} still set
+                aside for you. Using less leaves the rest reserved.
+              </div>
+            </div>
+
+            {useAllocationModal.item?.trackLength && (
+              <div style={{ marginTop: 10 }}>
+                <label style={S.label}>Offcut going back to stock (metres)</label>
+                <input
+                  style={S.input}
+                  type="number"
+                  step="any"
+                  min="0"
+                  max={Number(useAllocationModal.item.length || 0)}
+                  value={useAllocationModal.offcut}
+                  onChange={(e) => setUseAllocationModal((m) => ({ ...m, offcut: e.target.value }))}
+                  placeholder="Leave blank if nothing came back"
+                />
+                <div style={S.roleHint}>
+                  These come in {useAllocationModal.item.length}m lengths. Anything you put here is filed back as its own
+                  offcut, ready to be used on another job — leave it blank if there's nothing usable left.
+                </div>
+              </div>
+            )}
+
+            <button type="submit" className="stk-btn" style={{ ...S.submitBtn, marginTop: 12 }} disabled={!Number(useAllocationModal.qty)}>
+              Confirm used
+            </button>
+          </form>
+        </div>
+      )}
+
       {/* What is reserved on one stock item, and the two things that can
           be done about it — hand it back, or book it out against the job
           it was set aside for. This is the only way reserved material can
