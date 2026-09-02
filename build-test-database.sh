@@ -20,6 +20,7 @@ ORDER=(
   setup-stock-items-table.sql
   setup-master-data-tables.sql
   setup-master-factor-short-name.sql
+  setup-string-list-order.sql
 
   # --- jobs (COMBINED is the complete jobs system and is safe after the rest)
   setup-jobs.sql
@@ -50,6 +51,7 @@ ORDER=(
   setup-asset-history.sql
   setup-asset-service-and-repairs.sql
   setup-usage-log-table.sql
+  setup-job-allocations.sql
 
   # --- extra columns and permissions on profiles
   setup-production-access.sql

@@ -655,6 +655,54 @@ alter table master_factor_items add column if not exists short_name text;
 
 
 -- ============================================================
+-- setup-string-list-order.sql
+-- ============================================================
+-- Gives master_string_lists a real, storable order.
+--
+-- Job Process Types are the factory flow, so their sequence matters: the
+-- floor cannot start a process until everything before it is complete.
+-- Until now no order could be stored at all, and the list was loaded with
+-- no ORDER BY, so the sequence could silently reshuffle.
+--
+-- Safe to run more than once. Adding the column is guarded, and the
+-- backfill only touches lists that have never been ordered (every row
+-- still sitting at 0), so a manual ordering set later is never reset.
+
+alter table master_string_lists
+  add column if not exists sort_order integer not null default 0;
+
+with unordered as (
+  select list_name
+  from master_string_lists
+  group by list_name
+  having count(distinct sort_order) = 1 and min(sort_order) = 0
+),
+ranked as (
+  select m.id,
+         row_number() over (
+           partition by m.list_name
+           order by m.created_at, m.value
+         ) - 1 as rn
+  from master_string_lists m
+  join unordered u on u.list_name = m.list_name
+)
+update master_string_lists m
+set sort_order = r.rn
+from ranked r
+where m.id = r.id;
+
+-- Reading the list always sorts by this, so an index keeps it cheap.
+create index if not exists master_string_lists_order_idx
+  on master_string_lists (list_name, sort_order);
+
+-- Check: Job Process Types in factory order, numbered from 0.
+select sort_order, value
+from master_string_lists
+where list_name = 'jobProcessTypes'
+order by sort_order;
+
+
+-- ============================================================
 -- setup-jobs.sql
 -- ============================================================
 -- Run this once in Supabase → SQL Editor → New query, then Run.
@@ -2073,6 +2121,87 @@ from app_storage, jsonb_array_elements(coalesce(value::jsonb, '[]'::jsonb)) as e
 where key = 'stock-usage-log-v1'
   and elem->>'id' is not null
 on conflict (id) do nothing;
+
+
+-- ============================================================
+-- setup-job-allocations.sql
+-- ============================================================
+-- Material set aside for a job, and for a particular process on that job.
+--
+-- Stock ordered specially for a job used to have nowhere to live between
+-- arriving and being used. The operator had to go and find it, knowing
+-- from somewhere else that it was theirs.
+--
+-- An allocation reserves rather than removes: stock_items keeps its
+-- quantity, so the count still matches what is physically on the shelf.
+-- qty_used only rises when an operator actually books material out, and
+-- the stock quantity drops at that moment, not before.
+--
+-- Safe to run more than once.
+
+create table if not exists job_allocations (
+  id text primary key,
+  job_id uuid not null references jobs(id) on delete cascade,
+  job_number text not null default '',
+
+  -- Which stage the material is for. Kept as a name as well as an id: the
+  -- id is the real link, the name survives a process being removed from
+  -- the job so history still reads correctly.
+  process_id uuid references job_processes(id) on delete set null,
+  process_name text not null default '',
+
+  -- stock_items.id is text, not uuid. No foreign key on purpose: cutting a
+  -- long length can retire the original row and file the remainder as a
+  -- new one, and an allocation already used should not vanish because of
+  -- that. item_name is kept for the same reason.
+  item_id text not null default '',
+  item_name text not null default '',
+  main_cat text not null default '',
+
+  qty_allocated numeric not null default 0,
+  qty_used numeric not null default 0,
+
+  allocated_by text not null default '',
+  allocated_by_id uuid references profiles(id) on delete set null,
+  note text not null default '',
+
+  -- open -> partially or not yet used; used -> fully consumed;
+  -- released -> handed back without being used
+  status text not null default 'open',
+
+  created_at timestamptz not null default now()
+);
+
+create index if not exists job_allocations_job_idx on job_allocations (job_id);
+create index if not exists job_allocations_process_idx on job_allocations (process_id);
+create index if not exists job_allocations_item_idx on job_allocations (item_id);
+
+alter table job_allocations enable row level security;
+
+do $$ begin
+  create policy "Signed-in users can read job allocations" on job_allocations
+  for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create policy "Signed-in users can insert job allocations" on job_allocations
+  for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create policy "Signed-in users can update job allocations" on job_allocations
+  for update using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create policy "Signed-in users can delete job allocations" on job_allocations
+  for delete using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+
+-- Check: should return no rows on a fresh install.
+select job_number, process_name, item_name, qty_allocated, qty_used, status
+from job_allocations
+order by created_at desc;
 
 
 -- ============================================================
