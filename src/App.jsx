@@ -113,6 +113,18 @@ const MASTER_STRING_LISTS = [
 // behaviour, which also avoids rewriting hundreds of rows on lists like
 // customers every time one is added.
 const ORDERED_STRING_LISTS = ["jobProcessTypes"];
+
+// Which department a shortage goes to was decided by comparing the process
+// name against the exact strings "Nesting" and "Laser Operator". Process
+// types are free text that each shop types in for itself, so anything else
+// -- "nesting", "Tube Laser Operator", "Laser - External" -- failed the
+// comparison, and the shortage was saved and then shown to nobody. It
+// looked like shortages did not work; in fact they were invisible.
+//
+// Matching on the recognisable part of the name instead means a shortage
+// reaches the right people whatever the shop calls the stage.
+const isNestingProcess = (name) => /nest/i.test(name || "");
+const isLaserProcess = (name) => /laser/i.test(name || "");
 const MASTER_FACTOR_LISTS = ["sections", "grades", "cncGrades"];
 const MASTER_COUNTERS = ["nextJobNumber", "nextDeliveryNoteNumber", "nextFastenerNumber", "nextToolNumber", "nextPoNumber"];
 const EMPTY_COMPANY_DETAILS = { name: "", address: "", phone: "", email: "", vatNumber: "", regNumber: "" };
@@ -3222,7 +3234,7 @@ export default function StockControl() {
       // which only ever holds the process types the person flagging this
       // is themselves allowed to see — a Packer flagging a shortage may
       // have no Nesting entries loaded there at all.
-      const { data: nestingRows } = await supabase.from("job_processes").select("assigned_to").eq("job_id", job.id).eq("process_name", "Nesting").limit(1);
+      const { data: nestingRows } = await supabase.from("job_processes").select("assigned_to").eq("job_id", job.id).ilike("process_name", "%nest%").limit(1);
       const nestingAssignedTo = nestingRows?.[0]?.assigned_to || null;
 
       const { error } = await supabase.from("shortages").insert({
@@ -8425,10 +8437,12 @@ export default function StockControl() {
                         const totalQty = (quoteItems || []).reduce((sum, it) => sum + Number(it.qty || 0), 0);
                         return !!process.assigned_to && totalQty > 0;
                       }).length;
+                  // Only nesting gets the marker now. A shortage past that
+                  // point is carried by its own run, which shows up in the
+                  // department's normal list like any other work — a second
+                  // marker would be pointing at something already there.
                   const hasPendingShortage =
-                    !q &&
-                    ((procType === "Nesting" && (shortagesList || []).some((s) => s.status === "flagged")) ||
-                      (procType === "Laser Operator" && (shortagesList || []).some((s) => s.status === "nested")));
+                    !q && isNestingProcess(procType) && (shortagesList || []).some((s) => s.status === "flagged");
                   return { procType, readyCount, hasPendingShortage };
                 })
                 // A department with nothing ready and no shortage needing
@@ -8517,9 +8531,15 @@ export default function StockControl() {
               }
               return (
                 <div style={{ ...S.gradeItems, marginTop: 8 }}>
-                  {(procType === "Nesting" || procType === "Laser Operator") &&
+                  {/* Only the not-yet-nested ones. Once nesting has set a
+                      shortage up it has its own run through the shop, and
+                      that run is what carries it from here — listing it
+                      again for the laser would show the same shortage
+                      twice, with a "Shortage cut" button that marks it
+                      finished while welding and assembly are still to do. */}
+                  {isNestingProcess(procType) &&
                     (() => {
-                      const relevantStatus = procType === "Nesting" ? "flagged" : "nested";
+                      const relevantStatus = "flagged";
                       // Priority first, then oldest — a queue is only
                       // useful if the order on screen is the order to work
                       // in, so the operator never has to read all of them
@@ -8536,7 +8556,7 @@ export default function StockControl() {
                       if (relevant.length === 0) return null;
                       return (
                         <div style={{ marginBottom: 10 }}>
-                          <div style={{ ...S.label, color: C.danger }}>⚠ Shortages needing {procType === "Nesting" ? "nesting" : "cutting"}</div>
+                          <div style={{ ...S.label, color: C.danger }}>⚠ Shortages needing {isNestingProcess(procType) ? "nesting" : "cutting"}</div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
                             {relevant.map((s) => (
                               <div key={s.id} style={{ ...S.reqCard, borderColor: C.danger, borderWidth: 2 }}>
@@ -8563,9 +8583,9 @@ export default function StockControl() {
                                   type="button"
                                   className="stk-btn"
                                   style={{ ...S.reqActionBtn, marginTop: 6, width: "100%" }}
-                                  onClick={() => (procType === "Nesting" ? markShortageNested(s) : markShortageCut(s))}
+                                  onClick={() => (isNestingProcess(procType) ? markShortageNested(s) : markShortageCut(s))}
                                 >
-                                  {procType === "Nesting" ? "Shortage nested" : "Shortage cut"}
+                                  {isNestingProcess(procType) ? "Shortage nested" : "Shortage cut"}
                                 </button>
                               </div>
                             ))}
@@ -8595,7 +8615,7 @@ export default function StockControl() {
                           </div>
                         );
                       }
-                      const { job, process, isReady, quoteItems, documents, itemProgress } = selected;
+                      const { job, process, isReady, quoteItems, documents, itemProgress, shortage } = selected;
                       const drawingsForJob = quoteItems
                         .map((it) => {
                           const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
@@ -8621,7 +8641,34 @@ export default function StockControl() {
                                 {isReady ? "Ready" : "Waiting"}
                               </span>
                             </div>
-                            {process.process_name === "Nesting" && (
+                            {/* The list card says this is a re-cut, but the
+                                operator works from this screen — without it
+                                here they are making a replacement part with
+                                nothing telling them so, or how many. */}
+                            {shortage && (
+                              <div
+                                style={{
+                                  border: `2px solid ${C.danger}`,
+                                  borderRadius: 6,
+                                  padding: 8,
+                                  marginBottom: 8,
+                                  background: C.dangerTint,
+                                }}
+                              >
+                                <div style={{ color: C.danger, fontWeight: 700 }}>
+                                  ⚠ Shortage re-cut{shortage.is_priority === false ? "" : " · Priority"}
+                                </div>
+                                <div style={{ ...S.itemComment, marginTop: 2 }}>
+                                  {shortage.description} × {shortage.qty}
+                                  {shortage.board_number ? ` — board ${shortage.board_number}` : ""}
+                                </div>
+                                <div className="stk-meta-row" style={S.rowMeta}>
+                                  <span>Reason: {shortage.reason}</span>
+                                  <span>Flagged by {shortage.flagged_by} at {shortage.flagged_department}</span>
+                                </div>
+                              </div>
+                            )}
+                            {isNestingProcess(process.process_name) && (
                               <div style={{ marginBottom: 4 }}>
                                 <label style={S.label}>SigmaNest job number</label>
                                 <input
@@ -8754,7 +8801,7 @@ export default function StockControl() {
                             <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
                               <ExpandableProcessNotes value={process.notes} onCommit={(notes) => saveProcessNote(process, notes)} />
                             </div>
-                            {process.process_name === "Nesting" && (
+                            {isNestingProcess(process.process_name) && (
                               <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
                                 <label style={S.label}>Nesting document</label>
                                 <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
@@ -8776,7 +8823,12 @@ export default function StockControl() {
                                       style={{ display: "none" }}
                                       onChange={(e) => {
                                         const file = e.target.files[0];
-                                        if (file) uploadJobDocument(job.id, file, "Nesting");
+                                        // Tag it with the stage it was
+                                        // actually uploaded from. Hardcoding
+                                        // "Nesting" filed it under a stage
+                                        // that may not exist in this shop,
+                                        // so it never appeared again.
+                                        if (file) uploadJobDocument(job.id, file, process.process_name);
                                         e.target.value = "";
                                       }}
                                     />
@@ -13313,7 +13365,12 @@ export default function StockControl() {
                 </div>
                 {jobDetailLoading && <div style={S.empty}>Loading…</div>}
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-                  {jobDetail.processes.map((p) => (
+                  {/* The job's own stages only. A shortage's catch-up run
+                      is stored against the same job, so without this the
+                      two interleave and the checklist shows nesting twice
+                      with no way to tell which is the job and which is the
+                      re-cut. The runs get their own section below. */}
+                  {jobDetail.processes.filter((p) => !p.shortage_id).map((p) => (
                     <div key={p.id} style={{ ...S.managerRow, alignItems: "flex-start" }}>
                       <div style={{ flex: 1 }}>
                         <label style={{ ...S.checkRow, fontWeight: 600 }}>
@@ -13411,6 +13468,51 @@ export default function StockControl() {
                     </div>
                   ))}
                 </div>
+
+                {/* Each shortage's catch-up run, kept apart from the job's
+                    own stages and grouped by shortage, so it is clear this
+                    is a replacement part working its way back rather than
+                    the job repeating itself. Read-only here — the floor
+                    works these from Production, same as any other stage. */}
+                {(() => {
+                  const runs = jobDetail.processes.filter((p) => p.shortage_id);
+                  if (runs.length === 0) return null;
+                  const byShortage = {};
+                  for (const p of runs) (byShortage[p.shortage_id] ||= []).push(p);
+                  return Object.entries(byShortage).map(([sid, stages]) => {
+                    const s = (shortagesList || []).find((x) => x.id === sid);
+                    const done = stages.every((p) => p.is_complete);
+                    return (
+                      <div key={sid} style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+                        <label style={{ ...S.label, color: done ? C.accentFinished : C.danger }}>
+                          {done ? "✓" : "⚠"} Shortage re-cut
+                          {s ? ` — ${s.description} × ${s.qty}` : ""}
+                          {s && s.is_priority !== false && !done ? " · Priority" : ""}
+                        </label>
+                        {s && (
+                          <div style={S.roleHint}>
+                            Flagged by {s.flagged_by} at {s.flagged_department}
+                            {done ? " — replacement complete." : " — replacement working back through the shop."}
+                          </div>
+                        )}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                          {stages.map((p) => (
+                            <span
+                              key={p.id}
+                              style={{
+                                ...S.reqStatusTag,
+                                ...(p.is_complete ? S.reqStatus_received : S.reqStatus_ordered),
+                              }}
+                              title={p.is_complete ? `${p.completed_by} — ${new Date(p.completed_at).toLocaleString()}` : "Not done yet"}
+                            >
+                              {p.is_complete ? "✓ " : ""}{p.process_name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
               </div>
 
               <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
