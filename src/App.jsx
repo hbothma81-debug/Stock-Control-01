@@ -125,6 +125,19 @@ const ORDERED_STRING_LISTS = ["jobProcessTypes"];
 // reaches the right people whatever the shop calls the stage.
 const isNestingProcess = (name) => /nest/i.test(name || "");
 const isLaserProcess = (name) => /laser/i.test(name || "");
+
+// A shortage can cover several missing parts. Older ones, and any saved
+// before the app could hold more than one, carry a single description and
+// quantity instead — so read items where they exist and fall back to the
+// pair otherwise, rather than showing only the first of three.
+function shortageLines(s) {
+  if (Array.isArray(s?.items) && s.items.length > 0) return s.items;
+  return s?.description ? [{ description: s.description, qty: s.qty }] : [];
+}
+const shortageSummary = (s) =>
+  shortageLines(s)
+    .map((i) => `${i.description} × ${i.qty}`)
+    .join(", ");
 const MASTER_FACTOR_LISTS = ["sections", "grades", "cncGrades"];
 const MASTER_COUNTERS = ["nextJobNumber", "nextDeliveryNoteNumber", "nextFastenerNumber", "nextToolNumber", "nextPoNumber"];
 const EMPTY_COMPANY_DETAILS = { name: "", address: "", phone: "", email: "", vatNumber: "", regNumber: "" };
@@ -3217,9 +3230,14 @@ export default function StockControl() {
     setShortageModal({
       job,
       process,
-      boardNumber: "",
-      description: "",
-      qty: "",
+      // Prefilled from the job when nesting has already recorded it, since
+      // that is the number the nesting operator needs and retyping it is
+      // just a chance to get it wrong. Still editable — a shortage can
+      // come off a different nest from the one on the job.
+      boardNumber: job.laser_job_reference || "",
+      // One line per missing part. Several parts short off the same nest
+      // is one shortage to be re-cut together, not several.
+      lines: [{ description: "", qty: "" }],
       reason: "short",
       isPriority: true,
       priorityNote: "",
@@ -3227,8 +3245,17 @@ export default function StockControl() {
   }
 
   async function submitNewShortage() {
-    const { job, process, boardNumber, description, qty, reason, isPriority, priorityNote } = shortageModal;
-    if (!description.trim() || !qty || Number(qty) <= 0) return;
+    const { job, process, boardNumber, lines, reason, isPriority, priorityNote } = shortageModal;
+    // Blank rows are ignored rather than rejected — someone adding a line
+    // and changing their mind should not have to remove it again.
+    const items = (lines || [])
+      .map((l) => ({ description: (l.description || "").trim(), qty: Number(l.qty) || 0 }))
+      .filter((l) => l.description && l.qty > 0);
+    if (items.length === 0) return;
+    // description and qty carry the first line, so anything reading the
+    // shortage the old way still shows something sensible.
+    const description = items[0].description;
+    const qty = items[0].qty;
     try {
       // A direct, fresh lookup rather than relying on productionQueue,
       // which only ever holds the process types the person flagging this
@@ -3246,6 +3273,7 @@ export default function StockControl() {
         flagged_by_id: currentUser?.id || null,
         flagged_department: process.process_name,
         board_number: boardNumber.trim(),
+        items,
         description: description.trim(),
         qty: Number(qty),
         reason,
@@ -3268,7 +3296,9 @@ export default function StockControl() {
             job_id: job.id,
             job_number: job.job_number,
             recipient_id: recipientId,
-            message: `Shortage flagged on ${job.job_number} (${job.customer || "no customer"}) by ${roleLabel}: ${description.trim()} × ${qty}`,
+            message: `Shortage flagged on ${job.job_number} (${job.customer || "no customer"}) by ${roleLabel}: ${items
+              .map((i) => `${i.description} × ${i.qty}`)
+              .join(", ")}`,
           }))
         );
       }
@@ -3358,7 +3388,7 @@ export default function StockControl() {
           job_id: shortage.job_id,
           job_number: shortage.job_number,
           recipient_id: shortage.flagged_by_id,
-          message: `Shortage cut and ready — ${shortage.description} × ${shortage.qty} for ${shortage.job_number} (${shortage.customer || "no customer"})`,
+          message: `Shortage cut and ready — ${shortageSummary(shortage)} for ${shortage.job_number} (${shortage.customer || "no customer"})`,
         });
       }
       fetchShortages();
@@ -8573,7 +8603,7 @@ export default function StockControl() {
                                   )}
                                 </div>
                                 <div style={{ ...S.itemComment, marginTop: 2 }}>
-                                  {s.description} × {s.qty} {s.board_number && `— board ${s.board_number}`}
+                                  {shortageSummary(s)} {s.board_number && `— SigmaNest ${s.board_number}`}
                                 </div>
                                 <div className="stk-meta-row" style={S.rowMeta}>
                                   <span>Reason: {s.reason}</span>
@@ -8659,8 +8689,8 @@ export default function StockControl() {
                                   ⚠ Shortage re-cut{shortage.is_priority === false ? "" : " · Priority"}
                                 </div>
                                 <div style={{ ...S.itemComment, marginTop: 2 }}>
-                                  {shortage.description} × {shortage.qty}
-                                  {shortage.board_number ? ` — board ${shortage.board_number}` : ""}
+                                  {shortageSummary(shortage)}
+                                  {shortage.board_number ? ` — SigmaNest ${shortage.board_number}` : ""}
                                 </div>
                                 <div className="stk-meta-row" style={S.rowMeta}>
                                   <span>Reason: {shortage.reason}</span>
@@ -8869,7 +8899,7 @@ export default function StockControl() {
                           </div>
                           {shortage && (
                             <div style={{ ...S.itemComment, color: C.danger, fontWeight: 600, marginTop: 2 }}>
-                              ⚠ Shortage re-cut{shortage.is_priority === false ? "" : " · Priority"} — {shortage.description} × {shortage.qty}
+                              ⚠ Shortage re-cut{shortage.is_priority === false ? "" : " · Priority"} — {shortageSummary(shortage)}
                             </div>
                           )}
                           <div className="stk-meta-row" style={S.rowMeta}>
@@ -8975,7 +9005,7 @@ export default function StockControl() {
                         <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>{statusLabel[s.status] || s.status}</span>
                       </div>
                       <div style={{ ...S.itemComment, marginTop: 2 }}>
-                        {s.description} × {s.qty} {s.board_number && `— board ${s.board_number}`}
+                        {shortageSummary(s)} {s.board_number && `— SigmaNest ${s.board_number}`}
                       </div>
                       <div className="stk-meta-row" style={S.rowMeta}>
                         <span>Reason: {s.reason}</span>
@@ -9007,7 +9037,7 @@ export default function StockControl() {
                               <span style={{ ...S.reqStatusTag, ...S.reqStatus_received }}>Cut</span>
                             </div>
                             <div style={{ ...S.itemComment, marginTop: 2 }}>
-                              {s.description} × {s.qty} {s.board_number && `— board ${s.board_number}`}
+                              {shortageSummary(s)} {s.board_number && `— SigmaNest ${s.board_number}`}
                             </div>
                             <div className="stk-meta-row" style={S.rowMeta}>
                               <span>Flagged by {s.flagged_by}</span>
@@ -13486,7 +13516,7 @@ export default function StockControl() {
                       <div key={sid} style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
                         <label style={{ ...S.label, color: done ? C.accentFinished : C.danger }}>
                           {done ? "✓" : "⚠"} Shortage re-cut
-                          {s ? ` — ${s.description} × ${s.qty}` : ""}
+                          {s ? ` — ${shortageSummary(s)}` : ""}
                           {s && s.is_priority !== false && !done ? " · Priority" : ""}
                         </label>
                         {s && (
@@ -13879,36 +13909,76 @@ export default function StockControl() {
               re-cut — fill in enough that the laser operator knows exactly what to cut and how many.
             </div>
             <div style={{ marginTop: 10 }}>
-              <label style={S.label}>Board number</label>
+              <label style={S.label}>SigmaNest job number</label>
               <input
                 style={S.input}
                 value={shortageModal.boardNumber}
                 onChange={(e) => setShortageModal((m) => ({ ...m, boardNumber: e.target.value }))}
-                placeholder="Which sheet/board this comes from"
+                placeholder="Not recorded on this job yet"
                 autoFocus
               />
+              {shortageModal.job.laser_job_reference && (
+                <div style={S.roleHint}>Taken from the job — change it if this came off a different nest.</div>
+              )}
             </div>
+
+            {/* One row per missing part. Several parts short off the same
+                nest is one shortage to be re-cut together, so they belong
+                on one flag rather than three. */}
             <div style={{ marginTop: 8 }}>
-              <label style={S.label}>Description</label>
-              <input
-                style={S.input}
-                value={shortageModal.description}
-                onChange={(e) => setShortageModal((m) => ({ ...m, description: e.target.value }))}
-                placeholder="What part needs to be cut"
-              />
-            </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <div style={{ flex: 1 }}>
-                <label style={S.label}>Quantity</label>
-                <input
-                  style={S.input}
-                  type="number"
-                  min="1"
-                  value={shortageModal.qty}
-                  onChange={(e) => setShortageModal((m) => ({ ...m, qty: e.target.value }))}
-                  placeholder="How many"
-                />
+              <label style={S.label}>What's missing</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+                {shortageModal.lines.map((l, idx) => (
+                  <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input
+                      style={{ ...S.input, flex: 1 }}
+                      value={l.description}
+                      onChange={(e) =>
+                        setShortageModal((m) => ({
+                          ...m,
+                          lines: m.lines.map((x, i) => (i === idx ? { ...x, description: e.target.value } : x)),
+                        }))
+                      }
+                      placeholder="What part needs to be cut"
+                    />
+                    <span style={{ color: C.muted, fontSize: 13 }}>×</span>
+                    <input
+                      style={{ ...S.input, width: 80, flexShrink: 0 }}
+                      type="number"
+                      min="1"
+                      value={l.qty}
+                      onChange={(e) =>
+                        setShortageModal((m) => ({
+                          ...m,
+                          lines: m.lines.map((x, i) => (i === idx ? { ...x, qty: e.target.value } : x)),
+                        }))
+                      }
+                      placeholder="Qty"
+                    />
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={{ ...S.managerDelete, opacity: shortageModal.lines.length === 1 ? 0.25 : 1 }}
+                      disabled={shortageModal.lines.length === 1}
+                      title="Remove this line"
+                      onClick={() => setShortageModal((m) => ({ ...m, lines: m.lines.filter((_, i) => i !== idx) }))}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
               </div>
+              <button
+                type="button"
+                className="stk-btn"
+                style={{ ...S.addBtn, marginTop: 6 }}
+                onClick={() => setShortageModal((m) => ({ ...m, lines: [...m.lines, { description: "", qty: "" }] }))}
+              >
+                <Plus size={15} strokeWidth={2.5} /> Add another part
+              </button>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
               <div style={{ flex: 1 }}>
                 <label style={S.label}>Reason</label>
                 <select
@@ -13951,7 +14021,7 @@ export default function StockControl() {
               type="button"
               className="stk-btn"
               style={S.submitBtn}
-              disabled={!shortageModal.description.trim() || !shortageModal.qty || Number(shortageModal.qty) <= 0}
+              disabled={!shortageModal.lines.some((l) => (l.description || "").trim() && Number(l.qty) > 0)}
               onClick={submitNewShortage}
             >
               Flag Shortage
