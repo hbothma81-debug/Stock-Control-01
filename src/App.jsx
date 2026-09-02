@@ -773,6 +773,14 @@ export default function StockControl() {
   // Same compact-line, tap-to-expand pattern as Purchase Orders and
   // Requisitions.
   const [expandedReceivingId, setExpandedReceivingId] = useState(null);
+  // The receiving-history view, moved here from Records → Usage Log →
+  // Received — dedicated state, separate from Usage Log's own, since
+  // they're now two independent places in the app rather than one shared
+  // view.
+  const [showReceivingHistory, setShowReceivingHistory] = useState(false);
+  const [receivingHistoryDateFrom, setReceivingHistoryDateFrom] = useState("");
+  const [receivingHistoryDateTo, setReceivingHistoryDateTo] = useState("");
+  const [receivingHistorySearchQuery, setReceivingHistorySearchQuery] = useState("");
   const [shortageSearchQuery, setShortageSearchQuery] = useState("");
   const [showPoReport, setShowPoReport] = useState(false);
   const [showCompletedPOs, setShowCompletedPOs] = useState(false);
@@ -7735,6 +7743,77 @@ export default function StockControl() {
               });
             })()}
           </div>
+
+          <div style={S.gradeBlock}>
+            <button className="stk-grade" style={S.gradeHeader} onClick={() => setShowReceivingHistory((v) => !v)}>
+              <ChevronDown size={15} style={{ transform: showReceivingHistory ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
+              <span style={S.gradeTitle}>Completed / History</span>
+            </button>
+            {showReceivingHistory && (
+              <div style={{ marginTop: 10 }}>
+                <div style={S.filterBar}>
+                  <div>
+                    <label style={S.label}>From</label>
+                    <input
+                      type="date"
+                      style={S.input}
+                      value={receivingHistoryDateFrom}
+                      onChange={(e) => setReceivingHistoryDateFrom(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label style={S.label}>To</label>
+                    <input
+                      type="date"
+                      style={S.input}
+                      value={receivingHistoryDateTo}
+                      onChange={(e) => setReceivingHistoryDateTo(e.target.value)}
+                    />
+                  </div>
+                  <input
+                    style={S.input}
+                    value={receivingHistorySearchQuery}
+                    onChange={(e) => setReceivingHistorySearchQuery(e.target.value)}
+                    placeholder="Search item, supplier note, or person…"
+                  />
+                </div>
+                {(() => {
+                  const received = [...usageLog]
+                    .filter((u) => u.direction === "add")
+                    .filter((u) => !receivingHistoryDateFrom || new Date(u.timestamp) >= new Date(receivingHistoryDateFrom))
+                    .filter((u) => !receivingHistoryDateTo || new Date(u.timestamp) <= new Date(receivingHistoryDateTo + "T23:59:59"))
+                    .filter((u) => {
+                      if (!receivingHistorySearchQuery.trim()) return true;
+                      const q = receivingHistorySearchQuery.toLowerCase();
+                      return (
+                        u.itemName.toLowerCase().includes(q) ||
+                        (u.note || "").toLowerCase().includes(q) ||
+                        (u.by || "").toLowerCase().includes(q)
+                      );
+                    })
+                    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                  return (
+                    <div style={{ ...S.gradeItems, marginTop: 10 }}>
+                      {received.length === 0 && <div style={S.empty}>Nothing received yet.</div>}
+                      {received.map((u) => (
+                        <div key={u.id} style={S.reqCard}>
+                          <div style={S.reqCardTop}>
+                            <span style={S.itemName}>{u.itemName}</span>
+                            <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>+{u.qty}</span>
+                          </div>
+                          <div className="stk-meta-row" style={S.rowMeta}>
+                            <span>By {u.by}</span>
+                            <span>{new Date(u.timestamp).toLocaleString()}</span>
+                          </div>
+                          {u.note && <div style={S.itemComment}>{u.note}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
         </div>
       ) : tab === "jobs" ? (
         <div style={S.list}>
@@ -8615,7 +8694,6 @@ export default function StockControl() {
           <div style={S.segRow}>
             {[
               { key: "log", label: "Usage Log" },
-              { key: "received", label: "Received" },
               { key: "jobCosting", label: "Job Costing" },
             ].map((m) => (
               <button
@@ -8633,60 +8711,7 @@ export default function StockControl() {
             ))}
           </div>
 
-          {usageViewMode === "received" ? (
-            <div style={{ marginTop: 12 }}>
-              <div style={S.filterBar}>
-                <div>
-                  <label style={S.label}>From</label>
-                  <input type="date" style={S.input} value={usageDateFrom} onChange={(e) => setUsageDateFrom(e.target.value)} />
-                </div>
-                <div>
-                  <label style={S.label}>To</label>
-                  <input type="date" style={S.input} value={usageDateTo} onChange={(e) => setUsageDateTo(e.target.value)} />
-                </div>
-                <input
-                  style={S.input}
-                  value={usageSearchQuery}
-                  onChange={(e) => setUsageSearchQuery(e.target.value)}
-                  placeholder="Search item, supplier note, or person…"
-                />
-              </div>
-              {(() => {
-                const received = [...usageLog]
-                  .filter((u) => u.direction === "add")
-                  .filter((u) => !usageDateFrom || new Date(u.timestamp) >= new Date(usageDateFrom))
-                  .filter((u) => !usageDateTo || new Date(u.timestamp) <= new Date(usageDateTo + "T23:59:59"))
-                  .filter((u) => {
-                    if (!usageSearchQuery.trim()) return true;
-                    const q = usageSearchQuery.toLowerCase();
-                    return (
-                      u.itemName.toLowerCase().includes(q) ||
-                      (u.note || "").toLowerCase().includes(q) ||
-                      (u.by || "").toLowerCase().includes(q)
-                    );
-                  })
-                  .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-                return (
-                  <div style={{ ...S.gradeItems, marginTop: 10 }}>
-                    {received.length === 0 && <div style={S.empty}>Nothing received yet.</div>}
-                    {received.map((u) => (
-                      <div key={u.id} style={S.reqCard}>
-                        <div style={S.reqCardTop}>
-                          <span style={S.itemName}>{u.itemName}</span>
-                          <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>+{u.qty}</span>
-                        </div>
-                        <div className="stk-meta-row" style={S.rowMeta}>
-                          <span>By {u.by}</span>
-                          <span>{new Date(u.timestamp).toLocaleString()}</span>
-                        </div>
-                        {u.note && <div style={S.itemComment}>{u.note}</div>}
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-            </div>
-          ) : usageViewMode === "jobCosting" ? (
+          {usageViewMode === "jobCosting" ? (
             <div style={{ marginTop: 12 }}>
               <input
                 style={S.input}
