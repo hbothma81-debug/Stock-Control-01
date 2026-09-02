@@ -763,7 +763,7 @@ export default function StockControl() {
   const [assetRemoveModal, setAssetRemoveModal] = useState(null); // { item, reason, date }
   const [showAssetArchive, setShowAssetArchive] = useState(false);
   const [poBuilder, setPoBuilder] = useState(null); // { supplierId, lineItems: [...], linkedRequisitionIds: [...], notes }
-  const [poSupplierFilter, setPoSupplierFilter] = useState("");
+  const [poSearchQuery, setPoSearchQuery] = useState("");
   const [showPoReport, setShowPoReport] = useState(false);
   const [showCompletedPOs, setShowCompletedPOs] = useState(false);
   const [receivingPo, setReceivingPo] = useState(null);
@@ -801,6 +801,10 @@ export default function StockControl() {
   // requisition for a zero-qty item, etc). The qty they wanted is held
   // here since the Add Item form itself doesn't carry it.
   const [addingServiceConsumableQty, setAddingServiceConsumableQty] = useState(null);
+  // Set while the Add Item form is open specifically from the requisition
+  // picker's "not found" path — on save, walks straight into requesting
+  // stock for that brand-new item instead of leaving the picker stranded.
+  const [addingItemForRequisition, setAddingItemForRequisition] = useState(false);
   // Repair list — per-asset, like History, but with real open/resolved
   // state rather than being a permanent log.
   const [repairListItem, setRepairListItem] = useState(null);
@@ -879,6 +883,10 @@ export default function StockControl() {
   const [poReportStatus, setPoReportStatus] = useState("");
   const [selectedReqIds, setSelectedReqIds] = useState([]);
   const [requisitionTarget, setRequisitionTarget] = useState(null);
+  // Set when the requisition form is editing an existing request rather
+  // than creating a new one — lets someone correct a mistake (wrong qty,
+  // supplier, or notes) instead of cancelling and starting over.
+  const [editingRequisitionId, setEditingRequisitionId] = useState(null);
   const [requisitionQty, setRequisitionQty] = useState("");
   const [requisitionNotes, setRequisitionNotes] = useState("");
   const [requisitionSupplier, setRequisitionSupplier] = useState("");
@@ -889,6 +897,10 @@ export default function StockControl() {
   // deliberately unfiltered by quantity, unlike the tab list.
   const [showRequisitionPicker, setShowRequisitionPicker] = useState(false);
   const [requisitionPickerQuery, setRequisitionPickerQuery] = useState("");
+  // Searches across every section of the Requisitions tab at once —
+  // pending, ordered, and the completed archive — by item, supplier, or
+  // who requested it.
+  const [requisitionsSearchQuery, setRequisitionsSearchQuery] = useState("");
   // Which customer/supplier is currently open in its own detail view within
   // Stock Manager — null shows the plain list of names, matching the same
   // list-then-detail pattern used for Sections and Production.
@@ -1598,6 +1610,7 @@ export default function StockControl() {
     setSelectedGradeGroup(null);
     setAssetManufacturerOpen(null);
     setAssetDetailOpen(null);
+    setProductionSearchQuery("");
   }, [tab]);
 
   // The part-number → drawing lookup is used on Customer Stock rows and the
@@ -5141,9 +5154,22 @@ export default function StockControl() {
 
   function openRequisition(it) {
     setRequisitionTarget(it);
+    setEditingRequisitionId(null);
     setRequisitionQty("");
     setRequisitionNotes("");
     setRequisitionSupplier(it.supplier || "");
+  }
+
+  // Corrects an existing pending request — same form, but updates the
+  // original in place rather than creating a second one. requisitionTarget
+  // just needs enough shape to display the item label; the qty/supplier/
+  // notes fields are what actually change.
+  function openEditRequisition(req) {
+    setRequisitionTarget({ mainCat: req.mainCat, grade: req.itemGrade, name: req.itemRawName || req.itemLabel });
+    setEditingRequisitionId(req.id);
+    setRequisitionQty(String(req.qty));
+    setRequisitionNotes(req.notes || "");
+    setRequisitionSupplier(req.supplier || "");
   }
 
   function openRequisitionPicker() {
@@ -5156,6 +5182,19 @@ export default function StockControl() {
     setRequisitionPickerQuery("");
   }
 
+  // Opens the real Add Item form, pre-filled with whatever was typed in
+  // the requisition search — same "not found? create it" pattern as
+  // service consumables. On save, addItem() sees addingItemForRequisition
+  // and walks straight into requesting stock for the new item.
+  function createItemForRequisition(name) {
+    setAddingItemForRequisition(true);
+    setForm({ ...emptyForm, id: uid(), mainCat: tab !== "requisitions" && tab !== "purchaseOrders" ? tab : "plate", name });
+    setEditingId(null);
+    setAllowDuplicate(false);
+    setShowAdd(true);
+    closeRequisitionPicker();
+  }
+
   // Picking an item from the search hands straight off into the same
   // request form every other requisition uses — this only replaces how
   // the item gets found, not what happens once it's chosen.
@@ -5166,6 +5205,7 @@ export default function StockControl() {
 
   function closeRequisition() {
     setRequisitionTarget(null);
+    setEditingRequisitionId(null);
     setRequisitionQty("");
     setRequisitionNotes("");
     setRequisitionSupplier("");
@@ -5174,6 +5214,15 @@ export default function StockControl() {
   function submitRequisition(e) {
     e.preventDefault();
     if (!requisitionTarget || !requisitionQty.trim()) return;
+    if (editingRequisitionId) {
+      updateRequisition(editingRequisitionId, {
+        qty: requisitionQty.trim(),
+        notes: requisitionNotes.trim(),
+        supplier: requisitionSupplier,
+      });
+      closeRequisition();
+      return;
+    }
     const label =
       requisitionTarget.mainCat === "plate"
         ? `${requisitionTarget.grade} — ${requisitionTarget.name}`
@@ -5679,6 +5728,19 @@ export default function StockControl() {
     });
   }
 
+  // Starts a brand-new PO pre-filled with an old one's supplier and lines
+  // — not linked to whatever requisitions the original PO was, since this
+  // is a fresh order being raised now, not a continuation of that one.
+  // Quantities carry over exactly as they were; editing them before
+  // sending is the whole point of copying rather than starting blank.
+  function copyPurchaseOrder(po) {
+    openPoBuilder(
+      [],
+      po.supplierId,
+      po.lineItems.map((li) => ({ description: li.description, qty: String(li.qty), unitPrice: String(li.unitPrice) }))
+    );
+  }
+
   function closePoBuilder() {
     setPoBuilder(null);
   }
@@ -5804,6 +5866,9 @@ export default function StockControl() {
             </select>
             <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => markOrdered(r.id)}>
               <ShoppingCart size={13} /> Mark ordered
+            </button>
+            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openEditRequisition(r)}>
+              <Pencil size={13} /> Edit
             </button>
             <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => cancelRequisition(r.id)}>
               Cancel
@@ -6305,6 +6370,12 @@ export default function StockControl() {
           { source: "stores", itemId: newItem.id, name: newItem.name, qty: addingServiceConsumableQty, unit: newItem.unit || "" },
         ]);
         setAddingServiceConsumableQty(null);
+      } else if (addingItemForRequisition) {
+        // Same reasoning, for the requisition picker's "not found" path —
+        // the explicit intent here was always to request stock for this
+        // item, regardless of what quantity got entered while creating it.
+        setAddingItemForRequisition(false);
+        openRequisition(newItem);
       } else if (Number(newItem.qty) === 0 && canRequisition && newItem.mainCat !== "custom") {
         // A brand-new item saved at zero stock would otherwise vanish from
         // the home page the instant it's added (zero-qty items only stay
@@ -6477,6 +6548,7 @@ export default function StockControl() {
     setAllowDuplicate(false);
     setShowAdd(false);
     setAddingServiceConsumableQty(null);
+    setAddingItemForRequisition(false);
   }
 
   function jumpToMatch() {
@@ -7227,10 +7299,26 @@ export default function StockControl() {
             </button>
           )}
           {requisitions.length === 0 && <div style={{ ...S.empty, marginTop: 10 }}>No requisitions yet.</div>}
+          {requisitions.length > 0 && (
+            <input
+              style={{ ...S.input, marginTop: 10 }}
+              value={requisitionsSearchQuery}
+              onChange={(e) => setRequisitionsSearchQuery(e.target.value)}
+              placeholder="Search by item, supplier, or who requested it…"
+            />
+          )}
           {["pending", "ordered"].map((status) => {
+            const rq = requisitionsSearchQuery.trim().toLowerCase();
             const list = requisitions
               .filter((r) => r.status === status)
               .filter((r) => canManageRequisitions || r.requestedBy === roleLabel)
+              .filter(
+                (r) =>
+                  !rq ||
+                  (r.itemLabel || "").toLowerCase().includes(rq) ||
+                  (r.supplier || "").toLowerCase().includes(rq) ||
+                  (r.requestedBy || "").toLowerCase().includes(rq)
+              )
               .sort((a, b) => new Date(b.dateRequested) - new Date(a.dateRequested));
             if (list.length === 0) return null;
             return (
@@ -7331,6 +7419,15 @@ export default function StockControl() {
                       .filter((r) => !archiveTypeFilter || r.mainCat === archiveTypeFilter)
                       .filter((r) => !archiveDateFrom || new Date(r.dateRequested) >= new Date(archiveDateFrom))
                       .filter((r) => !archiveDateTo || new Date(r.dateRequested) <= new Date(archiveDateTo + "T23:59:59"))
+                      .filter((r) => {
+                        const rq = requisitionsSearchQuery.trim().toLowerCase();
+                        return (
+                          !rq ||
+                          (r.itemLabel || "").toLowerCase().includes(rq) ||
+                          (r.supplier || "").toLowerCase().includes(rq) ||
+                          (r.requestedBy || "").toLowerCase().includes(rq)
+                        );
+                      })
                       .sort((a, b) => new Date(b.dateRequested) - new Date(a.dateRequested))
                       .map((r) => (
                         <div key={r.id} style={S.reqCard}>
@@ -7370,87 +7467,104 @@ export default function StockControl() {
             )}
           </div>
 
-          {purchaseOrders.length > 5 && (
-            <div style={{ marginTop: 10 }}>
-              <label style={S.label}>Supplier</label>
-              <select style={S.input} value={poSupplierFilter} onChange={(e) => setPoSupplierFilter(e.target.value)}>
-                <option value="">All suppliers</option>
-                {master.suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </div>
+          {purchaseOrders.length > 0 && (
+            <input
+              style={{ ...S.input, marginTop: 10 }}
+              value={poSearchQuery}
+              onChange={(e) => setPoSearchQuery(e.target.value)}
+              placeholder="Search by PO number, supplier, or reference…"
+            />
           )}
 
           {purchaseOrders.length === 0 && <div style={S.empty}>No Purchase Orders yet.</div>}
-          <div style={{ ...S.gradeItems, marginTop: 10 }}>
-            {[...purchaseOrders]
-              .filter((po) => po.status !== "received")
-              .filter((po) => !poSupplierFilter || po.supplierId === poSupplierFilter)
-              .sort((a, b) => new Date(b.dateCreated) - new Date(a.dateCreated))
-              .map((po) => (
-                <div key={po.id} style={S.reqCard}>
-                  <div style={S.reqCardTop}>
-                    <span style={S.itemName}>{po.poNumber} — {po.supplierName || "No supplier"}</span>
-                    <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>R{po.totalValue.toFixed(2)}</span>
-                  </div>
-                  <div className="stk-meta-row" style={S.rowMeta}>
-                    <span>Raised by {po.createdBy}</span>
-                    <span>{new Date(po.dateCreated).toLocaleDateString()}</span>
-                    <span>{po.lineItems.length} line{po.lineItems.length === 1 ? "" : "s"}</span>
-                  </div>
-                  {po.notes && <div style={S.itemComment}>{po.notes}</div>}
-                  <div style={S.reqActions}>
-                    <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => viewPoPdf(po)}>
-                      <FileText size={13} /> View PDF
-                    </button>
-                    {canMarkReceivedPerm && (
-                      <button type="button" className="stk-btn" style={{ ...S.reqActionBtn, background: C.accentFinished }} onClick={() => openReceiving(po)}>
-                        <Check size={13} /> Receive
-                      </button>
-                    )}
-                  </div>
+          {(() => {
+            const pq = poSearchQuery.trim().toLowerCase();
+            const matchesSearch = (po) =>
+              !pq ||
+              (po.poNumber || "").toLowerCase().includes(pq) ||
+              (po.supplierName || "").toLowerCase().includes(pq) ||
+              (po.reference || "").toLowerCase().includes(pq);
+            const renderPoCard = (po) => (
+              <div key={po.id} style={S.reqCard}>
+                <div style={S.reqCardTop}>
+                  <span style={S.itemName}>{po.poNumber}</span>
+                  <span style={{ ...S.reqStatusTag, ...(po.status === "received" ? S.reqStatus_received : S.reqStatus_ordered) }}>
+                    R{po.totalValue.toFixed(2)}
+                  </span>
                 </div>
-              ))}
-          </div>
+                <div className="stk-meta-row" style={S.rowMeta}>
+                  <span>Raised by {po.createdBy}</span>
+                  <span>{new Date(po.dateCreated).toLocaleDateString()}</span>
+                  <span>{po.lineItems.length} line{po.lineItems.length === 1 ? "" : "s"}</span>
+                  {po.status === "received" && (
+                    <>
+                      <span>Received by {po.receivedBy} on {new Date(po.receivedDate).toLocaleDateString()}</span>
+                      {po.deliveryNoteNumber && <span>Delivery note: {po.deliveryNoteNumber}</span>}
+                    </>
+                  )}
+                </div>
+                {po.notes && <div style={S.itemComment}>{po.notes}</div>}
+                <div style={S.reqActions}>
+                  <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => viewPoPdf(po)}>
+                    <FileText size={13} /> View PDF
+                  </button>
+                  {canRaisePO && (
+                    <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => copyPurchaseOrder(po)}>
+                      <Copy size={13} /> Copy
+                    </button>
+                  )}
+                  {po.status !== "received" && canMarkReceivedPerm && (
+                    <button type="button" className="stk-btn" style={{ ...S.reqActionBtn, background: C.accentFinished }} onClick={() => openReceiving(po)}>
+                      <Check size={13} /> Receive
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
 
-          <div style={S.gradeBlock}>
-            <button className="stk-grade" style={S.gradeHeader} onClick={() => setShowCompletedPOs((v) => !v)}>
-              <ChevronDown size={15} style={{ transform: showCompletedPOs ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
-              <span style={S.gradeTitle}>Received / Completed</span>
-              <span style={S.gradeCount}>{purchaseOrders.filter((po) => po.status === "received").length}</span>
-            </button>
-            {showCompletedPOs && (
-              <div style={S.gradeItems}>
-                {[...purchaseOrders]
-                  .filter((po) => po.status === "received")
-                  .filter((po) => !poSupplierFilter || po.supplierId === poSupplierFilter)
-                  .sort((a, b) => new Date(b.receivedDate) - new Date(a.receivedDate))
-                  .map((po) => (
-                    <div key={po.id} style={S.reqCard}>
-                      <div style={S.reqCardTop}>
-                        <span style={S.itemName}>{po.poNumber} — {po.supplierName || "No supplier"}</span>
-                        <span style={{ ...S.reqStatusTag, ...S.reqStatus_received }}>R{po.totalValue.toFixed(2)}</span>
-                      </div>
-                      <div className="stk-meta-row" style={S.rowMeta}>
-                        <span>Raised by {po.createdBy}</span>
-                        <span>{new Date(po.dateCreated).toLocaleDateString()}</span>
-                        <span>Received by {po.receivedBy} on {new Date(po.receivedDate).toLocaleDateString()}</span>
-                        {po.deliveryNoteNumber && <span>Delivery note: {po.deliveryNoteNumber}</span>}
-                      </div>
-                      <div style={S.reqActions}>
-                        <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => viewPoPdf(po)}>
-                          <FileText size={13} /> View PDF
-                        </button>
-                      </div>
+            const outstanding = [...purchaseOrders].filter((po) => po.status !== "received").filter(matchesSearch);
+            const bySupplier = Object.entries(
+              outstanding.reduce((acc, po) => {
+                const k = po.supplierName || "No supplier";
+                (acc[k] = acc[k] || []).push(po);
+                return acc;
+              }, {})
+            ).sort((a, b) => a[0].localeCompare(b[0]));
+
+            return (
+              <>
+                <div style={{ ...S.gradeItems, marginTop: 10 }}>
+                  {bySupplier.map(([supplierName, list]) => (
+                    <div key={supplierName} style={{ marginBottom: 14 }}>
+                      <div style={{ ...S.label, fontWeight: 700, marginBottom: 6 }}>{supplierName} · {list.length}</div>
+                      {list.sort((a, b) => new Date(b.dateCreated) - new Date(a.dateCreated)).map(renderPoCard)}
                     </div>
                   ))}
-                {purchaseOrders.filter((po) => po.status === "received").length === 0 && (
-                  <div style={S.empty}>Nothing received yet.</div>
-                )}
-              </div>
-            )}
-          </div>
+                  {outstanding.length === 0 && purchaseOrders.length > 0 && <div style={S.empty}>Nothing matches.</div>}
+                </div>
+
+                <div style={S.gradeBlock}>
+                  <button className="stk-grade" style={S.gradeHeader} onClick={() => setShowCompletedPOs((v) => !v)}>
+                    <ChevronDown size={15} style={{ transform: showCompletedPOs ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
+                    <span style={S.gradeTitle}>Received / Completed</span>
+                    <span style={S.gradeCount}>{purchaseOrders.filter((po) => po.status === "received").length}</span>
+                  </button>
+                  {showCompletedPOs && (
+                    <div style={S.gradeItems}>
+                      {[...purchaseOrders]
+                        .filter((po) => po.status === "received")
+                        .filter(matchesSearch)
+                        .sort((a, b) => new Date(b.receivedDate) - new Date(a.receivedDate))
+                        .map(renderPoCard)}
+                      {purchaseOrders.filter((po) => po.status === "received").filter(matchesSearch).length === 0 && (
+                        <div style={S.empty}>Nothing received matches.</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </>
+            );
+          })()}
         </div>
       ) : tab === "receiving" ? (
         <div style={S.list}>
@@ -7576,16 +7690,32 @@ export default function StockControl() {
         productionSelectedDept === null ? (
           <div style={S.list}>
             {productionLoading && <div style={S.empty}>Loading…</div>}
+            {Object.keys(productionQueue || {}).length > 0 && (
+              <input
+                style={{ ...S.input, marginBottom: 10 }}
+                value={productionSearchQuery}
+                onChange={(e) => setProductionSearchQuery(e.target.value)}
+                placeholder="Search job number, SigmaNest number, or customer…"
+              />
+            )}
             {(() => {
+              const q = productionSearchQuery.trim().toLowerCase();
+              const matchesJob = ({ job }) =>
+                (job.job_number || "").toLowerCase().includes(q) ||
+                (job.laser_job_reference || "").toLowerCase().includes(q) ||
+                (job.customer || "").toLowerCase().includes(q);
               const visibleDepts = Object.entries(productionQueue || {})
                 .map(([procType, allEntries]) => {
-                  const readyCount = allEntries.filter(({ process, quoteItems }) => {
-                    const totalQty = (quoteItems || []).reduce((sum, it) => sum + Number(it.qty || 0), 0);
-                    return !!process.assigned_to && totalQty > 0;
-                  }).length;
+                  const readyCount = q
+                    ? allEntries.filter(matchesJob).length
+                    : allEntries.filter(({ process, quoteItems }) => {
+                        const totalQty = (quoteItems || []).reduce((sum, it) => sum + Number(it.qty || 0), 0);
+                        return !!process.assigned_to && totalQty > 0;
+                      }).length;
                   const hasPendingShortage =
-                    (procType === "Nesting" && (shortagesList || []).some((s) => s.status === "flagged")) ||
-                    (procType === "Laser Operator" && (shortagesList || []).some((s) => s.status === "nested"));
+                    !q &&
+                    ((procType === "Nesting" && (shortagesList || []).some((s) => s.status === "flagged")) ||
+                      (procType === "Laser Operator" && (shortagesList || []).some((s) => s.status === "nested")));
                   return { procType, readyCount, hasPendingShortage };
                 })
                 // A department with nothing ready and no shortage needing
@@ -7593,10 +7723,15 @@ export default function StockControl() {
                 // rather than list empty departments alongside real work.
                 // One with a pending shortage stays visible regardless of
                 // readyCount, so that alert is never accidentally hidden.
+                // A search is a deliberate, specific request though — it
+                // shows every department that job is genuinely in, not
+                // just the ones with something "ready" right now.
                 .filter(({ readyCount, hasPendingShortage }) => readyCount > 0 || hasPendingShortage);
               return (
                 <>
-                  {!productionLoading && visibleDepts.length === 0 && <div style={S.empty}>Nothing outstanding right now.</div>}
+                  {!productionLoading && visibleDepts.length === 0 && (
+                    <div style={S.empty}>{q ? "Nothing matches that search." : "Nothing outstanding right now."}</div>
+                  )}
                   <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 6 }}>
                     {visibleDepts.map(({ procType, readyCount, hasPendingShortage }) => {
                 return (
@@ -7642,7 +7777,7 @@ export default function StockControl() {
               style={S.input}
               value={productionSearchQuery}
               onChange={(e) => setProductionSearchQuery(e.target.value)}
-              placeholder="Search job number or SigmaNest number…"
+              placeholder="Search job number, SigmaNest number, or customer…"
             />
             {(() => {
               const procType = productionSelectedDept;
@@ -7651,7 +7786,9 @@ export default function StockControl() {
               let entries = q
                 ? allEntries.filter(
                     ({ job }) =>
-                      (job.job_number || "").toLowerCase().includes(q) || (job.laser_job_reference || "").toLowerCase().includes(q)
+                      (job.job_number || "").toLowerCase().includes(q) ||
+                      (job.laser_job_reference || "").toLowerCase().includes(q) ||
+                      (job.customer || "").toLowerCase().includes(q)
                   )
                 : allEntries;
               // Nothing assigned yet, or nothing to actually do yet (zero
@@ -13697,24 +13834,38 @@ export default function StockControl() {
                       (it.partNumber || "").toLowerCase().includes(q)
                   )
                   .slice(0, 50);
-                if (matches.length === 0) return <div style={S.empty}>No matching items.</div>;
-                return matches.map((it) => (
-                  <button
-                    key={it.id}
-                    type="button"
-                    className="stk-btn"
-                    style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer" }}
-                    onClick={() => pickItemForRequisition(it)}
-                  >
-                    <div style={S.reqCardTop}>
-                      <span style={S.itemName}>{it.grade ? `${it.grade} — ` : ""}{it.name}</span>
-                      <span style={{ ...S.reqStatusTag, ...(Number(it.qty) > 0 ? S.reqStatus_received : S.reqStatus_ordered) }}>
-                        {Number(it.qty) > 0 ? `${it.qty} in stock` : "0 in stock"}
-                      </span>
-                    </div>
-                    {it.customer && <div className="stk-meta-row" style={S.rowMeta}><span>{it.customer}</span></div>}
-                  </button>
-                ));
+                return (
+                  <>
+                    {matches.length === 0 && <div style={S.empty}>No matching items.</div>}
+                    {matches.map((it) => (
+                      <button
+                        key={it.id}
+                        type="button"
+                        className="stk-btn"
+                        style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer" }}
+                        onClick={() => pickItemForRequisition(it)}
+                      >
+                        <div style={S.reqCardTop}>
+                          <span style={S.itemName}>{it.grade ? `${it.grade} — ` : ""}{it.name}</span>
+                          <span style={{ ...S.reqStatusTag, ...(Number(it.qty) > 0 ? S.reqStatus_received : S.reqStatus_ordered) }}>
+                            {Number(it.qty) > 0 ? `${it.qty} in stock` : "0 in stock"}
+                          </span>
+                        </div>
+                        {it.customer && <div className="stk-meta-row" style={S.rowMeta}><span>{it.customer}</span></div>}
+                      </button>
+                    ))}
+                    {canAdd && (
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={{ ...S.reqActionBtnMuted, width: "100%", marginTop: matches.length > 0 ? 6 : 0 }}
+                        onClick={() => createItemForRequisition(requisitionPickerQuery.trim())}
+                      >
+                        <Plus size={13} /> Not in Stock yet? Create "{requisitionPickerQuery.trim()}" as a new item
+                      </button>
+                    )}
+                  </>
+                );
               })()}
             </div>
           </div>
@@ -13725,7 +13876,7 @@ export default function StockControl() {
         <div style={S.modalOverlay}>
           <form style={S.modal} onClick={(e) => e.stopPropagation()} onSubmit={submitRequisition}>
             <div style={S.modalHead}>
-              <span style={S.modalTitle}>Request stock</span>
+              <span style={S.modalTitle}>{editingRequisitionId ? "Edit request" : "Request stock"}</span>
               <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeRequisition}>
                 <X size={18} />
               </button>
@@ -13768,7 +13919,7 @@ export default function StockControl() {
               />
             </div>
             <button type="submit" style={S.submitBtn} className="stk-btn">
-              Send request
+              {editingRequisitionId ? "Save changes" : "Send request"}
             </button>
           </form>
         </div>
