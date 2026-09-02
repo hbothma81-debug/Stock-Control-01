@@ -704,6 +704,90 @@ function ReqFlag({ req, onClick }) {
   );
 }
 
+// Finding a stock item without leaving the job — pick the department, then
+// the item. Used both to book material out from a process and to set it
+// aside for one, so it lives here rather than being written twice.
+//
+// Module level, not inside StockControl: a component redefined on every
+// render remounts, and the search box would lose focus on each keystroke.
+function StockPicker({ items, allowedDepts, onPick, emptyMessage }) {
+  const [dept, setDept] = useState(null);
+  const [search, setSearch] = useState("");
+
+  if (allowedDepts.length === 0) return <div style={S.empty}>{emptyMessage}</div>;
+
+  if (dept === null) {
+    return (
+      <>
+        <div style={S.roleHint}>Which department is the material in?</div>
+        <div style={S.managerListFullPage}>
+          {allowedDepts.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              className="stk-btn"
+              style={S.managerMenuRow}
+              onClick={() => { setDept(t.key); setSearch(""); }}
+            >
+              {t.label}
+              <ChevronRight size={16} />
+            </button>
+          ))}
+        </div>
+      </>
+    );
+  }
+
+  const deptLabel = TABS.find((t) => t.key === dept)?.label || dept;
+  const q = search.trim().toLowerCase();
+  const matches = (items || [])
+    .filter((it) => it.mainCat === dept)
+    .filter((it) => !q || (it.name || "").toLowerCase().includes(q) || (it.loc || "").toLowerCase().includes(q));
+  // Capped rather than paged: this is a "find the thing in front of you"
+  // list, so if it is still hundreds long the answer is to type more.
+  const shown = matches.slice(0, 60);
+
+  return (
+    <>
+      <button
+        type="button"
+        className="stk-btn"
+        style={{ ...S.prominentBackBtn, marginBottom: 8 }}
+        onClick={() => { setDept(null); setSearch(""); }}
+      >
+        <ChevronLeft size={18} strokeWidth={2.5} /> All departments
+      </button>
+      <input
+        autoFocus
+        style={S.input}
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder={`Search ${deptLabel.toLowerCase()}…`}
+      />
+      <div style={S.managerListFullPage}>
+        {matches.length === 0 && <div style={S.empty}>Nothing in {deptLabel} matches that.</div>}
+        {shown.map((it) => (
+          <button
+            key={it.id}
+            type="button"
+            className="stk-btn"
+            style={S.managerMenuRow}
+            onClick={() => onPick(it)}
+          >
+            <span style={{ flex: 1, textAlign: "left" }}>{it.name}</span>
+            <span style={{ fontFamily: F.mono, fontSize: 12.5, color: Number(it.qty) > 0 ? C.muted : C.danger }}>
+              {it.qty}{it.loc ? ` · ${it.loc}` : ""}
+            </span>
+          </button>
+        ))}
+        {matches.length > shown.length && (
+          <div style={S.empty}>{matches.length - shown.length} more — keep typing to narrow it down.</div>
+        )}
+      </div>
+    </>
+  );
+}
+
 export default function StockControl() {
   const [items, setItems] = useState(null);
   const [loadError, setLoadError] = useState({});
@@ -730,6 +814,11 @@ export default function StockControl() {
   // Picking stock from inside a process, so an operator never has to leave
   // the job to find the material they've just used. { job, process, dept, search }
   const [pullStockModal, setPullStockModal] = useState(null);
+  // Setting material aside for a stage of a job, from the job screen.
+  // { job, process, item } — item is null until one is picked, which is
+  // what switches the modal from the picker to the quantity step.
+  const [allocateModal, setAllocateModal] = useState(null);
+  const [allocateQty, setAllocateQty] = useState("");
   const [assetRemoveModal, setAssetRemoveModal] = useState(null); // { item, reason, date }
   const [showAssetArchive, setShowAssetArchive] = useState(false);
   const [poBuilder, setPoBuilder] = useState(null); // { supplierId, lineItems: [...], linkedRequisitionIds: [...], notes }
@@ -2753,25 +2842,74 @@ export default function StockControl() {
   }
 
   async function openJobDetail(job) {
-    setJobDetail({ job, processes: [], documents: [], quoteItems: [], deliveryNotes: [] });
+    setJobDetail({ job, processes: [], documents: [], quoteItems: [], deliveryNotes: [], allocations: [] });
     setJobDetailTab("overview");
     setJobDetailLoading(true);
     try {
-      const [{ data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }] = await Promise.all([
+      const [{ data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }, { data: allocations, error: allocError }] = await Promise.all([
         supabase.from("job_processes").select("*").eq("job_id", job.id).order("sort_order"),
         supabase.from("job_documents").select("*").eq("job_id", job.id).order("created_at", { ascending: false }),
         supabase.from("job_quote_items").select("*").eq("job_id", job.id).order("sort_order"),
         supabase.from("delivery_notes").select("*").eq("job_id", job.id).order("created_at", { ascending: false }),
+        supabase.from("job_allocations").select("*").eq("job_id", job.id).order("created_at"),
       ]);
       if (procError) throw procError;
       if (docError) throw docError;
       if (qiError) throw qiError;
       if (dnError) throw dnError;
-      setJobDetail({ job, processes: processes || [], documents: documents || [], quoteItems: quoteItems || [], deliveryNotes: deliveryNotes || [] });
+      if (allocError) throw allocError;
+      setJobDetail({ job, processes: processes || [], documents: documents || [], quoteItems: quoteItems || [], deliveryNotes: deliveryNotes || [], allocations: allocations || [] });
     } catch (err) {
       console.error("Failed to load job detail:", err);
     }
     setJobDetailLoading(false);
+  }
+
+  // Sets material aside for one stage of a job. Reserves rather than
+  // removes: stock_items keeps its quantity, so the count still matches
+  // the shelf. It only drops when an operator books the material out.
+  async function allocateStockToProcess(item, qty) {
+    const { job, process } = allocateModal;
+    const amount = Number(qty);
+    if (!amount || amount <= 0) return;
+    try {
+      const { error } = await supabase.from("job_allocations").insert({
+        id: uid(),
+        job_id: job.id,
+        job_number: job.job_number || "",
+        process_id: process.id,
+        process_name: process.process_name,
+        item_id: item.id,
+        item_name: item.name || "",
+        main_cat: item.mainCat || "",
+        qty_allocated: amount,
+        qty_used: 0,
+        allocated_by: roleLabel,
+        allocated_by_id: currentUser?.id || null,
+        status: "open",
+      });
+      if (error) throw error;
+      setAllocateModal(null);
+      refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to allocate stock:", err);
+      alert(`Couldn't allocate that: ${err.message || "unknown error"}. If this mentions a missing table, setup-job-allocations.sql hasn't been run yet in Supabase.`);
+    }
+  }
+
+  // Hands material back without it having been used — the job changed, or
+  // it was set aside by mistake. Kept as a released row rather than
+  // deleted, so "who reserved what and what happened to it" survives.
+  async function releaseAllocation(allocation) {
+    if (!window.confirm(`Release ${allocation.qty_allocated} × ${allocation.item_name} back from ${allocation.process_name}?`)) return;
+    try {
+      const { error } = await supabase.from("job_allocations").update({ status: "released" }).eq("id", allocation.id);
+      if (error) throw error;
+      refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to release allocation:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
   }
 
   function closeJobDetail() {
@@ -12113,114 +12251,105 @@ export default function StockControl() {
           the stock table runs to thousands of rows. Handing straight over
           to the usual Use stock form keeps one path for actually booking
           material out, with the job filled in already. */}
-      {pullStockModal && (
+      {/* Setting material aside for a stage. Reserves only — the stock
+          count is untouched until an operator books it out, so the number
+          on screen keeps matching what is physically in the racks. */}
+      {allocateModal && (
         <div style={{ ...S.modalOverlay, zIndex: 30 }}>
           <div style={{ ...S.modal, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>
-                Pull from stock — {pullStockModal.job.job_number}
+                Allocate to {allocateModal.process.process_name} — {allocateModal.job.job_number}
               </span>
-              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setPullStockModal(null)}>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setAllocateModal(null)}>
                 <X size={18} />
               </button>
             </div>
 
-            {pullStockModal.dept === null ? (
-              (() => {
-                // Only departments this person may reduce. Booking material
-                // out is a stock edit wherever it is done from, so the same
-                // permission applies here as on the stock screens — this
-                // must not become a way around it.
-                const allowed = TABS.filter((t) => canEditQty(t.key));
-                if (allowed.length === 0) {
-                  return (
-                    <div style={S.empty}>
-                      You don't have permission to take stock out of any department, so there's nothing to pull from.{" "}
-                      {isAdmin ? "Set this" : "Ask an admin to set it"} under Stock Manager → User Management → your name → Edit qty.
-                    </div>
-                  );
-                }
-                return (
-                  <>
-                    <div style={S.roleHint}>Which department are you taking material from?</div>
-                    <div style={S.managerListFullPage}>
-                      {allowed.map((t) => (
-                        <button
-                          key={t.key}
-                          type="button"
-                          className="stk-btn"
-                          style={S.managerMenuRow}
-                          onClick={() => setPullStockModal((m) => ({ ...m, dept: t.key, search: "" }))}
-                        >
-                          {t.label}
-                          <ChevronRight size={16} />
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                );
-              })()
+            {allocateModal.item === null ? (
+              <StockPicker
+                items={items}
+                // Reserving is not taking, so this only needs sight of the
+                // department, not the right to reduce it. The permission
+                // that matters is checked when the material is booked out.
+                allowedDepts={TABS.filter((t) => canView(t.key))}
+                emptyMessage="You can't see any stock departments, so there's nothing to allocate from."
+                onPick={(it) => { setAllocateModal((m) => ({ ...m, item: it })); setAllocateQty(""); }}
+              />
             ) : (
-              (() => {
-                const deptLabel = TABS.find((t) => t.key === pullStockModal.dept)?.label || pullStockModal.dept;
-                const q = pullStockModal.search.trim().toLowerCase();
-                const matches = (items || [])
-                  .filter((it) => it.mainCat === pullStockModal.dept)
-                  .filter((it) => !q || (it.name || "").toLowerCase().includes(q) || (it.loc || "").toLowerCase().includes(q));
-                // Capped rather than paged: this is a "find the thing you
-                // just used" list, so if it is still hundreds long the
-                // answer is to type more, not to scroll further.
-                const shown = matches.slice(0, 60);
-                return (
-                  <>
-                    <button
-                      type="button"
-                      className="stk-btn"
-                      style={{ ...S.prominentBackBtn, marginBottom: 8 }}
-                      onClick={() => setPullStockModal((m) => ({ ...m, dept: null, search: "" }))}
-                    >
-                      <ChevronLeft size={18} strokeWidth={2.5} /> All departments
-                    </button>
-                    <input
-                      autoFocus
-                      style={S.input}
-                      value={pullStockModal.search}
-                      onChange={(e) => setPullStockModal((m) => ({ ...m, search: e.target.value }))}
-                      placeholder={`Search ${deptLabel.toLowerCase()}…`}
-                    />
-                    <div style={S.managerListFullPage}>
-                      {matches.length === 0 && <div style={S.empty}>Nothing in {deptLabel} matches that.</div>}
-                      {shown.map((it) => (
-                        <button
-                          key={it.id}
-                          type="button"
-                          className="stk-btn"
-                          style={S.managerMenuRow}
-                          onClick={() => {
-                            openUsageModal(it, "use", {
-                              jobNumber: pullStockModal.job.job_number || "",
-                              customer: pullStockModal.job.customer || "",
-                              note: `Used on ${pullStockModal.process.process_name}`,
-                            });
-                            setPullStockModal(null);
-                          }}
-                        >
-                          <span style={{ flex: 1, textAlign: "left" }}>{it.name}</span>
-                          <span style={{ fontFamily: F.mono, fontSize: 12.5, color: Number(it.qty) > 0 ? C.muted : C.danger }}>
-                            {it.qty}{it.loc ? ` · ${it.loc}` : ""}
-                          </span>
-                        </button>
-                      ))}
-                      {matches.length > shown.length && (
-                        <div style={S.empty}>
-                          {matches.length - shown.length} more — keep typing to narrow it down.
-                        </div>
-                      )}
-                    </div>
-                  </>
-                );
-              })()
+              <form
+                onSubmit={(e) => { e.preventDefault(); allocateStockToProcess(allocateModal.item, allocateQty); }}
+              >
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={{ ...S.prominentBackBtn, marginBottom: 8 }}
+                  onClick={() => setAllocateModal((m) => ({ ...m, item: null }))}
+                >
+                  <ChevronLeft size={18} strokeWidth={2.5} /> Pick a different item
+                </button>
+                <div style={S.roleHint}>
+                  {allocateModal.item.name} — {allocateModal.item.qty} in stock
+                  {allocateModal.item.trackLength ? ` · sold in ${allocateModal.item.length}m lengths` : ""}
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <label style={S.label}>How much to set aside</label>
+                  <input
+                    autoFocus
+                    style={S.input}
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={allocateQty}
+                    onChange={(e) => setAllocateQty(e.target.value)}
+                    placeholder={`Up to ${allocateModal.item.qty} available`}
+                  />
+                </div>
+                {Number(allocateQty) > Number(allocateModal.item.qty) && (
+                  <div style={{ ...S.roleHint, color: C.danger }}>
+                    That's more than the {allocateModal.item.qty} currently in stock. You can still reserve it — material
+                    on order often arrives after the job is planned — but nobody will be able to book out what isn't there.
+                  </div>
+                )}
+                <button type="submit" className="stk-btn" style={{ ...S.submitBtn, marginTop: 12 }} disabled={!Number(allocateQty)}>
+                  Allocate to {allocateModal.process.process_name}
+                </button>
+              </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Booking material out from inside a process. Hands over to the
+          usual Use stock form once an item is chosen, so there is still
+          one path for actually recording usage — only the way in is new. */}
+      {pullStockModal && (
+        <div style={{ ...S.modalOverlay, zIndex: 30 }}>
+          <div style={{ ...S.modal, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Pull from stock — {pullStockModal.job.job_number}</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setPullStockModal(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <StockPicker
+              items={items}
+              // Taking material out is a stock edit wherever it is done
+              // from, so the same permission applies here as on the stock
+              // screens — this must not become a way around it.
+              allowedDepts={TABS.filter((t) => canEditQty(t.key))}
+              emptyMessage={`You don't have permission to take stock out of any department, so there's nothing to pull from. ${
+                isAdmin ? "Set this" : "Ask an admin to set it"
+              } under Stock Manager → User Management → your name → Edit qty.`}
+              onPick={(it) => {
+                openUsageModal(it, "use", {
+                  jobNumber: pullStockModal.job.job_number || "",
+                  customer: pullStockModal.job.customer || "",
+                  note: `Used on ${pullStockModal.process.process_name}`,
+                });
+                setPullStockModal(null);
+              }}
+            />
           </div>
         </div>
       )}
@@ -12635,6 +12764,50 @@ export default function StockControl() {
                         )}
                         {p.tracking_mode === "each" && !p.is_complete && (
                           <div style={{ ...S.roleHint, marginLeft: 22 }}>Each-mode progress is tracked per item on the Production tab.</div>
+                        )}
+                        {/* Material set aside for this stage. Shown here as
+                            well as on the operator's screen so whoever
+                            reserved it can see it is still waiting. */}
+                        {(() => {
+                          const mine = (jobDetail.allocations || []).filter(
+                            (a) => a.process_id === p.id && a.status !== "released"
+                          );
+                          if (mine.length === 0) return null;
+                          return (
+                            <div style={{ marginLeft: 22, marginTop: 4, display: "flex", flexDirection: "column", gap: 4 }}>
+                              {mine.map((a) => {
+                                const outstanding = Number(a.qty_allocated) - Number(a.qty_used);
+                                return (
+                                  <div key={a.id} className="stk-meta-row" style={{ ...S.rowMeta, alignItems: "center" }}>
+                                    <span style={{ color: outstanding > 0 ? C.accentRaw : C.muted }}>
+                                      <Package size={11} /> {a.item_name} — {a.qty_used > 0 ? `${a.qty_used} of ${a.qty_allocated} used` : `${a.qty_allocated} reserved`}
+                                    </span>
+                                    {canEditThisJob && outstanding > 0 && (
+                                      <button
+                                        type="button"
+                                        className="stk-btn"
+                                        style={S.managerDelete}
+                                        title="Release this material back"
+                                        onClick={() => releaseAllocation(a)}
+                                      >
+                                        <X size={12} />
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                        {canEditThisJob && !p.is_complete && (
+                          <button
+                            type="button"
+                            className="stk-btn"
+                            style={{ ...S.reqActionBtnMuted, marginLeft: 22, marginTop: 4 }}
+                            onClick={() => { setAllocateModal({ job: jobDetail.job, process: p, item: null }); setAllocateQty(""); }}
+                          >
+                            <Package size={12} /> Allocate stock
+                          </button>
                         )}
                         {canEditThisJob && (
                           <div style={{ display: "flex", gap: 6, marginTop: 4, marginLeft: 22, flexWrap: "wrap" }}>
