@@ -845,6 +845,9 @@ export default function StockControl() {
   const [allJobQuoteItems, setAllJobQuoteItems] = useState([]);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [jobDetail, setJobDetail] = useState(null); // { job, processes, documents }
+  // Which sub-section of the job detail page is showing — a full page now,
+  // not a popup, broken into tabs given how much lives on one job.
+  const [jobDetailTab, setJobDetailTab] = useState("overview");
   const [jobDetailLoading, setJobDetailLoading] = useState(false);
   const [showNewJob, setShowNewJob] = useState(false);
   const [newStockItemModal, setNewStockItemModal] = useState(null);
@@ -2682,6 +2685,7 @@ export default function StockControl() {
 
   async function openJobDetail(job) {
     setJobDetail({ job, processes: [], documents: [], quoteItems: [], deliveryNotes: [] });
+    setJobDetailTab("overview");
     setJobDetailLoading(true);
     try {
       const [{ data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }] = await Promise.all([
@@ -2703,6 +2707,7 @@ export default function StockControl() {
 
   function closeJobDetail() {
     setJobDetail(null);
+    setJobDetailTab("overview");
     setSelectedForInvoice(new Set());
   }
 
@@ -7507,10 +7512,10 @@ export default function StockControl() {
                   style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}
                   onClick={() => openJobDetail(job)}
                 >
-                  <span style={{ fontWeight: 700 }}>{job.job_number}</span>
-                  <span style={{ color: C.muted, fontSize: 13 }}>{job.laser_job_reference || "No SigmaNest #"}</span>
-                  <span style={{ fontSize: 13 }}>{job.customer || "No customer"}</span>
-                  <span style={{ color: C.muted, fontSize: 13 }}>{job.sales_rep || "No sales rep"}</span>
+                  <span style={{ fontSize: 15, color: C.text }}>{job.job_number}</span>
+                  <span style={{ fontSize: 15, color: C.text }}>{job.laser_job_reference || "No SigmaNest #"}</span>
+                  <span style={{ fontSize: 15, color: C.text }}>{job.customer || "No customer"}</span>
+                  <span style={{ fontSize: 15, color: C.text }}>{job.sales_rep || "No sales rep"}</span>
                 </button>
               );
 
@@ -12112,49 +12117,77 @@ export default function StockControl() {
       )}
 
       {jobDetail && (
-        <div style={S.modalOverlay}>
-          <div style={{ ...S.modal, maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
-            <div style={S.modalHead}>
-              <span style={S.modalTitle}>{jobDetail.job.job_number} — {jobDetail.job.customer || "No customer"}</span>
-              <div style={{ display: "flex", gap: 6 }}>
-                <button
-                  type="button"
-                  className="stk-btn"
-                  style={S.iconBtn}
-                  onClick={() => printJobSheet(jobDetail.job, jobDetail.processes, jobDetail.quoteItems, jobDetail.deliveryNotes)}
-                  title="Print job sheet"
-                >
-                  <FileText size={18} />
-                </button>
-                <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => openCopyJobModal(jobDetail.job)} title="Copy job">
-                  <Copy size={18} />
-                </button>
-                <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeJobDetail}>
-                  <X size={18} />
-                </button>
-              </div>
+        <div style={S.managerFullPage}>
+          <button
+            type="button"
+            className="stk-btn"
+            style={{ ...S.prominentBackBtn, marginBottom: 10 }}
+            onClick={closeJobDetail}
+          >
+            <ChevronLeft size={18} strokeWidth={2.5} /> Back to Jobs
+          </button>
+          <div style={S.modalHead}>
+            <span style={S.modalTitle}>{jobDetail.job.job_number} — {jobDetail.job.customer || "No customer"}</span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                type="button"
+                className="stk-btn"
+                style={S.iconBtn}
+                onClick={() => printJobSheet(jobDetail.job, jobDetail.processes, jobDetail.quoteItems, jobDetail.deliveryNotes)}
+                title="Print job sheet"
+              >
+                <FileText size={18} />
+              </button>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => openCopyJobModal(jobDetail.job)} title="Copy job">
+                <Copy size={18} />
+              </button>
             </div>
+          </div>
 
-            <div className="stk-meta-row" style={S.rowMeta}>
-              <span>Sales rep: {jobDetail.job.sales_rep}</span>
-              {jobDetail.job.due_date && <span>Due {new Date(jobDetail.job.due_date).toLocaleDateString()}</span>}
-              {jobDetail.job.quote_reference && <span>Quote: {jobDetail.job.quote_reference}</span>}
-            </div>
+          <div className="stk-meta-row" style={S.rowMeta}>
+            <span>Sales rep: {jobDetail.job.sales_rep}</span>
+            {jobDetail.job.due_date && <span>Due {new Date(jobDetail.job.due_date).toLocaleDateString()}</span>}
+            {jobDetail.job.quote_reference && <span>Quote: {jobDetail.job.quote_reference}</span>}
+          </div>
 
-            {canEditThisJob && (
-              <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                <div style={{ flex: 1 }}>
-                  <label style={S.label}>SigmaNest / laser job number</label>
-                  <input
-                    style={S.input}
-                    defaultValue={jobDetail.job.laser_job_reference || ""}
-                    onBlur={(e) => updateJobField(jobDetail.job.id, "laser_job_reference", e.target.value)}
-                    placeholder="Often only known once nesting is done — fill in when it exists"
-                  />
+          <div style={S.segRow}>
+            {[
+              { key: "overview", label: "Overview" },
+              { key: "items", label: "Items" },
+              { key: "invoice", label: "Invoice" },
+              { key: "delivery", label: "Delivery" },
+            ].map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                className="stk-btn"
+                onClick={() => setJobDetailTab(t.key)}
+                style={{
+                  ...S.segBtn,
+                  ...(jobDetailTab === t.key ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {jobDetailTab === "overview" && (
+            <>
+              {canEditThisJob && (
+                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={S.label}>SigmaNest / laser job number</label>
+                    <input
+                      style={S.input}
+                      defaultValue={jobDetail.job.laser_job_reference || ""}
+                      onBlur={(e) => updateJobField(jobDetail.job.id, "laser_job_reference", e.target.value)}
+                      placeholder="Often only known once nesting is done — fill in when it exists"
+                    />
+                  </div>
+                  <SavedCheck fieldKey={`job-${jobDetail.job.id}-laser_job_reference`} />
                 </div>
-                <SavedCheck fieldKey={`job-${jobDetail.job.id}-laser_job_reference`} />
-              </div>
-            )}
+              )}
 
             {jobDetail.quoteItems.length > 0 && (
               <div style={{ marginTop: 8, padding: 10, background: C.bg, borderRadius: 6, border: `1px solid ${C.border}` }}>
@@ -12212,6 +12245,121 @@ export default function StockControl() {
               <div style={{ ...S.roleHint, marginTop: 8 }}>{jobDetail.job.description}</div>
             )}
 
+              <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <label style={S.label}>Process checklist</label>
+                  {(isAdmin || profile?.isSalesPerson) && !jobIsLocked && (
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={S.reqActionBtnMuted}
+                      onClick={() => openEditProcessesModal(jobDetail.job, jobDetail.processes)}
+                    >
+                      <Pencil size={12} /> Edit processes
+                    </button>
+                  )}
+                </div>
+                {jobDetailLoading && <div style={S.empty}>Loading…</div>}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                  {jobDetail.processes.map((p) => (
+                    <div key={p.id} style={{ ...S.managerRow, alignItems: "flex-start" }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ ...S.checkRow, fontWeight: 600 }}>
+                          <input
+                            type="checkbox"
+                            checked={p.is_complete}
+                            disabled={!canEditThisJob}
+                            onChange={() => toggleJobProcessComplete(p, jobDetail.job)}
+                          />
+                          {p.process_name}
+                        </label>
+                        <SavedCheck fieldKey={`process-${p.id}`} />
+                        {p.is_complete && (
+                          <div style={{ ...S.roleHint, marginLeft: 22 }}>
+                            {p.completed_by} — {new Date(p.completed_at).toLocaleString()}
+                          </div>
+                        )}
+                        {p.tracking_mode === "each" && !p.is_complete && (
+                          <div style={{ ...S.roleHint, marginLeft: 22 }}>Each-mode progress is tracked per item on the Production tab.</div>
+                        )}
+                        {canEditThisJob && (
+                          <div style={{ display: "flex", gap: 6, marginTop: 4, marginLeft: 22, flexWrap: "wrap" }}>
+                            <select
+                              style={{ ...S.input, fontSize: 13.5, padding: "5px 8px", flex: "1 1 140px" }}
+                              value={p.assigned_to || ""}
+                              onChange={(e) => updateJobProcessAssignee(p, jobDetail.job, e.target.value)}
+                            >
+                              <option value="">Not assigned yet</option>
+                              {(people || []).map((person) => (
+                                <option key={person.id} value={person.id}>{person.name}</option>
+                              ))}
+                            </select>
+                            <input
+                              style={{ ...S.input, fontSize: 13.5, padding: "5px 8px", flex: "1 1 140px" }}
+                              defaultValue={p.notes || ""}
+                              onBlur={(e) => updateJobProcessField(p, "notes", e.target.value)}
+                              placeholder="Notes"
+                            />
+                            <select
+                              style={{ ...S.input, fontSize: 13.5, padding: "5px 8px", width: 100, flexShrink: 0 }}
+                              value={p.tracking_mode || "batch"}
+                              onChange={(e) => updateJobProcessField(p, "tracking_mode", e.target.value)}
+                              title="Batch: one tick completes the whole line. Each: a running count against the item's quantity."
+                            >
+                              <option value="batch">Batch</option>
+                              <option value="each">Each</option>
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <label style={S.label}>Documents</label>
+                  {canEditThisJob && (
+                    <label className="stk-btn" style={{ ...S.reqActionBtnMuted, cursor: "pointer" }}>
+                      <Upload size={12} /> Upload
+                      <input
+                        type="file"
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          const file = e.target.files[0];
+                          if (file) uploadJobDocument(jobDetail.job.id, file);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                  {jobDetail.documents
+                    .filter((doc) => !doc.is_quote_file || isAdmin || profile?.isSalesPerson)
+                    .map((doc) => (
+                    <div key={doc.id} style={S.managerRow}>
+                      <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1, justifyContent: "flex-start" }} onClick={() => viewJobDocument(doc)}>
+                        <Paperclip size={13} /> {doc.file_name}
+                      </button>
+                      {isAdmin && (
+                        <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => deleteJobDocument(doc)}>
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {jobDetail.documents.filter((doc) => !doc.is_quote_file || isAdmin || profile?.isSalesPerson).length === 0 && (
+                    <div style={S.empty}>No documents yet.</div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+
+          {jobDetailTab === "items" && (
+            <>
             {jobDetail.quoteItems.length > 0 && (
               <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
                 <label style={S.label}>Quoted items</label>
@@ -12329,7 +12477,11 @@ export default function StockControl() {
                 )}
               </div>
             )}
+            </>
+          )}
 
+          {jobDetailTab === "delivery" && (
+            <>
             {jobDetail.deliveryNotes.length > 0 && (
               <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
                 <label style={S.label}>Delivery notes</label>
@@ -12375,7 +12527,11 @@ export default function StockControl() {
                 </div>
               </div>
             )}
+            </>
+          )}
 
+          {jobDetailTab === "invoice" && (
+            <>
             {(() => {
               const requestsForJob = jobInvoiceRequests.filter((r) => r.job_id === jobDetail.job.id);
               if (requestsForJob.length === 0) return null;
@@ -12407,7 +12563,11 @@ export default function StockControl() {
                 </div>
               );
             })()}
+            </>
+          )}
 
+          {jobDetailTab === "items" && (
+            <>
             {(() => {
               const materialsUsed = (usageLog || []).filter(
                 (u) => u.direction === "use" && u.jobNumber === jobDetail.job.job_number
@@ -12441,118 +12601,8 @@ export default function StockControl() {
                 </div>
               );
             })()}
-
-            <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <label style={S.label}>Process checklist</label>
-                {(isAdmin || profile?.isSalesPerson) && !jobIsLocked && (
-                  <button
-                    type="button"
-                    className="stk-btn"
-                    style={S.reqActionBtnMuted}
-                    onClick={() => openEditProcessesModal(jobDetail.job, jobDetail.processes)}
-                  >
-                    <Pencil size={12} /> Edit processes
-                  </button>
-                )}
-              </div>
-              {jobDetailLoading && <div style={S.empty}>Loading…</div>}
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-                {jobDetail.processes.map((p) => (
-                  <div key={p.id} style={{ ...S.managerRow, alignItems: "flex-start" }}>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ ...S.checkRow, fontWeight: 600 }}>
-                        <input
-                          type="checkbox"
-                          checked={p.is_complete}
-                          disabled={!canEditThisJob}
-                          onChange={() => toggleJobProcessComplete(p, jobDetail.job)}
-                        />
-                        {p.process_name}
-                      </label>
-                      <SavedCheck fieldKey={`process-${p.id}`} />
-                      {p.is_complete && (
-                        <div style={{ ...S.roleHint, marginLeft: 22 }}>
-                          {p.completed_by} — {new Date(p.completed_at).toLocaleString()}
-                        </div>
-                      )}
-                      {p.tracking_mode === "each" && !p.is_complete && (
-                        <div style={{ ...S.roleHint, marginLeft: 22 }}>Each-mode progress is tracked per item on the Production tab.</div>
-                      )}
-                      {canEditThisJob && (
-                        <div style={{ display: "flex", gap: 6, marginTop: 4, marginLeft: 22, flexWrap: "wrap" }}>
-                          <select
-                            style={{ ...S.input, fontSize: 13.5, padding: "5px 8px", flex: "1 1 140px" }}
-                            value={p.assigned_to || ""}
-                            onChange={(e) => updateJobProcessAssignee(p, jobDetail.job, e.target.value)}
-                          >
-                            <option value="">Not assigned yet</option>
-                            {(people || []).map((person) => (
-                              <option key={person.id} value={person.id}>{person.name}</option>
-                            ))}
-                          </select>
-                          <input
-                            style={{ ...S.input, fontSize: 13.5, padding: "5px 8px", flex: "1 1 140px" }}
-                            defaultValue={p.notes || ""}
-                            onBlur={(e) => updateJobProcessField(p, "notes", e.target.value)}
-                            placeholder="Notes"
-                          />
-                          <select
-                            style={{ ...S.input, fontSize: 13.5, padding: "5px 8px", width: 100, flexShrink: 0 }}
-                            value={p.tracking_mode || "batch"}
-                            onChange={(e) => updateJobProcessField(p, "tracking_mode", e.target.value)}
-                            title="Batch: one tick completes the whole line. Each: a running count against the item's quantity."
-                          >
-                            <option value="batch">Batch</option>
-                            <option value="each">Each</option>
-                          </select>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <label style={S.label}>Documents</label>
-                {canEditThisJob && (
-                  <label className="stk-btn" style={{ ...S.reqActionBtnMuted, cursor: "pointer" }}>
-                    <Upload size={12} /> Upload
-                    <input
-                      type="file"
-                      style={{ display: "none" }}
-                      onChange={(e) => {
-                        const file = e.target.files[0];
-                        if (file) uploadJobDocument(jobDetail.job.id, file);
-                        e.target.value = "";
-                      }}
-                    />
-                  </label>
-                )}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-                {jobDetail.documents
-                  .filter((doc) => !doc.is_quote_file || isAdmin || profile?.isSalesPerson)
-                  .map((doc) => (
-                  <div key={doc.id} style={S.managerRow}>
-                    <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1, justifyContent: "flex-start" }} onClick={() => viewJobDocument(doc)}>
-                      <Paperclip size={13} /> {doc.file_name}
-                    </button>
-                    {isAdmin && (
-                      <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => deleteJobDocument(doc)}>
-                        <Trash2 size={13} />
-                      </button>
-                    )}
-                  </div>
-                ))}
-                {jobDetail.documents.filter((doc) => !doc.is_quote_file || isAdmin || profile?.isSalesPerson).length === 0 && (
-                  <div style={S.empty}>No documents yet.</div>
-                )}
-              </div>
-            </div>
-          </div>
+            </>
+          )}
         </div>
       )}
 
