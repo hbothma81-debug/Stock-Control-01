@@ -2932,7 +2932,10 @@ export default function StockControl() {
   // This is the only route by which reserved stock can be consumed —
   // ordinary Use is capped at what is free — so the quantity leaving the
   // shelf and the job it left for always agree.
-  async function useAllocation(allocation, qty, offcutLength = 0) {
+  // offcuts is a list of { length, qty } — a cut rarely leaves one tidy
+  // remainder, and the pieces that come back vary in both length and
+  // number from job to job.
+  async function useAllocation(allocation, qty, offcuts = []) {
     const outstanding = Number(allocation.qty_allocated) - Number(allocation.qty_used);
     const amount = Number(qty);
     if (!amount || amount <= 0) return;
@@ -2945,9 +2948,12 @@ export default function StockControl() {
       alert("That stock item no longer exists, so it can't be booked out. Release the allocation instead.");
       return;
     }
-    const offcut = Number(offcutLength) || 0;
-    if (offcut > 0 && offcut >= Number(item.length || 0)) {
-      alert(`An offcut of ${offcut}m isn't possible from a ${item.length}m length — it has to be shorter than the piece it came off.`);
+    const cleanOffcuts = (offcuts || [])
+      .map((o) => ({ length: Number(o.length) || 0, qty: Number(o.qty) || 0 }))
+      .filter((o) => o.length > 0 && o.qty > 0);
+    const tooLong = cleanOffcuts.find((o) => o.length >= Number(item.length || 0));
+    if (tooLong) {
+      alert(`An offcut of ${tooLong.length}m isn't possible from a ${item.length}m length — it has to be shorter than the piece it came off.`);
       return;
     }
     try {
@@ -2970,10 +2976,12 @@ export default function StockControl() {
       // the CNC bar cut already takes with its remainder.
       setItems((prev) => {
         const reduced = prev.map((it) => (it.id === item.id ? { ...it, qty: Math.max(0, Number(it.qty) - amount) } : it));
-        if (offcut <= 0) return reduced;
+        if (cleanOffcuts.length === 0) return reduced;
+        // One line per distinct length, carrying its own count — three 2m
+        // pieces belong together, but 2m and 3.5m pieces do not.
         return [
           ...reduced,
-          { ...item, id: uid(), qty: 1, length: offcut, stockType: "offcut", low: 0 },
+          ...cleanOffcuts.map((o) => ({ ...item, id: uid(), qty: o.qty, length: o.length, stockType: "offcut", low: 0 })),
         ];
       });
       setUsageLog((prev) => [
@@ -8565,7 +8573,7 @@ export default function StockControl() {
                                                   allocation: a,
                                                   item: stockItem,
                                                   qty: String(outstanding),
-                                                  offcut: "",
+                                                  offcuts: [],
                                                 })
                                               }
                                             >
@@ -12543,7 +12551,7 @@ export default function StockControl() {
             onClick={(e) => e.stopPropagation()}
             onSubmit={(e) => {
               e.preventDefault();
-              useAllocation(useAllocationModal.allocation, useAllocationModal.qty, useAllocationModal.offcut);
+              useAllocation(useAllocationModal.allocation, useAllocationModal.qty, useAllocationModal.offcuts);
               setUseAllocationModal(null);
             }}
           >
@@ -12578,21 +12586,68 @@ export default function StockControl() {
 
             {useAllocationModal.item?.trackLength && (
               <div style={{ marginTop: 10 }}>
-                <label style={S.label}>Offcut going back to stock (metres)</label>
-                <input
-                  style={S.input}
-                  type="number"
-                  step="any"
-                  min="0"
-                  max={Number(useAllocationModal.item.length || 0)}
-                  value={useAllocationModal.offcut}
-                  onChange={(e) => setUseAllocationModal((m) => ({ ...m, offcut: e.target.value }))}
-                  placeholder="Leave blank if nothing came back"
-                />
+                <label style={S.label}>Offcuts going back to stock</label>
                 <div style={S.roleHint}>
-                  These come in {useAllocationModal.item.length}m lengths. Anything you put here is filed back as its own
-                  offcut, ready to be used on another job — leave it blank if there's nothing usable left.
+                  These come in {useAllocationModal.item.length}m lengths. Add a row for each different offcut length —
+                  three 2m pieces is one row with a quantity of 3. Leave it empty if nothing usable came back.
                 </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                  {(useAllocationModal.offcuts || []).map((o, idx) => (
+                    <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <input
+                        style={{ ...S.input, flex: 1 }}
+                        type="number"
+                        step="any"
+                        min="0"
+                        max={Number(useAllocationModal.item.length || 0)}
+                        value={o.length}
+                        onChange={(e) =>
+                          setUseAllocationModal((m) => ({
+                            ...m,
+                            offcuts: m.offcuts.map((x, i) => (i === idx ? { ...x, length: e.target.value } : x)),
+                          }))
+                        }
+                        placeholder="Length (m)"
+                      />
+                      <span style={{ color: C.muted, fontSize: 13 }}>×</span>
+                      <input
+                        style={{ ...S.input, width: 80, flexShrink: 0 }}
+                        type="number"
+                        step="1"
+                        min="1"
+                        value={o.qty}
+                        onChange={(e) =>
+                          setUseAllocationModal((m) => ({
+                            ...m,
+                            offcuts: m.offcuts.map((x, i) => (i === idx ? { ...x, qty: e.target.value } : x)),
+                          }))
+                        }
+                        placeholder="Qty"
+                      />
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={S.managerDelete}
+                        title="Remove this offcut"
+                        onClick={() =>
+                          setUseAllocationModal((m) => ({ ...m, offcuts: m.offcuts.filter((_, i) => i !== idx) }))
+                        }
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={{ ...S.addBtn, marginTop: 6 }}
+                  onClick={() =>
+                    setUseAllocationModal((m) => ({ ...m, offcuts: [...(m.offcuts || []), { length: "", qty: "1" }] }))
+                  }
+                >
+                  <Plus size={15} strokeWidth={2.5} /> Add offcut
+                </button>
               </div>
             )}
 
