@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+
+# Backup of live credentials — never commit
+PRODUCTION-CREDENTIALS-BACKUP.txt
