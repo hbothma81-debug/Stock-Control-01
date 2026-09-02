@@ -727,6 +727,9 @@ export default function StockControl() {
   const lastSavedPurchaseOrdersRef = useRef(null);
   const lastSavedUsageLogRef = useRef(null);
   const [usageModal, setUsageModal] = useState(null); // { item, direction: "add" | "use", qty, jobNumber, customer, note }
+  // Picking stock from inside a process, so an operator never has to leave
+  // the job to find the material they've just used. { job, process, dept, search }
+  const [pullStockModal, setPullStockModal] = useState(null);
   const [assetRemoveModal, setAssetRemoveModal] = useState(null); // { item, reason, date }
   const [showAssetArchive, setShowAssetArchive] = useState(false);
   const [poBuilder, setPoBuilder] = useState(null); // { supplierId, lineItems: [...], linkedRequisitionIds: [...], notes }
@@ -5051,8 +5054,19 @@ export default function StockControl() {
     );
   }
 
-  function openUsageModal(item, direction) {
-    setUsageModal({ item, direction, qty: "", cutQty: "1", jobNumber: "", customer: "", note: "" });
+  // prefill lets the caller supply the job and customer up front — used
+  // when an operator pulls stock from inside a process, where the job is
+  // already known and retyping the number is just a chance to get it wrong.
+  function openUsageModal(item, direction, prefill = {}) {
+    setUsageModal({
+      item,
+      direction,
+      qty: "",
+      cutQty: "1",
+      jobNumber: prefill.jobNumber || "",
+      customer: prefill.customer || "",
+      note: prefill.note || "",
+    });
   }
 
   function closeUsageModal() {
@@ -8191,6 +8205,14 @@ export default function StockControl() {
                                 Flag shortage
                               </button>
                             </div>
+                            <button
+                              type="button"
+                              className="stk-btn"
+                              style={{ ...S.reqActionBtnMuted, width: "100%", marginTop: 6 }}
+                              onClick={() => setPullStockModal({ job, process, dept: null, search: "" })}
+                            >
+                              <PackagePlus size={13} /> Pull from stock
+                            </button>
                             <div style={{ marginTop: 6 }}>
                               {process.tracking_mode === "each" ? (
                                 <QtyProgressControl
@@ -12086,8 +12108,125 @@ export default function StockControl() {
         </div>
       )}
 
+      {/* Pulling stock from inside a process. Two steps — pick the
+          department, then the item — rather than one enormous list, since
+          the stock table runs to thousands of rows. Handing straight over
+          to the usual Use stock form keeps one path for actually booking
+          material out, with the job filled in already. */}
+      {pullStockModal && (
+        <div style={{ ...S.modalOverlay, zIndex: 30 }}>
+          <div style={{ ...S.modal, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>
+                Pull from stock — {pullStockModal.job.job_number}
+              </span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setPullStockModal(null)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            {pullStockModal.dept === null ? (
+              (() => {
+                // Only departments this person may reduce. Booking material
+                // out is a stock edit wherever it is done from, so the same
+                // permission applies here as on the stock screens — this
+                // must not become a way around it.
+                const allowed = TABS.filter((t) => canEditQty(t.key));
+                if (allowed.length === 0) {
+                  return (
+                    <div style={S.empty}>
+                      You don't have permission to take stock out of any department, so there's nothing to pull from.{" "}
+                      {isAdmin ? "Set this" : "Ask an admin to set it"} under Stock Manager → User Management → your name → Edit qty.
+                    </div>
+                  );
+                }
+                return (
+                  <>
+                    <div style={S.roleHint}>Which department are you taking material from?</div>
+                    <div style={S.managerListFullPage}>
+                      {allowed.map((t) => (
+                        <button
+                          key={t.key}
+                          type="button"
+                          className="stk-btn"
+                          style={S.managerMenuRow}
+                          onClick={() => setPullStockModal((m) => ({ ...m, dept: t.key, search: "" }))}
+                        >
+                          {t.label}
+                          <ChevronRight size={16} />
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                );
+              })()
+            ) : (
+              (() => {
+                const deptLabel = TABS.find((t) => t.key === pullStockModal.dept)?.label || pullStockModal.dept;
+                const q = pullStockModal.search.trim().toLowerCase();
+                const matches = (items || [])
+                  .filter((it) => it.mainCat === pullStockModal.dept)
+                  .filter((it) => !q || (it.name || "").toLowerCase().includes(q) || (it.loc || "").toLowerCase().includes(q));
+                // Capped rather than paged: this is a "find the thing you
+                // just used" list, so if it is still hundreds long the
+                // answer is to type more, not to scroll further.
+                const shown = matches.slice(0, 60);
+                return (
+                  <>
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={{ ...S.prominentBackBtn, marginBottom: 8 }}
+                      onClick={() => setPullStockModal((m) => ({ ...m, dept: null, search: "" }))}
+                    >
+                      <ChevronLeft size={18} strokeWidth={2.5} /> All departments
+                    </button>
+                    <input
+                      autoFocus
+                      style={S.input}
+                      value={pullStockModal.search}
+                      onChange={(e) => setPullStockModal((m) => ({ ...m, search: e.target.value }))}
+                      placeholder={`Search ${deptLabel.toLowerCase()}…`}
+                    />
+                    <div style={S.managerListFullPage}>
+                      {matches.length === 0 && <div style={S.empty}>Nothing in {deptLabel} matches that.</div>}
+                      {shown.map((it) => (
+                        <button
+                          key={it.id}
+                          type="button"
+                          className="stk-btn"
+                          style={S.managerMenuRow}
+                          onClick={() => {
+                            openUsageModal(it, "use", {
+                              jobNumber: pullStockModal.job.job_number || "",
+                              customer: pullStockModal.job.customer || "",
+                              note: `Used on ${pullStockModal.process.process_name}`,
+                            });
+                            setPullStockModal(null);
+                          }}
+                        >
+                          <span style={{ flex: 1, textAlign: "left" }}>{it.name}</span>
+                          <span style={{ fontFamily: F.mono, fontSize: 12.5, color: Number(it.qty) > 0 ? C.muted : C.danger }}>
+                            {it.qty}{it.loc ? ` · ${it.loc}` : ""}
+                          </span>
+                        </button>
+                      ))}
+                      {matches.length > shown.length && (
+                        <div style={S.empty}>
+                          {matches.length - shown.length} more — keep typing to narrow it down.
+                        </div>
+                      )}
+                    </div>
+                  </>
+                );
+              })()
+            )}
+          </div>
+        </div>
+      )}
+
       {usageModal && (
-        <div style={S.modalOverlay}>
+        <div style={{ ...S.modalOverlay, zIndex: 31 }}>
           <form style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()} onSubmit={submitUsageModal}>
             {(() => {
               const isCncCut = usageModal.item.mainCat === "cncBar" && usageModal.direction === "use";
