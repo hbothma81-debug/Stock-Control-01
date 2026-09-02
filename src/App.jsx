@@ -813,6 +813,9 @@ export default function StockControl() {
   const [invoicedSectionOpen, setInvoicedSectionOpen] = useState(false);
   const [notificationsViewedOpen, setNotificationsViewedOpen] = useState(false);
   const [jobsCompletedSectionOpen, setJobsCompletedSectionOpen] = useState(false);
+  const [jobsSearchQuery, setJobsSearchQuery] = useState("");
+  const [jobsCustomerFilter, setJobsCustomerFilter] = useState("");
+  const [jobsSalesRepFilter, setJobsSalesRepFilter] = useState("");
   const [shortagesResolvedOpen, setShortagesResolvedOpen] = useState(false);
   const [productionSelectedDept, setProductionSelectedDept] = useState(null);
   // Which specific job card is open within the current department — null
@@ -7484,94 +7487,85 @@ export default function StockControl() {
           {jobsLoading && <div style={{ ...S.empty, marginTop: 10 }}>Loading…</div>}
           {!jobsLoading && jobsList?.length === 0 && <div style={S.empty}>No jobs yet.</div>}
 
-          <label style={{ ...S.label, marginTop: 10, display: "block" }}>Active</label>
-          <div style={{ ...S.gradeItems, marginTop: 6 }}>
-            {(jobsList || [])
-              .filter((j) => j.status === "in_progress" || j.status === "complete")
-              .map((job) => {
-                const jobItems = allJobQuoteItems.filter((it) => it.job_id === job.id);
-                const invoicedCount = jobItems.filter((it) => it.item_status === "invoiced").length;
-                return (
-                <div key={job.id} style={S.reqCard}>
-                  <div style={S.reqCardTop}>
-                    <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
-                    <span style={{ ...S.reqStatusTag, ...(job.status === "complete" ? S.reqStatus_received : S.reqStatus_ordered) }}>
-                      {job.status === "in_progress" ? "In Progress" : "Complete"}
-                    </span>
-                  </div>
-                  <div className="stk-meta-row" style={S.rowMeta}>
-                    <span>Sales rep: {job.sales_rep}</span>
-                    {job.due_date && <span>Due {new Date(job.due_date).toLocaleDateString()}</span>}
-                    {job.quote_reference && <span>Quote: {job.quote_reference}</span>}
-                    {job.laser_job_reference && <span>Laser: {job.laser_job_reference}</span>}
-                    {jobItems.length > 0 && <span>{invoicedCount}/{jobItems.length} invoiced</span>}
-                    {job.invoice_number && <span>Invoice #{job.invoice_number}</span>}
-                  </div>
-                  <div style={S.reqActions}>
-                    <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => openJobDetail(job)}>
-                      <ClipboardList size={13} /> Open
-                    </button>
-                    {jobInvoiceRequests.find((r) => r.job_id === job.id) && (
-                      <button
-                        type="button"
-                        className="stk-btn"
-                        style={S.reqActionBtnMuted}
-                        onClick={() => viewJobInvoiceRequest(jobInvoiceRequests.find((r) => r.job_id === job.id))}
-                      >
-                        <FileText size={13} /> Open Invoice
-                      </button>
-                    )}
-                    {(isAdmin || !!profile?.canManageInvoicing) && (
-                      <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => invoiceNowFromList(job)}>
-                        <Check size={13} /> Invoice Now
-                      </button>
-                    )}
-                    <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openCopyJobModal(job)}>
-                      <Copy size={13} /> Copy Job
-                    </button>
-                  </div>
-                </div>
-                );
-              })}
-            {(jobsList || []).filter((j) => j.status === "in_progress" || j.status === "complete").length === 0 && (
-              <div style={S.empty}>Nothing active.</div>
-            )}
-          </div>
+          {jobsList?.length > 0 &&
+            (() => {
+              const customers = [...new Set(jobsList.map((j) => j.customer).filter(Boolean))].sort();
+              const salesReps = [...new Set(jobsList.map((j) => j.sales_rep).filter(Boolean))].sort();
+              const q = jobsSearchQuery.trim().toLowerCase();
+              const matchesFilters = (j) =>
+                (!jobsCustomerFilter || j.customer === jobsCustomerFilter) &&
+                (!jobsSalesRepFilter || j.sales_rep === jobsSalesRepFilter) &&
+                (!q ||
+                  (j.job_number || "").toLowerCase().includes(q) ||
+                  (j.customer || "").toLowerCase().includes(q) ||
+                  (j.sales_rep || "").toLowerCase().includes(q));
+              const renderJobRow = (job) => (
+                <button
+                  key={job.id}
+                  type="button"
+                  className="stk-btn"
+                  style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}
+                  onClick={() => openJobDetail(job)}
+                >
+                  <span style={{ fontWeight: 700 }}>{job.job_number}</span>
+                  <span style={{ color: C.muted, fontSize: 13 }}>{job.laser_job_reference || "No SigmaNest #"}</span>
+                  <span style={{ fontSize: 13 }}>{job.customer || "No customer"}</span>
+                  <span style={{ color: C.muted, fontSize: 13 }}>{job.sales_rep || "No sales rep"}</span>
+                </button>
+              );
 
-          <button
-            type="button"
-            className="stk-btn"
-            style={{ ...S.productionPill, marginTop: 16 }}
-            onClick={() => setJobsCompletedSectionOpen((o) => !o)}
-          >
-            <span>Completed</span>
-            <span style={S.gradeCount}>{(jobsList || []).filter((j) => j.status === "invoiced").length}</span>
-            <ChevronDown size={14} style={{ transform: jobsCompletedSectionOpen ? "rotate(180deg)" : "none" }} />
-          </button>
-          {jobsCompletedSectionOpen && (
-          <div style={{ ...S.gradeItems, marginTop: 6 }}>
-            {(jobsList || [])
-              .filter((j) => j.status === "invoiced")
-              .map((job) => (
-                <div key={job.id} style={S.reqCard}>
-                  <div style={S.reqCardTop}>
-                    <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
-                    <span style={{ ...S.reqStatusTag, ...S.reqStatus_received }}>Invoiced</span>
+              return (
+                <>
+                  <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                    <input
+                      style={{ ...S.input, flex: 2, minWidth: 160 }}
+                      value={jobsSearchQuery}
+                      onChange={(e) => setJobsSearchQuery(e.target.value)}
+                      placeholder="Search job #, customer, sales rep…"
+                    />
+                    <select style={{ ...S.input, flex: 1, minWidth: 130 }} value={jobsCustomerFilter} onChange={(e) => setJobsCustomerFilter(e.target.value)}>
+                      <option value="">All customers</option>
+                      {customers.map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                    <select style={{ ...S.input, flex: 1, minWidth: 130 }} value={jobsSalesRepFilter} onChange={(e) => setJobsSalesRepFilter(e.target.value)}>
+                      <option value="">All sales reps</option>
+                      {salesReps.map((r) => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
                   </div>
-                  <div className="stk-meta-row" style={S.rowMeta}>
-                    <span>Invoice #{job.invoice_number}</span>
-                    <span>{job.invoiced_by} on {new Date(job.invoiced_at).toLocaleDateString()}</span>
+
+                  <label style={{ ...S.label, marginTop: 12, display: "block" }}>Active</label>
+                  <div style={{ ...S.managerListFullPage, marginTop: 6 }}>
+                    {jobsList.filter((j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j)).map(renderJobRow)}
+                    {jobsList.filter((j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j)).length === 0 && (
+                      <div style={S.empty}>Nothing active matches.</div>
+                    )}
                   </div>
-                  <div style={S.reqActions}>
-                    <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openJobDetail(job)}>
-                      <ClipboardList size={13} /> Open
-                    </button>
-                  </div>
-                </div>
-              ))}
-            {(jobsList || []).filter((j) => j.status === "invoiced").length === 0 && <div style={S.empty}>Nothing completed yet.</div>}
-          </div>
-          )}
+
+                  <button
+                    type="button"
+                    className="stk-btn"
+                    style={{ ...S.productionPill, marginTop: 16 }}
+                    onClick={() => setJobsCompletedSectionOpen((o) => !o)}
+                  >
+                    <span>Completed</span>
+                    <span style={S.gradeCount}>{jobsList.filter((j) => j.status === "invoiced" && matchesFilters(j)).length}</span>
+                    <ChevronDown size={14} style={{ transform: jobsCompletedSectionOpen ? "rotate(180deg)" : "none" }} />
+                  </button>
+                  {jobsCompletedSectionOpen && (
+                    <div style={{ ...S.managerListFullPage, marginTop: 6 }}>
+                      {jobsList.filter((j) => j.status === "invoiced" && matchesFilters(j)).map(renderJobRow)}
+                      {jobsList.filter((j) => j.status === "invoiced" && matchesFilters(j)).length === 0 && (
+                        <div style={S.empty}>Nothing completed matches.</div>
+                      )}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
         </div>
       ) : tab === "production" ? (
         productionSelectedDept === null ? (
@@ -12184,14 +12178,26 @@ export default function StockControl() {
                   <option value="cancelled">Cancelled</option>
                 </select>
                 {jobDetail.job.status === "complete" && (
-                  <button
-                    type="button"
-                    className="stk-btn"
-                    style={{ ...S.reqActionBtn, marginTop: 8 }}
-                    onClick={() => openMarkInvoicedModal(jobDetail.job)}
-                  >
-                    <Check size={13} /> Mark as Invoiced
-                  </button>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                    {(isAdmin || !!profile?.canManageInvoicing) && (
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={S.reqActionBtnMuted}
+                        onClick={() => invoiceNowFromList(jobDetail.job)}
+                      >
+                        <Check size={13} /> Invoice Now (all remaining)
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={S.reqActionBtn}
+                      onClick={() => openMarkInvoicedModal(jobDetail.job)}
+                    >
+                      <Check size={13} /> Mark as Invoiced
+                    </button>
+                  </div>
                 )}
               </div>
             )}
