@@ -765,6 +765,12 @@ export default function StockControl() {
   const [poBuilder, setPoBuilder] = useState(null); // { supplierId, lineItems: [...], linkedRequisitionIds: [...], notes }
   const [poSearchQuery, setPoSearchQuery] = useState("");
   const [poSupplierFilter, setPoSupplierFilter] = useState("");
+  // Same compact-line, tap-to-expand pattern as Requisitions — null shows
+  // every PO as a single line (number, value, status); tapping one opens
+  // the real detail (raised by, lines, notes, actions) in place.
+  const [expandedPoId, setExpandedPoId] = useState(null);
+  const [receivingSearchQuery, setReceivingSearchQuery] = useState("");
+  const [shortageSearchQuery, setShortageSearchQuery] = useState("");
   const [showPoReport, setShowPoReport] = useState(false);
   const [showCompletedPOs, setShowCompletedPOs] = useState(false);
   const [receivingPo, setReceivingPo] = useState(null);
@@ -1619,6 +1625,9 @@ export default function StockControl() {
     setAssetDetailOpen(null);
     setProductionSearchQuery("");
     setExpandedReqId(null);
+    setExpandedPoId(null);
+    setReceivingSearchQuery("");
+    setShortageSearchQuery("");
   }, [tab]);
 
   // The part-number → drawing lookup is used on Customer Stock rows and the
@@ -5815,7 +5824,20 @@ export default function StockControl() {
         <button
           type="button"
           className="stk-btn"
-          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", textAlign: "left", cursor: "pointer", gap: 10 }}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            width: "100%",
+            textAlign: "left",
+            cursor: "pointer",
+            gap: 10,
+            background: "transparent",
+            border: "none",
+            padding: 0,
+            color: "inherit",
+            font: "inherit",
+          }}
           onClick={() => setExpandedReqId(isOpen ? null : r.id)}
         >
           <span style={S.itemName}>{r.itemLabel}</span>
@@ -7529,43 +7551,71 @@ export default function StockControl() {
                 (po.poNumber || "").toLowerCase().includes(pq) ||
                 (po.supplierName || "").toLowerCase().includes(pq) ||
                 (po.reference || "").toLowerCase().includes(pq));
-            const renderPoCard = (po) => (
-              <div key={po.id} style={S.reqCard}>
-                <div style={S.reqCardTop}>
-                  <span style={S.itemName}>{po.poNumber}</span>
-                  <span style={{ ...S.reqStatusTag, ...(po.status === "received" ? S.reqStatus_received : S.reqStatus_ordered) }}>
-                    R{po.totalValue.toFixed(2)}
-                  </span>
-                </div>
-                <div className="stk-meta-row" style={S.rowMeta}>
-                  <span>Raised by {po.createdBy}</span>
-                  <span>{new Date(po.dateCreated).toLocaleDateString()}</span>
-                  <span>{po.lineItems.length} line{po.lineItems.length === 1 ? "" : "s"}</span>
-                  {po.status === "received" && (
+            const renderPoCard = (po) => {
+              const isOpen = expandedPoId === po.id;
+              return (
+                <div key={po.id} style={S.reqCard}>
+                  <button
+                    type="button"
+                    className="stk-btn"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      width: "100%",
+                      textAlign: "left",
+                      cursor: "pointer",
+                      gap: 10,
+                      background: "transparent",
+                      border: "none",
+                      padding: 0,
+                      color: "inherit",
+                      font: "inherit",
+                    }}
+                    onClick={() => setExpandedPoId(isOpen ? null : po.id)}
+                  >
+                    <span style={S.itemName}>{po.poNumber}</span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ ...S.reqStatusTag, ...(po.status === "received" ? S.reqStatus_received : S.reqStatus_ordered) }}>
+                        R{po.totalValue.toFixed(2)}
+                      </span>
+                      <ChevronDown size={16} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+                    </span>
+                  </button>
+                  {isOpen && (
                     <>
-                      <span>Received by {po.receivedBy} on {new Date(po.receivedDate).toLocaleDateString()}</span>
-                      {po.deliveryNoteNumber && <span>Delivery note: {po.deliveryNoteNumber}</span>}
+                      <div className="stk-meta-row" style={{ ...S.rowMeta, marginTop: 6 }}>
+                        <span>Raised by {po.createdBy}</span>
+                        <span>{new Date(po.dateCreated).toLocaleDateString()}</span>
+                        <span>{po.lineItems.length} line{po.lineItems.length === 1 ? "" : "s"}</span>
+                        {po.status === "received" && (
+                          <>
+                            <span>Received by {po.receivedBy} on {new Date(po.receivedDate).toLocaleDateString()}</span>
+                            {po.deliveryNoteNumber && <span>Delivery note: {po.deliveryNoteNumber}</span>}
+                          </>
+                        )}
+                      </div>
+                      {po.notes && <div style={S.itemComment}>{po.notes}</div>}
+                      <div style={S.reqActions}>
+                        <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => viewPoPdf(po)}>
+                          <FileText size={13} /> View PDF
+                        </button>
+                        {canRaisePO && (
+                          <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => copyPurchaseOrder(po)}>
+                            <Copy size={13} /> Copy
+                          </button>
+                        )}
+                        {po.status !== "received" && canMarkReceivedPerm && (
+                          <button type="button" className="stk-btn" style={{ ...S.reqActionBtn, background: C.accentFinished }} onClick={() => openReceiving(po)}>
+                            <Check size={13} /> Receive
+                          </button>
+                        )}
+                      </div>
                     </>
                   )}
                 </div>
-                {po.notes && <div style={S.itemComment}>{po.notes}</div>}
-                <div style={S.reqActions}>
-                  <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => viewPoPdf(po)}>
-                    <FileText size={13} /> View PDF
-                  </button>
-                  {canRaisePO && (
-                    <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => copyPurchaseOrder(po)}>
-                      <Copy size={13} /> Copy
-                    </button>
-                  )}
-                  {po.status !== "received" && canMarkReceivedPerm && (
-                    <button type="button" className="stk-btn" style={{ ...S.reqActionBtn, background: C.accentFinished }} onClick={() => openReceiving(po)}>
-                      <Check size={13} /> Receive
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
+              );
+            };
 
             const outstanding = [...purchaseOrders].filter((po) => po.status !== "received").filter(matchesSearch);
             const bySupplier = Object.entries(
@@ -7614,14 +7664,31 @@ export default function StockControl() {
       ) : tab === "receiving" ? (
         <div style={S.list}>
           <div style={S.roleHint}>Pick an outstanding Purchase Order to confirm what actually arrived.</div>
+          {purchaseOrders.filter((po) => po.status !== "received").length > 0 && (
+            <input
+              style={{ ...S.input, marginTop: 10 }}
+              value={receivingSearchQuery}
+              onChange={(e) => setReceivingSearchQuery(e.target.value)}
+              placeholder="Search by PO number or supplier…"
+            />
+          )}
           {purchaseOrders.filter((po) => po.status !== "received").length === 0 && (
             <div style={S.empty}>Nothing outstanding to receive.</div>
           )}
           <div style={{ ...S.gradeItems, marginTop: 10 }}>
-            {[...purchaseOrders]
-              .filter((po) => po.status !== "received")
-              .sort((a, b) => new Date(b.dateCreated) - new Date(a.dateCreated))
-              .map((po) => (
+            {(() => {
+              const rq = receivingSearchQuery.trim().toLowerCase();
+              const list = [...purchaseOrders]
+                .filter((po) => po.status !== "received")
+                .filter(
+                  (po) =>
+                    !rq ||
+                    (po.poNumber || "").toLowerCase().includes(rq) ||
+                    (po.supplierName || "").toLowerCase().includes(rq)
+                )
+                .sort((a, b) => new Date(b.dateCreated) - new Date(a.dateCreated));
+              if (list.length === 0 && rq) return <div style={S.empty}>Nothing matches.</div>;
+              return list.map((po) => (
                 <div key={po.id} style={S.reqCard}>
                   <div style={S.reqCardTop}>
                     <span style={S.itemName}>{po.poNumber} — {po.supplierName || "No supplier"}</span>
@@ -7638,7 +7705,8 @@ export default function StockControl() {
                     </button>
                   </div>
                 </div>
-              ))}
+              ));
+            })()}
           </div>
         </div>
       ) : tab === "jobs" ? (
@@ -8129,13 +8197,26 @@ export default function StockControl() {
           <div style={S.roleHint}>Every shortage across every job, in one place — flagged, being nested, or ready to cut.</div>
           {shortagesList === null && <div style={{ ...S.empty, marginTop: 10 }}>Loading…</div>}
           {shortagesList?.length === 0 && <div style={{ ...S.empty, marginTop: 10 }}>Nothing outstanding right now.</div>}
+          {shortagesList?.length > 0 && (
+            <input
+              style={{ ...S.input, marginTop: 10 }}
+              value={shortageSearchQuery}
+              onChange={(e) => setShortageSearchQuery(e.target.value)}
+              placeholder="Search by job number or customer…"
+            />
+          )}
           {(() => {
-            const open = (shortagesList || []).filter((s) => s.status !== "cut");
-            const resolved = (shortagesList || []).filter((s) => s.status === "cut");
+            const sq = shortageSearchQuery.trim().toLowerCase();
+            const matchesSearch = (s) =>
+              !sq || (s.job_number || "").toLowerCase().includes(sq) || (s.customer || "").toLowerCase().includes(sq);
+            const open = (shortagesList || []).filter((s) => s.status !== "cut").filter(matchesSearch);
+            const resolved = (shortagesList || []).filter((s) => s.status === "cut").filter(matchesSearch);
             const statusLabel = { flagged: "Needs nesting", nested: "Needs cutting" };
             return (
               <>
-                {shortagesList?.length > 0 && open.length === 0 && <div style={{ ...S.empty, marginTop: 10 }}>Nothing open — everything's cut.</div>}
+                {shortagesList?.length > 0 && open.length === 0 && (
+                  <div style={{ ...S.empty, marginTop: 10 }}>{sq ? "Nothing open matches." : "Nothing open — everything's cut."}</div>
+                )}
                 <div style={{ ...S.gradeItems, marginTop: 10 }}>
                   {open.map((s) => (
                     <div key={s.id} style={{ ...S.reqCard, borderColor: C.danger, borderWidth: 2 }}>
