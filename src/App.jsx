@@ -2493,13 +2493,33 @@ export default function StockControl() {
     setNewJobForm(null);
   }
 
+  // Ticking a process slots it into its place in the factory flow — the
+  // order set in Stock Manager — rather than onto the end. That order
+  // becomes sort_order, which is what gates the floor, so the sequence has
+  // to come from the shop's real flow and not from whichever button
+  // somebody happened to tap first.
+  //
+  // Placed relative to what's already selected rather than re-sorting the
+  // whole list, so any deliberate reordering of this particular job
+  // survives ticking another process.
   function toggleNewJobProcess(processName) {
-    setNewJobForm((f) => ({
-      ...f,
-      selectedProcesses: f.selectedProcesses.some((p) => p.name === processName)
-        ? f.selectedProcesses.filter((p) => p.name !== processName)
-        : [...f.selectedProcesses, { name: processName, operator: "", assignedToId: null, trackingMode: "batch" }],
-    }));
+    setNewJobForm((f) => {
+      if (f.selectedProcesses.some((p) => p.name === processName)) {
+        return { ...f, selectedProcesses: f.selectedProcesses.filter((p) => p.name !== processName) };
+      }
+      const flow = master?.jobProcessTypes || [];
+      // A process since removed from the master list has no place in the
+      // flow — keep those last rather than letting -1 jump them to front.
+      const rank = (name) => {
+        const i = flow.indexOf(name);
+        return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+      };
+      const entry = { name: processName, operator: "", assignedToId: null, trackingMode: "batch" };
+      const at = f.selectedProcesses.findIndex((p) => rank(p.name) > rank(processName));
+      const next = [...f.selectedProcesses];
+      next.splice(at === -1 ? next.length : at, 0, entry);
+      return { ...f, selectedProcesses: next };
+    });
   }
 
   // Sets both the real person link (assignedToId, what makes a genuine
@@ -2805,9 +2825,11 @@ export default function StockControl() {
   }
 
   // A process is only actionable once every process before it (by
-  // sort_order, on the same job) is marked complete — the order processes
-  // were selected in becomes the real workflow sequence, one after
-  // another, not all open at once.
+  // sort_order, on the same job) is marked complete — work moves through
+  // one stage at a time, not all open at once. sort_order comes from the
+  // factory flow set in Stock Manager, so this gating follows the real
+  // shop sequence. Jobs created before that existed keep the order they
+  // were built with, which was whatever order the boxes were ticked in.
   function isProcessActionable(process, jobProcesses) {
     return jobProcesses.filter((p) => p.sort_order < process.sort_order).every((p) => p.is_complete);
   }
