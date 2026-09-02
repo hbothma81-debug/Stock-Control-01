@@ -12,6 +12,8 @@ import {
 import { F, C, S, THEME_CSS } from "./theme.js";
 import { TABS, NAV_TABS, TAB_GROUPS } from "./constants.js";
 import UserManagement from "./UserManagement.jsx";
+import CompanyDetails from "./manager/CompanyDetails.jsx";
+import EditableName from "./EditableName.jsx";
 
 // window.storage is installed in main.jsx before this component ever
 // renders — backed by Supabase. See src/lib/storage.js.
@@ -565,25 +567,6 @@ function LibraryField({ label, options, value, onChange, customValue, onCustomCh
   );
 }
 
-function EditableName({ value, onCommit, style }) {
-  const [val, setVal] = useState(value);
-  useEffect(() => setVal(value), [value]);
-  return (
-    <input
-      className="stk-editable"
-      style={{ ...S.editableName, ...style }}
-      value={val}
-      onChange={(e) => setVal(e.target.value)}
-      onBlur={() => {
-        if (val.trim() && val !== value) onCommit(val.trim());
-        else setVal(value);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") e.target.blur();
-      }}
-    />
-  );
-}
 
 // "Each"-tracked process control — a running count against the item's
 // total quantity, not a checkbox. Logging a batch subtracts against the
@@ -11900,78 +11883,11 @@ export default function StockControl() {
                 })()
               )
             ) : managerTab === "companyDetails" ? (
-              <>
-                <div style={S.roleHint}>This is your own letterhead — it appears at the top of every Purchase Order.</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
-                  {master.companyDetails.logo ? (
-                    <img src={master.companyDetails.logo} alt="" style={S.supplierLogoPreview} />
-                  ) : (
-                    <div style={S.supplierLogoPlaceholder}>
-                      <ImageIcon size={16} color={C.muted} />
-                    </div>
-                  )}
-                  <label className="stk-btn" style={{ ...S.addBtn, cursor: "pointer" }}>
-                    <Paperclip size={14} />
-                    Upload logo
-                    <input type="file" accept="image/*" style={{ display: "none" }} onChange={handleCompanyLogoSelect} />
-                  </label>
-                </div>
-                <div style={{ marginTop: 12 }}>
-                  <label style={S.label}>Company name</label>
-                  <input
-                    style={S.input}
-                    value={master.companyDetails.name}
-                    onChange={(e) => updateCompanyDetail("name", e.target.value)}
-                  />
-                </div>
-                <div style={{ marginTop: 10 }}>
-                  <label style={S.label}>Address</label>
-                  <input
-                    style={S.input}
-                    value={master.companyDetails.address}
-                    onChange={(e) => updateCompanyDetail("address", e.target.value)}
-                  />
-                </div>
-                <div style={S.formGrid}>
-                  <div>
-                    <label style={S.label}>Phone</label>
-                    <input
-                      style={S.input}
-                      value={master.companyDetails.phone}
-                      onChange={(e) => updateCompanyDetail("phone", e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label style={S.label}>Email</label>
-                    <input
-                      style={S.input}
-                      type="email"
-                      value={master.companyDetails.email}
-                      onChange={(e) => updateCompanyDetail("email", e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div style={S.formGrid}>
-                  <div>
-                    <label style={S.label}>VAT number</label>
-                    <input
-                      style={S.input}
-                      value={master.companyDetails.vatNumber}
-                      onChange={(e) => updateCompanyDetail("vatNumber", e.target.value)}
-                      placeholder="e.g. 4420263735"
-                    />
-                  </div>
-                  <div>
-                    <label style={S.label}>Registration number</label>
-                    <input
-                      style={S.input}
-                      value={master.companyDetails.regNumber}
-                      onChange={(e) => updateCompanyDetail("regNumber", e.target.value)}
-                      placeholder="e.g. 2013/089712/07"
-                    />
-                  </div>
-                </div>
-              </>
+              <CompanyDetails
+                companyDetails={master.companyDetails}
+                updateCompanyDetail={updateCompanyDetail}
+                handleCompanyLogoSelect={handleCompanyLogoSelect}
+              />
             ) : managerTab === "departments" && isAdmin ? (
               <UserManagement
                 people={people}
