@@ -1640,6 +1640,72 @@ alter table profiles add column if not exists is_shortage_handler boolean not nu
 
 
 -- ============================================================
+-- setup-shortage-priority.sql
+-- ============================================================
+-- Priority on a shortage, plus somewhere to say why it is one.
+--
+-- A shortage means something already promised to a customer is missing or
+-- scrapped, so the re-cut is holding up work that was otherwise finished.
+-- It defaults to true for that reason: priority is the normal case, and
+-- the exception is a shortage that genuinely can wait.
+--
+-- Existing shortages are backfilled to true, matching how they have been
+-- treated in practice.
+--
+-- Safe to run more than once.
+
+alter table shortages
+  add column if not exists is_priority boolean not null default true;
+
+alter table shortages
+  add column if not exists priority_note text not null default '';
+
+create index if not exists shortages_priority_idx
+  on shortages (is_priority, status);
+
+-- Check: outstanding shortages, most urgent first.
+select job_number, description, qty, status, is_priority
+from shortages
+where status <> 'cut'
+order by is_priority desc, created_at;
+
+
+-- ============================================================
+-- setup-shortage-rework.sql
+-- ============================================================
+-- Lets a shortage carry its own set of stages.
+--
+-- A shortage is not finished when it comes off the laser. The replacement
+-- part still has to catch up: through every stage between the re-cut and
+-- wherever the problem was found. Until now the trail ended at "cut" and
+-- the rest happened by memory.
+--
+-- Rather than a second table, shortage stages are job_processes rows with
+-- shortage_id set. They are the same thing -- work waiting at a stage --
+-- so the production queue, the assignment, the completion tracking and
+-- the floor gating all apply to them already, and an operator sees them
+-- in the queue they are already watching.
+--
+-- Rows with shortage_id null are the job's own stages, exactly as before.
+--
+-- shortages.id is text, not uuid, hence the column type here.
+--
+-- Safe to run more than once.
+
+alter table job_processes
+  add column if not exists shortage_id text references shortages(id) on delete cascade;
+
+create index if not exists job_processes_shortage_idx
+  on job_processes (shortage_id);
+
+-- Check: no shortage stages yet on a fresh install.
+select p.job_id, p.process_name, p.sort_order, p.is_complete, s.description
+from job_processes p
+join shortages s on s.id = p.shortage_id
+order by p.job_id, p.sort_order;
+
+
+-- ============================================================
 -- setup-requisitions-table.sql
 -- ============================================================
 -- Run this once in Supabase → SQL Editor → New query, then Run.
