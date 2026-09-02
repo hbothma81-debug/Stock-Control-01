@@ -764,6 +764,7 @@ export default function StockControl() {
   const [showAssetArchive, setShowAssetArchive] = useState(false);
   const [poBuilder, setPoBuilder] = useState(null); // { supplierId, lineItems: [...], linkedRequisitionIds: [...], notes }
   const [poSearchQuery, setPoSearchQuery] = useState("");
+  const [poSupplierFilter, setPoSupplierFilter] = useState("");
   const [showPoReport, setShowPoReport] = useState(false);
   const [showCompletedPOs, setShowCompletedPOs] = useState(false);
   const [receivingPo, setReceivingPo] = useState(null);
@@ -901,6 +902,12 @@ export default function StockControl() {
   // pending, ordered, and the completed archive — by item, supplier, or
   // who requested it.
   const [requisitionsSearchQuery, setRequisitionsSearchQuery] = useState("");
+  const [requisitionsSupplierFilter, setRequisitionsSupplierFilter] = useState("");
+  // Which requisition's full detail is expanded — null shows every
+  // requisition as a compact line (name plus the Add to PO tick box
+  // only); tapping one opens its real detail (qty, notes, price, actions)
+  // in place, simpler than a card with everything showing at once.
+  const [expandedReqId, setExpandedReqId] = useState(null);
   // Which customer/supplier is currently open in its own detail view within
   // Stock Manager — null shows the plain list of names, matching the same
   // list-then-detail pattern used for Sections and Production.
@@ -1611,6 +1618,7 @@ export default function StockControl() {
     setAssetManufacturerOpen(null);
     setAssetDetailOpen(null);
     setProductionSearchQuery("");
+    setExpandedReqId(null);
   }, [tab]);
 
   // The part-number → drawing lookup is used on Customer Stock rows and the
@@ -5800,87 +5808,101 @@ export default function StockControl() {
   // list below — same card, just reused rather than duplicated.
   function renderRequisitionCard(r) {
     const price = resolveReqPrice(r);
+    const isOpen = expandedReqId === r.id;
+    const canAddToPo = canManageRequisitions && r.status === "pending" && canRaisePO;
     return (
       <div key={r.id} style={S.reqCard}>
-        <div style={S.reqCardTop}>
+        <button
+          type="button"
+          className="stk-btn"
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", textAlign: "left", cursor: "pointer", gap: 10 }}
+          onClick={() => setExpandedReqId(isOpen ? null : r.id)}
+        >
           <span style={S.itemName}>{r.itemLabel}</span>
-          <span style={{ ...S.reqStatusTag, ...S["reqStatus_" + r.status] }}>{r.status}</span>
-        </div>
-        <div className="stk-meta-row" style={S.rowMeta}>
-          {canManageRequisitions ? (
-            <span style={S.reqQtyEditRow}>
-              Qty:
-              <input
-                type="number"
-                step="any"
-                min="0"
-                value={r.qty}
-                onChange={(e) => updateRequisition(r.id, { qty: e.target.value })}
-                style={S.reqQtyInput}
-              />
-            </span>
-          ) : (
-            <span>Qty: {r.qty}</span>
-          )}
-          <span>Requested by {r.requestedBy}</span>
-          <span>{new Date(r.dateRequested).toLocaleDateString()}</span>
-          {r.status === "ordered" && r.orderedBy && (
-            <span>Ordered by {r.orderedBy} on {new Date(r.dateOrdered).toLocaleDateString()}</span>
-          )}
-          {r.supplier && <span>Supplier: {r.supplier}</span>}
-        </div>
-        {r.notes && <div style={S.itemComment}>{r.notes}</div>}
-        {canManageRequisitions && r.mainCat !== "custom" && (
-          <div style={S.reqPriceRow}>
-            <span style={S.reqPriceLabel}>
-              Current price ({r.mainCat === "plate" || r.mainCat === "cncBar" ? "R/kg" : r.mainCat === "structural" ? "R/m" : "R/ea"})
-              {price === 0 ? " — not set" : ""}:
-            </span>
-            <input
-              type="number"
-              step="0.01"
-              style={{ ...S.managerFactorInput, ...(price === 0 ? S.reqPriceMissing : {}) }}
-              value={price === 0 ? "" : price}
-              placeholder="0"
-              onChange={(e) => updateReqPrice(r, e.target.value)}
-            />
-          </div>
-        )}
-        {canManageRequisitions && r.status === "pending" && (
-          <div style={S.reqActions}>
-            {canRaisePO && (
-              <label style={S.reqSelectLabel}>
+          <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ ...S.reqStatusTag, ...S["reqStatus_" + r.status] }}>{r.status}</span>
+            {canAddToPo && (
+              <label style={S.reqSelectLabel} onClick={(e) => e.stopPropagation()}>
                 <input type="checkbox" checked={selectedReqIds.includes(r.id)} onChange={() => toggleReqSelection(r.id)} />
                 Add to PO
               </label>
             )}
-            <select
-              style={{ ...S.input, flex: 1 }}
-              value={r.supplier}
-              onChange={(e) => updateRequisition(r.id, { supplier: e.target.value })}
-            >
-              <option value="">Supplier (optional)</option>
-              {master.suppliers.map((s) => (
-                <option key={s.id} value={s.name}>{s.name}</option>
-              ))}
-            </select>
-            <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => markOrdered(r.id)}>
-              <ShoppingCart size={13} /> Mark ordered
-            </button>
-            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openEditRequisition(r)}>
-              <Pencil size={13} /> Edit
-            </button>
-            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => cancelRequisition(r.id)}>
-              Cancel
-            </button>
-          </div>
-        )}
-        {r.status === "ordered" && canMarkReceivedPerm && (
-          <div style={S.reqActions}>
-            <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => markReceived(r.id)}>
-              <Check size={13} /> Mark received
-            </button>
-          </div>
+            <ChevronDown size={16} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+          </span>
+        </button>
+        {isOpen && (
+          <>
+            <div className="stk-meta-row" style={{ ...S.rowMeta, marginTop: 6 }}>
+              {canManageRequisitions ? (
+                <span style={S.reqQtyEditRow}>
+                  Qty:
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={r.qty}
+                    onChange={(e) => updateRequisition(r.id, { qty: e.target.value })}
+                    style={S.reqQtyInput}
+                  />
+                </span>
+              ) : (
+                <span>Qty: {r.qty}</span>
+              )}
+              <span>Requested by {r.requestedBy}</span>
+              <span>{new Date(r.dateRequested).toLocaleDateString()}</span>
+              {r.status === "ordered" && r.orderedBy && (
+                <span>Ordered by {r.orderedBy} on {new Date(r.dateOrdered).toLocaleDateString()}</span>
+              )}
+              {r.supplier && <span>Supplier: {r.supplier}</span>}
+            </div>
+            {r.notes && <div style={S.itemComment}>{r.notes}</div>}
+            {canManageRequisitions && r.mainCat !== "custom" && (
+              <div style={S.reqPriceRow}>
+                <span style={S.reqPriceLabel}>
+                  Current price ({r.mainCat === "plate" || r.mainCat === "cncBar" ? "R/kg" : r.mainCat === "structural" ? "R/m" : "R/ea"})
+                  {price === 0 ? " — not set" : ""}:
+                </span>
+                <input
+                  type="number"
+                  step="0.01"
+                  style={{ ...S.managerFactorInput, ...(price === 0 ? S.reqPriceMissing : {}) }}
+                  value={price === 0 ? "" : price}
+                  placeholder="0"
+                  onChange={(e) => updateReqPrice(r, e.target.value)}
+                />
+              </div>
+            )}
+            {canManageRequisitions && r.status === "pending" && (
+              <div style={S.reqActions}>
+                <select
+                  style={{ ...S.input, flex: 1 }}
+                  value={r.supplier}
+                  onChange={(e) => updateRequisition(r.id, { supplier: e.target.value })}
+                >
+                  <option value="">Supplier (optional)</option>
+                  {master.suppliers.map((s) => (
+                    <option key={s.id} value={s.name}>{s.name}</option>
+                  ))}
+                </select>
+                <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => markOrdered(r.id)}>
+                  <ShoppingCart size={13} /> Mark ordered
+                </button>
+                <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => openEditRequisition(r)}>
+                  <Pencil size={13} /> Edit
+                </button>
+                <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => cancelRequisition(r.id)}>
+                  Cancel
+                </button>
+              </div>
+            )}
+            {r.status === "ordered" && canMarkReceivedPerm && (
+              <div style={S.reqActions}>
+                <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => markReceived(r.id)}>
+                  <Check size={13} /> Mark received
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     );
@@ -7300,18 +7322,31 @@ export default function StockControl() {
           )}
           {requisitions.length === 0 && <div style={{ ...S.empty, marginTop: 10 }}>No requisitions yet.</div>}
           {requisitions.length > 0 && (
-            <input
-              style={{ ...S.input, marginTop: 10 }}
-              value={requisitionsSearchQuery}
-              onChange={(e) => setRequisitionsSearchQuery(e.target.value)}
-              placeholder="Search by item, supplier, or who requested it…"
-            />
+            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+              <input
+                style={{ ...S.input, flex: 2, minWidth: 160 }}
+                value={requisitionsSearchQuery}
+                onChange={(e) => setRequisitionsSearchQuery(e.target.value)}
+                placeholder="Search by item, supplier, or who requested it…"
+              />
+              <select
+                style={{ ...S.input, flex: 1, minWidth: 130 }}
+                value={requisitionsSupplierFilter}
+                onChange={(e) => setRequisitionsSupplierFilter(e.target.value)}
+              >
+                <option value="">All suppliers</option>
+                {master.suppliers.map((s) => (
+                  <option key={s.id} value={s.name}>{s.name}</option>
+                ))}
+              </select>
+            </div>
           )}
           {["pending", "ordered"].map((status) => {
             const rq = requisitionsSearchQuery.trim().toLowerCase();
             const list = requisitions
               .filter((r) => r.status === status)
               .filter((r) => canManageRequisitions || r.requestedBy === roleLabel)
+              .filter((r) => !requisitionsSupplierFilter || r.supplier === requisitionsSupplierFilter)
               .filter(
                 (r) =>
                   !rq ||
@@ -7419,6 +7454,7 @@ export default function StockControl() {
                       .filter((r) => !archiveTypeFilter || r.mainCat === archiveTypeFilter)
                       .filter((r) => !archiveDateFrom || new Date(r.dateRequested) >= new Date(archiveDateFrom))
                       .filter((r) => !archiveDateTo || new Date(r.dateRequested) <= new Date(archiveDateTo + "T23:59:59"))
+                      .filter((r) => !requisitionsSupplierFilter || r.supplier === requisitionsSupplierFilter)
                       .filter((r) => {
                         const rq = requisitionsSearchQuery.trim().toLowerCase();
                         return (
@@ -7468,22 +7504,31 @@ export default function StockControl() {
           </div>
 
           {purchaseOrders.length > 0 && (
-            <input
-              style={{ ...S.input, marginTop: 10 }}
-              value={poSearchQuery}
-              onChange={(e) => setPoSearchQuery(e.target.value)}
-              placeholder="Search by PO number, supplier, or reference…"
-            />
+            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+              <input
+                style={{ ...S.input, flex: 2, minWidth: 160 }}
+                value={poSearchQuery}
+                onChange={(e) => setPoSearchQuery(e.target.value)}
+                placeholder="Search by PO number, supplier, or reference…"
+              />
+              <select style={{ ...S.input, flex: 1, minWidth: 130 }} value={poSupplierFilter} onChange={(e) => setPoSupplierFilter(e.target.value)}>
+                <option value="">All suppliers</option>
+                {master.suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
           )}
 
           {purchaseOrders.length === 0 && <div style={S.empty}>No Purchase Orders yet.</div>}
           {(() => {
             const pq = poSearchQuery.trim().toLowerCase();
             const matchesSearch = (po) =>
-              !pq ||
-              (po.poNumber || "").toLowerCase().includes(pq) ||
-              (po.supplierName || "").toLowerCase().includes(pq) ||
-              (po.reference || "").toLowerCase().includes(pq);
+              (!poSupplierFilter || po.supplierId === poSupplierFilter) &&
+              (!pq ||
+                (po.poNumber || "").toLowerCase().includes(pq) ||
+                (po.supplierName || "").toLowerCase().includes(pq) ||
+                (po.reference || "").toLowerCase().includes(pq));
             const renderPoCard = (po) => (
               <div key={po.id} style={S.reqCard}>
                 <div style={S.reqCardTop}>
