@@ -2430,6 +2430,7 @@ export default function StockControl() {
       quotedValue: "",
       dueDate: "",
       quoteReference: "",
+      customerPo: "",
       laserJobReference: "",
       materialLocation: "",
       buyOutNotes: "",
@@ -2777,6 +2778,7 @@ export default function StockControl() {
             description: newJobForm.description,
             quoted_value: newJobForm.quotedValue ? Number(newJobForm.quotedValue) : null,
             quote_reference: newJobForm.quoteReference,
+            customer_po: newJobForm.customerPo,
             laser_job_reference: newJobForm.laserJobReference,
             material_location: newJobForm.materialLocation,
             buy_out_notes: newJobForm.buyOutNotes,
@@ -3631,6 +3633,7 @@ export default function StockControl() {
             description: source.description,
             quoted_value: source.quoted_value,
             quote_reference: source.quote_reference,
+            customer_po: source.customer_po,
             laser_job_reference: "",
             material_1_grade: source.material_1_grade,
             material_1_qty: source.material_1_qty,
@@ -4150,6 +4153,7 @@ export default function StockControl() {
       `Sales rep: ${job.sales_rep || "—"}`,
       job.due_date ? `Due date: ${new Date(job.due_date).toLocaleDateString()}` : null,
       job.quote_reference ? `Quote reference: ${job.quote_reference}` : null,
+      job.customer_po ? `Customer PO: ${job.customer_po}` : null,
       job.laser_job_reference ? `Laser job reference: ${job.laser_job_reference}` : null,
       job.qty ? `Quantity: ${job.qty}` : null,
     ].filter(Boolean);
@@ -13117,6 +13121,7 @@ export default function StockControl() {
             <span>Sales rep: {jobDetail.job.sales_rep}</span>
             {jobDetail.job.due_date && <span>Due {new Date(jobDetail.job.due_date).toLocaleDateString()}</span>}
             {jobDetail.job.quote_reference && <span>Quote: {jobDetail.job.quote_reference}</span>}
+            {jobDetail.job.customer_po && <span>Customer PO: {jobDetail.job.customer_po}</span>}
           </div>
 
           <div style={S.segRow}>
@@ -13155,6 +13160,23 @@ export default function StockControl() {
                     />
                   </div>
                   <SavedCheck fieldKey={`job-${jobDetail.job.id}-laser_job_reference`} />
+                </div>
+              )}
+
+              {/* Editable here as well as on creation: a customer's PO
+                  regularly turns up after the job has already started. */}
+              {canEditThisJob && (
+                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={S.label}>Customer PO</label>
+                    <input
+                      style={S.input}
+                      defaultValue={jobDetail.job.customer_po || ""}
+                      onBlur={(e) => updateJobField(jobDetail.job.id, "customer_po", e.target.value)}
+                      placeholder="Their PO number — fill in when it arrives"
+                    />
+                  </div>
+                  <SavedCheck fieldKey={`job-${jobDetail.job.id}-customer_po`} />
                 </div>
               )}
 
@@ -14167,6 +14189,15 @@ export default function StockControl() {
                   value={newJobForm.quoteReference}
                   onChange={(e) => setNewJobForm((f) => ({ ...f, quoteReference: e.target.value }))}
                   placeholder="e.g. JOB-31513 or QU226331"
+                />
+              </div>
+              <div>
+                <label style={S.label}>Customer PO (optional)</label>
+                <input
+                  style={S.input}
+                  value={newJobForm.customerPo}
+                  onChange={(e) => setNewJobForm((f) => ({ ...f, customerPo: e.target.value }))}
+                  placeholder="Their PO number — often arrives later"
                 />
               </div>
               <div>
