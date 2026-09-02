@@ -3192,12 +3192,24 @@ export default function StockControl() {
   // then runs through two people in sequence — Nesting sets it up, the
   // Laser Operator actually cuts it — before whoever originally flagged it
   // gets told it's ready.
+  // isPriority starts true: a shortage means something already promised is
+  // missing, so the re-cut is holding up work that was otherwise done.
+  // Priority is the normal case here, not the exception.
   function openShortageFlagModal(job, process) {
-    setShortageModal({ job, process, boardNumber: "", description: "", qty: "", reason: "short" });
+    setShortageModal({
+      job,
+      process,
+      boardNumber: "",
+      description: "",
+      qty: "",
+      reason: "short",
+      isPriority: true,
+      priorityNote: "",
+    });
   }
 
   async function submitNewShortage() {
-    const { job, process, boardNumber, description, qty, reason } = shortageModal;
+    const { job, process, boardNumber, description, qty, reason, isPriority, priorityNote } = shortageModal;
     if (!description.trim() || !qty || Number(qty) <= 0) return;
     try {
       // A direct, fresh lookup rather than relying on productionQueue,
@@ -3220,6 +3232,8 @@ export default function StockControl() {
         qty: Number(qty),
         reason,
         status: "flagged",
+        is_priority: !!isPriority,
+        priority_note: (priorityNote || "").trim(),
       });
       if (error) throw error;
 
@@ -8429,7 +8443,19 @@ export default function StockControl() {
                   {(procType === "Nesting" || procType === "Laser Operator") &&
                     (() => {
                       const relevantStatus = procType === "Nesting" ? "flagged" : "nested";
-                      const relevant = (shortagesList || []).filter((s) => s.status === relevantStatus);
+                      // Priority first, then oldest — a queue is only
+                      // useful if the order on screen is the order to work
+                      // in, so the operator never has to read all of them
+                      // to find what matters.
+                      const relevant = (shortagesList || [])
+                        .filter((s) => s.status === relevantStatus)
+                        .slice()
+                        .sort((a, b) => {
+                          const ap = a.is_priority === false ? 1 : 0;
+                          const bp = b.is_priority === false ? 1 : 0;
+                          if (ap !== bp) return ap - bp;
+                          return String(a.created_at || "").localeCompare(String(b.created_at || ""));
+                        });
                       if (relevant.length === 0) return null;
                       return (
                         <div style={{ marginBottom: 10 }}>
@@ -8439,6 +8465,15 @@ export default function StockControl() {
                               <div key={s.id} style={{ ...S.reqCard, borderColor: C.danger, borderWidth: 2 }}>
                                 <div style={S.reqCardTop}>
                                   <span style={S.itemName}>{s.job_number} — {s.customer || "No customer"}</span>
+                                  {s.is_priority === false ? (
+                                    <span style={{ ...S.reqStatusTag, color: C.muted }} title={s.priority_note || "Can wait"}>
+                                      Can wait
+                                    </span>
+                                  ) : (
+                                    <span style={{ ...S.reqStatusTag, background: C.dangerTint, color: C.danger, fontWeight: 700 }}>
+                                      Priority
+                                    </span>
+                                  )}
                                 </div>
                                 <div style={{ ...S.itemComment, marginTop: 2 }}>
                                   {s.description} × {s.qty} {s.board_number && `— board ${s.board_number}`}
@@ -13760,6 +13795,30 @@ export default function StockControl() {
                 </select>
               </div>
             </div>
+            {/* On by default. A shortage is work that was supposed to be
+                finished, so it normally jumps the queue — the exception is
+                one that genuinely can wait, and that is worth saying out
+                loud rather than leaving everything marked urgent until
+                urgent stops meaning anything. */}
+            <label style={{ ...S.checkRow, marginTop: 10, fontWeight: 600 }}>
+              <input
+                type="checkbox"
+                checked={shortageModal.isPriority}
+                onChange={(e) => setShortageModal((m) => ({ ...m, isPriority: e.target.checked }))}
+              />
+              Priority — cut this ahead of other work
+            </label>
+            {!shortageModal.isPriority && (
+              <div style={{ marginTop: 6 }}>
+                <label style={S.label}>Why can this one wait? (optional)</label>
+                <input
+                  style={S.input}
+                  value={shortageModal.priorityNote}
+                  onChange={(e) => setShortageModal((m) => ({ ...m, priorityNote: e.target.value }))}
+                  placeholder="e.g. customer collecting next month"
+                />
+              </div>
+            )}
             <button
               type="button"
               className="stk-btn"
