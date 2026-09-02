@@ -939,6 +939,10 @@ export default function StockControl() {
   const [showAddStockItemModal, setShowAddStockItemModal] = useState(false);
   const [showStockImportModal, setShowStockImportModal] = useState(false);
   const [newJobForm, setNewJobForm] = useState(null);
+  // Create Job does several awaited round trips — job, processes, quote
+  // items, notifications. Without this the button stays live throughout,
+  // and a second click part way through creates a whole second job.
+  const [jobSubmitting, setJobSubmitting] = useState(false);
   const [newJobItemSuggestOpen, setNewJobItemSuggestOpen] = useState(null); // which quote item row index has its suggestion dropdown open
   const [notificationsList, setNotificationsList] = useState(null);
   const [shortagesList, setShortagesList] = useState(null);
@@ -2702,6 +2706,9 @@ export default function StockControl() {
   }
 
   async function submitNewJob() {
+    // Belt and braces with the button's disabled state: a fast double
+    // click can register both presses before React re-renders.
+    if (jobSubmitting) return;
     if (!newJobForm.customer || (newJobForm.customer === CUSTOM && !newJobForm.newCustomerName.trim())) {
       alert("Pick or add a customer before creating the job.");
       return;
@@ -2710,6 +2717,7 @@ export default function StockControl() {
       alert("Select at least one process this job needs.");
       return;
     }
+    setJobSubmitting(true);
     try {
       // A brand-new customer, added right here — same info a full Stock
       // Manager entry would eventually hold, just the essentials up front.
@@ -2842,6 +2850,8 @@ export default function StockControl() {
     } catch (err) {
       console.error("Failed to create job:", err);
       alert(`Couldn't create that job: ${err.message || "unknown error"}. If this mentions a missing column, an SQL migration hasn't been run yet in Supabase.`);
+    } finally {
+      setJobSubmitting(false);
     }
   }
 
@@ -8383,6 +8393,41 @@ export default function StockControl() {
                                 Flag shortage
                               </button>
                             </div>
+                            {/* Material already set aside for this stage,
+                                so the operator is told what to use rather
+                                than having to go and find out. */}
+                            {(() => {
+                              const mine = (allocationsList || []).filter(
+                                (a) => a.process_id === process.id && a.status !== "released"
+                              );
+                              if (mine.length === 0) return null;
+                              return (
+                                <div style={{ marginTop: 8 }}>
+                                  <div style={{ ...S.label, color: C.accentRaw }}>Material set aside for this stage</div>
+                                  <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+                                    {mine.map((a) => {
+                                      const outstanding = Number(a.qty_allocated) - Number(a.qty_used);
+                                      const stockItem = (items || []).find((i) => i.id === a.item_id);
+                                      return (
+                                        <div key={a.id} style={{ ...S.reqCard, borderColor: C.accentRaw }}>
+                                          <div style={S.reqCardTop}>
+                                            <span style={S.itemName}>{a.item_name}</span>
+                                            <span style={{ fontFamily: F.mono, fontSize: 12.5, color: outstanding > 0 ? C.accentRaw : C.muted }}>
+                                              {outstanding > 0 ? `${outstanding} to use` : "all used"}
+                                            </span>
+                                          </div>
+                                          <div className="stk-meta-row" style={S.rowMeta}>
+                                            {a.qty_used > 0 && <span>{a.qty_used} of {a.qty_allocated} already used</span>}
+                                            {stockItem?.loc && <span>Location: {stockItem.loc}</span>}
+                                            <span>Set aside by {a.allocated_by}</span>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })()}
                             <button
                               type="button"
                               className="stk-btn"
@@ -9907,6 +9952,28 @@ export default function StockControl() {
                             <div style={S.qtyDisplay}>
                               <span style={{ ...S.qtyNum, color: low ? C.danger : C.text }}>{it.qty}</span>
                               <span style={S.qtyUnit}>{it.trackLength ? "pcs" : it.unit}</span>
+                              {/* The big number stays the shelf count — it
+                                  is what someone walking to the rack will
+                                  actually find. Free is what is left once
+                                  other jobs have had their claim, which is
+                                  the number that matters when deciding
+                                  whether you can take any. */}
+                              {(() => {
+                                const held = allocationsForItem(it.id).reduce(
+                                  (sum, a) => sum + (Number(a.qty_allocated) - Number(a.qty_used)),
+                                  0
+                                );
+                                if (held <= 0) return null;
+                                const free = Number(it.qty) - held;
+                                return (
+                                  <span
+                                    style={{ ...S.qtyUnit, color: free > 0 ? C.accentRaw : C.danger, fontWeight: 600 }}
+                                    title={`${it.qty} on the shelf, ${held} reserved for other jobs`}
+                                  >
+                                    {free > 0 ? `${free} free` : "none free"}
+                                  </span>
+                                );
+                              })()}
                             </div>
                             {canEditQty(tab) && (
                               <button className="stk-btn" style={S.usageBtnAdd} onClick={() => openUsageModal(it, "add")}>
@@ -13967,8 +14034,14 @@ export default function StockControl() {
               )}
             </div>
 
-            <button type="button" className="stk-btn" style={S.submitBtn} onClick={submitNewJob}>
-              Create Job
+            <button
+              type="button"
+              className="stk-btn"
+              style={{ ...S.submitBtn, ...(jobSubmitting ? { opacity: 0.6, cursor: "not-allowed" } : {}) }}
+              onClick={submitNewJob}
+              disabled={jobSubmitting}
+            >
+              {jobSubmitting ? "Creating…" : "Create Job"}
             </button>
           </div>
         </div>
