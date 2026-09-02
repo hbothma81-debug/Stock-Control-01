@@ -819,6 +819,10 @@ export default function StockControl() {
   // what switches the modal from the picker to the quantity step.
   const [allocateModal, setAllocateModal] = useState(null);
   const [allocateQty, setAllocateQty] = useState("");
+  // Looking at what is reserved on a stock item, and dealing with it —
+  // either handing it back or booking it out against its job. { item }
+  const [reservedModal, setReservedModal] = useState(null);
+  const [reservedUseQty, setReservedUseQty] = useState({});
   const [assetRemoveModal, setAssetRemoveModal] = useState(null); // { item, reason, date }
   const [showAssetArchive, setShowAssetArchive] = useState(false);
   const [poBuilder, setPoBuilder] = useState(null); // { supplierId, lineItems: [...], linkedRequisitionIds: [...], notes }
@@ -2921,6 +2925,62 @@ export default function StockControl() {
   // Hands material back without it having been used — the job changed, or
   // it was set aside by mistake. Kept as a released row rather than
   // deleted, so "who reserved what and what happened to it" survives.
+  // Books reserved material out against the job it was set aside for.
+  // This is the only route by which reserved stock can be consumed —
+  // ordinary Use is capped at what is free — so the quantity leaving the
+  // shelf and the job it left for always agree.
+  async function useAllocation(allocation, qty) {
+    const outstanding = Number(allocation.qty_allocated) - Number(allocation.qty_used);
+    const amount = Number(qty);
+    if (!amount || amount <= 0) return;
+    if (amount > outstanding) {
+      alert(`Only ${outstanding} of that allocation is left to use.`);
+      return;
+    }
+    const item = (items || []).find((i) => i.id === allocation.item_id);
+    if (!item) {
+      alert("That stock item no longer exists, so it can't be booked out. Release the allocation instead.");
+      return;
+    }
+    try {
+      const newUsed = Number(allocation.qty_used) + amount;
+      const { error } = await supabase
+        .from("job_allocations")
+        .update({
+          qty_used: newUsed,
+          status: newUsed >= Number(allocation.qty_allocated) ? "used" : "open",
+        })
+        .eq("id", allocation.id);
+      if (error) throw error;
+
+      // Same two effects as any other usage: the shelf goes down, and the
+      // log records what went where. Both save themselves.
+      setItems((prev) => prev.map((it) => (it.id === item.id ? { ...it, qty: Math.max(0, Number(it.qty) - amount) } : it)));
+      setUsageLog((prev) => [
+        ...prev,
+        {
+          id: uid(),
+          itemId: item.id,
+          itemName: item.name,
+          mainCat: item.mainCat,
+          qty: amount,
+          direction: "use",
+          by: roleLabel,
+          jobNumber: allocation.job_number || "",
+          customer: "",
+          note: `Allocated to ${allocation.process_name}`,
+          lineCost: resolveUsageLineCost(item, amount),
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+      fetchAllocations();
+      if (jobDetail) refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to use allocation:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
   async function releaseAllocation(allocation) {
     if (!window.confirm(`Release ${allocation.qty_allocated} × ${allocation.item_name} back from ${allocation.process_name}?`)) return;
     try {
@@ -4324,6 +4384,21 @@ export default function StockControl() {
     );
   }
 
+  function reservedQtyForItem(itemId) {
+    return allocationsForItem(itemId).reduce(
+      (sum, a) => sum + (Number(a.qty_allocated) - Number(a.qty_used)),
+      0
+    );
+  }
+
+  // What anyone may actually take. Reserved material is off limits: the
+  // only way to consume it is through its own allocation, which books it
+  // out against the job it was set aside for. Without this a reservation
+  // is only a note, and the material walks.
+  function availableQtyForItem(item) {
+    return Math.max(0, Number(item.qty) - reservedQtyForItem(item.id));
+  }
+
   async function fetchShortages() {
     if (!supabase) return;
     try {
@@ -5291,6 +5366,22 @@ export default function StockControl() {
     if (!qty || qty <= 0) return;
     if (usageModal.direction === "use" && !usageModal.jobNumber.trim() && !usageModal.customer.trim()) return;
     const itemId = usageModal.item.id;
+
+    // Reserved material is not up for grabs. Taking it has to go through
+    // its allocation, so it is booked against the job it was set aside
+    // for — otherwise the first person to the rack wins and the
+    // reservation means nothing.
+    if (usageModal.direction === "use") {
+      const held = reservedQtyForItem(itemId);
+      const free = Math.max(0, Number(usageModal.item.qty) - held);
+      if (held > 0 && qty > free) {
+        alert(
+          `Only ${free} of ${usageModal.item.qty} is free — the other ${held} is reserved for another job.\n\n` +
+            `To use reserved material, open the reserved marker on this item and mark that allocation used, so it's booked against the job it was set aside for.`
+        );
+        return;
+      }
+    }
 
     // CNC Bar is sold by cutting an arbitrary length off a single piece, not
     // by whole pieces — cutting from a group of otherwise-identical pieces
@@ -9872,12 +9963,15 @@ export default function StockControl() {
                               const total = reserved.reduce((sum, a) => sum + (Number(a.qty_allocated) - Number(a.qty_used)), 0);
                               const jobs = [...new Set(reserved.map((a) => a.job_number))].filter(Boolean);
                               return (
-                                <span
-                                  style={{ color: C.accentRaw, fontWeight: 600 }}
-                                  title={reserved.map((a) => `${a.job_number} · ${a.process_name}: ${Number(a.qty_allocated) - Number(a.qty_used)}`).join("\n")}
+                                <button
+                                  type="button"
+                                  className="stk-btn"
+                                  style={{ background: "none", border: "none", padding: 0, color: C.accentRaw, fontWeight: 600, cursor: "pointer", font: "inherit" }}
+                                  title="See what's reserved, and release it or mark it used"
+                                  onClick={(e) => { e.stopPropagation(); setReservedModal({ item: it }); setReservedUseQty({}); }}
                                 >
                                   {total} reserved{jobs.length ? ` · ${jobs.slice(0, 3).join(", ")}${jobs.length > 3 ? ` +${jobs.length - 3}` : ""}` : ""}
-                                </span>
+                                </button>
                               );
                             })()}
                             {tab === "plate" && it.sheetName && <span>{it.sheetName}</span>}
@@ -9949,32 +10043,33 @@ export default function StockControl() {
                                 {tab === "cncBar" ? "Cut" : "Use"}
                               </button>
                             )}
-                            <div style={S.qtyDisplay}>
-                              <span style={{ ...S.qtyNum, color: low ? C.danger : C.text }}>{it.qty}</span>
-                              <span style={S.qtyUnit}>{it.trackLength ? "pcs" : it.unit}</span>
-                              {/* The big number stays the shelf count — it
-                                  is what someone walking to the rack will
-                                  actually find. Free is what is left once
-                                  other jobs have had their claim, which is
-                                  the number that matters when deciding
-                                  whether you can take any. */}
-                              {(() => {
-                                const held = allocationsForItem(it.id).reduce(
-                                  (sum, a) => sum + (Number(a.qty_allocated) - Number(a.qty_used)),
-                                  0
-                                );
-                                if (held <= 0) return null;
-                                const free = Number(it.qty) - held;
-                                return (
-                                  <span
-                                    style={{ ...S.qtyUnit, color: free > 0 ? C.accentRaw : C.danger, fontWeight: 600 }}
-                                    title={`${it.qty} on the shelf, ${held} reserved for other jobs`}
-                                  >
-                                    {free > 0 ? `${free} free` : "none free"}
+                            {/* The big number is what anyone may actually
+                                take, so reserved material is already
+                                subtracted — a number nobody is allowed to
+                                act on would be worse than useless here.
+                                The shelf count is still shown underneath
+                                whenever the two differ, since a stock take
+                                counts what is physically on the rack. */}
+                            {(() => {
+                              const held = reservedQtyForItem(it.id);
+                              const free = availableQtyForItem(it);
+                              return (
+                                <div style={S.qtyDisplay}>
+                                  <span style={{ ...S.qtyNum, color: low || (held > 0 && free === 0) ? C.danger : C.text }}>
+                                    {held > 0 ? free : it.qty}
                                   </span>
-                                );
-                              })()}
-                            </div>
+                                  <span style={S.qtyUnit}>{it.trackLength ? "pcs" : it.unit}</span>
+                                  {held > 0 && (
+                                    <span
+                                      style={{ ...S.qtyUnit, color: C.accentRaw, fontWeight: 600 }}
+                                      title={`${it.qty} physically on the shelf, ${held} reserved for other jobs`}
+                                    >
+                                      of {it.qty}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })()}
                             {canEditQty(tab) && (
                               <button className="stk-btn" style={S.usageBtnAdd} onClick={() => openUsageModal(it, "add")}>
                                 Add
@@ -12377,6 +12472,85 @@ export default function StockControl() {
           the stock table runs to thousands of rows. Handing straight over
           to the usual Use stock form keeps one path for actually booking
           material out, with the job filled in already. */}
+      {/* What is reserved on one stock item, and the two things that can
+          be done about it — hand it back, or book it out against the job
+          it was set aside for. This is the only way reserved material can
+          be consumed; ordinary Use is capped at what is free. */}
+      {reservedModal && (
+        <div style={{ ...S.modalOverlay, zIndex: 30 }}>
+          <div style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Reserved — {reservedModal.item.name}</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setReservedModal(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            {(() => {
+              const rows = allocationsForItem(reservedModal.item.id);
+              if (rows.length === 0) {
+                return <div style={S.empty}>Nothing is reserved on this item any more.</div>;
+              }
+              const held = reservedQtyForItem(reservedModal.item.id);
+              return (
+                <>
+                  <div style={S.roleHint}>
+                    {reservedModal.item.qty} on the shelf · {held} reserved · {Math.max(0, Number(reservedModal.item.qty) - held)} free
+                    for anyone else to use.
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
+                    {rows.map((a) => {
+                      const outstanding = Number(a.qty_allocated) - Number(a.qty_used);
+                      const entered = reservedUseQty[a.id] ?? String(outstanding);
+                      return (
+                        <div key={a.id} style={S.reqCard}>
+                          <div style={S.reqCardTop}>
+                            <span style={S.itemName}>{a.job_number || "No job number"}</span>
+                            <span style={{ fontFamily: F.mono, fontSize: 12.5, color: C.accentRaw }}>{outstanding} left</span>
+                          </div>
+                          <div className="stk-meta-row" style={S.rowMeta}>
+                            <span>For {a.process_name}</span>
+                            {Number(a.qty_used) > 0 && <span>{a.qty_used} of {a.qty_allocated} already used</span>}
+                            <span>Set aside by {a.allocated_by}</span>
+                          </div>
+                          <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
+                            <input
+                              style={{ ...S.input, width: 90, flexShrink: 0 }}
+                              type="number"
+                              step="any"
+                              min="0"
+                              max={outstanding}
+                              value={entered}
+                              onChange={(e) => setReservedUseQty((m) => ({ ...m, [a.id]: e.target.value }))}
+                            />
+                            <button
+                              type="button"
+                              className="stk-btn"
+                              style={{ ...S.reqActionBtn, flex: 1 }}
+                              onClick={() => useAllocation(a, entered)}
+                            >
+                              Mark used on {a.job_number || "this job"}
+                            </button>
+                            <button
+                              type="button"
+                              className="stk-btn"
+                              style={S.managerDelete}
+                              title="Release this back — nothing is booked out"
+                              onClick={() => releaseAllocation(a)}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
       {/* Setting material aside for a stage. Reserves only — the stock
           count is untouched until an operator books it out, so the number
           on screen keeps matching what is physically in the racks. */}
