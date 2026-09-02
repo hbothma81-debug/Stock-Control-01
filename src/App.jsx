@@ -942,6 +942,9 @@ export default function StockControl() {
   const [newJobItemSuggestOpen, setNewJobItemSuggestOpen] = useState(null); // which quote item row index has its suggestion dropdown open
   const [notificationsList, setNotificationsList] = useState(null);
   const [shortagesList, setShortagesList] = useState(null);
+  // Every allocation still outstanding, across all jobs — so a stock item
+  // can show what of it is already spoken for, not just the job screen.
+  const [allocationsList, setAllocationsList] = useState(null);
   const [drawingSearchQuery, setDrawingSearchQuery] = useState("");
   const [drawingSearchResults, setDrawingSearchResults] = useState(null);
   const [drawingCustomerFilter, setDrawingCustomerFilter] = useState("");
@@ -1842,6 +1845,7 @@ export default function StockControl() {
   // for either to be opened first.
   useEffect(() => {
     if (profile && shortagesList === null) fetchShortages();
+    if (profile && allocationsList === null) fetchAllocations();
   }, [profile]);
 
   // Belt-and-suspenders on top of the immediate saves above: the moment this
@@ -2846,7 +2850,7 @@ export default function StockControl() {
     setJobDetailTab("overview");
     setJobDetailLoading(true);
     try {
-      const [{ data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }, { data: allocations, error: allocError }] = await Promise.all([
+      const [{ data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }, allocResult] = await Promise.all([
         supabase.from("job_processes").select("*").eq("job_id", job.id).order("sort_order"),
         supabase.from("job_documents").select("*").eq("job_id", job.id).order("created_at", { ascending: false }),
         supabase.from("job_quote_items").select("*").eq("job_id", job.id).order("sort_order"),
@@ -2857,8 +2861,12 @@ export default function StockControl() {
       if (docError) throw docError;
       if (qiError) throw qiError;
       if (dnError) throw dnError;
-      if (allocError) throw allocError;
-      setJobDetail({ job, processes: processes || [], documents: documents || [], quoteItems: quoteItems || [], deliveryNotes: deliveryNotes || [], allocations: allocations || [] });
+      // Deliberately not fatal. Allocations are an extra on this screen —
+      // the process checklist, documents and quote items must still load
+      // if the table is missing (migration not run yet) or unreadable.
+      // Throwing here took the whole job detail down with it.
+      if (allocResult.error) console.error("Failed to load allocations (job detail still shown):", allocResult.error);
+      setJobDetail({ job, processes: processes || [], documents: documents || [], quoteItems: quoteItems || [], deliveryNotes: deliveryNotes || [], allocations: allocResult.data || [] });
     } catch (err) {
       console.error("Failed to load job detail:", err);
     }
@@ -2891,6 +2899,9 @@ export default function StockControl() {
       if (error) throw error;
       setAllocateModal(null);
       refreshJobDetail();
+      // The stock screens show what is reserved too, so they need telling
+      // as much as the job screen does.
+      fetchAllocations();
     } catch (err) {
       console.error("Failed to allocate stock:", err);
       alert(`Couldn't allocate that: ${err.message || "unknown error"}. If this mentions a missing table, setup-job-allocations.sql hasn't been run yet in Supabase.`);
@@ -2906,6 +2917,7 @@ export default function StockControl() {
       const { error } = await supabase.from("job_allocations").update({ status: "released" }).eq("id", allocation.id);
       if (error) throw error;
       refreshJobDetail();
+      fetchAllocations();
     } catch (err) {
       console.error("Failed to release allocation:", err);
       alert("That didn't save — check your connection and try again.");
@@ -4272,6 +4284,34 @@ export default function StockControl() {
       console.error("Failed to load notifications:", err);
       setNotificationsList([]);
     }
+  }
+
+  // Deliberately never throws past itself. Reserved quantities are extra
+  // information on the stock screens; if the table is missing or
+  // unreadable those screens must still work, showing nothing reserved
+  // rather than nothing at all.
+  async function fetchAllocations() {
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase
+        .from("job_allocations")
+        .select("*")
+        .neq("status", "released")
+        .order("created_at");
+      if (error) throw error;
+      setAllocationsList(data || []);
+    } catch (err) {
+      console.error("Failed to load allocations (stock still shown):", err);
+      setAllocationsList([]);
+    }
+  }
+
+  // What is still spoken for on a given stock item — allocated less
+  // already used, ignoring anything handed back.
+  function allocationsForItem(itemId) {
+    return (allocationsList || []).filter(
+      (a) => a.item_id === itemId && Number(a.qty_allocated) - Number(a.qty_used) > 0
+    );
   }
 
   async function fetchShortages() {
@@ -9776,6 +9816,25 @@ export default function StockControl() {
                           )}
                           {it.comment && <div style={S.itemComment}>{it.comment}</div>}
                           <div className="stk-meta-row" style={S.rowMeta}>
+                            {/* What of this item is already promised to a
+                                job. The quantity above is still the true
+                                shelf count — reserving does not remove
+                                anything — so without this there is no way
+                                to tell that some of it is spoken for. */}
+                            {(() => {
+                              const reserved = allocationsForItem(it.id);
+                              if (reserved.length === 0) return null;
+                              const total = reserved.reduce((sum, a) => sum + (Number(a.qty_allocated) - Number(a.qty_used)), 0);
+                              const jobs = [...new Set(reserved.map((a) => a.job_number))].filter(Boolean);
+                              return (
+                                <span
+                                  style={{ color: C.accentRaw, fontWeight: 600 }}
+                                  title={reserved.map((a) => `${a.job_number} · ${a.process_name}: ${Number(a.qty_allocated) - Number(a.qty_used)}`).join("\n")}
+                                >
+                                  {total} reserved{jobs.length ? ` · ${jobs.slice(0, 3).join(", ")}${jobs.length > 3 ? ` +${jobs.length - 3}` : ""}` : ""}
+                                </span>
+                              );
+                            })()}
                             {tab === "plate" && it.sheetName && <span>{it.sheetName}</span>}
                             {(tab === "plate" || tab === "structural") && it.stockType === "offcut" && (
                               <span style={S.offcutTag}>Offcut</span>
