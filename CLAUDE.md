@@ -16,5 +16,6 @@
 - Before making any change, create a git commit as a save point so we can undo it if something breaks.
 - Make one small change at a time, then let me test it, before moving to the next change.
 - Flag any security issues clearly and explain the real-world risk in plain language — don't just silently fix them.
-- Confirm with me before deploying any change live (e.g. pushing to Vercel/production).
+- Small, low-risk changes can be merged and pushed live without asking first — but only after you have actually checked them, and you must tell me what you deployed afterwards. "Low-risk" means all of: no application code changed (or the change is trivial and you've tested it), a clean build from a fresh clone passes, and it's straightforward to undo.
+- Everything else still needs my confirmation before going live. That includes anything that changes how the app behaves, touches the database structure, alters permissions or logins, or that you're not sure about. If in doubt, ask.
 - If a file is getting very large (like App.jsx), mention it and suggest splitting it into smaller files when it makes sense — but explain why before doing it.
