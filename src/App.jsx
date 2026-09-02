@@ -770,6 +770,9 @@ export default function StockControl() {
   // the real detail (raised by, lines, notes, actions) in place.
   const [expandedPoId, setExpandedPoId] = useState(null);
   const [receivingSearchQuery, setReceivingSearchQuery] = useState("");
+  // Same compact-line, tap-to-expand pattern as Purchase Orders and
+  // Requisitions.
+  const [expandedReceivingId, setExpandedReceivingId] = useState(null);
   const [shortageSearchQuery, setShortageSearchQuery] = useState("");
   const [showPoReport, setShowPoReport] = useState(false);
   const [showCompletedPOs, setShowCompletedPOs] = useState(false);
@@ -1628,6 +1631,7 @@ export default function StockControl() {
     setExpandedPoId(null);
     setReceivingSearchQuery("");
     setShortageSearchQuery("");
+    setExpandedReceivingId(null);
   }, [tab]);
 
   // The part-number → drawing lookup is used on Customer Stock rows and the
@@ -7605,11 +7609,6 @@ export default function StockControl() {
                             <Copy size={13} /> Copy
                           </button>
                         )}
-                        {po.status !== "received" && canMarkReceivedPerm && (
-                          <button type="button" className="stk-btn" style={{ ...S.reqActionBtn, background: C.accentFinished }} onClick={() => openReceiving(po)}>
-                            <Check size={13} /> Receive
-                          </button>
-                        )}
                       </div>
                     </>
                   )}
@@ -7688,24 +7687,52 @@ export default function StockControl() {
                 )
                 .sort((a, b) => new Date(b.dateCreated) - new Date(a.dateCreated));
               if (list.length === 0 && rq) return <div style={S.empty}>Nothing matches.</div>;
-              return list.map((po) => (
-                <div key={po.id} style={S.reqCard}>
-                  <div style={S.reqCardTop}>
-                    <span style={S.itemName}>{po.poNumber} — {po.supplierName || "No supplier"}</span>
-                    <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>R{po.totalValue.toFixed(2)}</span>
-                  </div>
-                  <div className="stk-meta-row" style={S.rowMeta}>
-                    <span>Raised by {po.createdBy}</span>
-                    <span>{new Date(po.dateCreated).toLocaleDateString()}</span>
-                    <span>{po.lineItems.length} line{po.lineItems.length === 1 ? "" : "s"}</span>
-                  </div>
-                  <div style={S.reqActions}>
-                    <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => openReceiving(po)}>
-                      <Check size={13} /> Receive this PO
+              return list.map((po) => {
+                const isOpen = expandedReceivingId === po.id;
+                return (
+                  <div key={po.id} style={S.reqCard}>
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        width: "100%",
+                        textAlign: "left",
+                        cursor: "pointer",
+                        gap: 10,
+                        background: "transparent",
+                        border: "none",
+                        padding: 0,
+                        color: "inherit",
+                        font: "inherit",
+                      }}
+                      onClick={() => setExpandedReceivingId(isOpen ? null : po.id)}
+                    >
+                      <span style={S.itemName}>{po.poNumber} — {po.supplierName || "No supplier"}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>R{po.totalValue.toFixed(2)}</span>
+                        <ChevronDown size={16} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+                      </span>
                     </button>
+                    {isOpen && (
+                      <>
+                        <div className="stk-meta-row" style={{ ...S.rowMeta, marginTop: 6 }}>
+                          <span>Raised by {po.createdBy}</span>
+                          <span>{new Date(po.dateCreated).toLocaleDateString()}</span>
+                          <span>{po.lineItems.length} line{po.lineItems.length === 1 ? "" : "s"}</span>
+                        </div>
+                        <div style={S.reqActions}>
+                          <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => openReceiving(po)}>
+                            <Check size={13} /> Receive this PO
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
-                </div>
-              ));
+                );
+              });
             })()}
           </div>
         </div>
