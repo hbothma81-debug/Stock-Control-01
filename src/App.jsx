@@ -7952,6 +7952,18 @@ export default function StockControl() {
       ) : tab === "production" ? (
         productionSelectedDept === null ? (
           <div style={S.list}>
+            {/* Without any process types assigned, fetchProductionQueue
+                returns immediately and this screen stays blank — which
+                reads as "no work on" rather than "not set up", and an
+                admin sees it too since isAdmin doesn't bypass the check.
+                Say so, the way the sign-in screen does for no access. */}
+            {!profile?.allowedProcessTypes?.length && (
+              <div style={S.empty}>
+                Production shows the stages you're set up to handle, and you haven't been given any yet — so there's
+                nothing here, even if jobs are running. {isAdmin ? "Set yours" : "Ask an admin to set them"} under Stock
+                Manager → User Management → your name → Production access.
+              </div>
+            )}
             {productionLoading && <div style={S.empty}>Loading…</div>}
             {Object.keys(productionQueue || {}).length > 0 && (
               <input
