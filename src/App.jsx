@@ -5,7 +5,7 @@ import autoTable from "jspdf-autotable";
 import { supabase } from "./lib/supabaseClient.js";
 import {
   Plus, Minus, Search, Trash2, PackagePlus, AlertTriangle, X,
-  ChevronDown, ChevronRight, ChevronLeft, User, UserCheck, ShieldCheck, Lock, Database, Truck,
+  ChevronDown, ChevronUp, ChevronRight, ChevronLeft, User, UserCheck, ShieldCheck, Lock, Database, Truck,
   Download, Pencil, Copy, Filter as FilterIcon, Paperclip, FileText, Image as ImageIcon,
   Wrench, Users, Eye, EyeOff, ShoppingCart, ClipboardList, Check, Package, Upload, RefreshCw,
 } from "lucide-react";
@@ -149,6 +149,15 @@ const MASTER_STRING_LISTS = [
   "sizes", "sectionTypes", "salesPeople", "customers", "staffDepartments", "jobProcessTypes",
   "storeCategories", "fastenerCategories", "fastenerGrades", "fastenerFinishes", "sheetNames",
 ];
+// Lists where the order on screen is the order that matters, not just how
+// they happen to be stored. Job Process Types is the factory flow: the
+// floor can't start a process until everything before it is complete, so
+// its sequence is real production instruction, not presentation. These get
+// reorder controls in the manager, and their positions are written back to
+// sort_order. Every other list keeps its existing add-to-the-end
+// behaviour, which also avoids rewriting hundreds of rows on lists like
+// customers every time one is added.
+const ORDERED_STRING_LISTS = ["jobProcessTypes"];
 const MASTER_FACTOR_LISTS = ["sections", "grades", "cncGrades"];
 const MASTER_COUNTERS = ["nextJobNumber", "nextDeliveryNoteNumber", "nextFastenerNumber", "nextToolNumber", "nextPoNumber"];
 const EMPTY_COMPANY_DETAILS = { name: "", address: "", phone: "", email: "", vatNumber: "", regNumber: "" };
@@ -187,7 +196,12 @@ async function fetchAllRows(table, { select = "*", orderBy = "id", ascending = t
 // always has.
 async function loadMasterFromTables() {
   const [stringLists, factorItems, suppliers, supplierContacts, storesCatalog, customerContacts, companyRows, counters] = await Promise.all([
-    supabase.from("master_string_lists").select("*"),
+    // Explicitly ordered: without an ORDER BY, Postgres makes no promise
+    // about row order, so the factory process sequence could quietly
+    // reshuffle between loads. created_at is the tiebreak so lists that
+    // have never been ordered still come back in the order they were
+    // added, exactly as before.
+    supabase.from("master_string_lists").select("*").order("sort_order").order("created_at"),
     supabase.from("master_factor_items").select("*"),
     supabase.from("master_suppliers").select("*"),
     supabase.from("master_supplier_contacts").select("*"),
@@ -1375,10 +1389,31 @@ export default function StockControl() {
       const added = nextList.filter((v) => !prevList.includes(v));
       const removed = prevList.filter((v) => !nextList.includes(v));
       if (added.length) {
-        ops.push(supabase.from("master_string_lists").insert(added.map((v) => ({ id: uid(), list_name: listName, value: v }))));
+        // sort_order comes from where the value actually sits in the list.
+        // For unordered lists additions always land at the end, so this is
+        // the same append behaviour as before — it just records it.
+        ops.push(
+          supabase.from("master_string_lists").insert(
+            added.map((v) => ({ id: uid(), list_name: listName, value: v, sort_order: nextList.indexOf(v) }))
+          )
+        );
       }
       if (removed.length) {
         ops.push(supabase.from("master_string_lists").delete().eq("list_name", listName).in("value", removed));
+      }
+      // Moving an item changes no values at all, so the added/removed diff
+      // above cannot express a reorder — the positions have to be written
+      // back separately. Only for lists where order carries meaning, and
+      // only when something changed (identical lists returned above), so
+      // this stays a handful of rows. These run after the insert, since
+      // ops are executed in sequence, so a value moved into a new position
+      // always exists by the time it is updated.
+      if (ORDERED_STRING_LISTS.includes(listName)) {
+        nextList.forEach((v, i) => {
+          ops.push(
+            supabase.from("master_string_lists").update({ sort_order: i }).eq("list_name", listName).eq("value", v)
+          );
+        });
       }
     }
 
@@ -2458,19 +2493,56 @@ export default function StockControl() {
     setNewJobForm(null);
   }
 
+  // Ticking a process slots it into its place in the factory flow — the
+  // order set in Stock Manager — rather than onto the end. That order
+  // becomes sort_order, which is what gates the floor, so the sequence has
+  // to come from the shop's real flow and not from whichever button
+  // somebody happened to tap first.
+  //
+  // Placed relative to what's already selected rather than re-sorting the
+  // whole list, so any deliberate reordering of this particular job
+  // survives ticking another process.
   function toggleNewJobProcess(processName) {
-    setNewJobForm((f) => ({
-      ...f,
-      selectedProcesses: f.selectedProcesses.some((p) => p.name === processName)
-        ? f.selectedProcesses.filter((p) => p.name !== processName)
-        : [...f.selectedProcesses, { name: processName, operator: "", assignedToId: null, trackingMode: "batch" }],
-    }));
+    setNewJobForm((f) => {
+      if (f.selectedProcesses.some((p) => p.name === processName)) {
+        return { ...f, selectedProcesses: f.selectedProcesses.filter((p) => p.name !== processName) };
+      }
+      const flow = master?.jobProcessTypes || [];
+      // A process since removed from the master list has no place in the
+      // flow — keep those last rather than letting -1 jump them to front.
+      const rank = (name) => {
+        const i = flow.indexOf(name);
+        return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+      };
+      const entry = { name: processName, operator: "", assignedToId: null, trackingMode: "batch" };
+      const at = f.selectedProcesses.findIndex((p) => rank(p.name) > rank(processName));
+      const next = [...f.selectedProcesses];
+      next.splice(at === -1 ? next.length : at, 0, entry);
+      return { ...f, selectedProcesses: next };
+    });
   }
 
   // Sets both the real person link (assignedToId, what makes a genuine
   // notification possible) and the plain operator text alongside it, so
   // anything that still displays operator as text keeps working exactly
   // as before, without needing every display spot updated at once.
+  // Lets one job depart from the standard flow — a part that needs
+  // painting before assembly, say. Only this job is affected: the Stock
+  // Manager order is untouched, and because toggleNewJobProcess places new
+  // processes relative to what's already selected, ticking another one
+  // afterwards slots it in around this adjustment instead of undoing it.
+  function moveNewJobProcess(processName, direction) {
+    setNewJobForm((f) => {
+      const from = f.selectedProcesses.findIndex((p) => p.name === processName);
+      const to = from + direction;
+      if (from === -1 || to < 0 || to >= f.selectedProcesses.length) return f;
+      const next = [...f.selectedProcesses];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return { ...f, selectedProcesses: next };
+    });
+  }
+
   function updateNewJobProcessAssignee(processName, personId) {
     const person = (people || []).find((p) => p.id === personId);
     setNewJobForm((f) => ({
@@ -2770,9 +2842,11 @@ export default function StockControl() {
   }
 
   // A process is only actionable once every process before it (by
-  // sort_order, on the same job) is marked complete — the order processes
-  // were selected in becomes the real workflow sequence, one after
-  // another, not all open at once.
+  // sort_order, on the same job) is marked complete — work moves through
+  // one stage at a time, not all open at once. sort_order comes from the
+  // factory flow set in Stock Manager, so this gating follows the real
+  // shop sequence. Jobs created before that existed keep the order they
+  // were built with, which was whatever order the boxes were ticked in.
   function isProcessActionable(process, jobProcesses) {
     return jobProcesses.filter((p) => p.sort_order < process.sort_order).every((p) => p.is_complete);
   }
@@ -6647,6 +6721,24 @@ export default function StockControl() {
       });
     }
     setManagerInput("");
+  }
+
+  // Moves an entry one place up or down in a list whose order is real —
+  // currently Job Process Types, where the sequence is the factory flow.
+  // Works on the full list rather than what's on screen, so a search
+  // filter can never make an item jump past hidden neighbours; the buttons
+  // are hidden while searching for the same reason.
+  function moveMasterEntry(entry, direction) {
+    setMaster((prev) => {
+      const list = prev[managerTab] || [];
+      const from = list.indexOf(entry);
+      const to = from + direction;
+      if (from === -1 || to < 0 || to >= list.length) return prev;
+      const reordered = [...list];
+      reordered.splice(from, 1);
+      reordered.splice(to, 0, entry);
+      return { ...prev, [managerTab]: reordered };
+    });
   }
 
   function removeMasterEntry(entry) {
@@ -11695,6 +11787,12 @@ export default function StockControl() {
                   </button>
                 </div>
 
+                {ORDERED_STRING_LISTS.includes(managerTab) && (
+                  <div style={{ ...S.roleHint, marginTop: 10 }}>
+                    This order is the factory flow — top to bottom is the sequence work moves through the shop. Use the arrows to change it.
+                  </div>
+                )}
+
                 {master[managerTab].length > 8 && (
                   <input
                     style={{ ...S.input, marginTop: 10 }}
@@ -11745,14 +11843,50 @@ export default function StockControl() {
                         ))
                     : master[managerTab]
                         .filter((entry) => entry.toLowerCase().includes(managerSearchQuery.toLowerCase()))
-                        .map((entry) => (
+                        .map((entry) => {
+                        // Reordering is offered only where the sequence
+                        // means something, and never while a search is
+                        // narrowing the list — moving an item one place
+                        // when its neighbours are hidden would look like
+                        // it jumped several.
+                        const reorderable = ORDERED_STRING_LISTS.includes(managerTab) && !managerSearchQuery;
+                        const fullList = master[managerTab];
+                        const pos = fullList.indexOf(entry);
+                        return (
                         <div key={entry} style={S.managerRow}>
                           <EditableName value={entry} onCommit={(v) => renameMasterEntry(managerTab, entry, v)} />
-                          <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeMasterEntry(entry)}>
-                            <Trash2 size={13} />
-                          </button>
+                          <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
+                            {reorderable && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="stk-btn"
+                                  style={{ ...S.managerDelete, opacity: pos === 0 ? 0.25 : 1, cursor: pos === 0 ? "not-allowed" : "pointer" }}
+                                  disabled={pos === 0}
+                                  title="Move earlier in the factory flow"
+                                  onClick={() => moveMasterEntry(entry, -1)}
+                                >
+                                  <ChevronUp size={15} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="stk-btn"
+                                  style={{ ...S.managerDelete, opacity: pos === fullList.length - 1 ? 0.25 : 1, cursor: pos === fullList.length - 1 ? "not-allowed" : "pointer" }}
+                                  disabled={pos === fullList.length - 1}
+                                  title="Move later in the factory flow"
+                                  onClick={() => moveMasterEntry(entry, 1)}
+                                >
+                                  <ChevronDown size={15} />
+                                </button>
+                              </>
+                            )}
+                            <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeMasterEntry(entry)}>
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
                         </div>
-                      ))}
+                        );
+                      })}
                 </div>
               </>
             )}
@@ -13635,9 +13769,40 @@ export default function StockControl() {
               </div>
               {newJobForm.selectedProcesses.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
-                  {newJobForm.selectedProcesses.map((sp) => (
+                  <div style={S.roleHint}>
+                    Numbered in the order work moves through the shop — each stage opens up as the one before it is completed. This follows the
+                    factory flow set in Stock Manager; use the arrows if this job needs a different sequence.
+                  </div>
+                  {newJobForm.selectedProcesses.map((sp, idx) => (
                     <div key={sp.name} style={{ marginBottom: 4 }}>
-                      <span style={{ fontSize: 14, fontWeight: 600 }}>{sp.name}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontSize: 12, color: C.muted, flexShrink: 0, minWidth: 16 }}>{idx + 1}.</span>
+                        <span style={{ fontSize: 14, fontWeight: 600, flex: 1 }}>{sp.name}</span>
+                        <button
+                          type="button"
+                          className="stk-btn"
+                          style={{ ...S.managerDelete, opacity: idx === 0 ? 0.25 : 1, cursor: idx === 0 ? "not-allowed" : "pointer" }}
+                          disabled={idx === 0}
+                          title="Do this stage earlier on this job"
+                          onClick={() => moveNewJobProcess(sp.name, -1)}
+                        >
+                          <ChevronUp size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          className="stk-btn"
+                          style={{
+                            ...S.managerDelete,
+                            opacity: idx === newJobForm.selectedProcesses.length - 1 ? 0.25 : 1,
+                            cursor: idx === newJobForm.selectedProcesses.length - 1 ? "not-allowed" : "pointer",
+                          }}
+                          disabled={idx === newJobForm.selectedProcesses.length - 1}
+                          title="Do this stage later on this job"
+                          onClick={() => moveNewJobProcess(sp.name, 1)}
+                        >
+                          <ChevronDown size={15} />
+                        </button>
+                      </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
                         <select
                           style={{ ...S.input, flex: "1 1 180px" }}
