@@ -3053,7 +3053,15 @@ export default function StockControl() {
   // shop sequence. Jobs created before that existed keep the order they
   // were built with, which was whatever order the boxes were ticked in.
   function isProcessActionable(process, jobProcesses) {
-    return jobProcesses.filter((p) => p.sort_order < process.sort_order).every((p) => p.is_complete);
+    // A shortage's catch-up stages are their own sequence, running
+    // alongside the job rather than inside it. Comparing the two would
+    // hold the re-cut behind stages the original job has already passed,
+    // and would hold the job behind the re-cut — neither is true.
+    const sameRun = (p) => (p.shortage_id || null) === (process.shortage_id || null);
+    return jobProcesses
+      .filter(sameRun)
+      .filter((p) => p.sort_order < process.sort_order)
+      .every((p) => p.is_complete);
   }
 
   // The floor-facing queue: for someone with specific process-type access,
@@ -3086,14 +3094,21 @@ export default function StockControl() {
         setProductionLoading(false);
         return;
       }
-      const [{ data: allProcesses, error: procError }, { data: allQuoteItems, error: qiError }, { data: allDocs, error: docError }] = await Promise.all([
+      const [{ data: allProcesses, error: procError }, { data: allQuoteItems, error: qiError }, { data: allDocs, error: docError }, shortageResult] = await Promise.all([
         supabase.from("job_processes").select("*").in("job_id", jobIds).order("sort_order"),
         supabase.from("job_quote_items").select("*").in("job_id", jobIds),
         supabase.from("job_documents").select("*").in("job_id", jobIds).not("process_name", "is", null),
+        // Fetched here rather than read from shortagesList so the queue
+        // never depends on that having loaded first.
+        supabase.from("shortages").select("*").in("job_id", jobIds),
       ]);
       if (procError) throw procError;
       if (qiError) throw qiError;
       if (docError) throw docError;
+      // Not fatal: without it the catch-up stages simply lose their
+      // shortage label, which is far better than no queue at all.
+      if (shortageResult.error) console.error("Failed to load shortages for the queue:", shortageResult.error);
+      const queueShortages = shortageResult.data || [];
 
       // Each-mode progress is tracked per item, not lumped into one
       // combined count — needs the process ids from the fetch above
@@ -3128,6 +3143,9 @@ export default function StockControl() {
             quoteItems: jobQuoteItems,
             documents: (allDocs || []).filter((d) => d.job_id === job.id && d.process_name === p.process_name),
             itemProgress: allItemProgress.filter((ip) => ip.job_process_id === p.id),
+            // Set only on catch-up stages, so the queue can say this is a
+            // replacement for something missing rather than new work.
+            shortage: p.shortage_id ? queueShortages.find((s) => s.id === p.shortage_id) || null : null,
           });
         }
       }
@@ -3136,6 +3154,11 @@ export default function StockControl() {
       for (const procType of Object.keys(byProcessType)) {
         byProcessType[procType].sort((a, b) => {
           if (a.process.is_urgent !== b.process.is_urgent) return a.process.is_urgent ? -1 : 1;
+          // A priority shortage is a customer already waiting on something
+          // that should have been finished, so it outranks new work.
+          const aShort = a.shortage && a.shortage.is_priority !== false ? 1 : 0;
+          const bShort = b.shortage && b.shortage.is_priority !== false ? 1 : 0;
+          if (aShort !== bShort) return bShort - aShort;
           if (a.isReady !== b.isReady) return a.isReady ? -1 : 1;
           return new Date(a.job.due_date || "2999-01-01") - new Date(b.job.due_date || "2999-01-01");
         });
@@ -3262,17 +3285,67 @@ export default function StockControl() {
     }
   }
 
+  // Nesting the shortage is also where the replacement gets its own run
+  // through the shop. It has to catch up from the re-cut to wherever the
+  // problem was found: a part a packer noticed missing needs cutting,
+  // welding and painting again before it can be packed, but nothing
+  // beyond that stage.
+  //
+  // The stages are job_processes rows carrying shortage_id, so they land
+  // in the same queue the operators already watch, gate one after another
+  // the same way, and can be assigned like any other work.
   async function markShortageNested(shortage) {
     try {
+      const { data: jobStages, error: stagesError } = await supabase
+        .from("job_processes")
+        .select("*")
+        .eq("job_id", shortage.job_id)
+        .is("shortage_id", null)
+        .order("sort_order");
+      if (stagesError) throw stagesError;
+
+      // Everything up to and including the stage that raised it. If that
+      // stage can't be found — renamed or removed since — fall back to the
+      // whole sequence rather than silently skipping the catch-up.
+      const flaggedAt = (jobStages || []).find((p) => p.process_name === shortage.flagged_department);
+      const upTo = flaggedAt ? Number(flaggedAt.sort_order) : Infinity;
+      const needed = (jobStages || []).filter((p) => Number(p.sort_order) <= upTo);
+
+      const { data: already, error: existingError } = await supabase
+        .from("job_processes")
+        .select("id")
+        .eq("shortage_id", shortage.id)
+        .limit(1);
+      if (existingError) throw existingError;
+
+      // Re-nesting a shortage must not double the catch-up stages.
+      if (needed.length > 0 && (already || []).length === 0) {
+        const { error: insertError } = await supabase.from("job_processes").insert(
+          needed.map((p, idx) => ({
+            job_id: shortage.job_id,
+            shortage_id: shortage.id,
+            process_name: p.process_name,
+            operator: p.operator || "",
+            assigned_to: p.assigned_to || null,
+            tracking_mode: "batch",
+            sort_order: idx,
+          }))
+        );
+        if (insertError) throw insertError;
+      }
+
       const { error } = await supabase
         .from("shortages")
         .update({ status: "nested", nested_by: roleLabel, nested_at: new Date().toISOString() })
         .eq("id", shortage.id);
       if (error) throw error;
       fetchShortages();
+      if (productionQueue !== null) fetchProductionQueue();
     } catch (err) {
       console.error("Failed to update shortage:", err);
-      alert("That didn't save — check your connection and try again.");
+      alert(
+        `That didn't save: ${err.message || "unknown error"}. If this mentions shortage_id, setup-shortage-rework.sql hasn't been run yet in Supabase.`
+      );
     }
   }
 
@@ -3449,6 +3522,27 @@ export default function StockControl() {
         })
         .eq("id", process.id);
       if (error) throw error;
+
+      // A shortage is only genuinely resolved once its replacement has
+      // been through every catch-up stage — not when it comes off the
+      // laser. Closing it here means the trail ends where the work does.
+      if (process.shortage_id) {
+        const { data: runStages, error: runError } = await supabase
+          .from("job_processes")
+          .select("is_complete")
+          .eq("shortage_id", process.shortage_id);
+        if (runError) throw runError;
+        const allDone = (runStages || []).length > 0 && runStages.every((p) => p.is_complete);
+        await supabase
+          .from("shortages")
+          .update(
+            allDone
+              ? { status: "cut", cut_by: roleLabel, cut_at: new Date().toISOString() }
+              : { status: "nested", cut_by: "", cut_at: "" }
+          )
+          .eq("id", process.shortage_id);
+        fetchShortages();
+      }
 
       // Notify whoever's running this job the moment a process wraps up —
       // never on un-ticking, that's just a correction, not progress.
@@ -8712,14 +8806,24 @@ export default function StockControl() {
                       );
                     })()
                   ) : (
-                    entries.map(({ job, process, isReady, quoteItems }) => {
+                    entries.map(({ job, process, isReady, quoteItems, shortage }) => {
                       const totalQty = quoteItems.reduce((sum, it) => sum + Number(it.qty || 0), 0);
                       return (
                         <button
                           key={process.id}
                           type="button"
                           className="stk-btn"
-                          style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer" }}
+                          style={{
+                            ...S.reqCard,
+                            width: "100%",
+                            textAlign: "left",
+                            cursor: "pointer",
+                            // A replacement for something missing reads
+                            // very differently from new work, and the
+                            // operator needs to know which this is before
+                            // they open it.
+                            ...(shortage ? { borderColor: C.danger, borderWidth: 2 } : {}),
+                          }}
                           onClick={() => setProductionSelectedProcessId(process.id)}
                         >
                           <div style={S.reqCardTop}>
@@ -8728,10 +8832,16 @@ export default function StockControl() {
                               {isReady ? "Ready" : "Waiting"}
                             </span>
                           </div>
+                          {shortage && (
+                            <div style={{ ...S.itemComment, color: C.danger, fontWeight: 600, marginTop: 2 }}>
+                              ⚠ Shortage re-cut{shortage.is_priority === false ? "" : " · Priority"} — {shortage.description} × {shortage.qty}
+                            </div>
+                          )}
                           <div className="stk-meta-row" style={S.rowMeta}>
                             {job.sales_rep && <span>Sales: {job.sales_rep}</span>}
                             {job.laser_job_reference && <span>SigmaNest: {job.laser_job_reference}</span>}
                             {totalQty > 0 && <span>Qty: {totalQty}</span>}
+                            {shortage && <span>Originally flagged at {shortage.flagged_department}</span>}
                             {process.is_urgent && <span style={{ color: C.danger, fontWeight: 600 }}>Urgent</span>}
                           </div>
                         </button>
