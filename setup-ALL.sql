@@ -73,25 +73,37 @@ alter table profiles enable row level security;
 
 -- You must be signed in to touch the shared stock data at all — this is the
 -- real security boundary now, replacing the old "anyone with the PIN" model.
-create policy "Signed-in users can read app data" on app_storage
+do $$ begin
+  create policy "Signed-in users can read app data" on app_storage
   for select using (auth.role() = 'authenticated');
-create policy "Signed-in users can write app data" on app_storage
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can write app data" on app_storage
   for insert with check (auth.role() = 'authenticated');
-create policy "Signed-in users can update app data" on app_storage
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can update app data" on app_storage
   for update using (auth.role() = 'authenticated');
-create policy "Signed-in users can delete app data" on app_storage
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can delete app data" on app_storage
   for delete using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 -- Everyone signed in can see the list of people (so an admin can browse and
 -- grant access, and so the app can look up your own permissions after login).
-create policy "Signed-in users can read profiles" on profiles
+do $$ begin
+  create policy "Signed-in users can read profiles" on profiles
   for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 -- Only an existing admin can change anyone's permissions or admin status.
-create policy "Admins can update profiles" on profiles
+do $$ begin
+  create policy "Admins can update profiles" on profiles
   for update using (
-    exists (select 1 from profiles p where p.id = auth.uid() and p.is_admin = true)
+  exists (select 1 from profiles p where p.id = auth.uid() and p.is_admin = true)
   );
+exception when duplicate_object then null; end $$;
 
 
 -- ============================================================
@@ -199,20 +211,28 @@ create index if not exists stock_items_customer_idx on stock_items (customer);
 alter table stock_items enable row level security;
 
 drop policy if exists "Signed-in users can read stock items" on stock_items;
-create policy "Signed-in users can read stock items" on stock_items
+do $$ begin
+  create policy "Signed-in users can read stock items" on stock_items
   for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 drop policy if exists "Signed-in users can insert stock items" on stock_items;
-create policy "Signed-in users can insert stock items" on stock_items
+do $$ begin
+  create policy "Signed-in users can insert stock items" on stock_items
   for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 drop policy if exists "Signed-in users can update stock items" on stock_items;
-create policy "Signed-in users can update stock items" on stock_items
+do $$ begin
+  create policy "Signed-in users can update stock items" on stock_items
   for update using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 drop policy if exists "Signed-in users can delete stock items" on stock_items;
-create policy "Signed-in users can delete stock items" on stock_items
+do $$ begin
+  create policy "Signed-in users can delete stock items" on stock_items
   for delete using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 -- Data migration: copy every item out of the existing shared blob into its
 -- own real row. Safe to run even if some rows already exist — on conflict
@@ -649,15 +669,21 @@ insert into storage.buckets (id, name, public)
 values ('job-documents', 'job-documents', false)
 on conflict (id) do nothing;
 
-create policy "Signed-in users can read job documents"
+do $$ begin
+  create policy "Signed-in users can read job documents"
   on storage.objects for select
   using (bucket_id = 'job-documents' and auth.role() = 'authenticated');
-create policy "Signed-in users can upload job documents"
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can upload job documents"
   on storage.objects for insert
   with check (bucket_id = 'job-documents' and auth.role() = 'authenticated');
-create policy "Signed-in users can delete job documents"
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can delete job documents"
   on storage.objects for delete
   using (bucket_id = 'job-documents' and auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 -- 2. The job itself.
 create table if not exists jobs (
@@ -737,23 +763,51 @@ alter table job_processes enable row level security;
 alter table job_documents enable row level security;
 alter table job_notifications enable row level security;
 
-create policy "Signed-in users can read jobs" on jobs for select using (auth.role() = 'authenticated');
-create policy "Signed-in users can add jobs" on jobs for insert with check (auth.role() = 'authenticated');
-create policy "Signed-in users can update jobs" on jobs for update using (auth.role() = 'authenticated');
-create policy "Signed-in users can delete jobs" on jobs for delete using (auth.role() = 'authenticated');
+do $$ begin
+  create policy "Signed-in users can read jobs" on jobs for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can add jobs" on jobs for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can update jobs" on jobs for update using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can delete jobs" on jobs for delete using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
-create policy "Signed-in users can read job processes" on job_processes for select using (auth.role() = 'authenticated');
-create policy "Signed-in users can add job processes" on job_processes for insert with check (auth.role() = 'authenticated');
-create policy "Signed-in users can update job processes" on job_processes for update using (auth.role() = 'authenticated');
-create policy "Signed-in users can delete job processes" on job_processes for delete using (auth.role() = 'authenticated');
+do $$ begin
+  create policy "Signed-in users can read job processes" on job_processes for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can add job processes" on job_processes for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can update job processes" on job_processes for update using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can delete job processes" on job_processes for delete using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
-create policy "Signed-in users can read job documents rows" on job_documents for select using (auth.role() = 'authenticated');
-create policy "Signed-in users can add job documents rows" on job_documents for insert with check (auth.role() = 'authenticated');
-create policy "Signed-in users can delete job documents rows" on job_documents for delete using (auth.role() = 'authenticated');
+do $$ begin
+  create policy "Signed-in users can read job documents rows" on job_documents for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can add job documents rows" on job_documents for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can delete job documents rows" on job_documents for delete using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
-create policy "Signed-in users can read job notifications" on job_notifications for select using (auth.role() = 'authenticated');
-create policy "Signed-in users can add job notifications" on job_notifications for insert with check (auth.role() = 'authenticated');
-create policy "Signed-in users can update job notifications" on job_notifications for update using (auth.role() = 'authenticated');
+do $$ begin
+  create policy "Signed-in users can read job notifications" on job_notifications for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can add job notifications" on job_notifications for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can update job notifications" on job_notifications for update using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 
 -- ============================================================
@@ -1078,13 +1132,25 @@ create index if not exists job_quote_item_invoices_item_idx on job_quote_item_in
 alter table job_quote_items enable row level security;
 alter table job_quote_item_invoices enable row level security;
 
-create policy "Signed-in users can read quote items" on job_quote_items for select using (auth.role() = 'authenticated');
-create policy "Signed-in users can add quote items" on job_quote_items for insert with check (auth.role() = 'authenticated');
-create policy "Signed-in users can update quote items" on job_quote_items for update using (auth.role() = 'authenticated');
-create policy "Signed-in users can delete quote items" on job_quote_items for delete using (auth.role() = 'authenticated');
+do $$ begin
+  create policy "Signed-in users can read quote items" on job_quote_items for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can add quote items" on job_quote_items for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can update quote items" on job_quote_items for update using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can delete quote items" on job_quote_items for delete using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
-create policy "Signed-in users can read quote item invoices" on job_quote_item_invoices for select using (auth.role() = 'authenticated');
-create policy "Signed-in users can add quote item invoices" on job_quote_item_invoices for insert with check (auth.role() = 'authenticated');
+do $$ begin
+  create policy "Signed-in users can read quote item invoices" on job_quote_item_invoices for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can add quote item invoices" on job_quote_item_invoices for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 
 -- ============================================================
@@ -1139,8 +1205,12 @@ create table if not exists job_qty_updates (
 create index if not exists job_qty_updates_job_id_idx on job_qty_updates (job_id);
 
 alter table job_qty_updates enable row level security;
-create policy "Signed-in users can read qty updates" on job_qty_updates for select using (auth.role() = 'authenticated');
-create policy "Signed-in users can add qty updates" on job_qty_updates for insert with check (auth.role() = 'authenticated');
+do $$ begin
+  create policy "Signed-in users can read qty updates" on job_qty_updates for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can add qty updates" on job_qty_updates for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 
 -- ============================================================
@@ -1166,8 +1236,12 @@ create index if not exists job_qty_updates_job_id_idx on job_qty_updates (job_id
 
 alter table job_qty_updates enable row level security;
 
-create policy "Signed-in users can read job qty updates" on job_qty_updates for select using (auth.role() = 'authenticated');
-create policy "Signed-in users can add job qty updates" on job_qty_updates for insert with check (auth.role() = 'authenticated');
+do $$ begin
+  create policy "Signed-in users can read job qty updates" on job_qty_updates for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can add job qty updates" on job_qty_updates for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 
 -- ============================================================
@@ -1260,10 +1334,18 @@ create index if not exists job_process_item_progress_process_idx on job_process_
 -- all blocks everyone, including the app itself.
 alter table job_process_item_progress enable row level security;
 
-create policy "Signed-in users can read process item progress" on job_process_item_progress for select using (auth.role() = 'authenticated');
-create policy "Signed-in users can add process item progress" on job_process_item_progress for insert with check (auth.role() = 'authenticated');
-create policy "Signed-in users can update process item progress" on job_process_item_progress for update using (auth.role() = 'authenticated');
-create policy "Signed-in users can delete process item progress" on job_process_item_progress for delete using (auth.role() = 'authenticated');
+do $$ begin
+  create policy "Signed-in users can read process item progress" on job_process_item_progress for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can add process item progress" on job_process_item_progress for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can update process item progress" on job_process_item_progress for update using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can delete process item progress" on job_process_item_progress for delete using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 
 -- ============================================================
@@ -1322,11 +1404,19 @@ create index if not exists delivery_notes_job_id_idx on delivery_notes (job_id);
 alter table delivery_notes enable row level security;
 alter table delivery_note_items enable row level security;
 
-create policy "Signed-in users can read delivery notes" on delivery_notes for select using (auth.role() = 'authenticated');
-create policy "Signed-in users can add delivery notes" on delivery_notes for insert with check (auth.role() = 'authenticated');
+do $$ begin
+  create policy "Signed-in users can read delivery notes" on delivery_notes for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can add delivery notes" on delivery_notes for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
-create policy "Signed-in users can read delivery note items" on delivery_note_items for select using (auth.role() = 'authenticated');
-create policy "Signed-in users can add delivery note items" on delivery_note_items for insert with check (auth.role() = 'authenticated');
+do $$ begin
+  create policy "Signed-in users can read delivery note items" on delivery_note_items for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can add delivery note items" on delivery_note_items for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 
 -- ============================================================
@@ -1403,8 +1493,12 @@ create index if not exists generated_documents_type_idx on generated_documents(d
 
 alter table generated_documents enable row level security;
 
-create policy "Signed-in users can read generated documents" on generated_documents for select using (auth.role() = 'authenticated');
-create policy "Signed-in users can add generated documents" on generated_documents for insert with check (auth.role() = 'authenticated');
+do $$ begin
+  create policy "Signed-in users can read generated documents" on generated_documents for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can add generated documents" on generated_documents for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 
 -- ============================================================
@@ -1446,20 +1540,28 @@ create index if not exists shortages_job_id_idx on shortages (job_id);
 alter table shortages enable row level security;
 
 drop policy if exists "Signed-in users can read shortages" on shortages;
-create policy "Signed-in users can read shortages" on shortages
+do $$ begin
+  create policy "Signed-in users can read shortages" on shortages
   for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 drop policy if exists "Signed-in users can insert shortages" on shortages;
-create policy "Signed-in users can insert shortages" on shortages
+do $$ begin
+  create policy "Signed-in users can insert shortages" on shortages
   for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 drop policy if exists "Signed-in users can update shortages" on shortages;
-create policy "Signed-in users can update shortages" on shortages
+do $$ begin
+  create policy "Signed-in users can update shortages" on shortages
   for update using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 drop policy if exists "Signed-in users can delete shortages" on shortages;
-create policy "Signed-in users can delete shortages" on shortages
+do $$ begin
+  create policy "Signed-in users can delete shortages" on shortages
   for delete using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 -- One or more people can be the designated shortage handler(s) — always
 -- notified when a shortage is flagged, regardless of which job it's on or
@@ -1510,20 +1612,28 @@ create index if not exists requisitions_item_id_idx on requisitions (item_id);
 alter table requisitions enable row level security;
 
 drop policy if exists "Signed-in users can read requisitions" on requisitions;
-create policy "Signed-in users can read requisitions" on requisitions
+do $$ begin
+  create policy "Signed-in users can read requisitions" on requisitions
   for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 drop policy if exists "Signed-in users can insert requisitions" on requisitions;
-create policy "Signed-in users can insert requisitions" on requisitions
+do $$ begin
+  create policy "Signed-in users can insert requisitions" on requisitions
   for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 drop policy if exists "Signed-in users can update requisitions" on requisitions;
-create policy "Signed-in users can update requisitions" on requisitions
+do $$ begin
+  create policy "Signed-in users can update requisitions" on requisitions
   for update using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 drop policy if exists "Signed-in users can delete requisitions" on requisitions;
-create policy "Signed-in users can delete requisitions" on requisitions
+do $$ begin
+  create policy "Signed-in users can delete requisitions" on requisitions
   for delete using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 -- Data migration: copy every requisition out of the existing shared blob
 -- into its own real row. Safe to run more than once — on conflict does
@@ -1612,20 +1722,28 @@ create index if not exists purchase_orders_supplier_idx on purchase_orders (supp
 alter table purchase_orders enable row level security;
 
 drop policy if exists "Signed-in users can read purchase orders" on purchase_orders;
-create policy "Signed-in users can read purchase orders" on purchase_orders
+do $$ begin
+  create policy "Signed-in users can read purchase orders" on purchase_orders
   for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 drop policy if exists "Signed-in users can insert purchase orders" on purchase_orders;
-create policy "Signed-in users can insert purchase orders" on purchase_orders
+do $$ begin
+  create policy "Signed-in users can insert purchase orders" on purchase_orders
   for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 drop policy if exists "Signed-in users can update purchase orders" on purchase_orders;
-create policy "Signed-in users can update purchase orders" on purchase_orders
+do $$ begin
+  create policy "Signed-in users can update purchase orders" on purchase_orders
   for update using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 drop policy if exists "Signed-in users can delete purchase orders" on purchase_orders;
-create policy "Signed-in users can delete purchase orders" on purchase_orders
+do $$ begin
+  create policy "Signed-in users can delete purchase orders" on purchase_orders
   for delete using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 -- Data migration: copy every PO out of the existing shared blob into its
 -- own real row. Safe to run more than once — on conflict does nothing.
@@ -1686,21 +1804,29 @@ on conflict (id) do nothing;
 -- itself controls who actually sees the Drawings section via the same
 -- permission system as everything else — this is just "you must be logged
 -- in at all" as the outer boundary, same as the rest of the app's data.
-create policy "Signed-in users can read drawing files"
+do $$ begin
+  create policy "Signed-in users can read drawing files"
   on storage.objects for select
   using (bucket_id = 'drawings' and auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
-create policy "Signed-in users can upload drawing files"
+do $$ begin
+  create policy "Signed-in users can upload drawing files"
   on storage.objects for insert
   with check (bucket_id = 'drawings' and auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
-create policy "Signed-in users can update drawing files"
+do $$ begin
+  create policy "Signed-in users can update drawing files"
   on storage.objects for update
   using (bucket_id = 'drawings' and auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
-create policy "Signed-in users can delete drawing files"
+do $$ begin
+  create policy "Signed-in users can delete drawing files"
   on storage.objects for delete
   using (bucket_id = 'drawings' and auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 -- 2. The metadata about each drawing — a real table, not a JSON blob, so it
 -- can be searched and filtered properly as the library grows.
@@ -1725,14 +1851,22 @@ create index if not exists drawings_customer_idx on drawings (customer);
 
 alter table drawings enable row level security;
 
-create policy "Signed-in users can read drawings" on drawings
+do $$ begin
+  create policy "Signed-in users can read drawings" on drawings
   for select using (auth.role() = 'authenticated');
-create policy "Signed-in users can add drawings" on drawings
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can add drawings" on drawings
   for insert with check (auth.role() = 'authenticated');
-create policy "Signed-in users can update drawings" on drawings
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can update drawings" on drawings
   for update using (auth.role() = 'authenticated');
-create policy "Signed-in users can delete drawings" on drawings
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can delete drawings" on drawings
   for delete using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 
 -- ============================================================
@@ -1749,17 +1883,23 @@ insert into storage.buckets (id, name, public)
 values ('asset-attachments', 'asset-attachments', false)
 on conflict (id) do nothing;
 
-create policy "Signed-in users can read asset attachments"
+do $$ begin
+  create policy "Signed-in users can read asset attachments"
   on storage.objects for select
   using (bucket_id = 'asset-attachments' and auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
-create policy "Signed-in users can upload asset attachments"
+do $$ begin
+  create policy "Signed-in users can upload asset attachments"
   on storage.objects for insert
   with check (bucket_id = 'asset-attachments' and auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
-create policy "Signed-in users can delete asset attachments"
+do $$ begin
+  create policy "Signed-in users can delete asset attachments"
   on storage.objects for delete
   using (bucket_id = 'asset-attachments' and auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 -- 2. The history log itself — one row per note or meter reading, per asset.
 create table if not exists asset_history (
@@ -1779,12 +1919,18 @@ create index if not exists asset_history_item_id_idx on asset_history (item_id);
 
 alter table asset_history enable row level security;
 
-create policy "Signed-in users can read asset history" on asset_history
+do $$ begin
+  create policy "Signed-in users can read asset history" on asset_history
   for select using (auth.role() = 'authenticated');
-create policy "Signed-in users can add asset history" on asset_history
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can add asset history" on asset_history
   for insert with check (auth.role() = 'authenticated');
-create policy "Signed-in users can delete asset history" on asset_history
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can delete asset history" on asset_history
   for delete using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 
 -- ============================================================
@@ -1821,14 +1967,22 @@ create index if not exists asset_repairs_item_id_idx on asset_repairs (item_id);
 
 alter table asset_repairs enable row level security;
 
-create policy "Signed-in users can read asset repairs" on asset_repairs
+do $$ begin
+  create policy "Signed-in users can read asset repairs" on asset_repairs
   for select using (auth.role() = 'authenticated');
-create policy "Signed-in users can add asset repairs" on asset_repairs
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can add asset repairs" on asset_repairs
   for insert with check (auth.role() = 'authenticated');
-create policy "Signed-in users can update asset repairs" on asset_repairs
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can update asset repairs" on asset_repairs
   for update using (auth.role() = 'authenticated');
-create policy "Signed-in users can delete asset repairs" on asset_repairs
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "Signed-in users can delete asset repairs" on asset_repairs
   for delete using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 
 -- ============================================================
@@ -1870,20 +2024,28 @@ create index if not exists usage_log_timestamp_idx on usage_log (timestamp);
 alter table usage_log enable row level security;
 
 drop policy if exists "Signed-in users can read usage log" on usage_log;
-create policy "Signed-in users can read usage log" on usage_log
+do $$ begin
+  create policy "Signed-in users can read usage log" on usage_log
   for select using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 drop policy if exists "Signed-in users can insert usage log" on usage_log;
-create policy "Signed-in users can insert usage log" on usage_log
+do $$ begin
+  create policy "Signed-in users can insert usage log" on usage_log
   for insert with check (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 drop policy if exists "Signed-in users can update usage log" on usage_log;
-create policy "Signed-in users can update usage log" on usage_log
+do $$ begin
+  create policy "Signed-in users can update usage log" on usage_log
   for update using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 drop policy if exists "Signed-in users can delete usage log" on usage_log;
-create policy "Signed-in users can delete usage log" on usage_log
+do $$ begin
+  create policy "Signed-in users can delete usage log" on usage_log
   for delete using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
 
 -- Data migration: copy every log entry out of the existing shared blob
 -- into its own real row. Safe to run more than once — on conflict does

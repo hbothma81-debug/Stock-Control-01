@@ -97,3 +97,17 @@ for f in *.sql; do
   [ "$f" = "$OUT" ] && continue
   printf '%s\n' "${ORDER[@]}" | grep -qx "$f" || echo "  $f"
 done
+
+# Several scripts declare the same policy, which Postgres rejects on the
+# second attempt (42710) and which aborts the entire run. Make every policy
+# statement tolerate already existing, so order stops mattering.
+#
+# Git Bash on Windows does not pick up the installer's PATH entry, so fall
+# back to the standard install location before giving up.
+NODE=node
+command -v node >/dev/null 2>&1 || NODE="/c/Program Files/nodejs/node.exe"
+if [ ! -x "$NODE" ] && ! command -v node >/dev/null 2>&1; then
+  echo "Could not find node — setup-ALL.sql is generated but NOT de-duplicated." >&2
+  exit 1
+fi
+"$NODE" make-policies-idempotent.cjs "$OUT"
