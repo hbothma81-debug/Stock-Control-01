@@ -2526,6 +2526,23 @@ export default function StockControl() {
   // notification possible) and the plain operator text alongside it, so
   // anything that still displays operator as text keeps working exactly
   // as before, without needing every display spot updated at once.
+  // Lets one job depart from the standard flow — a part that needs
+  // painting before assembly, say. Only this job is affected: the Stock
+  // Manager order is untouched, and because toggleNewJobProcess places new
+  // processes relative to what's already selected, ticking another one
+  // afterwards slots it in around this adjustment instead of undoing it.
+  function moveNewJobProcess(processName, direction) {
+    setNewJobForm((f) => {
+      const from = f.selectedProcesses.findIndex((p) => p.name === processName);
+      const to = from + direction;
+      if (from === -1 || to < 0 || to >= f.selectedProcesses.length) return f;
+      const next = [...f.selectedProcesses];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return { ...f, selectedProcesses: next };
+    });
+  }
+
   function updateNewJobProcessAssignee(processName, personId) {
     const person = (people || []).find((p) => p.id === personId);
     setNewJobForm((f) => ({
@@ -13752,9 +13769,40 @@ export default function StockControl() {
               </div>
               {newJobForm.selectedProcesses.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
-                  {newJobForm.selectedProcesses.map((sp) => (
+                  <div style={S.roleHint}>
+                    Numbered in the order work moves through the shop — each stage opens up as the one before it is completed. This follows the
+                    factory flow set in Stock Manager; use the arrows if this job needs a different sequence.
+                  </div>
+                  {newJobForm.selectedProcesses.map((sp, idx) => (
                     <div key={sp.name} style={{ marginBottom: 4 }}>
-                      <span style={{ fontSize: 14, fontWeight: 600 }}>{sp.name}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontSize: 12, color: C.muted, flexShrink: 0, minWidth: 16 }}>{idx + 1}.</span>
+                        <span style={{ fontSize: 14, fontWeight: 600, flex: 1 }}>{sp.name}</span>
+                        <button
+                          type="button"
+                          className="stk-btn"
+                          style={{ ...S.managerDelete, opacity: idx === 0 ? 0.25 : 1, cursor: idx === 0 ? "not-allowed" : "pointer" }}
+                          disabled={idx === 0}
+                          title="Do this stage earlier on this job"
+                          onClick={() => moveNewJobProcess(sp.name, -1)}
+                        >
+                          <ChevronUp size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          className="stk-btn"
+                          style={{
+                            ...S.managerDelete,
+                            opacity: idx === newJobForm.selectedProcesses.length - 1 ? 0.25 : 1,
+                            cursor: idx === newJobForm.selectedProcesses.length - 1 ? "not-allowed" : "pointer",
+                          }}
+                          disabled={idx === newJobForm.selectedProcesses.length - 1}
+                          title="Do this stage later on this job"
+                          onClick={() => moveNewJobProcess(sp.name, 1)}
+                        >
+                          <ChevronDown size={15} />
+                        </button>
+                      </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
                         <select
                           style={{ ...S.input, flex: "1 1 180px" }}
