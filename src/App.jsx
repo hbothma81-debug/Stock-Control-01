@@ -894,6 +894,10 @@ export default function StockControl() {
   // about that item — comments, full specs, and every action — on its own,
   // matching the same list-then-detail pattern used everywhere else now.
   const [selectedItemDetail, setSelectedItemDetail] = useState(null);
+  // Which grade/customer/manufacturer group is open, showing that group's
+  // compact item cards — the middle level between the group list and one
+  // item's own detail page.
+  const [selectedGradeGroup, setSelectedGradeGroup] = useState(null);
   const [showArchive, setShowArchive] = useState(false);
   const [showLowStock, setShowLowStock] = useState(false);
   const [archiveTypeFilter, setArchiveTypeFilter] = useState("");
@@ -956,7 +960,6 @@ export default function StockControl() {
     return <Check size={13} strokeWidth={3} style={{ color: C.accentFinished, marginLeft: 4, flexShrink: 0 }} />;
   }
   const [form, setForm] = useState(emptyForm);
-  const [collapsed, setCollapsed] = useState({});
   const [showManager, setShowManager] = useState(false);
   const [managerTab, setManagerTab] = useState(null);
   const [managerInput, setManagerInput] = useState("");
@@ -1586,6 +1589,7 @@ export default function StockControl() {
   // elsewhere in the app.
   useEffect(() => {
     setSelectedItemDetail(null);
+    setSelectedGradeGroup(null);
     setAssetManufacturerOpen(null);
     setAssetDetailOpen(null);
   }, [tab]);
@@ -1643,7 +1647,8 @@ export default function StockControl() {
     markInvoicedModal || deliveryNoteBatchModal || copyJobModal || previewItem ||
     showAddStockItemModal || showStockImportModal || editProcessesModal || productionSelectedDept ||
     productionSelectedProcessId || showManager || requisitionTarget || showRequisitionPicker ||
-    assetManufacturerOpen || assetDetailOpen || serviceNowItem || repairListItem
+    assetManufacturerOpen || assetDetailOpen || serviceNowItem || repairListItem ||
+    selectedGradeGroup || selectedItemDetail
   );
   const modalWasOpenRef = useRef(false);
   const closingViaBackRef = useRef(false);
@@ -1667,6 +1672,8 @@ export default function StockControl() {
     setManagerTab(null);
     closeRequisition();
     closeRequisitionPicker();
+    setSelectedGradeGroup(null);
+    setSelectedItemDetail(null);
     setAssetManufacturerOpen(null);
     setAssetDetailOpen(null);
     closeServiceNow();
@@ -6120,10 +6127,6 @@ export default function StockControl() {
     reader.readAsText(file);
   }
 
-  function toggleGrade(key) {
-    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
-  }
-
   function addItem(e) {
     e.preventDefault();
     if (matchedExisting && !allowDuplicate) return;
@@ -9110,25 +9113,88 @@ export default function StockControl() {
             {query ? "Nothing matches that search." : "Nothing here yet — add an item to get started."}
           </div>
         )}
-        {grouped.map(([grade, list]) => {
-          const key = tab + ":" + grade;
-          const isCollapsed = !!collapsed[key];
-          return (
-            <div key={key} style={S.gradeBlock}>
-              <button className="stk-grade" style={S.gradeHeader} onClick={() => toggleGrade(key)}>
-                <ChevronDown size={15} style={{ transform: isCollapsed ? "rotate(-90deg)" : "none", transition: "transform .15s" }} />
-                <span style={S.gradeTitle}>{grade}</span>
+        {!selectedGradeGroup ? (
+          // Level 1: groups, collapsed — tap one to open its items, same
+          // pattern as Sections and Assets manufacturers.
+          <div style={S.managerListFullPage}>
+            {grouped.map(([grade, list]) => (
+              <button
+                key={grade}
+                type="button"
+                className="stk-btn"
+                style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
+                onClick={() => setSelectedGradeGroup(grade)}
+              >
+                <span style={S.itemName}>{grade}</span>
                 <span style={S.gradeCount}>{list.length}</span>
               </button>
-              {!isCollapsed && (
-                <div style={S.gradeItems}>
-                  {list.map((it) => {
-                    const low = isLowStock(it);
-                    const pw = tab === "plate" ? plateWeight(it) : null;
-                    const sw = tab === "structural" ? structuralWeight(it) : null;
-                    const cw = tab === "cncBar" ? cncBarWeight(it) : null;
-                    const linkedReq = tab !== "custom" ? activeRequisitionForItem(it.id) : null;
-                    return (
+            ))}
+          </div>
+        ) : (() => {
+          const groupEntry = grouped.find(([g]) => g === selectedGradeGroup);
+          const list = groupEntry ? groupEntry[1] : [];
+          return !selectedItemDetail ? (
+            // Level 2: this group's items, compact cards — name and
+            // quantity only, with the same low-stock/requisition flag
+            // shown everywhere else.
+            <>
+              <button
+                type="button"
+                className="stk-btn"
+                style={{ ...S.prominentBackBtn, marginBottom: 10 }}
+                onClick={() => setSelectedGradeGroup(null)}
+              >
+                <ChevronLeft size={18} strokeWidth={2.5} /> Back to {TABS.find((t) => t.key === tab)?.label || "list"}
+              </button>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>{selectedGradeGroup}</div>
+              <div style={S.managerListFullPage}>
+                {list.length === 0 && <div style={S.empty}>Nothing here.</div>}
+                {list.map((it) => {
+                  const low = isLowStock(it);
+                  const linkedReq = tab !== "custom" ? activeRequisitionForItem(it.id) : null;
+                  return (
+                    <button
+                      key={it.id}
+                      type="button"
+                      className="stk-btn"
+                      style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}
+                      onClick={() => setSelectedItemDetail(it.id)}
+                    >
+                      <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        {(tab === "custom" || tab === "stores") && it.partNumber && <span style={S.partTag}>{it.partNumber}</span>}
+                        <span style={S.itemName}>{it.name}</span>
+                        {linkedReq && <ReqFlag req={linkedReq} onClick={() => handleFlagClick(linkedReq)} />}
+                      </span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {low && <AlertTriangle size={13} strokeWidth={2.5} color={C.danger} />}
+                        <span style={{ color: low ? C.danger : C.text, fontWeight: 600 }}>{it.qty}</span>
+                        <span style={{ color: C.muted, fontSize: 12.5 }}>{it.trackLength ? "pcs" : it.unit}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            // Level 3: one item's full detail — the exact same rendering
+            // this tab has always used, just scoped to a single item
+            // instead of mapped across the whole group.
+            <>
+              <button
+                type="button"
+                className="stk-btn"
+                style={{ ...S.prominentBackBtn, marginBottom: 10 }}
+                onClick={() => setSelectedItemDetail(null)}
+              >
+                <ChevronLeft size={18} strokeWidth={2.5} /> Back to {selectedGradeGroup}
+              </button>
+              {list.filter((it) => it.id === selectedItemDetail).map((it) => {
+            const low = isLowStock(it);
+            const pw = tab === "plate" ? plateWeight(it) : null;
+            const sw = tab === "structural" ? structuralWeight(it) : null;
+            const cw = tab === "cncBar" ? cncBarWeight(it) : null;
+            const linkedReq = tab !== "custom" ? activeRequisitionForItem(it.id) : null;
+            return (
                       <div
                         key={it.id}
                         className="stk-row"
@@ -9286,11 +9352,9 @@ export default function StockControl() {
                       </div>
                     );
                   })}
-                </div>
-              )}
-            </div>
+            </>
           );
-        })}
+        })()}
           </>
         )}
       </div>
