@@ -48,6 +48,7 @@ ORDER=(
   setup-shortages-table.sql
   setup-shortage-priority.sql
   setup-shortage-rework.sql
+  setup-shortage-items.sql
   setup-requisitions-table.sql
   setup-purchase-orders-table.sql
   setup-drawings.sql
