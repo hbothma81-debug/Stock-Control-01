@@ -26,6 +26,7 @@ const MANAGER_TABS = [
   { key: "cncGrades", label: "CNC Bar Grades" },
   { key: "staffDepartments", label: "Staff Departments" },
   { key: "jobProcessTypes", label: "Job Process Types" },
+  { key: "laserMaterials", label: "Laser Materials" },
   { key: "customers", label: "Customers" },
   { key: "stockCodes", label: "Stock Codes" },
   { key: "storeCategories", label: "Store Categories" },
@@ -103,6 +104,7 @@ function itemToDbRow(item) {
 const MASTER_STRING_LISTS = [
   "sizes", "sectionTypes", "salesPeople", "customers", "staffDepartments", "jobProcessTypes",
   "storeCategories", "fastenerCategories", "fastenerGrades", "fastenerFinishes", "sheetNames",
+  "laserMaterials",
 ];
 // Lists where the order on screen is the order that matters, not just how
 // they happen to be stored. Job Process Types is the factory flow: the
@@ -112,7 +114,12 @@ const MASTER_STRING_LISTS = [
 // sort_order. Every other list keeps its existing add-to-the-end
 // behaviour, which also avoids rewriting hundreds of rows on lists like
 // customers every time one is added.
-const ORDERED_STRING_LISTS = ["jobProcessTypes"];
+//
+// Laser Materials is ordered for a different reason: it sets how the
+// cut list groups programs at the machine. Left alphabetical, 10mm
+// would sort next to 1.2mm, so the order has to be the shop's, not the
+// alphabet's.
+const ORDERED_STRING_LISTS = ["jobProcessTypes", "laserMaterials"];
 
 // Which department a shortage goes to was decided by comparing the process
 // name against the exact strings "Nesting" and "Laser Operator". Process
@@ -490,6 +497,10 @@ const DEFAULT_MASTER = {
     "Welding", "Grinding/Polishing", "Wet Spray", "Powder Coating", "Galvanising",
     "Plating", "Buy - out", "Assembly", "Quality Check", "Dispatch",
   ],
+  // What a laser program is cut from, e.g. "1.2mm MS". Deliberately
+  // empty: these are thickness-and-grade combinations only the shop
+  // knows, and a guessed list would just be wrong.
+  laserMaterials: [],
   nextJobNumber: 1,
   nextDeliveryNoteNumber: 1,
   nextFastenerNumber: 1,
@@ -12506,12 +12517,11 @@ export default function StockControl() {
                 </div>
 
                 {ORDERED_STRING_LISTS.includes(managerTab) && (
-                  <>
-                    <div style={{ ...S.roleHint, marginTop: 10 }}>
-                      This order is the factory flow — top to bottom is the sequence work moves through the shop. Use the arrows to change it.
-                      Every job follows this order, new or already running, and every department is listed in it.
-                    </div>
-                  </>
+                  <div style={{ ...S.roleHint, marginTop: 10 }}>
+                    {managerTab === "laserMaterials"
+                      ? "This order is how the laser's cut list groups programs together. Put them in the order that suits the machine — thinnest first, say — because left alphabetical, 10mm sorts next to 1.2mm."
+                      : "This order is the factory flow — top to bottom is the sequence work moves through the shop. Use the arrows to change it. Every job follows this order, new or already running, and every department is listed in it."}
+                  </div>
                 )}
 
                 {master[managerTab].length > 8 && (
@@ -12584,7 +12594,7 @@ export default function StockControl() {
                                   className="stk-btn"
                                   style={{ ...S.managerDelete, opacity: pos === 0 ? 0.25 : 1, cursor: pos === 0 ? "not-allowed" : "pointer" }}
                                   disabled={pos === 0}
-                                  title="Move earlier in the factory flow"
+                                  title={managerTab === "laserMaterials" ? "Move up the cut list" : "Move earlier in the factory flow"}
                                   onClick={() => moveMasterEntry(entry, -1)}
                                 >
                                   <ChevronUp size={15} />
@@ -12594,7 +12604,7 @@ export default function StockControl() {
                                   className="stk-btn"
                                   style={{ ...S.managerDelete, opacity: pos === fullList.length - 1 ? 0.25 : 1, cursor: pos === fullList.length - 1 ? "not-allowed" : "pointer" }}
                                   disabled={pos === fullList.length - 1}
-                                  title="Move later in the factory flow"
+                                  title={managerTab === "laserMaterials" ? "Move down the cut list" : "Move later in the factory flow"}
                                   onClick={() => moveMasterEntry(entry, 1)}
                                 >
                                   <ChevronDown size={15} />
