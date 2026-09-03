@@ -8646,7 +8646,26 @@ export default function StockControl() {
                 // A search is a deliberate, specific request though — it
                 // shows every department that job is genuinely in, not
                 // just the ones with something "ready" right now.
-                .filter(({ readyCount, hasPendingShortage }) => readyCount > 0 || hasPendingShortage);
+                // A search narrows to what actually matches. Otherwise
+                // every department the person handles is listed, empty or
+                // not: the shop floor is a fixed set of stations, and one
+                // vanishing because it happens to have no work makes the
+                // list a different shape every time you look at it. An
+                // empty department showing "0" is information; an absent
+                // one is a question.
+                .filter(({ readyCount, hasPendingShortage }) => (q ? readyCount > 0 : true) || hasPendingShortage)
+                // In factory-flow order, the order set in Stock Manager,
+                // so the list reads the way work moves through the shop.
+                // Anything no longer in that list sorts last rather than
+                // to the front.
+                .sort((a, b) => {
+                  const flow = master?.jobProcessTypes || [];
+                  const rank = (t) => {
+                    const i = flow.indexOf(t);
+                    return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+                  };
+                  return rank(a.procType) - rank(b.procType);
+                });
               return (
                 <>
                   {!productionLoading && visibleDepts.length === 0 && (
