@@ -3058,10 +3058,26 @@ export default function StockControl() {
 
   // Job stages in factory-flow order. Stable, so two stages of the same
   // name keep their relative position.
-  function inFlowOrder(processes) {
+  //
+  // A finished job is left in the order it was stored in. What happened on
+  // a job that is already done is a record, not a plan: reshuffling it to
+  // match a flow set afterwards would rewrite history, and it is why a
+  // completed job's checklist appeared to scramble itself.
+  function isFrozenJob(job) {
+    return job?.status === "complete" || job?.status === "invoiced" || job?.status === "cancelled";
+  }
+
+  function inFlowOrder(processes, job) {
+    const frozen = isFrozenJob(job);
     return (processes || [])
       .map((p, i) => ({ p, i }))
-      .sort((a, b) => flowRank(a.p.process_name) - flowRank(b.p.process_name) || Number(a.p.sort_order) - Number(b.p.sort_order) || a.i - b.i)
+      .sort((a, b) => {
+        if (!frozen) {
+          const r = flowRank(a.p.process_name) - flowRank(b.p.process_name);
+          if (r !== 0) return r;
+        }
+        return Number(a.p.sort_order) - Number(b.p.sort_order) || a.i - b.i;
+      })
       .map(({ p }) => p);
   }
 
@@ -3145,14 +3161,21 @@ export default function StockControl() {
       // access to — every job with that process still outstanding shows
       // up, not just the ones ready right now, so a department can see
       // its whole upcoming workload, not only this instant's queue.
-      // Created in factory-flow order, so the departments come out of here
-      // already sequenced rather than in whatever order this person's
-      // permissions happened to be ticked. The render sorts them too; doing
-      // it here as well means the order is right even on the first paint,
-      // before anything re-renders.
+      // Built by walking the Job Process Types list and keeping the ones
+      // this person handles — not by walking their permissions and trying
+      // to sort them afterwards.
+      //
+      // Sorting after the fact only works while every name in someone's
+      // access still exists in the list. A name left behind by a rename
+      // matches nothing, so it cannot be placed in the order; several of
+      // them tie and the whole list falls back to the order the
+      // permissions happened to be ticked in. Taking the order from the
+      // list itself cannot fail that way: the sequence is the list's, and
+      // a stale permission simply produces no department, which is the
+      // truth — that department no longer exists.
       const byProcessType = {};
-      for (const procType of [...profile.allowedProcessTypes].sort((a, b) => flowRank(a) - flowRank(b))) {
-        byProcessType[procType] = [];
+      for (const procType of master?.jobProcessTypes || []) {
+        if (profile.allowedProcessTypes.includes(procType)) byProcessType[procType] = [];
       }
 
       for (const job of activeJobs) {
@@ -4425,7 +4448,7 @@ export default function StockControl() {
       // against the same job, so without this the sheet lists nesting
       // twice with nothing saying why. The runs are summarised under
       // Shortages instead, where the context is.
-      body: inFlowOrder(processes.filter((p) => !p.shortage_id)).map((p) => [
+      body: inFlowOrder(processes.filter((p) => !p.shortage_id), job).map((p) => [
         p.process_name,
         p.operator || "",
         p.is_complete ? `Yes — ${p.completed_by || ""}` : "",
@@ -8689,14 +8712,10 @@ export default function StockControl() {
                 // A search is a deliberate, specific request though — it
                 // shows every department that job is genuinely in, not
                 // just the ones with something "ready" right now.
-                // A search narrows to what actually matches. Otherwise
-                // every department the person handles is listed, empty or
-                // not: the shop floor is a fixed set of stations, and one
-                // vanishing because it happens to have no work makes the
-                // list a different shape every time you look at it. An
-                // empty department showing "0" is information; an absent
-                // one is a question.
-                .filter(({ readyCount, hasPendingShortage }) => (q ? readyCount > 0 : true) || hasPendingShortage)
+                // Only departments with work in them. A station with
+                // nothing at it is noise on a screen someone is using to
+                // decide what to do next.
+                .filter(({ readyCount, hasPendingShortage }) => readyCount > 0 || hasPendingShortage)
                 // In factory-flow order, the order set in Stock Manager,
                 // so the list reads the way work moves through the shop.
                 // Anything no longer in that list sorts last rather than
@@ -13661,7 +13680,11 @@ export default function StockControl() {
               <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                   <label style={S.label}>Process checklist</label>
-                  {(isAdmin || profile?.isSalesPerson) && !jobIsLocked && (
+                  {/* Uses canEditThisJob rather than testing the lock
+                      again, so the admin override actually reaches this
+                      button. Gating it separately is what left an invoiced
+                      job with no way to open the editor at all. */}
+                  {(isAdmin || profile?.isSalesPerson) && canEditThisJob && (
                     <button
                       type="button"
                       className="stk-btn"
@@ -13669,6 +13692,7 @@ export default function StockControl() {
                       onClick={() => openEditProcessesModal(jobDetail.job, jobDetail.processes)}
                     >
                       <Pencil size={12} /> Edit processes
+                      {editingLockedJob && " (invoiced)"}
                     </button>
                   )}
                 </div>
@@ -13679,7 +13703,7 @@ export default function StockControl() {
                       two interleave and the checklist shows nesting twice
                       with no way to tell which is the job and which is the
                       re-cut. The runs get their own section below. */}
-                  {inFlowOrder(jobDetail.processes.filter((p) => !p.shortage_id)).map((p) => (
+                  {inFlowOrder(jobDetail.processes.filter((p) => !p.shortage_id), jobDetail.job).map((p) => (
                     <div key={p.id} style={{ ...S.managerRow, alignItems: "flex-start" }}>
                       <div style={{ flex: 1 }}>
                         <label style={{ ...S.checkRow, fontWeight: 600 }}>
@@ -13805,7 +13829,7 @@ export default function StockControl() {
                           </div>
                         )}
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-                          {inFlowOrder(stages).map((p) => (
+                          {inFlowOrder(stages, jobDetail.job).map((p) => (
                             <span
                               key={p.id}
                               style={{
