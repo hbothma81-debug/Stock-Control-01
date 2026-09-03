@@ -12103,6 +12103,17 @@ export default function StockControl() {
                           const perM = d ? (Math.PI / 4000) * d * d * findFactor("cncGrades", effectiveGrade) : 0;
                           const currentPerKg = findPrice("cncGrades", effectiveGrade);
                           const displayValue = priceUnitMode === "perKg" ? currentPerKg : currentPerKg * perM;
+                          // Same trap as the sections above: without a weight per
+                          // metre there is nothing to divide by, and writing the
+                          // zero would wipe the grade rate everywhere it is used.
+                          if (priceUnitMode === "perUnit" && !(perM > 0)) {
+                            return (
+                              <div style={{ ...S.roleHint, color: C.danger }}>
+                                Enter a diameter first — without it there is no weight per metre to price against. Or
+                                switch to R/kg and enter the rate by weight.
+                              </div>
+                            );
+                          }
                           return (
                             <>
                               <input
@@ -12113,7 +12124,7 @@ export default function StockControl() {
                                 placeholder="0"
                                 onChange={(e) => {
                                   const v = parseFloat(e.target.value) || 0;
-                                  const newPerKg = priceUnitMode === "perKg" ? v : perM > 0 ? v / perM : 0;
+                                  const newPerKg = priceUnitMode === "perKg" ? v : v / perM;
                                   setMaterialPrice("cncGrades", effectiveGrade, newPerKg);
                                 }}
                               />
@@ -12168,6 +12179,20 @@ export default function StockControl() {
                           const currentPerM = findPrice("sections", effectiveSection);
                           const currentPerKg = kgPerM ? currentPerM / kgPerM : 0;
                           const displayValue = priceUnitMode === "perKg" ? currentPerKg : currentPerM;
+                          // Pricing by weight needs a kg/m to convert with. Without
+                          // one the conversion is a multiply by zero, and the old
+                          // behaviour wrote that zero straight over the rate -- so
+                          // typing a price by weight silently wiped the price per
+                          // metre for that section everywhere it was used. Say what
+                          // is missing instead of offering a box that destroys data.
+                          if (priceUnitMode === "perKg" && !kgPerM) {
+                            return (
+                              <div style={{ ...S.roleHint, color: C.danger }}>
+                                {effectiveSection} has no kg/m set, so it cannot be priced by weight. Set it under Stock
+                                Manager → Sections, or switch to R/m and enter the rate per metre.
+                              </div>
+                            );
+                          }
                           return (
                             <>
                               <input
@@ -12178,14 +12203,14 @@ export default function StockControl() {
                                 placeholder="0"
                                 onChange={(e) => {
                                   const v = parseFloat(e.target.value) || 0;
-                                  const newPerM = priceUnitMode === "perKg" ? v * (kgPerM || 0) : v;
+                                  const newPerM = priceUnitMode === "perKg" ? v * kgPerM : v;
                                   setMaterialPrice("sections", effectiveSection, newPerM);
                                 }}
                               />
                               <div style={S.roleHint}>
                                 {kgPerM
                                   ? `${kgPerM.toFixed(2)}kg per metre — this updates the ${effectiveSection} rate everywhere it's used.`
-                                  : "This section has no kg/m set yet in Stock Manager."}
+                                  : `Priced per metre. ${effectiveSection} has no kg/m set in Stock Manager, so it cannot be priced by weight.`}
                               </div>
                             </>
                           );
