@@ -10,10 +10,11 @@ import {
   Wrench, Users, Eye, EyeOff, ShoppingCart, ClipboardList, Check, Package, Upload, RefreshCw,
 } from "lucide-react";
 import { F, C, S, THEME_CSS } from "./theme.js";
-import { TABS, NAV_TABS, TAB_GROUPS } from "./constants.js";
+import { TABS, NAV_TABS, TAB_GROUPS, LASER_MACHINE } from "./constants.js";
 import UserManagement from "./UserManagement.jsx";
 import CompanyDetails from "./manager/CompanyDetails.jsx";
 import EditableName from "./EditableName.jsx";
+import NestingView from "./laser/NestingView.jsx";
 
 // window.storage is installed in main.jsx before this component ever
 // renders — backed by Supabase. See src/lib/storage.js.
@@ -927,6 +928,9 @@ export default function StockControl() {
   const [repairListResolvedOpen, setRepairListResolvedOpen] = useState(false);
   const [jobsList, setJobsList] = useState(null);
   const [productionQueue, setProductionQueue] = useState(null);
+  // Everything the Laser 4kw tab needs: the programs, which jobs are on
+  // them, and the job stages so "waiting to be nested" can be worked out.
+  const [laserData, setLaserData] = useState(null);
   const [invoicedSectionOpen, setInvoicedSectionOpen] = useState(false);
   const [notificationsViewedOpen, setNotificationsViewedOpen] = useState(false);
   const [jobsCompletedSectionOpen, setJobsCompletedSectionOpen] = useState(false);
@@ -1780,6 +1784,10 @@ export default function StockControl() {
   useEffect(() => {
     if (tab === "production" && productionQueue === null && profile?.allowedProcessTypes?.length) fetchProductionQueue();
   }, [tab, profile]);
+
+  useEffect(() => {
+    if (tab === "laser4kw" && laserData === null) fetchLaserData();
+  }, [tab, laserData]);
 
   // Dropdown menus (the Stock/Procurement/Records group menus, the
   // customer/section-type filter) should always close on an outside
@@ -3099,6 +3107,208 @@ export default function StockControl() {
         return Number(a.p.sort_order) - Number(b.p.sort_order) || a.i - b.i;
       })
       .map(({ p }) => p);
+  }
+
+  // ---------- Laser 4kw: SigmaNest programs ----------
+
+  // Jobs come from jobsList, which is already loaded for everyone as soon
+  // as they sign in, so this only fetches what is specific to the tab.
+  async function fetchLaserData() {
+    if (!supabase) return;
+    try {
+      const [programs, links, processes] = await Promise.all([
+        fetchAllRows("laser_programs", { orderBy: "created_at", ascending: false }),
+        fetchAllRows("laser_program_jobs", { orderBy: "created_at" }),
+        fetchAllRows("job_processes", { select: "id, job_id, process_name, is_complete, shortage_id" }),
+      ]);
+      setLaserData({ programs: programs || [], links: links || [], processes: processes || [] });
+    } catch (err) {
+      console.error("Failed to load laser programs:", err);
+      setLaserData({ programs: [], links: [], processes: [] });
+    }
+  }
+
+  // Shapes the raw rows into what the screen needs. Cancelled programs
+  // drop out here rather than being deleted, so one that was already cut
+  // still exists in the history.
+  function laserNestingData() {
+    const d = laserData || { programs: [], links: [], processes: [] };
+    const jobs = jobsList || [];
+    const activeJobs = jobs.filter((j) => j.status === "in_progress");
+    const jobById = new Map(jobs.map((j) => [j.id, j]));
+
+    const linksByProgram = {};
+    for (const l of d.links) {
+      if (!linksByProgram[l.program_id]) linksByProgram[l.program_id] = [];
+      linksByProgram[l.program_id].push({ ...l, job_number: jobById.get(l.job_id)?.job_number || "" });
+    }
+
+    const programs = d.programs
+      .filter((p) => !p.is_cancelled)
+      .map((p) => ({ ...p, jobs: linksByProgram[p.id] || [] }));
+
+    const programsByJob = {};
+    for (const p of programs) {
+      for (const l of p.jobs) {
+        if (!programsByJob[l.job_id]) programsByJob[l.job_id] = [];
+        programsByJob[l.job_id].push(p);
+      }
+    }
+
+    // A job is waiting to be nested while its own nesting stage is still
+    // open. Matched on the name the way shortages are routed, so a shop
+    // calling it "Nesting" or "Plate Nesting" both work. Catch-up stages
+    // belonging to a shortage are skipped -- those arrive in step 5.
+    const jobsToNest = [];
+    for (const job of activeJobs) {
+      const process = d.processes.find(
+        (pr) =>
+          pr.job_id === job.id &&
+          !pr.shortage_id &&
+          isNestingProcess(pr.process_name) &&
+          !pr.is_complete
+      );
+      if (process) jobsToNest.push({ job, process, onPrograms: programsByJob[job.id] || [] });
+    }
+    jobsToNest.sort(
+      (a, b) => new Date(a.job.due_date || "2999-01-01") - new Date(b.job.due_date || "2999-01-01")
+    );
+
+    return { jobsToNest, programs, allJobs: activeJobs };
+  }
+
+  // The history is worth having but never worth blocking a change for: a
+  // missing line in the log beats a program that would not save.
+  async function logProgramEvent(programId, action, detail) {
+    try {
+      await supabase.from("laser_program_events").insert({
+        program_id: programId,
+        action,
+        detail: detail || "",
+        acted_by: roleLabel,
+        acted_by_id: currentUser?.id || null,
+      });
+    } catch (err) {
+      console.error("Failed to record program history:", err);
+    }
+  }
+
+  async function createLaserProgram({ program_number, material, machine, jobs }) {
+    if (!supabase) return false;
+    try {
+      const { data, error } = await supabase
+        .from("laser_programs")
+        .insert({ program_number, material, machine, created_by: roleLabel })
+        .select("id")
+        .single();
+      if (error) throw error;
+      if (jobs.length) {
+        const { error: linkError } = await supabase.from("laser_program_jobs").insert(
+          jobs.map((j) => ({
+            program_id: data.id,
+            job_id: j.job_id,
+            sigmanest_number: j.sigmanest_number,
+            created_by: roleLabel,
+          }))
+        );
+        if (linkError) throw linkError;
+      }
+      await logProgramEvent(data.id, "created", material + " - " + jobs.length + " job(s)");
+      await fetchLaserData();
+      return true;
+    } catch (err) {
+      console.error("Failed to create laser program:", err);
+      alert(
+        err?.code === "23505"
+          ? "Program " + program_number + " already exists and has not been cancelled. Use a different number, or cancel the old one first."
+          : "That didn't save — check your connection and try again."
+      );
+      return false;
+    }
+  }
+
+  async function updateLaserProgram(program, fields) {
+    try {
+      const { error } = await supabase.from("laser_programs").update(fields).eq("id", program.id);
+      if (error) throw error;
+      const what = Object.entries(fields).map(([k, v]) => k + " -> " + v).join(", ");
+      await logProgramEvent(program.id, "edited", what);
+      flashSaved("program-" + program.id);
+      await fetchLaserData();
+    } catch (err) {
+      console.error("Failed to update laser program:", err);
+      alert(err?.code === "23505" ? "Another live program already has that number." : "That didn't save — check your connection and try again.");
+      await fetchLaserData();
+    }
+  }
+
+  async function cancelLaserProgram(program) {
+    const ok = window.confirm(
+      "Cancel program " + program.program_number + "? It stays on record with its history, but comes off the cut list."
+    );
+    if (!ok) return;
+    try {
+      const { error } = await supabase
+        .from("laser_programs")
+        .update({ is_cancelled: true, cancelled_by: roleLabel, cancelled_at: new Date().toISOString() })
+        .eq("id", program.id);
+      if (error) throw error;
+      await logProgramEvent(program.id, "cancelled", program.program_number);
+      await fetchLaserData();
+    } catch (err) {
+      console.error("Failed to cancel laser program:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  async function addJobToLaserProgram(program, job) {
+    try {
+      const { error } = await supabase.from("laser_program_jobs").insert({
+        program_id: program.id,
+        job_id: job.id,
+        sigmanest_number: job.laser_job_reference || "",
+        created_by: roleLabel,
+      });
+      if (error) throw error;
+      await logProgramEvent(program.id, "job added", job.job_number);
+      await fetchLaserData();
+    } catch (err) {
+      console.error("Failed to add job to laser program:", err);
+      alert(
+        err?.code === "23505" ? job.job_number + " is already on this program." : "That didn't save — check your connection and try again."
+      );
+    }
+  }
+
+  async function removeJobFromLaserProgram(program, link) {
+    try {
+      const { error } = await supabase.from("laser_program_jobs").delete().eq("id", link.id);
+      if (error) throw error;
+      await logProgramEvent(program.id, "job removed", link.job_number || link.sigmanest_number);
+      await fetchLaserData();
+    } catch (err) {
+      console.error("Failed to remove job from laser program:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  // Ticked when there are no more programs coming for that job. Without
+  // it the app cannot tell a job with parts still to nest apart from one
+  // that is finished, so the laser stage would complete too early.
+  async function markJobFullyNested(job, process) {
+    try {
+      const { error } = await supabase
+        .from("job_processes")
+        .update({ is_complete: true, completed_by: roleLabel, completed_at: new Date().toISOString() })
+        .eq("id", process.id);
+      if (error) throw error;
+      flashSaved("nesting-" + process.id);
+      await fetchLaserData();
+      if (productionQueue !== null) fetchProductionQueue();
+    } catch (err) {
+      console.error("Failed to mark nesting complete:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
   }
 
   function isProcessActionable(process, jobProcesses) {
@@ -5279,6 +5489,11 @@ export default function StockControl() {
     if (section === "invoicing") return !!profile?.canManageInvoicing;
     if (section === "notifications") return !!profile;
     if (section === "production") return !!profile?.allowedProcessTypes?.length;
+    // The programs tab belongs to whoever nests or cuts. Matched on the
+    // name rather than a fixed list, so renaming a department in Stock
+    // Manager cannot quietly take the tab away from the people using it.
+    if (section === "laser4kw")
+      return !!profile?.allowedProcessTypes?.some((t) => isNestingProcess(t) || isLaserProcess(t));
     if (section === "usageLog") return !!profile?.canViewUsageLog;
     if (section === "shortageCenter") return !!profile?.isShortageHandler;
     return profile ? !!profile.permissions?.[section]?.view : false;
@@ -8730,6 +8945,31 @@ export default function StockControl() {
               );
             })()}
         </div>
+      ) : tab === "laser4kw" ? (
+        laserData === null || jobsList === null ? (
+          <div style={S.empty}>Loading programs…</div>
+        ) : (
+          (() => {
+            const { jobsToNest, programs, allJobs } = laserNestingData();
+            return (
+              <NestingView
+                machine={LASER_MACHINE}
+                jobsToNest={jobsToNest}
+                programs={programs}
+                allJobs={allJobs}
+                materials={master.laserMaterials || []}
+                canManage={isAdmin || !!profile?.allowedProcessTypes?.some(isNestingProcess)}
+                onCreateProgram={createLaserProgram}
+                onCancelProgram={cancelLaserProgram}
+                onAddJobToProgram={addJobToLaserProgram}
+                onRemoveJobFromProgram={removeJobFromLaserProgram}
+                onMarkJobNested={markJobFullyNested}
+                onUpdateProgram={updateLaserProgram}
+                SavedCheck={SavedCheck}
+              />
+            );
+          })()
+        )
       ) : tab === "production" ? (
         productionSelectedDept === null ? (
           <div style={S.list}>

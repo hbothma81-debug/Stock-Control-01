@@ -23,6 +23,7 @@ export const TABS = [
 export const NAV_TABS = [
   { key: "jobs", label: "Jobs" },
   { key: "production", label: "Production" },
+  { key: "laser4kw", label: "Laser 4kw" },
   ...TABS,
   { key: "requisitions", label: "Requisitions" },
   { key: "purchaseOrders", label: "Purchase Orders" },
@@ -57,6 +58,11 @@ export const TAB_GROUPS = [
 // Jobs and Notifications still need a canView() entry (for the header
 // buttons and permission checks) even though they're not part of the main
 // tab row — this covers that without duplicating them into NAV_TABS.
+// The laser the programs are cut on. Named here rather than typed in two
+// places so the tab label and the value stored on a program cannot drift
+// apart. A second machine becomes a list rather than a rename.
+export const LASER_MACHINE = "Laser 4kw";
+
 export const EXTRA_SECTIONS = [{ key: "notifications", label: "Notifications" }];
 
 export const SECTIONS = ["plate", "structural", "cncBar", "custom", "stores", "fasteners", "assets", "drawings", "deliveryNotes", "invoiceRequests", "processSheets", "poReports", "jobs"];
