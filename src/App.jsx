@@ -3145,8 +3145,15 @@ export default function StockControl() {
       // access to — every job with that process still outstanding shows
       // up, not just the ones ready right now, so a department can see
       // its whole upcoming workload, not only this instant's queue.
+      // Created in factory-flow order, so the departments come out of here
+      // already sequenced rather than in whatever order this person's
+      // permissions happened to be ticked. The render sorts them too; doing
+      // it here as well means the order is right even on the first paint,
+      // before anything re-renders.
       const byProcessType = {};
-      for (const procType of profile.allowedProcessTypes) byProcessType[procType] = [];
+      for (const procType of [...profile.allowedProcessTypes].sort((a, b) => flowRank(a) - flowRank(b))) {
+        byProcessType[procType] = [];
+      }
 
       for (const job of activeJobs) {
         const jobProcesses = (allProcesses || []).filter((p) => p.job_id === job.id);
@@ -3528,17 +3535,27 @@ export default function StockControl() {
     const existing = (jobDetail?.processes || []).filter((p) => !p.shortage_id);
     const existingNames = new Set(existing.map((p) => p.process_name));
     const toAdd = [...selected].filter((name) => !existingNames.has(name));
-    // Completed processes are hard-protected in the UI itself (checkbox
-    // disabled, can't reach here unchecked). Anything else being removed
-    // still gets a plain confirmation first — an Each-mode process with
-    // partial progress logged doesn't show that here reliably (its
-    // progress lives in a separate per-item table this editor doesn't
-    // load), so a confirmation covers that gap honestly instead of
-    // guessing at a check that could miss it.
+    // Removals are confirmed rather than checked: an Each-mode process
+    // with partial progress logged doesn't show that here reliably, since
+    // its progress lives in a separate per-item table this editor doesn't
+    // load. A confirmation covers that gap honestly instead of guessing at
+    // a check that could miss it.
+    //
+    // Completed stages are only reachable here by an admin, and losing a
+    // completion is worth saying out loud rather than folding into the
+    // general warning.
     const toRemove = existing.filter((p) => !selected.has(p.process_name));
     if (toRemove.length > 0) {
       const names = toRemove.map((p) => p.process_name).join(", ");
-      if (!window.confirm(`Remove ${names} from this job? Any notes, urgent flag, or logged progress on it will be lost.`)) {
+      const completed = toRemove.filter((p) => p.is_complete).map((p) => p.process_name);
+      const warning = completed.length
+        ? `\n\nAlready completed, and that record will be lost: ${completed.join(", ")}.`
+        : "";
+      if (
+        !window.confirm(
+          `Remove ${names} from this job? Any notes, urgent flag, or logged progress on it will be lost.${warning}`
+        )
+      ) {
         return;
       }
     }
@@ -5183,7 +5200,12 @@ export default function StockControl() {
   // anyone — this is the single source of truth for that lock, used
   // throughout the Job Detail modal alongside the normal permission check.
   const jobIsLocked = jobDetail?.job?.status === "invoiced";
-  const canEditThisJob = canEditQty("jobs") && !jobIsLocked;
+  // An admin can still edit a locked job. The lock is there to stop
+  // invoiced work being changed by accident, not to make a job
+  // unrepairable — and a job carrying stages from an old process list has
+  // to be fixable by somebody.
+  const canEditThisJob = canEditQty("jobs") && (!jobIsLocked || isAdmin);
+  const editingLockedJob = jobIsLocked && isAdmin;
 
   const canAdd = isAdmin || !!profile?.canAddItems;
   const canEditItems = isAdmin || !!profile?.canEditItems;
@@ -14378,7 +14400,12 @@ export default function StockControl() {
                 // completed before it can move on. Worth saying, because
                 // the buttons themselves can't show it.
                 const duplicated = jobStages.length > 1;
-                const locked = existingProcess?.is_complete;
+                // A completed stage is protected from being removed by
+                // accident, but an admin has to be able to clear one:
+                // a job left carrying a stage from an old process list is
+                // otherwise unrepairable, which is worse than the risk the
+                // lock guards against. Still confirmed before it saves.
+                const locked = existingProcess?.is_complete && !isAdmin;
                 const checked = editProcessesModal.selected.has(name);
                 return (
                   <button
@@ -14390,6 +14417,8 @@ export default function StockControl() {
                     title={
                       locked
                         ? "Already marked complete — can't be removed here"
+                        : existingProcess?.is_complete
+                        ? "Already marked complete. As an admin you can still untick it — the completion is lost."
                         : orphaned
                         ? "This stage is on the job but no longer in Job Process Types. Untick it to take it off the job."
                         : duplicated
