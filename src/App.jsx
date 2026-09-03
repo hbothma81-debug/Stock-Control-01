@@ -15,6 +15,7 @@ import UserManagement from "./UserManagement.jsx";
 import CompanyDetails from "./manager/CompanyDetails.jsx";
 import EditableName from "./EditableName.jsx";
 import NestingView from "./laser/NestingView.jsx";
+import CutList from "./laser/CutList.jsx";
 
 // window.storage is installed in main.jsx before this component ever
 // renders — backed by Supabase. See src/lib/storage.js.
@@ -133,6 +134,13 @@ const ORDERED_STRING_LISTS = ["jobProcessTypes", "laserMaterials"];
 // reaches the right people whatever the shop calls the stage.
 const isNestingProcess = (name) => /nest/i.test(name || "");
 const isLaserProcess = (name) => /laser/i.test(name || "");
+// The stage that SigmaNest programs actually cut. "Laser" but not "Tube
+// Laser" and not "Laser - External": all three have the word in them, but
+// they are different machines and only one of them runs off these
+// programs. Tube laser gets its own nesting later, and when it does this
+// belongs in the process type settings rather than here.
+const isProgramLaserProcess = (name) =>
+  /laser/i.test(name || "") && !/tube/i.test(name || "") && !/external/i.test(name || "");
 
 // A shortage can cover several missing parts. Older ones, and any saved
 // before the app could hold more than one, carry a single description and
@@ -931,6 +939,10 @@ export default function StockControl() {
   // Everything the Laser 4kw tab needs: the programs, which jobs are on
   // them, and the job stages so "waiting to be nested" can be worked out.
   const [laserData, setLaserData] = useState(null);
+  const [laserView, setLaserView] = useState("nesting");
+  // Which program is mid-save, so its button can say so and cannot be
+  // pressed twice -- marking a program cut also rewrites job stages.
+  const [programBusyId, setProgramBusyId] = useState(null);
   const [invoicedSectionOpen, setInvoicedSectionOpen] = useState(false);
   const [notificationsViewedOpen, setNotificationsViewedOpen] = useState(false);
   const [jobsCompletedSectionOpen, setJobsCompletedSectionOpen] = useState(false);
@@ -3113,15 +3125,22 @@ export default function StockControl() {
 
   // Jobs come from jobsList, which is already loaded for everyone as soon
   // as they sign in, so this only fetches what is specific to the tab.
+  // Returns the rows rather than storing them, so marking a program cut
+  // can work out which job stages to change from fresh data before any of
+  // it reaches the screen.
+  async function loadLaserRaw() {
+    const [programs, links, processes] = await Promise.all([
+      fetchAllRows("laser_programs", { orderBy: "created_at", ascending: false }),
+      fetchAllRows("laser_program_jobs", { orderBy: "created_at" }),
+      fetchAllRows("job_processes", { select: "id, job_id, process_name, is_complete, shortage_id" }),
+    ]);
+    return { programs: programs || [], links: links || [], processes: processes || [] };
+  }
+
   async function fetchLaserData() {
     if (!supabase) return;
     try {
-      const [programs, links, processes] = await Promise.all([
-        fetchAllRows("laser_programs", { orderBy: "created_at", ascending: false }),
-        fetchAllRows("laser_program_jobs", { orderBy: "created_at" }),
-        fetchAllRows("job_processes", { select: "id, job_id, process_name, is_complete, shortage_id" }),
-      ]);
-      setLaserData({ programs: programs || [], links: links || [], processes: processes || [] });
+      setLaserData(await loadLaserRaw());
     } catch (err) {
       console.error("Failed to load laser programs:", err);
       setLaserData({ programs: [], links: [], processes: [] });
@@ -3292,6 +3311,84 @@ export default function StockControl() {
     }
   }
 
+  // Marks a program cut, then brings every job on it into line.
+  //
+  // A job's laser stage is finished when its nesting has been ticked off
+  // AND every program carrying it has been cut. One program cut does not
+  // finish a job that is also sitting on another, and un-ticking a program
+  // by mistake puts the affected jobs back.
+  //
+  // A job with no programs at all never completes here. That is a job
+  // handled outside the app -- already cut before this existed, or sent
+  // out -- and its laser stage is ticked by hand the way it is today.
+  async function syncLaserStagesFor(jobIds, d) {
+    const live = d.programs.filter((p) => !p.is_cancelled);
+    const changes = [];
+    for (const jobId of new Set(jobIds)) {
+      // filter, not find: a job carrying the same stage twice (which the
+      // process-type check script reports) would otherwise have only one of
+      // them completed and stall on the other.
+      const laserStages = d.processes.filter(
+        (pr) => pr.job_id === jobId && !pr.shortage_id && isProgramLaserProcess(pr.process_name)
+      );
+      if (laserStages.length === 0) continue;
+      const nesting = d.processes.find(
+        (pr) => pr.job_id === jobId && !pr.shortage_id && isNestingProcess(pr.process_name)
+      );
+      const mine = live.filter((pg) =>
+        d.links.some((l) => l.program_id === pg.id && l.job_id === jobId)
+      );
+      const done = !!nesting?.is_complete && mine.length > 0 && mine.every((pg) => pg.is_complete);
+      for (const laser of laserStages) {
+        if (done !== !!laser.is_complete) changes.push({ id: laser.id, done });
+      }
+    }
+    for (const c of changes) {
+      const { error } = await supabase
+        .from("job_processes")
+        .update({
+          is_complete: c.done,
+          completed_by: c.done ? roleLabel : null,
+          completed_at: c.done ? new Date().toISOString() : null,
+        })
+        .eq("id", c.id);
+      if (error) throw error;
+    }
+    return changes.length;
+  }
+
+  async function toggleProgramCut(program) {
+    if (!supabase || programBusyId) return;
+    const nowCut = !program.is_complete;
+    setProgramBusyId(program.id);
+    try {
+      const { error } = await supabase
+        .from("laser_programs")
+        .update({
+          is_complete: nowCut,
+          completed_by: nowCut ? roleLabel : "",
+          completed_at: nowCut ? new Date().toISOString() : null,
+        })
+        .eq("id", program.id);
+      if (error) throw error;
+      await logProgramEvent(program.id, nowCut ? "cut" : "un-cut", program.program_number);
+
+      // Re-read before deciding anything: someone else may have cut the
+      // other program this job is waiting on while this one was open.
+      const fresh = await loadLaserRaw();
+      const jobIds = fresh.links.filter((l) => l.program_id === program.id).map((l) => l.job_id);
+      const changed = await syncLaserStagesFor(jobIds, fresh);
+      setLaserData(changed > 0 ? await loadLaserRaw() : fresh);
+      if (productionQueue !== null) fetchProductionQueue();
+    } catch (err) {
+      console.error("Failed to mark program cut:", err);
+      alert("That didn't save — check your connection and try again.");
+      await fetchLaserData();
+    } finally {
+      setProgramBusyId(null);
+    }
+  }
+
   // Ticked when there are no more programs coming for that job. Without
   // it the app cannot tell a job with parts still to nest apart from one
   // that is finished, so the laser stage would complete too early.
@@ -3303,7 +3400,11 @@ export default function StockControl() {
         .eq("id", process.id);
       if (error) throw error;
       flashSaved("nesting-" + process.id);
-      await fetchLaserData();
+      // Nesting was the only thing missing on a job whose programs are
+      // already cut, so its laser stage may finish at the same moment.
+      const fresh = await loadLaserRaw();
+      const changed = await syncLaserStagesFor([job.id], fresh);
+      setLaserData(changed > 0 ? await loadLaserRaw() : fresh);
       if (productionQueue !== null) fetchProductionQueue();
     } catch (err) {
       console.error("Failed to mark nesting complete:", err);
@@ -5493,7 +5594,7 @@ export default function StockControl() {
     // name rather than a fixed list, so renaming a department in Stock
     // Manager cannot quietly take the tab away from the people using it.
     if (section === "laser4kw")
-      return !!profile?.allowedProcessTypes?.some((t) => isNestingProcess(t) || isLaserProcess(t));
+      return !!profile?.allowedProcessTypes?.some((t) => isNestingProcess(t) || isProgramLaserProcess(t));
     if (section === "usageLog") return !!profile?.canViewUsageLog;
     if (section === "shortageCenter") return !!profile?.isShortageHandler;
     return profile ? !!profile.permissions?.[section]?.view : false;
@@ -8951,22 +9052,62 @@ export default function StockControl() {
         ) : (
           (() => {
             const { jobsToNest, programs, allJobs } = laserNestingData();
+            const canNest = isAdmin || !!profile?.allowedProcessTypes?.some(isNestingProcess);
+            const canCut = isAdmin || !!profile?.allowedProcessTypes?.some(isProgramLaserProcess);
+            // Someone who only nests, or only cuts, gets straight to their
+            // own screen with no switch to think about.
+            const view = !canNest ? "cutting" : !canCut ? "nesting" : laserView;
             return (
-              <NestingView
-                machine={LASER_MACHINE}
-                jobsToNest={jobsToNest}
-                programs={programs}
-                allJobs={allJobs}
-                materials={master.laserMaterials || []}
-                canManage={isAdmin || !!profile?.allowedProcessTypes?.some(isNestingProcess)}
-                onCreateProgram={createLaserProgram}
-                onCancelProgram={cancelLaserProgram}
-                onAddJobToProgram={addJobToLaserProgram}
-                onRemoveJobFromProgram={removeJobFromLaserProgram}
-                onMarkJobNested={markJobFullyNested}
-                onUpdateProgram={updateLaserProgram}
-                SavedCheck={SavedCheck}
-              />
+              <>
+                {canNest && canCut && (
+                  <div style={{ ...S.segRow, marginBottom: 10 }}>
+                    {[
+                      { key: "nesting", label: "Nesting" },
+                      { key: "cutting", label: "Cutting" },
+                    ].map((v) => (
+                      <button
+                        key={v.key}
+                        type="button"
+                        className="stk-btn"
+                        onClick={() => setLaserView(v.key)}
+                        style={{
+                          ...S.segBtn,
+                          ...(view === v.key
+                            ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` }
+                            : {}),
+                        }}
+                      >
+                        {v.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {view === "nesting" ? (
+                  <NestingView
+                    machine={LASER_MACHINE}
+                    jobsToNest={jobsToNest}
+                    programs={programs}
+                    allJobs={allJobs}
+                    materials={master.laserMaterials || []}
+                    canManage={canNest}
+                    onCreateProgram={createLaserProgram}
+                    onCancelProgram={cancelLaserProgram}
+                    onAddJobToProgram={addJobToLaserProgram}
+                    onRemoveJobFromProgram={removeJobFromLaserProgram}
+                    onMarkJobNested={markJobFullyNested}
+                    onUpdateProgram={updateLaserProgram}
+                    SavedCheck={SavedCheck}
+                  />
+                ) : (
+                  <CutList
+                    programs={programs}
+                    materials={master.laserMaterials || []}
+                    canCut={canCut}
+                    onToggleCut={toggleProgramCut}
+                    busyId={programBusyId}
+                  />
+                )}
+              </>
             );
           })()
         )
@@ -9984,7 +10125,7 @@ export default function StockControl() {
                 onClick={() => setUsageViewMode(m.key)}
                 style={{
                   ...S.segBtn,
-                  ...(usageViewMode === m.key ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                  ...(usageViewMode === m.key ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
                 }}
               >
                 {m.label}
@@ -11024,7 +11165,7 @@ export default function StockControl() {
                   onClick={() => setForm({ ...emptyForm, mainCat: t.key, trackLength: t.key === "structural" })}
                   style={{
                     ...S.segBtn,
-                    ...(form.mainCat === t.key ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                    ...(form.mainCat === t.key ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
                     ...((editingId || allowDuplicate) ? { opacity: 0.5, cursor: "not-allowed" } : {}),
                   }}
                 >
@@ -11256,7 +11397,7 @@ export default function StockControl() {
                         onClick={() => setForm({ ...form, serviceMode: m.key })}
                         style={{
                           ...S.segBtn,
-                          ...(form.serviceMode === m.key ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                          ...(form.serviceMode === m.key ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
                         }}
                       >
                         {m.label}
@@ -11363,7 +11504,7 @@ export default function StockControl() {
                           onClick={() => setForm({ ...form, storesKind: t.key })}
                           style={{
                             ...S.segBtn,
-                            ...(form.storesKind === t.key ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                            ...(form.storesKind === t.key ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
                           }}
                         >
                           {t.label}
@@ -11501,7 +11642,7 @@ export default function StockControl() {
                           onClick={() => setForm({ ...form, stockType: t, size: "", customSize: "", offcutLength: "", offcutWidth: "" })}
                           style={{
                             ...S.segBtn,
-                            ...(form.stockType === t ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                            ...(form.stockType === t ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
                           }}
                         >
                           {t === "full" ? "Full sheet" : "Offcut"}
@@ -11576,7 +11717,7 @@ export default function StockControl() {
                                 onClick={() => setPriceUnitMode(m.key)}
                                 style={{
                                   ...S.segBtn,
-                                  ...(priceUnitMode === m.key ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                                  ...(priceUnitMode === m.key ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
                                 }}
                               >
                                 {m.label}
@@ -11676,7 +11817,7 @@ export default function StockControl() {
                                 onClick={() => setPriceUnitMode(m.key)}
                                 style={{
                                   ...S.segBtn,
-                                  ...(priceUnitMode === m.key ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                                  ...(priceUnitMode === m.key ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
                                 }}
                               >
                                 {m.label}
@@ -11741,7 +11882,7 @@ export default function StockControl() {
                                 onClick={() => setPriceUnitMode(m.key)}
                                 style={{
                                   ...S.segBtn,
-                                  ...(priceUnitMode === m.key ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                                  ...(priceUnitMode === m.key ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
                                 }}
                               >
                                 {m.label}
@@ -11819,7 +11960,7 @@ export default function StockControl() {
                           onClick={() => setForm({ ...form, stockType: t })}
                           style={{
                             ...S.segBtn,
-                            ...(form.stockType === t ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                            ...(form.stockType === t ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
                           }}
                         >
                           {t === "full" ? "Full plate/length" : "Offcut"}
@@ -13890,7 +14031,7 @@ export default function StockControl() {
                 onClick={() => setJobDetailTab(t.key)}
                 style={{
                   ...S.segBtn,
-                  ...(jobDetailTab === t.key ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                  ...(jobDetailTab === t.key ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
                 }}
               >
                 {t.label}
@@ -14762,7 +14903,7 @@ export default function StockControl() {
                     }
                     style={{
                       ...S.segBtn,
-                      ...(checked ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                      ...(checked ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
                       ...(locked ? { opacity: 0.6, cursor: "not-allowed" } : {}),
                       ...(orphaned || duplicated ? { borderColor: C.danger } : {}),
                     }}
@@ -14827,7 +14968,7 @@ export default function StockControl() {
                 <button
                   type="button"
                   className="stk-btn"
-                  style={{ ...S.segBtn, ...(deliveryNoteBatchModal.direction === "to_supplier" ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}) }}
+                  style={{ ...S.segBtn, ...(deliveryNoteBatchModal.direction === "to_supplier" ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}) }}
                   onClick={() => setDeliveryNoteBatchModal((m) => ({ ...m, direction: "to_supplier", recipientName: "" }))}
                 >
                   External supplier
@@ -14835,7 +14976,7 @@ export default function StockControl() {
                 <button
                   type="button"
                   className="stk-btn"
-                  style={{ ...S.segBtn, ...(deliveryNoteBatchModal.direction === "to_customer" ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}) }}
+                  style={{ ...S.segBtn, ...(deliveryNoteBatchModal.direction === "to_customer" ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}) }}
                   onClick={() => setDeliveryNoteBatchModal((m) => ({ ...m, direction: "to_customer", recipientName: m.job.customer || "" }))}
                 >
                   Customer
@@ -15293,7 +15434,7 @@ export default function StockControl() {
                     onClick={() => toggleNewJobProcess(p)}
                     style={{
                       ...S.segBtn,
-                      ...(newJobForm.selectedProcesses.some((sp) => sp.name === p) ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
+                      ...(newJobForm.selectedProcesses.some((sp) => sp.name === p) ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
                     }}
                   >
                     {p}
