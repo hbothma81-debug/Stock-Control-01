@@ -599,7 +599,7 @@ function LibraryField({ label, options, value, onChange, customValue, onCustomCh
 // "Each"-tracked process control — one row per item on the job, matching
 // the printed process sheet, each with its own running count against that
 // item's own quantity. Never lumps different items into one shared total.
-function QtyProgressControl({ process, job, quoteItems, itemProgress, isReady, onSubmit }) {
+function QtyProgressControl({ process, job, quoteItems, itemProgress, limitFor, onSubmit }) {
   const [inputs, setInputs] = useState({});
   if (process.is_complete) {
     return <span style={{ ...S.roleHint, color: C.accentFinished, fontWeight: 600 }}>Complete — all items</span>;
@@ -615,6 +615,13 @@ function QtyProgressControl({ process, job, quoteItems, itemProgress, isReady, o
         const itemQty = Number(item.qty) || 0;
         const remaining = Math.max(itemQty - done, 0);
         const itemDone = remaining === 0 && itemQty > 0;
+        // Per item rather than per stage: this row opens as soon as this
+        // item has cleared the stages before it, even while the rest of
+        // the job has not. flow.allowed is how many of this item those
+        // stages have released; done is how many have already been
+        // logged here.
+        const flow = limitFor ? limitFor(item) : { allowed: itemQty, waitingOn: null };
+        const canLog = Math.max(Math.min(remaining, flow.allowed - done), 0);
         return (
           <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
             <span style={{ fontSize: 13, flex: "1 1 140px", color: itemDone ? C.accentFinished : C.text }}>
@@ -622,13 +629,16 @@ function QtyProgressControl({ process, job, quoteItems, itemProgress, isReady, o
             </span>
             {itemDone ? (
               <span style={{ fontSize: 12, color: C.accentFinished, fontWeight: 600 }}>Done</span>
+            ) : canLog <= 0 ? (
+              <span style={{ fontSize: 12, color: C.muted }}>
+                {flow.waitingOn ? "Waiting on " + flow.waitingOn : "Waiting"}
+              </span>
             ) : (
               <>
                 <input
                   type="number"
                   min="0"
-                  max={remaining}
-                  disabled={!isReady}
+                  max={canLog}
                   style={{ ...S.input, width: 64, fontSize: 13.5, padding: "5px 6px" }}
                   value={inputs[item.id] || ""}
                   onChange={(e) => setInputs((prev) => ({ ...prev, [item.id]: e.target.value }))}
@@ -638,9 +648,9 @@ function QtyProgressControl({ process, job, quoteItems, itemProgress, isReady, o
                   type="button"
                   className="stk-btn"
                   style={S.reqActionBtn}
-                  disabled={!isReady}
+                  disabled={canLog <= 0}
                   onClick={() => {
-                    const qty = Math.min(parseFloat(inputs[item.id]) || 0, remaining);
+                    const qty = Math.min(parseFloat(inputs[item.id]) || 0, canLog);
                     if (qty > 0) onSubmit(process, job, item, qty, progress, quoteItems, itemProgress);
                     setInputs((prev) => ({ ...prev, [item.id]: "" }));
                   }}
@@ -3018,7 +3028,6 @@ export default function StockControl() {
   function closeJobDetail() {
     setJobDetail(null);
     setJobDetailTab("overview");
-    setSelectedForInvoice(new Set());
   }
 
   async function refreshJobDetail() {
@@ -3095,6 +3104,43 @@ export default function StockControl() {
       .filter(sameRun)
       .filter((p) => flowRank(p.process_name) < mine)
       .every((p) => p.is_complete);
+  }
+
+  // How much of ONE item may pass through this stage right now.
+  //
+  // A stage that tracks per item hands its work forward piece by piece,
+  // so an item that has been nested can go to the laser while the rest of
+  // the job is still on the nester. Big jobs get walked through part by
+  // part instead of waiting for the whole lot at every stage.
+  //
+  // What it may not do is get ahead of itself: the cap is what the stages
+  // before have actually finished for that same item, so five cannot be
+  // cut when only two have been nested.
+  //
+  // A batch stage carries no per-item information -- it only knows done or
+  // not done -- so it hands nothing forward until it is signed off as a
+  // whole. Anything not switched to Each keeps behaving as it does today.
+  function itemFlowLimit(process, jobProcesses, itemProgressForJob, quoteItem) {
+    const sameRun = (p) => (p.shortage_id || null) === (process.shortage_id || null);
+    const mine = flowRank(process.process_name);
+    let allowed = Number(quoteItem.qty) || 0;
+    let waitingOn = null;
+    for (const p of jobProcesses || []) {
+      if (!sameRun(p) || p.is_complete) continue;
+      if (flowRank(p.process_name) >= mine) continue;
+      if ((p.tracking_mode || "batch") !== "each") {
+        return { allowed: 0, waitingOn: p.process_name };
+      }
+      const row = (itemProgressForJob || []).find(
+        (ip) => ip.job_process_id === p.id && ip.job_quote_item_id === quoteItem.id
+      );
+      const done = Number(row?.qty_complete) || 0;
+      if (done < allowed) {
+        allowed = done;
+        waitingOn = p.process_name;
+      }
+    }
+    return { allowed: Math.max(allowed, 0), waitingOn };
   }
 
   // The floor-facing queue: for someone with specific process-type access,
@@ -3190,6 +3236,12 @@ export default function StockControl() {
             quoteItems: jobQuoteItems,
             documents: (allDocs || []).filter((d) => d.job_id === job.id && d.process_name === p.process_name),
             itemProgress: allItemProgress.filter((ip) => ip.job_process_id === p.id),
+            // The whole job's stages and per-item progress, so each item's
+            // row can work out how far that one item has already got.
+            jobProcesses,
+            jobItemProgress: allItemProgress.filter((ip) =>
+              jobProcesses.some((jp) => jp.id === ip.job_process_id)
+            ),
             // Set only on catch-up stages, so the queue can say this is a
             // replacement for something missing rather than new work.
             shortage: p.shortage_id ? queueShortages.find((s) => s.id === p.shortage_id) || null : null,
@@ -8919,6 +8971,8 @@ export default function StockControl() {
                         );
                       }
                       const { job, process, isReady, quoteItems, documents, itemProgress, shortage } = selected;
+                      const stagesOnJob = selected.jobProcesses || [];
+                      const progressOnJob = selected.jobItemProgress || [];
                       const drawingsForJob = quoteItems
                         .map((it) => {
                           const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
@@ -9083,7 +9137,7 @@ export default function StockControl() {
                                   job={job}
                                   quoteItems={quoteItems}
                                   itemProgress={itemProgress}
-                                  isReady={isReady}
+                                  limitFor={(item) => itemFlowLimit(process, stagesOnJob, progressOnJob, item)}
                                   onSubmit={submitProcessItemProgress}
                                 />
                               ) : (
