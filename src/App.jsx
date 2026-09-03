@@ -3166,15 +3166,21 @@ export default function StockControl() {
   // can work out which job stages to change from fresh data before any of
   // it reaches the screen.
   async function loadLaserRaw() {
-    const [programs, links, processes] = await Promise.all([
+    const [programs, links, processes, shortages] = await Promise.all([
       fetchAllRows("laser_programs", { orderBy: "created_at", ascending: false }),
       fetchAllRows("laser_program_jobs", { orderBy: "created_at" }),
       fetchAllRows("job_processes", {
         select:
           "id, job_id, process_name, is_complete, shortage_id, started_at, started_by, operator, assigned_to, completed_at",
       }),
+      fetchAllRows("shortages", { orderBy: "created_at", ascending: false }),
     ]);
-    return { programs: programs || [], links: links || [], processes: processes || [] };
+    return {
+      programs: programs || [],
+      links: links || [],
+      processes: processes || [],
+      shortages: shortages || [],
+    };
   }
 
   async function fetchLaserData() {
@@ -3183,7 +3189,7 @@ export default function StockControl() {
       setLaserData(await loadLaserRaw());
     } catch (err) {
       console.error("Failed to load laser programs:", err);
-      setLaserData({ programs: [], links: [], processes: [] });
+      setLaserData({ programs: [], links: [], processes: [], shortages: [] });
     }
   }
 
@@ -3191,7 +3197,7 @@ export default function StockControl() {
   // drop out here rather than being deleted, so one that was already cut
   // still exists in the history.
   function laserNestingData() {
-    const d = laserData || { programs: [], links: [], processes: [] };
+    const d = laserData || { programs: [], links: [], processes: [], shortages: [] };
     const jobs = jobsList || [];
     const activeJobs = jobs.filter((j) => j.status === "in_progress");
     const jobById = new Map(jobs.map((j) => [j.id, j]));
@@ -3199,7 +3205,11 @@ export default function StockControl() {
     const linksByProgram = {};
     for (const l of d.links) {
       if (!linksByProgram[l.program_id]) linksByProgram[l.program_id] = [];
-      linksByProgram[l.program_id].push({ ...l, job_number: jobById.get(l.job_id)?.job_number || "" });
+      linksByProgram[l.program_id].push({
+        ...l,
+        job_number: jobById.get(l.job_id)?.job_number || "",
+        is_recut: !!l.shortage_id,
+      });
     }
 
     const programs = d.programs
@@ -3233,7 +3243,39 @@ export default function StockControl() {
       (a, b) => new Date(a.job.due_date || "2999-01-01") - new Date(b.job.due_date || "2999-01-01")
     );
 
-    return { jobsToNest, programs, allJobs: activeJobs };
+    // What Prince can put on a program: the jobs themselves, and any
+    // shortage still waiting to be re-cut. Both go through the same
+    // picker, because on the floor they are the same decision -- a
+    // re-cut gets nested in with everything else of that material.
+    const candidates = [];
+    for (const job of activeJobs) {
+      candidates.push({
+        key: "job:" + job.id,
+        kind: "job",
+        job_id: job.id,
+        shortage_id: null,
+        job_number: job.job_number || "",
+        sigmanest: job.laser_job_reference || "",
+        customer: job.customer || "",
+        detail: "",
+      });
+    }
+    const onAProgram = new Set(d.links.filter((l) => l.shortage_id).map((l) => l.shortage_id));
+    for (const sh of d.shortages) {
+      if (sh.status === "cut" || onAProgram.has(sh.id)) continue;
+      candidates.push({
+        key: "short:" + sh.id,
+        kind: "shortage",
+        job_id: sh.job_id,
+        shortage_id: sh.id,
+        job_number: sh.job_number || "",
+        sigmanest: sh.board_number || "",
+        customer: sh.customer || "",
+        detail: "re-cut: " + shortageSummary(sh),
+      });
+    }
+
+    return { jobsToNest, programs, candidates };
   }
 
   // The history is worth having but never worth blocking a change for: a
@@ -3266,6 +3308,7 @@ export default function StockControl() {
           jobs.map((j) => ({
             program_id: data.id,
             job_id: j.job_id,
+            shortage_id: j.shortage_id || null,
             sigmanest_number: j.sigmanest_number,
             created_by: roleLabel,
           }))
@@ -3273,6 +3316,12 @@ export default function StockControl() {
         if (linkError) throw linkError;
       }
       await logProgramEvent(data.id, "created", material + " - " + jobs.length + " job(s)");
+      // Putting a re-cut on a program is what nests it, so the catch-up
+      // stages get built here rather than needing a second button.
+      for (const j of jobs.filter((x) => x.shortage_id)) {
+        const sh = (laserData?.shortages || []).find((x) => x.id === j.shortage_id);
+        if (sh && sh.status === "flagged") await markShortageNested(sh);
+      }
       await fetchLaserData();
       return true;
     } catch (err) {
@@ -3320,21 +3369,30 @@ export default function StockControl() {
     }
   }
 
-  async function addJobToLaserProgram(program, job) {
+  async function addJobToLaserProgram(program, candidate) {
     try {
       const { error } = await supabase.from("laser_program_jobs").insert({
         program_id: program.id,
-        job_id: job.id,
-        sigmanest_number: job.laser_job_reference || "",
+        job_id: candidate.job_id,
+        shortage_id: candidate.shortage_id || null,
+        sigmanest_number: candidate.sigmanest || "",
         created_by: roleLabel,
       });
       if (error) throw error;
-      await logProgramEvent(program.id, "job added", job.job_number);
+      await logProgramEvent(
+        program.id,
+        "job added",
+        candidate.job_number + (candidate.detail ? " (" + candidate.detail + ")" : "")
+      );
+      if (candidate.shortage_id) {
+        const sh = (laserData?.shortages || []).find((x) => x.id === candidate.shortage_id);
+        if (sh && sh.status === "flagged") await markShortageNested(sh);
+      }
       await fetchLaserData();
     } catch (err) {
       console.error("Failed to add job to laser program:", err);
       alert(
-        err?.code === "23505" ? job.job_number + " is already on this program." : "That didn't save — check your connection and try again."
+        err?.code === "23505" ? candidate.job_number + " is already on this program." : "That didn't save — check your connection and try again."
       );
     }
   }
@@ -3475,6 +3533,47 @@ export default function StockControl() {
     return changes.length;
   }
 
+  // A re-cut is off the laser when the program carrying it is cut. Its
+  // catch-up nesting and laser stages close with it; the stages after
+  // those are real work and stay for the floor.
+  //
+  // markShortageCut also tells whoever raised it, which is the whole
+  // point -- they have been waiting. Un-cutting a program by mistake
+  // puts the re-cut back to nested without sending anything.
+  async function syncShortagesForProgram(program, nowCut, d) {
+    const ids = d.links.filter((l) => l.program_id === program.id && l.shortage_id).map((l) => l.shortage_id);
+    for (const id of new Set(ids)) {
+      const sh = d.shortages.find((x) => x.id === id);
+      if (!sh) continue;
+      const catchUp = d.processes.filter(
+        (pr) =>
+          pr.shortage_id === id &&
+          (isNestingProcess(pr.process_name) || isProgramLaserProcess(pr.process_name))
+      );
+      for (const stage of catchUp) {
+        if (!!stage.is_complete === nowCut) continue;
+        const { error } = await supabase
+          .from("job_processes")
+          .update({
+            is_complete: nowCut,
+            completed_by: nowCut ? roleLabel : null,
+            completed_at: nowCut ? new Date().toISOString() : null,
+          })
+          .eq("id", stage.id);
+        if (error) throw error;
+      }
+      if (nowCut && sh.status !== "cut") {
+        await markShortageCut(sh);
+      } else if (!nowCut && sh.status === "cut") {
+        const { error } = await supabase
+          .from("shortages")
+          .update({ status: "nested", cut_by: "", cut_at: "" })
+          .eq("id", sh.id);
+        if (error) throw error;
+      }
+    }
+  }
+
   async function toggleProgramCut(program) {
     if (!supabase || programBusyId) return;
     const nowCut = !program.is_complete;
@@ -3496,8 +3595,10 @@ export default function StockControl() {
       const fresh = await loadLaserRaw();
       const jobIds = fresh.links.filter((l) => l.program_id === program.id).map((l) => l.job_id);
       const changed = await syncLaserStagesFor(jobIds, fresh);
-      setLaserData(changed > 0 ? await loadLaserRaw() : fresh);
+      await syncShortagesForProgram(program, nowCut, fresh);
+      setLaserData(await loadLaserRaw());
       if (productionQueue !== null) fetchProductionQueue();
+      void changed;
     } catch (err) {
       console.error("Failed to mark program cut:", err);
       alert("That didn't save — check your connection and try again.");
@@ -9179,7 +9280,7 @@ export default function StockControl() {
           <div style={S.empty}>Loading programs…</div>
         ) : (
           (() => {
-            const { jobsToNest, programs, allJobs } = laserNestingData();
+            const { jobsToNest, programs, candidates } = laserNestingData();
             const canNest = isAdmin || !!profile?.allowedProcessTypes?.some(isNestingProcess);
             const canCut = isAdmin || !!profile?.allowedProcessTypes?.some(isProgramLaserProcess);
             // Someone who only nests, or only cuts, gets straight to their
@@ -9215,7 +9316,7 @@ export default function StockControl() {
                     machine={LASER_MACHINE}
                     jobsToNest={jobsToNest}
                     programs={programs}
-                    allJobs={allJobs}
+                    candidates={candidates}
                     materials={master.laserMaterials || []}
                     canManage={canNest}
                     onCreateProgram={createLaserProgram}
@@ -9378,6 +9479,7 @@ export default function StockControl() {
                 meName={roleLabel}
                 onTakeJob={takePackingJob}
                 onFinishPacking={finishPacking}
+                onFlagShortage={(row) => openShortageFlagModal(row.job, row.process)}
                 busyId={programBusyId}
               />
             )}

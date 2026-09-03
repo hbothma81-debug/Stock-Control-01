@@ -108,9 +108,12 @@ function ProgramRow({ program, canCut, onToggleCut, busy }) {
             <span style={S.roleHint}>No jobs on this program.</span>
           ) : (
             (p.jobs || []).map((l) => (
-              <span key={l.id} style={S.chip}>
+              <span
+                key={l.id}
+                style={{ ...S.chip, ...(l.shortage_id ? { borderColor: C.danger, color: C.danger } : {}) }}
+              >
                 {l.job_number || "unknown job"}
-                {l.sigmanest_number ? ` · ${l.sigmanest_number}` : ""}
+                {l.shortage_id ? " · re-cut" : l.sigmanest_number ? ` · ${l.sigmanest_number}` : ""}
               </span>
             ))
           )}

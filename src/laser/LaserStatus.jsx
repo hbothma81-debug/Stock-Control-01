@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Check, Hand } from "lucide-react";
+import { Check, Hand, AlertTriangle } from "lucide-react";
 import { C, S } from "../theme.js";
 
 // Where a job goes after the laser, and where the packer works.
@@ -29,7 +29,15 @@ function laserState(programs) {
   return { label: `Cutting — ${cut} of ${programs.length} programs`, tone: C.accentRaw, done: false };
 }
 
-export default function LaserStatus({ rows, canPack, meName, onTakeJob, onFinishPacking, busyId }) {
+export default function LaserStatus({
+  rows,
+  canPack,
+  meName,
+  onTakeJob,
+  onFinishPacking,
+  onFlagShortage,
+  busyId,
+}) {
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => {
@@ -159,6 +167,17 @@ export default function LaserStatus({ rows, canPack, meName, onTakeJob, onFinish
                         <Check size={14} strokeWidth={2.5} /> {busy ? "Saving…" : "Packed & checked"}
                       </button>
                     )}
+
+                    {/* The packer is the one who finds parts missing off a
+                        nest, so this is where a shortage gets raised. */}
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={{ ...S.reqActionBtnMuted, color: C.danger, borderColor: C.danger }}
+                      onClick={() => onFlagShortage(r)}
+                    >
+                      <AlertTriangle size={13} /> Flag shortage
+                    </button>
                   </div>
                 )}
 

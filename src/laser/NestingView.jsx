@@ -14,29 +14,42 @@ import { C, S } from "../theme.js";
 // No database calls in here. The parent owns all of that, the same way
 // UserManagement works -- this renders and collects, and calls back.
 
-// A job is only ever attached by its identity, never by the SigmaNest
-// number that was typed to find it, so correcting that number later cannot
-// break the link. This searches on either, because Prince is reading a
-// SigmaNest number off his screen but the rest of the shop talks in job
-// numbers.
-function matchJobs(candidates, query) {
+// What can go on a program: a job, or a shortage waiting to be re-cut.
+// Both are searched together because on the floor they are the same
+// decision -- a re-cut gets nested in with everything else of that
+// material rather than being handled on its own.
+//
+// Either way it is attached by identity, never by the SigmaNest number
+// typed to find it, so correcting that number later cannot break the
+// link. Searching covers both, because Prince reads a SigmaNest number
+// off his screen while the rest of the shop talks in job numbers.
+function matchCandidates(candidates, query) {
   const q = query.trim().toLowerCase();
   if (!q) return [];
   return candidates
     .filter(
-      (j) =>
-        (j.laser_job_reference || "").toLowerCase().includes(q) ||
-        (j.job_number || "").toLowerCase().includes(q) ||
-        (j.customer || "").toLowerCase().includes(q)
+      (c) =>
+        (c.sigmanest || "").toLowerCase().includes(q) ||
+        (c.job_number || "").toLowerCase().includes(q) ||
+        (c.customer || "").toLowerCase().includes(q) ||
+        (c.detail || "").toLowerCase().includes(q)
     )
     .slice(0, 8);
+}
+
+// One row in the picker, and the same wording on a chip once picked.
+function candidateLabel(c) {
+  const bits = [c.sigmanest || "no SigmaNest #"];
+  if (c.customer) bits.push(c.customer);
+  if (c.detail) bits.push(c.detail);
+  return bits.join(" · ");
 }
 
 export default function NestingView({
   machine,
   jobsToNest,
   programs,
-  allJobs,
+  candidates,
   materials,
   canManage,
   onCreateProgram,
@@ -59,15 +72,17 @@ export default function NestingView({
   const [addQuery, setAddQuery] = useState("");
 
   const suggestions = useMemo(
-    () => matchJobs(allJobs.filter((j) => !picked.some((p) => p.id === j.id)), jobQuery),
-    [allJobs, jobQuery, picked]
+    () => matchCandidates(candidates.filter((c) => !picked.some((p) => p.key === c.key)), jobQuery),
+    [candidates, jobQuery, picked]
   );
 
   const addSuggestions = useMemo(() => {
     if (!addingTo) return [];
-    const already = (addingTo.jobs || []).map((l) => l.job_id);
-    return matchJobs(allJobs.filter((j) => !already.includes(j.id)), addQuery);
-  }, [allJobs, addQuery, addingTo]);
+    // A job already on this program should not be offered again, and
+    // neither should a re-cut already on it.
+    const already = (addingTo.jobs || []).map((l) => (l.shortage_id ? "short:" + l.shortage_id : "job:" + l.job_id));
+    return matchCandidates(candidates.filter((c) => !already.includes(c.key)), addQuery);
+  }, [candidates, addQuery, addingTo]);
 
   const openPrograms = programs.filter((p) => !p.is_complete);
   const cutPrograms = programs.filter((p) => p.is_complete);
@@ -88,7 +103,11 @@ export default function NestingView({
         program_number: newNumber.trim(),
         material: newMaterial,
         machine,
-        jobs: picked.map((j) => ({ job_id: j.id, sigmanest_number: j.laser_job_reference || "" })),
+        jobs: picked.map((c) => ({
+          job_id: c.job_id,
+          shortage_id: c.shortage_id || null,
+          sigmanest_number: c.sigmanest || "",
+        })),
       });
       if (ok) resetBuilder();
     } finally {
@@ -152,15 +171,24 @@ export default function NestingView({
               <label style={S.label}>Jobs on this program</label>
               {picked.length > 0 && (
                 <div style={{ ...S.chipRow, marginBottom: 6 }}>
-                  {picked.map((j) => (
-                    <span key={j.id} style={{ ...S.chip, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                      {j.job_number}
-                      {j.laser_job_reference ? ` · ${j.laser_job_reference}` : ""}
+                  {picked.map((c) => (
+                    <span
+                      key={c.key}
+                      style={{
+                        ...S.chip,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        ...(c.kind === "shortage" ? { borderColor: C.danger, color: C.danger } : {}),
+                      }}
+                    >
+                      {c.job_number}
+                      {c.kind === "shortage" ? " · re-cut" : c.sigmanest ? ` · ${c.sigmanest}` : ""}
                       <button
                         type="button"
                         className="stk-btn"
                         style={{ ...S.iconBtn, padding: 0, minWidth: 0 }}
-                        onClick={() => setPicked((prev) => prev.filter((p) => p.id !== j.id))}
+                        onClick={() => setPicked((prev) => prev.filter((p) => p.key !== c.key))}
                         title="Take off this program"
                       >
                         <X size={13} />
@@ -178,20 +206,23 @@ export default function NestingView({
                 />
                 {suggestions.length > 0 && (
                   <div style={S.suggestDropdown}>
-                    {suggestions.map((j) => (
+                    {suggestions.map((c) => (
                       <button
-                        key={j.id}
+                        key={c.key}
                         type="button"
                         className="stk-btn"
-                        style={{ ...S.suggestItem, width: "100%", textAlign: "left" }}
+                        style={{
+                          ...S.suggestItem,
+                          width: "100%",
+                          textAlign: "left",
+                          ...(c.kind === "shortage" ? { color: C.danger } : {}),
+                        }}
                         onClick={() => {
-                          setPicked((prev) => [...prev, j]);
+                          setPicked((prev) => [...prev, c]);
                           setJobQuery("");
                         }}
                       >
-                        <b>{j.job_number}</b>
-                        {j.laser_job_reference ? ` · ${j.laser_job_reference}` : " · no SigmaNest #"}
-                        {j.customer ? ` · ${j.customer}` : ""}
+                        <b>{c.job_number}</b> {candidateLabel(c)}
                       </button>
                     ))}
                   </div>
@@ -399,9 +430,18 @@ function ProgramList({
                       <span style={S.roleHint}>No jobs on this program.</span>
                     ) : (
                       (p.jobs || []).map((l) => (
-                        <span key={l.id} style={{ ...S.chip, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <span
+                          key={l.id}
+                          style={{
+                            ...S.chip,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            ...(l.is_recut ? { borderColor: C.danger, color: C.danger } : {}),
+                          }}
+                        >
                           {l.job_number || "unknown job"}
-                          {l.sigmanest_number ? ` · ${l.sigmanest_number}` : ""}
+                          {l.is_recut ? " · re-cut" : l.sigmanest_number ? ` · ${l.sigmanest_number}` : ""}
                           {canManage && (
                             <button
                               type="button"
@@ -430,21 +470,24 @@ function ProgramList({
                         />
                         {addSuggestions.length > 0 && (
                           <div style={S.suggestDropdown}>
-                            {addSuggestions.map((j) => (
+                            {addSuggestions.map((c) => (
                               <button
-                                key={j.id}
+                                key={c.key}
                                 type="button"
                                 className="stk-btn"
-                                style={{ ...S.suggestItem, width: "100%", textAlign: "left" }}
+                                style={{
+                                  ...S.suggestItem,
+                                  width: "100%",
+                                  textAlign: "left",
+                                  ...(c.kind === "shortage" ? { color: C.danger } : {}),
+                                }}
                                 onClick={() => {
-                                  onAddJobToProgram(p, j);
+                                  onAddJobToProgram(p, c);
                                   setAddQuery("");
                                   setAddingTo(null);
                                 }}
                               >
-                                <b>{j.job_number}</b>
-                                {j.laser_job_reference ? ` · ${j.laser_job_reference}` : " · no SigmaNest #"}
-                                {j.customer ? ` · ${j.customer}` : ""}
+                                <b>{c.job_number}</b> {candidateLabel(c)}
                               </button>
                             ))}
                           </div>
