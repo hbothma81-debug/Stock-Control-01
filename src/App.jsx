@@ -3663,6 +3663,11 @@ export default function StockControl() {
         });
       }
       refreshJobDetail();
+      // Who a stage is assigned to decides whose queue it appears in, so
+      // the queue is now wrong until it is refetched. Without this the
+      // change saved but nothing moved on screen, which reads as the
+      // assignment not having worked.
+      if (productionQueue !== null) fetchProductionQueue();
     } catch (err) {
       console.error("Failed to update assignee:", err);
       alert("That didn't save — check your connection and try again.");
@@ -8554,12 +8559,10 @@ export default function StockControl() {
                 (job.customer || "").toLowerCase().includes(q);
               const visibleDepts = Object.entries(productionQueue || {})
                 .map(([procType, allEntries]) => {
-                  const readyCount = q
-                    ? allEntries.filter(matchesJob).length
-                    : allEntries.filter(({ process, quoteItems }) => {
-                        const totalQty = (quoteItems || []).reduce((sum, it) => sum + Number(it.qty || 0), 0);
-                        return !!process.assigned_to && totalQty > 0;
-                      }).length;
+                  // Counts what the department can actually see now that
+                  // nothing is hidden, so the number on the pill and the
+                  // length of the list agree.
+                  const readyCount = q ? allEntries.filter(matchesJob).length : allEntries.length;
                   // Only nesting gets the marker now. A shortage past that
                   // point is carried by its own run, which shows up in the
                   // department's normal list like any other work — a second
@@ -8641,17 +8644,20 @@ export default function StockControl() {
                       (job.customer || "").toLowerCase().includes(q)
                   )
                 : allEntries;
-              // Nothing assigned yet, or nothing to actually do yet (zero
-              // quantity) — hide it from the everyday view so the list only
-              // shows work that's genuinely ready to act on. A search is a
-              // deliberate, specific request though, so it isn't filtered by
-              // this — it should always find what you're looking for.
-              if (!q) {
-                entries = entries.filter(({ process, quoteItems }) => {
-                  const totalQty = (quoteItems || []).reduce((sum, it) => sum + Number(it.qty || 0), 0);
-                  return !!process.assigned_to && totalQty > 0;
-                });
-              }
+              // Everything at this stage is shown, and each card says
+              // whose it is. Unassigned work used to be hidden from the
+              // whole department, so a job nobody had been given was
+              // invisible to everyone — including the people who could
+              // have picked it up. Labelling instead of hiding keeps what
+              // the assignment was protecting (two people not starting the
+              // same job) without losing the work.
+              //
+              // Yours first, then unassigned, then other people's.
+              entries = entries.slice().sort((a, b) => {
+                const rank = (e) =>
+                  e.process.assigned_to === currentUser?.id ? 0 : !e.process.assigned_to ? 1 : 2;
+                return rank(a) - rank(b);
+              });
               return (
                 <div style={{ ...S.gradeItems, marginTop: 8 }}>
                   {/* Only the not-yet-nested ones. Once nesting has set a
@@ -9030,9 +9036,23 @@ export default function StockControl() {
                             </div>
                           )}
                           <div className="stk-meta-row" style={S.rowMeta}>
+                            {/* Whose job this is. Nothing is hidden any
+                                more, so the card has to say — otherwise two
+                                people start the same one. */}
+                            {process.assigned_to === currentUser?.id ? (
+                              <span style={{ color: C.accentRaw, fontWeight: 700 }}>Yours</span>
+                            ) : process.assigned_to ? (
+                              <span>{process.operator || "Someone else"}</span>
+                            ) : (
+                              <span style={{ color: C.accentRaw, fontWeight: 600 }}>Unassigned</span>
+                            )}
                             {job.sales_rep && <span>Sales: {job.sales_rep}</span>}
                             {job.laser_job_reference && <span>SigmaNest: {job.laser_job_reference}</span>}
-                            {totalQty > 0 && <span>Qty: {totalQty}</span>}
+                            {totalQty > 0 ? (
+                              <span>Qty: {totalQty}</span>
+                            ) : (
+                              <span style={{ color: C.muted }}>No quantity set yet</span>
+                            )}
                             {shortage && <span>Originally flagged at {shortage.flagged_department}</span>}
                             {process.is_urgent && <span style={{ color: C.danger, fontWeight: 600 }}>Urgent</span>}
                           </div>
