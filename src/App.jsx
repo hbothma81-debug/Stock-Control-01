@@ -7325,6 +7325,88 @@ export default function StockControl() {
   // Works on the full list rather than what's on screen, so a search
   // filter can never make an item jump past hidden neighbours; the buttons
   // are hidden while searching for the same reason.
+  // Re-sequences unfinished jobs to the factory flow as it stands now.
+  //
+    // Each job stores its own order from when it was created, so changing
+  // the flow afterwards left existing work running the old sequence. This
+  // brings them into line — but on request, not automatically: the order
+  // is what gates the floor, so silently resequencing a job someone is
+  // part way through would change what comes next underneath them. It
+  // also overwrites any deliberate per-job reordering, which is the other
+  // reason not to do it without being asked.
+  async function applyFlowToOpenJobs() {
+    if (!supabase) return;
+    const flow = master?.jobProcessTypes || [];
+    if (flow.length === 0) return;
+    const rank = (name) => {
+      const i = flow.indexOf(name);
+      return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+    };
+    try {
+      const { data: openJobs, error: jobsError } = await supabase
+        .from("jobs")
+        .select("id, job_number")
+        .in("status", ["in_progress", "complete"]);
+      if (jobsError) throw jobsError;
+      const jobIds = (openJobs || []).map((j) => j.id);
+      if (jobIds.length === 0) {
+        alert("No unfinished jobs to re-sequence.");
+        return;
+      }
+
+      // A shortage's catch-up run is its own sequence and is left alone.
+      const { data: stages, error: stagesError } = await supabase
+        .from("job_processes")
+        .select("id, job_id, process_name, sort_order")
+        .in("job_id", jobIds)
+        .is("shortage_id", null);
+      if (stagesError) throw stagesError;
+
+      const changes = [];
+      const affectedJobs = new Set();
+      for (const jobId of jobIds) {
+        const mine = (stages || []).filter((s) => s.job_id === jobId);
+        // Stable: two stages of the same name keep their relative order.
+        const ordered = mine
+          .map((s, i) => ({ s, i }))
+          .sort((a, b) => rank(a.s.process_name) - rank(b.s.process_name) || a.i - b.i)
+          .map(({ s }) => s);
+        ordered.forEach((s, idx) => {
+          if (Number(s.sort_order) !== idx) {
+            changes.push({ id: s.id, sort_order: idx });
+            affectedJobs.add(jobId);
+          }
+        });
+      }
+
+      if (changes.length === 0) {
+        alert("Every unfinished job already follows this order — nothing to change.");
+        return;
+      }
+      const names = (openJobs || [])
+        .filter((j) => affectedJobs.has(j.id))
+        .map((j) => j.job_number)
+        .join(", ");
+      const proceed = window.confirm(
+        `${affectedJobs.size} unfinished job${affectedJobs.size === 1 ? "" : "s"} still use an older sequence:\n\n${names}\n\n` +
+          `Re-sequencing them changes what the floor can start next, and replaces any order set for one job on its own. Completed stages stay completed.\n\n` +
+          `Update them to match this flow?`
+      );
+      if (!proceed) return;
+
+      for (const c of changes) {
+        const { error } = await supabase.from("job_processes").update({ sort_order: c.sort_order }).eq("id", c.id);
+        if (error) throw error;
+      }
+      if (productionQueue !== null) fetchProductionQueue();
+      if (jobDetail) refreshJobDetail();
+      alert(`Re-sequenced ${affectedJobs.size} job${affectedJobs.size === 1 ? "" : "s"} to match the factory flow.`);
+    } catch (err) {
+      console.error("Failed to re-sequence jobs:", err);
+      alert(`Couldn't re-sequence those jobs: ${err.message || "unknown error"}.`);
+    }
+  }
+
   function moveMasterEntry(entry, direction) {
     setMaster((prev) => {
       const list = prev[managerTab] || [];
@@ -8646,7 +8728,26 @@ export default function StockControl() {
                 // A search is a deliberate, specific request though — it
                 // shows every department that job is genuinely in, not
                 // just the ones with something "ready" right now.
-                .filter(({ readyCount, hasPendingShortage }) => readyCount > 0 || hasPendingShortage);
+                // A search narrows to what actually matches. Otherwise
+                // every department the person handles is listed, empty or
+                // not: the shop floor is a fixed set of stations, and one
+                // vanishing because it happens to have no work makes the
+                // list a different shape every time you look at it. An
+                // empty department showing "0" is information; an absent
+                // one is a question.
+                .filter(({ readyCount, hasPendingShortage }) => (q ? readyCount > 0 : true) || hasPendingShortage)
+                // In factory-flow order, the order set in Stock Manager,
+                // so the list reads the way work moves through the shop.
+                // Anything no longer in that list sorts last rather than
+                // to the front.
+                .sort((a, b) => {
+                  const flow = master?.jobProcessTypes || [];
+                  const rank = (t) => {
+                    const i = flow.indexOf(t);
+                    return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+                  };
+                  return rank(a.procType) - rank(b.procType);
+                });
               return (
                 <>
                   {!productionLoading && visibleDepts.length === 0 && (
@@ -12364,9 +12465,20 @@ export default function StockControl() {
                 </div>
 
                 {ORDERED_STRING_LISTS.includes(managerTab) && (
-                  <div style={{ ...S.roleHint, marginTop: 10 }}>
-                    This order is the factory flow — top to bottom is the sequence work moves through the shop. Use the arrows to change it.
-                  </div>
+                  <>
+                    <div style={{ ...S.roleHint, marginTop: 10 }}>
+                      This order is the factory flow — top to bottom is the sequence work moves through the shop. Use the arrows to change it.
+                      New jobs follow it straight away. Jobs already running keep the order they were created with until you apply it below.
+                    </div>
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={{ ...S.reqActionBtnMuted, marginTop: 6 }}
+                      onClick={applyFlowToOpenJobs}
+                    >
+                      <RefreshCw size={13} /> Apply this order to unfinished jobs
+                    </button>
+                  </>
                 )}
 
                 {master[managerTab].length > 8 && (
