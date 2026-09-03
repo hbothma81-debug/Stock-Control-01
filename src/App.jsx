@@ -2594,23 +2594,6 @@ export default function StockControl() {
   // notification possible) and the plain operator text alongside it, so
   // anything that still displays operator as text keeps working exactly
   // as before, without needing every display spot updated at once.
-  // Lets one job depart from the standard flow — a part that needs
-  // painting before assembly, say. Only this job is affected: the Stock
-  // Manager order is untouched, and because toggleNewJobProcess places new
-  // processes relative to what's already selected, ticking another one
-  // afterwards slots it in around this adjustment instead of undoing it.
-  function moveNewJobProcess(processName, direction) {
-    setNewJobForm((f) => {
-      const from = f.selectedProcesses.findIndex((p) => p.name === processName);
-      const to = from + direction;
-      if (from === -1 || to < 0 || to >= f.selectedProcesses.length) return f;
-      const next = [...f.selectedProcesses];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return { ...f, selectedProcesses: next };
-    });
-  }
-
   function updateNewJobProcessAssignee(processName, personId) {
     const person = (people || []).find((p) => p.id === personId);
     setNewJobForm((f) => ({
@@ -3060,15 +3043,41 @@ export default function StockControl() {
   // factory flow set in Stock Manager, so this gating follows the real
   // shop sequence. Jobs created before that existed keep the order they
   // were built with, which was whatever order the boxes were ticked in.
+  // Where a stage sits in the factory flow. Worked out from the Stock
+  // Manager list every time rather than read from the sort_order stored on
+  // the row, so the sequence on a job can never drift from the list: change
+  // the flow and every job follows it immediately, however old the job is
+  // and whatever order its stages were ticked in.
+  //
+  // A stage no longer in the list ranks last rather than first, and keeps
+  // its stored order relative to others like it.
+  function flowRank(processName) {
+    const i = (master?.jobProcessTypes || []).indexOf(processName);
+    return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+  }
+
+  // Job stages in factory-flow order. Stable, so two stages of the same
+  // name keep their relative position.
+  function inFlowOrder(processes) {
+    return (processes || [])
+      .map((p, i) => ({ p, i }))
+      .sort((a, b) => flowRank(a.p.process_name) - flowRank(b.p.process_name) || Number(a.p.sort_order) - Number(b.p.sort_order) || a.i - b.i)
+      .map(({ p }) => p);
+  }
+
   function isProcessActionable(process, jobProcesses) {
     // A shortage's catch-up stages are their own sequence, running
     // alongside the job rather than inside it. Comparing the two would
     // hold the re-cut behind stages the original job has already passed,
     // and would hold the job behind the re-cut — neither is true.
     const sameRun = (p) => (p.shortage_id || null) === (process.shortage_id || null);
+    // Compared by the factory flow, not the order stored on the row, so a
+    // change to the flow gates every job by it straight away — including
+    // jobs already on the floor.
+    const mine = flowRank(process.process_name);
     return jobProcesses
       .filter(sameRun)
-      .filter((p) => p.sort_order < process.sort_order)
+      .filter((p) => flowRank(p.process_name) < mine)
       .every((p) => p.is_complete);
   }
 
@@ -3371,9 +3380,11 @@ export default function StockControl() {
       // Everything up to and including the stage that raised it. If that
       // stage can't be found — renamed or removed since — fall back to the
       // whole sequence rather than silently skipping the catch-up.
-      const flaggedAt = (jobStages || []).find((p) => p.process_name === shortage.flagged_department);
-      const upTo = flaggedAt ? Number(flaggedAt.sort_order) : Infinity;
-      const needed = (jobStages || []).filter((p) => Number(p.sort_order) <= upTo);
+      // By the factory flow, like everything else, so the catch-up covers
+      // the right stages even if the job's stored order predates a change
+      // to that flow.
+      const upTo = flowRank(shortage.flagged_department);
+      const needed = inFlowOrder((jobStages || []).filter((p) => flowRank(p.process_name) <= upTo));
 
       const { data: already, error: existingError } = await supabase
         .from("job_processes")
@@ -4397,7 +4408,7 @@ export default function StockControl() {
       // against the same job, so without this the sheet lists nesting
       // twice with nothing saying why. The runs are summarised under
       // Shortages instead, where the context is.
-      body: processes.filter((p) => !p.shortage_id).map((p) => [
+      body: inFlowOrder(processes.filter((p) => !p.shortage_id)).map((p) => [
         p.process_name,
         p.operator || "",
         p.is_complete ? `Yes — ${p.completed_by || ""}` : "",
@@ -7334,87 +7345,6 @@ export default function StockControl() {
   // Works on the full list rather than what's on screen, so a search
   // filter can never make an item jump past hidden neighbours; the buttons
   // are hidden while searching for the same reason.
-  // Re-sequences unfinished jobs to the factory flow as it stands now.
-  //
-    // Each job stores its own order from when it was created, so changing
-  // the flow afterwards left existing work running the old sequence. This
-  // brings them into line — but on request, not automatically: the order
-  // is what gates the floor, so silently resequencing a job someone is
-  // part way through would change what comes next underneath them. It
-  // also overwrites any deliberate per-job reordering, which is the other
-  // reason not to do it without being asked.
-  async function applyFlowToOpenJobs() {
-    if (!supabase) return;
-    const flow = master?.jobProcessTypes || [];
-    if (flow.length === 0) return;
-    const rank = (name) => {
-      const i = flow.indexOf(name);
-      return i === -1 ? Number.MAX_SAFE_INTEGER : i;
-    };
-    try {
-      const { data: openJobs, error: jobsError } = await supabase
-        .from("jobs")
-        .select("id, job_number")
-        .in("status", ["in_progress", "complete"]);
-      if (jobsError) throw jobsError;
-      const jobIds = (openJobs || []).map((j) => j.id);
-      if (jobIds.length === 0) {
-        alert("No unfinished jobs to re-sequence.");
-        return;
-      }
-
-      // A shortage's catch-up run is its own sequence and is left alone.
-      const { data: stages, error: stagesError } = await supabase
-        .from("job_processes")
-        .select("id, job_id, process_name, sort_order")
-        .in("job_id", jobIds)
-        .is("shortage_id", null);
-      if (stagesError) throw stagesError;
-
-      const changes = [];
-      const affectedJobs = new Set();
-      for (const jobId of jobIds) {
-        const mine = (stages || []).filter((s) => s.job_id === jobId);
-        // Stable: two stages of the same name keep their relative order.
-        const ordered = mine
-          .map((s, i) => ({ s, i }))
-          .sort((a, b) => rank(a.s.process_name) - rank(b.s.process_name) || a.i - b.i)
-          .map(({ s }) => s);
-        ordered.forEach((s, idx) => {
-          if (Number(s.sort_order) !== idx) {
-            changes.push({ id: s.id, sort_order: idx });
-            affectedJobs.add(jobId);
-          }
-        });
-      }
-
-      if (changes.length === 0) {
-        alert("Every unfinished job already follows this order — nothing to change.");
-        return;
-      }
-      const names = (openJobs || [])
-        .filter((j) => affectedJobs.has(j.id))
-        .map((j) => j.job_number)
-        .join(", ");
-      const proceed = window.confirm(
-        `${affectedJobs.size} unfinished job${affectedJobs.size === 1 ? "" : "s"} still use an older sequence:\n\n${names}\n\n` +
-          `Re-sequencing them changes what the floor can start next, and replaces any order set for one job on its own. Completed stages stay completed.\n\n` +
-          `Update them to match this flow?`
-      );
-      if (!proceed) return;
-
-      for (const c of changes) {
-        const { error } = await supabase.from("job_processes").update({ sort_order: c.sort_order }).eq("id", c.id);
-        if (error) throw error;
-      }
-      if (productionQueue !== null) fetchProductionQueue();
-      if (jobDetail) refreshJobDetail();
-      alert(`Re-sequenced ${affectedJobs.size} job${affectedJobs.size === 1 ? "" : "s"} to match the factory flow.`);
-    } catch (err) {
-      console.error("Failed to re-sequence jobs:", err);
-      alert(`Couldn't re-sequence those jobs: ${err.message || "unknown error"}.`);
-    }
-  }
 
   function moveMasterEntry(entry, direction) {
     setMaster((prev) => {
@@ -12477,16 +12407,8 @@ export default function StockControl() {
                   <>
                     <div style={{ ...S.roleHint, marginTop: 10 }}>
                       This order is the factory flow — top to bottom is the sequence work moves through the shop. Use the arrows to change it.
-                      New jobs follow it straight away. Jobs already running keep the order they were created with until you apply it below.
+                      Every job follows this order, new or already running, and every department is listed in it.
                     </div>
-                    <button
-                      type="button"
-                      className="stk-btn"
-                      style={{ ...S.reqActionBtnMuted, marginTop: 6 }}
-                      onClick={applyFlowToOpenJobs}
-                    >
-                      <RefreshCw size={13} /> Apply this order to unfinished jobs
-                    </button>
                   </>
                 )}
 
@@ -13735,7 +13657,7 @@ export default function StockControl() {
                       two interleave and the checklist shows nesting twice
                       with no way to tell which is the job and which is the
                       re-cut. The runs get their own section below. */}
-                  {jobDetail.processes.filter((p) => !p.shortage_id).map((p) => (
+                  {inFlowOrder(jobDetail.processes.filter((p) => !p.shortage_id)).map((p) => (
                     <div key={p.id} style={{ ...S.managerRow, alignItems: "flex-start" }}>
                       <div style={{ flex: 1 }}>
                         <label style={{ ...S.checkRow, fontWeight: 600 }}>
@@ -13861,7 +13783,7 @@ export default function StockControl() {
                           </div>
                         )}
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-                          {stages.map((p) => (
+                          {inFlowOrder(stages).map((p) => (
                             <span
                               key={p.id}
                               style={{
@@ -15016,39 +14938,19 @@ export default function StockControl() {
               </div>
               {newJobForm.selectedProcesses.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+                  {/* No per-job reordering. The sequence is the factory
+                      flow and nothing else, so it cannot drift from the
+                      list: change the flow in Stock Manager and every job
+                      follows, new or already running. */}
                   <div style={S.roleHint}>
-                    Numbered in the order work moves through the shop — each stage opens up as the one before it is completed. This follows the
-                    factory flow set in Stock Manager; use the arrows if this job needs a different sequence.
+                    Numbered in the order work moves through the shop — each stage opens up as the one before it is completed. This is the
+                    factory flow set in Stock Manager, and it applies to every job. To change it, change it there.
                   </div>
                   {newJobForm.selectedProcesses.map((sp, idx) => (
                     <div key={sp.name} style={{ marginBottom: 4 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <span style={{ fontSize: 12, color: C.muted, flexShrink: 0, minWidth: 16 }}>{idx + 1}.</span>
                         <span style={{ fontSize: 14, fontWeight: 600, flex: 1 }}>{sp.name}</span>
-                        <button
-                          type="button"
-                          className="stk-btn"
-                          style={{ ...S.managerDelete, opacity: idx === 0 ? 0.25 : 1, cursor: idx === 0 ? "not-allowed" : "pointer" }}
-                          disabled={idx === 0}
-                          title="Do this stage earlier on this job"
-                          onClick={() => moveNewJobProcess(sp.name, -1)}
-                        >
-                          <ChevronUp size={15} />
-                        </button>
-                        <button
-                          type="button"
-                          className="stk-btn"
-                          style={{
-                            ...S.managerDelete,
-                            opacity: idx === newJobForm.selectedProcesses.length - 1 ? 0.25 : 1,
-                            cursor: idx === newJobForm.selectedProcesses.length - 1 ? "not-allowed" : "pointer",
-                          }}
-                          disabled={idx === newJobForm.selectedProcesses.length - 1}
-                          title="Do this stage later on this job"
-                          onClick={() => moveNewJobProcess(sp.name, 1)}
-                        >
-                          <ChevronDown size={15} />
-                        </button>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
                         <select
