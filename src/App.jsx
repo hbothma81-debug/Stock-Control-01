@@ -3490,7 +3490,13 @@ export default function StockControl() {
   }
 
   function openEditProcessesModal(job, processes) {
-    setEditProcessesModal({ job, selected: new Set(processes.map((p) => p.process_name)) });
+    // The job's own stages only. A shortage's catch-up run is stored
+    // against the same job, so including it would let this screen take
+    // stages off a re-cut that is still working its way back.
+    setEditProcessesModal({
+      job,
+      selected: new Set(processes.filter((p) => !p.shortage_id).map((p) => p.process_name)),
+    });
   }
 
   function toggleEditProcessesSelection(name) {
@@ -3505,7 +3511,10 @@ export default function StockControl() {
 
   async function saveEditProcesses() {
     const { job, selected } = editProcessesModal;
-    const existing = jobDetail?.processes || [];
+    // Same reason as opening it: a shortage's catch-up run belongs to the
+    // shortage, not to this screen, and must not be added to or removed
+    // from here.
+    const existing = (jobDetail?.processes || []).filter((p) => !p.shortage_id);
     const existingNames = new Set(existing.map((p) => p.process_name));
     const toAdd = [...selected].filter((name) => !existingNames.has(name));
     // Completed processes are hard-protected in the UI itself (checkbox
@@ -14421,10 +14430,32 @@ export default function StockControl() {
                 <X size={18} />
               </button>
             </div>
-            <div style={S.roleHint}>Check what this job needs. Unchecking removes a process — completed ones can't be removed.</div>
+            <div style={S.roleHint}>
+              Check what this job needs. Unchecking removes a process — completed ones can't be removed. Anything outlined in
+              red needs attention: it's either on the job twice, or no longer in Job Process Types.
+            </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
-              {master.jobProcessTypes.map((name) => {
-                const existingProcess = (jobDetail?.processes || []).find((p) => p.process_name === name);
+              {/* The list of types, plus anything this job already has that
+                  is no longer in it. Looping over the master list alone
+                  meant a stage whose type had since been deleted was never
+                  drawn — so it could not be unticked, could not be removed,
+                  and could not appear in Production either. The job was
+                  stuck with a stage nothing could reach. */}
+              {[
+                ...master.jobProcessTypes,
+                ...(jobDetail?.processes || [])
+                  .filter((p) => !p.shortage_id && !master.jobProcessTypes.includes(p.process_name))
+                  .map((p) => p.process_name),
+              ]
+                .filter((name, i, all) => all.indexOf(name) === i)
+                .map((name) => {
+                const jobStages = (jobDetail?.processes || []).filter((p) => !p.shortage_id && p.process_name === name);
+                const existingProcess = jobStages[0];
+                const orphaned = !master.jobProcessTypes.includes(name);
+                // Two rows for the same stage stall a job: both have to be
+                // completed before it can move on. Worth saying, because
+                // the buttons themselves can't show it.
+                const duplicated = jobStages.length > 1;
                 const locked = existingProcess?.is_complete;
                 const checked = editProcessesModal.selected.has(name);
                 return (
@@ -14434,14 +14465,25 @@ export default function StockControl() {
                     className="stk-btn"
                     disabled={locked}
                     onClick={() => toggleEditProcessesSelection(name)}
-                    title={locked ? "Already marked complete — can't be removed here" : undefined}
+                    title={
+                      locked
+                        ? "Already marked complete — can't be removed here"
+                        : orphaned
+                        ? "This stage is on the job but no longer in Job Process Types. Untick it to take it off the job."
+                        : duplicated
+                        ? `This job has ${jobStages.length} of these. Untick and save to remove them all, then tick it again to put one back.`
+                        : undefined
+                    }
                     style={{
                       ...S.segBtn,
                       ...(checked ? { background: C.accentTint, color: C.accentRaw, borderColor: C.accentRaw } : {}),
                       ...(locked ? { opacity: 0.6, cursor: "not-allowed" } : {}),
+                      ...(orphaned || duplicated ? { borderColor: C.danger } : {}),
                     }}
                   >
                     {name}
+                    {duplicated && ` ×${jobStages.length}`}
+                    {orphaned && " (not in list)"}
                     {locked && " 🔒"}
                   </button>
                 );
