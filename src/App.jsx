@@ -3694,6 +3694,13 @@ export default function StockControl() {
       const { error } = await supabase.from("job_processes").update({ [field]: value }).eq("id", process.id);
       if (error) throw error;
       flashSaved(`process-${process.id}`);
+      // The controls here are driven by what's in state, so without this
+      // the save landed in the database and the control snapped straight
+      // back to its old value — indistinguishable from the change being
+      // rejected. Tracking mode also changes how the floor records the
+      // work, so the queue has to hear about it too.
+      refreshJobDetail();
+      if (productionQueue !== null) fetchProductionQueue();
     } catch (err) {
       console.error("Failed to update process field:", err);
       alert("That didn't save — check your connection and try again.");
