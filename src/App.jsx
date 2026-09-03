@@ -5540,8 +5540,75 @@ export default function StockControl() {
 
   // Renaming a master entry cascades to every stock item that references it,
   // so the library and the live stock stay consistent.
+  // Master list values are stored as text on the rows that use them, not
+  // as a reference, so renaming one in the manager left every existing row
+  // pointing at the old name. A process type renamed from "tube laser
+  // operator" to "tube laser" produced two departments: the old name still
+  // on every job, the new one on nothing. It looked like a duplicate had
+  // been created; in fact nothing had been carried across.
+  //
+  // These are the places a name is copied to. Anything missed here is a
+  // row that silently detaches from its list.
+  async function cascadeMasterRename(listKey, oldValue, newValue) {
+    if (!supabase) return;
+    const jobs = [];
+    if (listKey === "jobProcessTypes") {
+      jobs.push(
+        supabase.from("job_processes").update({ process_name: newValue }).eq("process_name", oldValue),
+        supabase.from("job_documents").update({ process_name: newValue }).eq("process_name", oldValue),
+        supabase.from("shortages").update({ flagged_department: newValue }).eq("flagged_department", oldValue)
+      );
+    }
+    if (listKey === "customers") {
+      jobs.push(
+        supabase.from("jobs").update({ customer: newValue }).eq("customer", oldValue),
+        supabase.from("shortages").update({ customer: newValue }).eq("customer", oldValue)
+      );
+    }
+    if (listKey === "staffDepartments") {
+      jobs.push(supabase.from("profiles").update({ department: newValue }).eq("department", oldValue));
+    }
+    try {
+      const results = await Promise.all(jobs);
+      const failed = results.find((r) => r?.error);
+      if (failed) throw failed.error;
+
+      // allowed_process_types is a JSON array, so the element has to be
+      // swapped rather than matched on — done per person, since only the
+      // ones holding the old name need writing.
+      if (listKey === "jobProcessTypes") {
+        // Filtered here rather than with .contains(): that builds a
+        // Postgres array match, which never matches a jsonb column, so it
+        // returned nothing and the rename silently skipped everyone's
+        // production access. There are only ever a handful of people.
+        const { data: allProfiles, error } = await supabase.from("profiles").select("id, allowed_process_types");
+        if (error) throw error;
+        const holders = (allProfiles || []).filter((p) => (p.allowed_process_types || []).includes(oldValue));
+        for (const p of holders) {
+          const next = (p.allowed_process_types || []).map((v) => (v === oldValue ? newValue : v));
+          const { error: upError } = await supabase
+            .from("profiles")
+            .update({ allowed_process_types: next })
+            .eq("id", p.id);
+          if (upError) throw upError;
+        }
+        loadPeople();
+        if (productionQueue !== null) fetchProductionQueue();
+      }
+      if (listKey === "customers") fetchJobs();
+      fetchShortages();
+    } catch (err) {
+      console.error("Failed to carry the rename across:", err);
+      alert(
+        `The name changed in the list, but existing records still say "${oldValue}": ${err.message || "unknown error"}.\n\n` +
+          `Rename it back and try again, or they'll show up as a separate entry.`
+      );
+    }
+  }
+
   function renameMasterEntry(listKey, oldValue, newValue) {
     if (!newValue.trim() || newValue === oldValue) return;
+    cascadeMasterRename(listKey, oldValue, newValue.trim());
     const isFactor = FACTOR_TABLES.includes(listKey);
     setMaster((prev) => {
       const list = prev[listKey] || [];
