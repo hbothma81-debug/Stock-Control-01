@@ -294,6 +294,9 @@ const PO_DB_FIELDS = [
   ["deliveryDate", "delivery_date", "text"], ["reference", "reference", "text"], ["salesPerson", "sales_person", "text"],
   ["notes", "notes", "text"], ["status", "status", "text"], ["receivedBy", "received_by", "text"], ["receivedDate", "received_date", "text"],
   ["deliveryNoteNumber", "delivery_note_number", "text"],
+  // The job number is kept beside the id so a finished order still reads
+  // correctly if that job is ever deleted.
+  ["jobNumber", "job_number", "text"],
 ];
 function dbRowToPo(row) {
   const po = {
@@ -302,6 +305,9 @@ function dbRowToPo(row) {
     linkedRequisitionIds: row.linked_requisition_ids || [],
   };
   if (row.received_line_items != null) po.receivedLineItems = row.received_line_items;
+  // Not in PO_DB_FIELDS: that coerces empty to "", and "" is not a valid
+  // uuid. An order with no job has to write a real null.
+  po.jobId = row.job_id || null;
   for (const [jsKey, dbKey] of PO_DB_FIELDS) po[jsKey] = row[dbKey];
   return po;
 }
@@ -311,6 +317,7 @@ function poToDbRow(po) {
     line_items: po.lineItems || [],
     linked_requisition_ids: po.linkedRequisitionIds || [],
     received_line_items: po.receivedLineItems ?? null,
+    job_id: po.jobId || null,
   };
   for (const [jsKey, dbKey, type] of PO_DB_FIELDS) {
     const v = po[jsKey];
@@ -3089,6 +3096,24 @@ export default function StockControl() {
       fetchAllocations();
     } catch (err) {
       console.error("Failed to release allocation:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  // Material that arrived against a purchase order is set aside for the
+  // job but not for any one stage, because whoever ordered it usually does
+  // not know which. This is how someone who does know places it.
+  async function assignAllocationToProcess(allocation, process) {
+    try {
+      const { error } = await supabase
+        .from("job_allocations")
+        .update({ process_id: process.id, process_name: process.process_name })
+        .eq("id", allocation.id);
+      if (error) throw error;
+      refreshJobDetail();
+      fetchAllocations();
+    } catch (err) {
+      console.error("Failed to assign allocation to a stage:", err);
       alert("That didn't save — check your connection and try again.");
     }
   }
@@ -6954,6 +6979,56 @@ export default function StockControl() {
     setReceivingLines((prev) => prev.map((l, i) => (i === idx ? { ...l, receivedQty: value } : l)));
   }
 
+  // Material bought for a job should not land in general stock and wait
+  // to be found. If the order names a job, whatever actually arrives is
+  // set aside for it -- the short-delivery case included, since this uses
+  // the received quantity, not the ordered one.
+  //
+  // No stage is set. Whoever raised the order rarely knows whether the
+  // steel is for bending or the laser, and guessing would put it under
+  // the wrong one. It shows on the job as not yet assigned to a stage,
+  // for someone who does know to place.
+  async function allocateReceivedToJob(po, lines, timestamp) {
+    if (!supabase || !po.jobId) return;
+    const rows = [];
+    for (const line of lines) {
+      const qty = parseFloat(line.receivedQty) || 0;
+      if (qty <= 0 || !line.linkedItemId) continue;
+      rows.push({
+        id: uid(),
+        job_id: po.jobId,
+        job_number: po.jobNumber || "",
+        process_id: null,
+        process_name: "",
+        item_id: line.linkedItemId,
+        item_name: line.linkedItemName || "",
+        main_cat: line.linkedItemMainCat || "",
+        qty_allocated: qty,
+        qty_used: 0,
+        allocated_by: roleLabel,
+        allocated_by_id: currentUser?.id || null,
+        note: `Received against ${po.poNumber} on ${new Date(timestamp).toLocaleDateString()}`,
+        status: "open",
+      });
+    }
+    if (rows.length === 0) return;
+    try {
+      const { error } = await supabase.from("job_allocations").insert(rows);
+      if (error) throw error;
+      fetchAllocations();
+    } catch (err) {
+      // Never block the delivery over this. The stock is in either way,
+      // and an allocation can be made by hand -- losing the receipt could
+      // not be undone.
+      console.error("Failed to set received material aside for the job:", err);
+      alert(
+        "The delivery was received, but setting it aside for " +
+          (po.jobNumber || "the job") +
+          " did not save. Allocate it from the job when you get a moment."
+      );
+    }
+  }
+
   function submitReceiving() {
     if (!receivingDeliveryNote.trim()) {
       alert("Please enter the supplier's delivery note number before confirming.");
@@ -6977,6 +7052,7 @@ export default function StockControl() {
             by: roleLabel,
             jobNumber: "",
             customer: "",
+            jobNumber: receivingPo.jobNumber || "",
             note: `Received against ${receivingPo.poNumber} — delivery note ${receivingDeliveryNote.trim()}`,
             lineCost: 0,
             timestamp,
@@ -7013,6 +7089,7 @@ export default function StockControl() {
           : p
       )
     );
+    allocateReceivedToJob(receivingPo, receivingLines, timestamp);
     closeReceiving();
   }
 
@@ -7100,6 +7177,9 @@ export default function StockControl() {
     setPoBuilder({
       supplierId: prefillSupplierId,
       lineItems: prefillLineItems.length ? prefillLineItems : [{ description: "", qty: "", unitPrice: "" }],
+      jobId: null,
+      jobNumber: "",
+      jobQuery: "",
       notes: "",
       linkedRequisitionIds,
       deliveryDate: "",
@@ -7332,6 +7412,11 @@ export default function StockControl() {
       totalValue,
       deliveryDate: poBuilder.deliveryDate,
       reference: poBuilder.reference.trim(),
+      // Set only when a real job was picked. Receiving reads this to set
+      // the material aside for that job instead of dropping it into
+      // general stock for someone to find later.
+      jobId: poBuilder.jobId || null,
+      jobNumber: poBuilder.jobNumber || "",
       // Tied to whoever is actually logged in, not a free-pick dropdown —
       // this is an accountability field, so it can't be set to someone
       // else's name.
@@ -14612,6 +14697,64 @@ export default function StockControl() {
                 })()}
               </div>
 
+              {/* Set aside for this job but not yet for a stage -- which is
+                  how it arrives from a purchase order. Listed here rather
+                  than under a process, because otherwise it would be
+                  reserved and invisible, which is worse than not reserved
+                  at all. */}
+              {(() => {
+                const loose = (jobDetail.allocations || []).filter(
+                  (a) => !a.process_id && a.status !== "released"
+                );
+                if (loose.length === 0) return null;
+                const stages = inFlowOrder(
+                  (jobDetail.processes || []).filter((pr) => !pr.shortage_id),
+                  jobDetail.job
+                );
+                return (
+                  <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+                    <label style={S.label}>Material waiting on this job</label>
+                    <div style={S.roleHint}>
+                      Bought for this job and reserved for it, but not yet put against a stage. Pick the stage it is
+                      for and it moves up into the checklist.
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                      {loose.map((a) => {
+                        const outstanding = Number(a.qty_allocated) - Number(a.qty_used);
+                        return (
+                          <div
+                            key={a.id}
+                            style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+                          >
+                            <span style={{ fontSize: 13.5, flex: "1 1 180px" }}>
+                              {a.item_name || "Item"} — {outstanding} reserved
+                              {a.note ? <span style={S.roleHint}> · {a.note}</span> : null}
+                            </span>
+                            {canEditThisJob && stages.length > 0 && (
+                              <select
+                                style={{ ...S.input, width: 200 }}
+                                value=""
+                                onChange={(e) => {
+                                  const stage = stages.find((pr) => pr.id === e.target.value);
+                                  if (stage) assignAllocationToProcess(a, stage);
+                                }}
+                              >
+                                <option value="">Put against a stage…</option>
+                                {stages.map((pr) => (
+                                  <option key={pr.id} value={pr.id}>
+                                    {pr.process_name}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                   <label style={S.label}>Documents</label>
@@ -15993,14 +16136,87 @@ export default function StockControl() {
               </button>
             </div>
 
+            {/* A real job, not just text. When the steel arrives, receiving
+                sets it aside for this job on its own. Optional: an order for
+                general stock leaves it blank and behaves as it always has. */}
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>For a job (optional)</label>
+              {poBuilder.jobId ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ ...S.chip, borderColor: C.accentRaw, color: C.accentRaw }}>
+                    {poBuilder.jobNumber}
+                  </span>
+                  <button
+                    type="button"
+                    className="stk-btn"
+                    style={S.reqActionBtnMuted}
+                    onClick={() => setPoBuilder((b) => ({ ...b, jobId: null, jobNumber: "", jobQuery: "" }))}
+                  >
+                    Not for a job
+                  </button>
+                </div>
+              ) : (
+                <div style={{ position: "relative" }}>
+                  <input
+                    style={S.input}
+                    value={poBuilder.jobQuery || ""}
+                    onChange={(e) => setPoBuilder((b) => ({ ...b, jobQuery: e.target.value }))}
+                    placeholder="Type a job number or customer to find the job…"
+                  />
+                  {(() => {
+                    const q = (poBuilder.jobQuery || "").trim().toLowerCase();
+                    if (!q) return null;
+                    const hits = (jobsList || [])
+                      .filter((j) => j.status === "in_progress")
+                      .filter(
+                        (j) =>
+                          (j.job_number || "").toLowerCase().includes(q) ||
+                          (j.customer || "").toLowerCase().includes(q)
+                      )
+                      .slice(0, 8);
+                    if (hits.length === 0) {
+                      return <div style={{ ...S.roleHint, marginTop: 6 }}>No open job matches that.</div>;
+                    }
+                    return (
+                      <div style={S.suggestDropdown}>
+                        {hits.map((j) => (
+                          <button
+                            key={j.id}
+                            type="button"
+                            className="stk-btn"
+                            style={{ ...S.suggestItem, width: "100%", textAlign: "left" }}
+                            onClick={() =>
+                              setPoBuilder((b) => ({
+                                ...b,
+                                jobId: j.id,
+                                jobNumber: j.job_number || "",
+                                jobQuery: "",
+                              }))
+                            }
+                          >
+                            <b>{j.job_number}</b> {j.customer || "No customer"}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+              {poBuilder.jobId && (
+                <div style={S.roleHint}>
+                  Everything received against this order will be set aside for {poBuilder.jobNumber}.
+                </div>
+              )}
+            </div>
+
             <div style={S.formGrid}>
               <div>
-                <label style={S.label}>Reference (job number)</label>
+                <label style={S.label}>Reference (your own note)</label>
                 <input
                   style={S.input}
                   value={poBuilder.reference}
                   onChange={(e) => setPoBuilder((b) => ({ ...b, reference: e.target.value }))}
-                  placeholder="e.g. Job #4471"
+                  placeholder="e.g. quote 12345"
                 />
               </div>
               <div>
