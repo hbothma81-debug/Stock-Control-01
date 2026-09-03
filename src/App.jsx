@@ -16,6 +16,7 @@ import CompanyDetails from "./manager/CompanyDetails.jsx";
 import EditableName from "./EditableName.jsx";
 import NestingView from "./laser/NestingView.jsx";
 import CutList from "./laser/CutList.jsx";
+import LaserStatus from "./laser/LaserStatus.jsx";
 
 // window.storage is installed in main.jsx before this component ever
 // renders — backed by Supabase. See src/lib/storage.js.
@@ -141,6 +142,10 @@ const isLaserProcess = (name) => /laser/i.test(name || "");
 // belongs in the process type settings rather than here.
 const isProgramLaserProcess = (name) =>
   /laser/i.test(name || "") && !/tube/i.test(name || "") && !/external/i.test(name || "");
+
+// Laser Status is not a process type, so it needs a key that no process
+// type could ever collide with.
+const LASER_STATUS_DEPT = "__laser_status__";
 
 // A shortage can cover several missing parts. Older ones, and any saved
 // before the app could hold more than one, carry a single description and
@@ -940,6 +945,12 @@ export default function StockControl() {
   // them, and the job stages so "waiting to be nested" can be worked out.
   const [laserData, setLaserData] = useState(null);
   const [laserView, setLaserView] = useState("nesting");
+  // Per process type: whether it releases the next stage when started
+  // rather than when finished, and whether it is worked on the Laser
+  // Status screen instead of having its own box on Production. Kept as
+  // data so renaming a process carries them, rather than as names written
+  // into the code.
+  const [processTypeSettings, setProcessTypeSettings] = useState({});
   // Which program is mid-save, so its button can say so and cannot be
   // pressed twice -- marking a program cut also rewrites job stages.
   const [programBusyId, setProgramBusyId] = useState(null);
@@ -1800,6 +1811,32 @@ export default function StockControl() {
   useEffect(() => {
     if (tab === "laser4kw" && laserData === null) fetchLaserData();
   }, [tab, laserData]);
+
+  // Needed before the production queue can decide what is actionable, so
+  // it loads with the session rather than with a tab. An empty map means
+  // every stage behaves the old way, which is the safe default.
+  useEffect(() => {
+    if (!session?.user || !supabase) return;
+    (async () => {
+      try {
+        const rows = await fetchAllRows("process_type_settings", { orderBy: "process_name" });
+        const map = {};
+        for (const r of rows || []) map[r.process_name] = r;
+        setProcessTypeSettings(map);
+      } catch (err) {
+        console.error("Failed to load process type settings:", err);
+      }
+    })();
+  }, [session]);
+
+  // Laser Status lives under Production but reads the programs, so that
+  // data has to load with the tab rather than with the department -- its
+  // card shows a count before anyone opens it. Only fetched for the people
+  // who can actually see it.
+  useEffect(() => {
+    if (tab !== "production" || laserData !== null) return;
+    if (isAdmin || profile?.allowedProcessTypes?.some(workedInLaserStatus)) fetchLaserData();
+  }, [tab, laserData, profile, processTypeSettings]);
 
   // Dropdown menus (the Stock/Procurement/Records group menus, the
   // customer/section-type filter) should always close on an outside
@@ -3132,7 +3169,10 @@ export default function StockControl() {
     const [programs, links, processes] = await Promise.all([
       fetchAllRows("laser_programs", { orderBy: "created_at", ascending: false }),
       fetchAllRows("laser_program_jobs", { orderBy: "created_at" }),
-      fetchAllRows("job_processes", { select: "id, job_id, process_name, is_complete, shortage_id" }),
+      fetchAllRows("job_processes", {
+        select:
+          "id, job_id, process_name, is_complete, shortage_id, started_at, started_by, operator, assigned_to, completed_at",
+      }),
     ]);
     return { programs: programs || [], links: links || [], processes: processes || [] };
   }
@@ -3311,6 +3351,84 @@ export default function StockControl() {
     }
   }
 
+  // Everything Laser Status shows: a job appears once its first program is
+  // cut, and stays until the packer marks it packed and checked.
+  function laserStatusRows() {
+    const d = laserData || { programs: [], links: [], processes: [] };
+    const jobs = jobsList || [];
+    const live = d.programs.filter((pg) => !pg.is_cancelled);
+    const rows = [];
+    for (const job of jobs.filter((j) => j.status === "in_progress")) {
+      const packing = d.processes.find(
+        (pr) => pr.job_id === job.id && !pr.shortage_id && workedInLaserStatus(pr.process_name)
+      );
+      // A finished job leaves the screen. A job with no packing stage at
+      // all stays on it: someone did not tick Packer when the job was
+      // built, and the parts are coming off the machine regardless. A job
+      // nobody can see is worse than a row that needs fixing.
+      if (packing?.is_complete) continue;
+      const programs = live.filter((pg) =>
+        d.links.some((l) => l.program_id === pg.id && l.job_id === job.id)
+      );
+      // Nothing off the machine yet is nothing for the packer to look for.
+      if (!programs.some((pg) => pg.is_complete)) continue;
+      rows.push({
+        job,
+        process: packing || null,
+        programs,
+        packerName: packing?.operator || packing?.started_by || "",
+        isMine: !!currentUser?.id && !!packing && packing.assigned_to === currentUser.id,
+      });
+    }
+    rows.sort(
+      (a, b) => new Date(a.job.due_date || "2999-01-01") - new Date(b.job.due_date || "2999-01-01")
+    );
+    return rows;
+  }
+
+  // Taking a job does two things at once: it puts a name against it, and
+  // it opens every stage after packing. started_at is only set the first
+  // time, so taking a job over from someone does not re-open anything.
+  async function takePackingJob(row) {
+    if (!supabase || programBusyId) return;
+    setProgramBusyId(row.process.id);
+    try {
+      const fields = { assigned_to: currentUser?.id || null, operator: roleLabel };
+      if (!row.process.started_at) {
+        fields.started_at = new Date().toISOString();
+        fields.started_by = roleLabel;
+      }
+      const { error } = await supabase.from("job_processes").update(fields).eq("id", row.process.id);
+      if (error) throw error;
+      await fetchLaserData();
+      if (productionQueue !== null) fetchProductionQueue();
+    } catch (err) {
+      console.error("Failed to take packing job:", err);
+      alert("That didn't save — check your connection and try again.");
+    } finally {
+      setProgramBusyId(null);
+    }
+  }
+
+  async function finishPacking(row) {
+    if (!supabase || programBusyId) return;
+    setProgramBusyId(row.process.id);
+    try {
+      const { error } = await supabase
+        .from("job_processes")
+        .update({ is_complete: true, completed_by: roleLabel, completed_at: new Date().toISOString() })
+        .eq("id", row.process.id);
+      if (error) throw error;
+      await fetchLaserData();
+      if (productionQueue !== null) fetchProductionQueue();
+    } catch (err) {
+      console.error("Failed to finish packing:", err);
+      alert("That didn't save — check your connection and try again.");
+    } finally {
+      setProgramBusyId(null);
+    }
+  }
+
   // Marks a program cut, then brings every job on it into line.
   //
   // A job's laser stage is finished when its nesting has been ticked off
@@ -3412,6 +3530,9 @@ export default function StockControl() {
     }
   }
 
+  const releasesOnStart = (name) => !!processTypeSettings[name]?.releases_on_start;
+  const workedInLaserStatus = (name) => !!processTypeSettings[name]?.worked_in_laser_status;
+
   function isProcessActionable(process, jobProcesses) {
     // A shortage's catch-up stages are their own sequence, running
     // alongside the job rather than inside it. Comparing the two would
@@ -3422,10 +3543,14 @@ export default function StockControl() {
     // change to the flow gates every job by it straight away — including
     // jobs already on the floor.
     const mine = flowRank(process.process_name);
+    // A stage set to release on start counts as cleared once someone has
+    // taken it, not when it is finished. That is the packer: a big job is
+    // cut over several days and bending should not wait for the last
+    // program. Every other stage still has to be complete.
     return jobProcesses
       .filter(sameRun)
       .filter((p) => flowRank(p.process_name) < mine)
-      .every((p) => p.is_complete);
+      .every((p) => p.is_complete || (releasesOnStart(p.process_name) && !!p.started_at));
   }
 
   // How much of ONE item may pass through this stage right now.
@@ -3543,6 +3668,9 @@ export default function StockControl() {
       // truth — that department no longer exists.
       const byProcessType = {};
       for (const procType of master?.jobProcessTypes || []) {
+        // A stage worked on the Laser Status screen gets no box of its own.
+        // Two places to tick the same thing is two places to forget.
+        if (workedInLaserStatus(procType)) continue;
         if (profile.allowedProcessTypes.includes(procType)) byProcessType[procType] = [];
       }
 
@@ -9185,6 +9313,25 @@ export default function StockControl() {
                     <div style={S.empty}>{q ? "Nothing matches that search." : "Nothing outstanding right now."}</div>
                   )}
                   <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 6 }}>
+                    {/* Laser Status sits first, where it falls in the flow:
+                        after the laser, before everything the packer
+                        releases. It is not a process type, so it is not in
+                        the list the rest of these come from. */}
+                    {(isAdmin || profile?.allowedProcessTypes?.some(workedInLaserStatus)) && (
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={S.productionDeptCard}
+                        onClick={() => {
+                          setProductionSelectedDept(LASER_STATUS_DEPT);
+                          setProductionSelectedProcessId(null);
+                        }}
+                      >
+                        <span style={{ flex: 1 }}>Laser Status</span>
+                        <span style={S.gradeCount}>{laserData === null ? "…" : laserStatusRows().length}</span>
+                        <ChevronRight size={20} />
+                      </button>
+                    )}
                     {visibleDepts.map(({ procType, readyCount, hasPendingShortage }) => {
                 return (
                   <button
@@ -9210,6 +9357,30 @@ export default function StockControl() {
                 </>
               );
             })()}
+          </div>
+        ) : productionSelectedDept === LASER_STATUS_DEPT ? (
+          <div style={S.list}>
+            <button
+              type="button"
+              className="stk-btn"
+              style={{ ...S.prominentBackBtn, marginBottom: 10 }}
+              onClick={() => setProductionSelectedDept(null)}
+            >
+              <ChevronLeft size={18} strokeWidth={2.5} /> All departments
+            </button>
+            <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 10 }}>Laser Status</div>
+            {laserData === null || jobsList === null ? (
+              <div style={S.empty}>Loading…</div>
+            ) : (
+              <LaserStatus
+                rows={laserStatusRows()}
+                canPack={isAdmin || !!profile?.allowedProcessTypes?.some(workedInLaserStatus)}
+                meName={roleLabel}
+                onTakeJob={takePackingJob}
+                onFinishPacking={finishPacking}
+                busyId={programBusyId}
+              />
+            )}
           </div>
         ) : (
           <div style={S.list}>
