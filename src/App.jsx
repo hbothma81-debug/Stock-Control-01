@@ -7146,11 +7146,25 @@ export default function StockControl() {
     setSelectedReqIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
 
+  // What the supplier actually reads on the order.
+  //
+  // A requisition label is "MS — 50x50x2", which says nothing about how
+  // long the pieces should be. Ordering 10 of those is meaningless: the
+  // supplier needs 10 pieces of 6m. The length lives on the stock item,
+  // so it is put back on here rather than being baked into the label --
+  // which also means requisitions raised before this fix get it too.
+  function poLineDescription(req) {
+    const it = (items || []).find((x) => x.id === req.itemId);
+    const metres = Number(it?.length) || 0;
+    if (!metres || !it?.trackLength) return req.itemLabel;
+    return `${req.itemLabel} — ${metres}m lengths`;
+  }
+
   function raisePoFromSelected() {
     const selected = requisitions.filter((r) => selectedReqIds.includes(r.id));
     if (selected.length === 0) return;
     const lineItems = selected.map((r) => ({
-      description: r.itemLabel,
+      description: poLineDescription(r),
       qty: r.qty,
       unitPrice: resolvePoLineUnitPrice(r),
     }));
@@ -7168,7 +7182,7 @@ export default function StockControl() {
   function raisePoForSupplierGroup(supplierName, reqList) {
     if (reqList.length === 0) return;
     const lineItems = reqList.map((r) => ({
-      description: r.itemLabel,
+      description: poLineDescription(r),
       qty: r.qty,
       unitPrice: resolvePoLineUnitPrice(r),
     }));
