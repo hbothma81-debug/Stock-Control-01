@@ -898,7 +898,6 @@ export default function StockControl() {
   const [receivingHistoryDateFrom, setReceivingHistoryDateFrom] = useState("");
   const [receivingHistoryDateTo, setReceivingHistoryDateTo] = useState("");
   const [receivingHistorySearchQuery, setReceivingHistorySearchQuery] = useState("");
-  const [shortageSearchQuery, setShortageSearchQuery] = useState("");
   const [showPoReport, setShowPoReport] = useState(false);
   const [showCompletedPOs, setShowCompletedPOs] = useState(false);
   const [receivingPo, setReceivingPo] = useState(null);
@@ -968,7 +967,6 @@ export default function StockControl() {
   const [jobsSearchQuery, setJobsSearchQuery] = useState("");
   const [jobsCustomerFilter, setJobsCustomerFilter] = useState("");
   const [jobsSalesRepFilter, setJobsSalesRepFilter] = useState("");
-  const [shortagesResolvedOpen, setShortagesResolvedOpen] = useState(false);
   const [productionSelectedDept, setProductionSelectedDept] = useState(null);
   // Which specific job card is open within the current department — null
   // shows the compact list (job number, SigmaNest number, customer, sales
@@ -1795,7 +1793,6 @@ export default function StockControl() {
     setExpandedReqId(null);
     setExpandedPoId(null);
     setReceivingSearchQuery("");
-    setShortageSearchQuery("");
     setExpandedReceivingId(null);
   }, [tab]);
 
@@ -5851,7 +5848,6 @@ export default function StockControl() {
     if (section === "laser4kw")
       return !!profile?.allowedProcessTypes?.some((t) => isNestingProcess(t) || isProgramLaserProcess(t));
     if (section === "usageLog") return !!profile?.canViewUsageLog;
-    if (section === "shortageCenter") return !!profile?.isShortageHandler;
     return profile ? !!profile.permissions?.[section]?.view : false;
   }
 
@@ -10102,88 +10098,6 @@ export default function StockControl() {
                               <span>{new Date(n.created_at).toLocaleString()}</span>
                             </div>
                             <div style={{ ...S.itemName, fontSize: 14.5, marginTop: 2 }}>{n.message}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </>
-            );
-          })()}
-        </div>
-      ) : tab === "shortageCenter" ? (
-        <div style={S.list}>
-          <div style={S.roleHint}>Every shortage across every job, in one place — flagged, being nested, or ready to cut.</div>
-          {shortagesList === null && <div style={{ ...S.empty, marginTop: 10 }}>Loading…</div>}
-          {shortagesList?.length === 0 && <div style={{ ...S.empty, marginTop: 10 }}>Nothing outstanding right now.</div>}
-          {shortagesList?.length > 0 && (
-            <input
-              style={{ ...S.input, marginTop: 10 }}
-              value={shortageSearchQuery}
-              onChange={(e) => setShortageSearchQuery(e.target.value)}
-              placeholder="Search by job number or customer…"
-            />
-          )}
-          {(() => {
-            const sq = shortageSearchQuery.trim().toLowerCase();
-            const matchesSearch = (s) =>
-              !sq || (s.job_number || "").toLowerCase().includes(sq) || (s.customer || "").toLowerCase().includes(sq);
-            const open = (shortagesList || []).filter((s) => s.status !== "cut").filter(matchesSearch);
-            const resolved = (shortagesList || []).filter((s) => s.status === "cut").filter(matchesSearch);
-            const statusLabel = { flagged: "Needs nesting", nested: "Needs cutting" };
-            return (
-              <>
-                {shortagesList?.length > 0 && open.length === 0 && (
-                  <div style={{ ...S.empty, marginTop: 10 }}>{sq ? "Nothing open matches." : "Nothing open — everything's cut."}</div>
-                )}
-                <div style={{ ...S.gradeItems, marginTop: 10 }}>
-                  {open.map((s) => (
-                    <div key={s.id} style={{ ...S.reqCard, borderColor: C.danger, borderWidth: 2 }}>
-                      <div style={S.reqCardTop}>
-                        <span style={S.itemName}>{s.job_number} — {s.customer || "No customer"}</span>
-                        <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>{statusLabel[s.status] || s.status}</span>
-                      </div>
-                      <div style={{ ...S.itemComment, marginTop: 2 }}>
-                        {shortageSummary(s)} {s.board_number && `— SigmaNest ${s.board_number}`}
-                      </div>
-                      <div className="stk-meta-row" style={S.rowMeta}>
-                        <span>Reason: {s.reason}</span>
-                        <span>Flagged by {s.flagged_by} ({s.flagged_department})</span>
-                        <span>{new Date(s.created_at).toLocaleString()}</span>
-                        {s.status === "nested" && <span>Nested by {s.nested_by}</span>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {resolved.length > 0 && (
-                  <>
-                    <button
-                      type="button"
-                      className="stk-btn"
-                      style={{ ...S.productionPill, marginTop: 16 }}
-                      onClick={() => setShortagesResolvedOpen((o) => !o)}
-                    >
-                      <span>Resolved</span>
-                      <span style={S.gradeCount}>{resolved.length}</span>
-                      <ChevronDown size={14} style={{ transform: shortagesResolvedOpen ? "rotate(180deg)" : "none" }} />
-                    </button>
-                    {shortagesResolvedOpen && (
-                      <div style={{ ...S.gradeItems, marginTop: 6 }}>
-                        {resolved.map((s) => (
-                          <div key={s.id} style={S.reqCard}>
-                            <div style={S.reqCardTop}>
-                              <span style={S.itemName}>{s.job_number} — {s.customer || "No customer"}</span>
-                              <span style={{ ...S.reqStatusTag, ...S.reqStatus_received }}>Cut</span>
-                            </div>
-                            <div style={{ ...S.itemComment, marginTop: 2 }}>
-                              {shortageSummary(s)} {s.board_number && `— SigmaNest ${s.board_number}`}
-                            </div>
-                            <div className="stk-meta-row" style={S.rowMeta}>
-                              <span>Flagged by {s.flagged_by}</span>
-                              <span>Nested by {s.nested_by}</span>
-                              <span>Cut by {s.cut_by} on {new Date(s.cut_at).toLocaleDateString()}</span>
-                            </div>
                           </div>
                         ))}
                       </div>
