@@ -38,7 +38,7 @@ export default function Section({ title, count, collapsible = true, defaultOpen 
             ...S.productionPill,
             cursor: "pointer",
             color: C.text,
-            ...(shown ? { borderColor: C.accentRaw, background: C.accentTint, color: C.accentRaw } : {}),
+            ...(shown ? { border: `1px solid ${C.accentRaw}`, background: C.accentTint, color: C.accentRaw } : {}),
           }}
           onClick={() => setOpen((v) => !v)}
         >

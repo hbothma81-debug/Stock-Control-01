@@ -773,7 +773,7 @@ function ProgramList({
   const [openId, setOpenId] = useState(null);
 
   return (
-    <Section title={title} count={programs.length} collapsible={collapsible} defaultOpen={!collapsible}>
+    <Section title={title} count={programs.length} collapsible defaultOpen={!collapsible}>
       <>
         {programs.length === 0 ? (
           emptyText ? <div style={S.empty}>{emptyText}</div> : null

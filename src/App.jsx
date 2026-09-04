@@ -136,6 +136,13 @@ const ORDERED_STRING_LISTS = ["jobProcessTypes", "laserThicknesses"];
 // Matching on the recognisable part of the name instead means a shortage
 // reaches the right people whatever the shop calls the stage.
 const isNestingProcess = (name) => /nest/i.test(name || "");
+// The plate laser's own nesting. "Tube Laser Nesting" has the word in it
+// too, but it is a different machine with a different flow -- named
+// nestings and per-item quantities rather than program numbers -- so the
+// Laser 4kw screens have to leave it alone. Shortage routing and the
+// nesting document still use the broad match above, because both apply
+// to tube nesting as much as plate.
+const isPlateNestingProcess = (name) => /nest/i.test(name || "") && !/tube/i.test(name || "");
 const isLaserProcess = (name) => /laser/i.test(name || "");
 // The stage that SigmaNest programs actually cut. "Laser" but not "Tube
 // Laser" and not "Laser - External": all three have the word in them, but
@@ -3301,7 +3308,7 @@ export default function StockControl() {
         (pr) =>
           pr.job_id === job.id &&
           !pr.shortage_id &&
-          isNestingProcess(pr.process_name) &&
+          isPlateNestingProcess(pr.process_name) &&
           !pr.is_complete
       );
       if (!process) continue;
@@ -3625,7 +3632,7 @@ export default function StockControl() {
       );
       if (laserStages.length === 0) continue;
       const nesting = d.processes.find(
-        (pr) => pr.job_id === jobId && !pr.shortage_id && isNestingProcess(pr.process_name)
+        (pr) => pr.job_id === jobId && !pr.shortage_id && isPlateNestingProcess(pr.process_name)
       );
       const mine = live.filter((pg) =>
         d.links.some((l) => l.program_id === pg.id && l.job_id === jobId)
@@ -3664,7 +3671,7 @@ export default function StockControl() {
       const catchUp = d.processes.filter(
         (pr) =>
           pr.shortage_id === id &&
-          (isNestingProcess(pr.process_name) || isProgramLaserProcess(pr.process_name))
+          (isPlateNestingProcess(pr.process_name) || isProgramLaserProcess(pr.process_name))
       );
       for (const stage of catchUp) {
         if (!!stage.is_complete === nowCut) continue;
@@ -3938,6 +3945,23 @@ export default function StockControl() {
       setProductionQueue({});
     }
     setProductionLoading(false);
+  }
+
+  // Tube nestings are named rather than numbered -- the shop calls a nest
+  // something, and that name is what gets looked for later. Kept on the
+  // stage itself, since a tube nest belongs to one job rather than
+  // carrying several the way a plate program does.
+  async function saveNestingName(process, name) {
+    try {
+      const { error } = await supabase.from("job_processes").update({ nesting_name: name }).eq("id", process.id);
+      if (error) throw error;
+      flashSaved("nesting-name-" + process.id);
+      if (productionQueue !== null) fetchProductionQueue();
+      if (laserData !== null) fetchLaserData();
+    } catch (err) {
+      console.error("Failed to save the nesting name:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
   }
 
   async function toggleProcessUrgent(process) {
@@ -5943,7 +5967,7 @@ export default function StockControl() {
     // name rather than a fixed list, so renaming a department in Stock
     // Manager cannot quietly take the tab away from the people using it.
     if (section === "laser4kw")
-      return !!profile?.allowedProcessTypes?.some((t) => isNestingProcess(t) || isProgramLaserProcess(t));
+      return !!profile?.allowedProcessTypes?.some((t) => isPlateNestingProcess(t) || isProgramLaserProcess(t));
     if (section === "usageLog") return !!profile?.canViewUsageLog;
     return profile ? !!profile.permissions?.[section]?.view : false;
   }
@@ -9596,7 +9620,7 @@ export default function StockControl() {
         ) : (
           (() => {
             const { rows, programs, candidates } = laserNestingData();
-            const canNest = isAdmin || !!profile?.allowedProcessTypes?.some(isNestingProcess);
+            const canNest = isAdmin || !!profile?.allowedProcessTypes?.some(isPlateNestingProcess);
             const canCut = isAdmin || !!profile?.allowedProcessTypes?.some(isProgramLaserProcess);
             // Someone who only nests, or only cuts, still lands on their own
             // screen; Shortages is there for everyone, so the switch always
@@ -10185,6 +10209,21 @@ export default function StockControl() {
                             <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
                               <ExpandableProcessNotes value={process.notes} onCommit={(notes) => saveProcessNote(process, notes)} />
                             </div>
+                            {isNestingProcess(process.process_name) && (
+                              <div style={{ marginTop: 8 }}>
+                                <label style={S.label}>Nesting name</label>
+                                <input
+                                  style={S.input}
+                                  defaultValue={process.nesting_name || ""}
+                                  placeholder="What this nest is called"
+                                  onBlur={(e) => {
+                                    const v = e.target.value.trim();
+                                    if (v !== (process.nesting_name || "")) saveNestingName(process, v);
+                                  }}
+                                />
+                                <SavedCheck fieldKey={`nesting-name-${process.id}`} />
+                              </div>
+                            )}
                             {isNestingProcess(process.process_name) && (
                               <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
                                 <label style={S.label}>Nesting document</label>
@@ -12980,7 +13019,7 @@ export default function StockControl() {
                             cursor: "pointer",
                             color: C.text,
                             ...(open
-                              ? { borderColor: C.accentRaw, background: C.accentTint, color: C.accentRaw }
+                              ? { border: `1px solid ${C.accentRaw}`, background: C.accentTint, color: C.accentRaw }
                               : {}),
                           }}
                           onClick={() =>
