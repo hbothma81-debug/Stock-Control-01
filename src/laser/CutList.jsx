@@ -16,7 +16,7 @@ import Section from "./Section.jsx";
 //
 // No database calls in here. The parent owns those.
 
-export default function CutList({ programs, materials, canCut, onToggleCut, busyId }) {
+export default function CutList({ programs, thicknesses, canCut, onToggleCut, busyId }) {
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => {
@@ -37,16 +37,23 @@ export default function CutList({ programs, materials, canCut, onToggleCut, busy
   const toCut = filtered.filter((p) => !p.is_complete);
   const cut = filtered.filter((p) => p.is_complete);
 
-  // Material groups in the shop's own order. Anything on a program whose
-  // material has since been taken off the list still has to appear, so
-  // those fall in at the end rather than vanishing.
+  // Grouped by material, in the shop's own thickness order. A material
+  // reads "1.2mm MS", so its group sorts by where that thickness sits in
+  // the list -- alphabetically 10mm would land next to 1.2mm, and the
+  // point of grouping is to cut a thickness together. Anything whose
+  // thickness is not on the list falls in at the end rather than
+  // vanishing.
   const groups = useMemo(() => {
-    const order = [...materials];
-    for (const p of toCut) if (!order.includes(p.material)) order.push(p.material);
-    return order
+    const rank = (material) => {
+      const i = (thicknesses || []).findIndex((t) => (material || "").startsWith(t));
+      return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+    };
+    const names = [...new Set(toCut.map((p) => p.material))];
+    names.sort((a, b) => rank(a) - rank(b) || String(a).localeCompare(String(b)));
+    return names
       .map((m) => ({ material: m, items: toCut.filter((p) => p.material === m) }))
       .filter((g) => g.items.length > 0);
-  }, [toCut, materials]);
+  }, [toCut, thicknesses]);
 
   return (
     <div style={S.list}>

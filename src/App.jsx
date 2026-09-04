@@ -30,7 +30,7 @@ const MANAGER_TABS = [
   { key: "cncGrades", label: "CNC Bar Grades" },
   { key: "staffDepartments", label: "Staff Departments" },
   { key: "jobProcessTypes", label: "Job Process Types" },
-  { key: "laserMaterials", label: "Laser Materials" },
+  { key: "laserThicknesses", label: "Laser Thicknesses", singular: "laser thickness" },
   { key: "customers", label: "Customers" },
   { key: "stockCodes", label: "Stock Codes" },
   { key: "storeCategories", label: "Store Categories" },
@@ -109,6 +109,7 @@ const MASTER_STRING_LISTS = [
   "sizes", "sectionTypes", "salesPeople", "customers", "staffDepartments", "jobProcessTypes",
   "storeCategories", "fastenerCategories", "fastenerGrades", "fastenerFinishes", "sheetNames",
   "laserMaterials",
+  "laserThicknesses",
 ];
 // Lists where the order on screen is the order that matters, not just how
 // they happen to be stored. Job Process Types is the factory flow: the
@@ -119,11 +120,11 @@ const MASTER_STRING_LISTS = [
 // behaviour, which also avoids rewriting hundreds of rows on lists like
 // customers every time one is added.
 //
-// Laser Materials is ordered for a different reason: it sets how the
+// Laser Thicknesses is ordered for a different reason: it sets how the
 // cut list groups programs at the machine. Left alphabetical, 10mm
 // would sort next to 1.2mm, so the order has to be the shop's, not the
 // alphabet's.
-const ORDERED_STRING_LISTS = ["jobProcessTypes", "laserMaterials"];
+const ORDERED_STRING_LISTS = ["jobProcessTypes", "laserThicknesses"];
 
 // Which department a shortage goes to was decided by comparing the process
 // name against the exact strings "Nesting" and "Laser Operator". Process
@@ -519,10 +520,15 @@ const DEFAULT_MASTER = {
     "Welding", "Grinding/Polishing", "Wet Spray", "Powder Coating", "Galvanising",
     "Plating", "Buy - out", "Assembly", "Quality Check", "Dispatch",
   ],
-  // What a laser program is cut from, e.g. "1.2mm MS". Deliberately
-  // empty: these are thickness-and-grade combinations only the shop
-  // knows, and a guessed list would just be wrong.
+  // What a laser program is cut from. Held as a thickness and a grade
+  // rather than one combined list: every thickness times every grade is
+  // a list hundreds long that nobody can find anything in. The grade
+  // comes from Material Types, which already exists.
+  //
+  // laserMaterials is the old combined list. Left here so its rows are
+  // not deleted from anyone who still has them, but nothing reads it.
   laserMaterials: [],
+  laserThicknesses: [],
   nextJobNumber: 1,
   nextDeliveryNoteNumber: 1,
   nextFastenerNumber: 1,
@@ -9511,7 +9517,8 @@ export default function StockControl() {
                     rows={rows}
                     programs={programs}
                     candidates={candidates}
-                    materials={master.laserMaterials || []}
+                    thicknesses={master.laserThicknesses || []}
+                    grades={(master.grades || []).map((g) => g.shortName || g.name)}
                     canManage={canNest}
                     onCreateProgram={createLaserProgram}
                     onCancelProgram={cancelLaserProgram}
@@ -9536,7 +9543,7 @@ export default function StockControl() {
                 ) : view === "cutting" ? (
                   <CutList
                     programs={programs}
-                    materials={master.laserMaterials || []}
+                    thicknesses={master.laserThicknesses || []}
                     canCut={canCut}
                     onToggleCut={toggleProgramCut}
                     busyId={programBusyId}
@@ -13288,7 +13295,7 @@ export default function StockControl() {
                     style={{ ...S.input, flex: managerIsFactorTable ? 2 : 1 }}
                     value={managerInput}
                     onChange={(e) => setManagerInput(e.target.value)}
-                    placeholder={`Add a new ${MANAGER_TABS.find((t) => t.key === managerTab).label.toLowerCase().replace(/s$/, "")}…`}
+                    placeholder={`Add a new ${(() => { const t = MANAGER_TABS.find((x) => x.key === managerTab); return t.singular || t.label.toLowerCase().replace(/s$/, ""); })()}…`}
                     onKeyDown={(e) => e.key === "Enter" && !managerIsFactorTable && (e.preventDefault(), addMasterEntry())}
                   />
                   {managerIsFactorTable && (
@@ -13327,8 +13334,8 @@ export default function StockControl() {
 
                 {ORDERED_STRING_LISTS.includes(managerTab) && (
                   <div style={{ ...S.roleHint, marginTop: 10 }}>
-                    {managerTab === "laserMaterials"
-                      ? "This order is how the laser's cut list groups programs together. Put them in the order that suits the machine — thinnest first, say — because left alphabetical, 10mm sorts next to 1.2mm."
+                    {managerTab === "laserThicknesses"
+                      ? "This order is how the laser's cut list groups programs together. Put them in the order that suits the machine — thinnest first — because left alphabetical, 10mm sorts next to 1.2mm. The grade is picked separately, from Material Types."
                       : "This order is the factory flow — top to bottom is the sequence work moves through the shop. Use the arrows to change it. Every job follows this order, new or already running, and every department is listed in it."}
                   </div>
                 )}
@@ -13403,7 +13410,7 @@ export default function StockControl() {
                                   className="stk-btn"
                                   style={{ ...S.managerDelete, opacity: pos === 0 ? 0.25 : 1, cursor: pos === 0 ? "not-allowed" : "pointer" }}
                                   disabled={pos === 0}
-                                  title={managerTab === "laserMaterials" ? "Move up the cut list" : "Move earlier in the factory flow"}
+                                  title={managerTab === "laserThicknesses" ? "Move up the cut list" : "Move earlier in the factory flow"}
                                   onClick={() => moveMasterEntry(entry, -1)}
                                 >
                                   <ChevronUp size={15} />
@@ -13413,7 +13420,7 @@ export default function StockControl() {
                                   className="stk-btn"
                                   style={{ ...S.managerDelete, opacity: pos === fullList.length - 1 ? 0.25 : 1, cursor: pos === fullList.length - 1 ? "not-allowed" : "pointer" }}
                                   disabled={pos === fullList.length - 1}
-                                  title={managerTab === "laserMaterials" ? "Move down the cut list" : "Move later in the factory flow"}
+                                  title={managerTab === "laserThicknesses" ? "Move down the cut list" : "Move later in the factory flow"}
                                   onClick={() => moveMasterEntry(entry, 1)}
                                 >
                                   <ChevronDown size={15} />
