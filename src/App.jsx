@@ -15859,6 +15859,12 @@ export default function StockControl() {
                         <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => addNewJobQuoteItemToStockManager(idx)}>
                           <Plus size={11} /> Not in Customer Stock — add it
                         </button>
+                      ) : it.description.trim() ? (
+                        // The item goes into Customer Stock, which is kept per
+                        // customer, so there is nowhere to put it until one is
+                        // chosen. Saying so beats hiding the button, which reads
+                        // as the feature having been taken away.
+                        <>Pick a customer above to add this to their stock.</>
                       ) : null}
                     </div>
                   </div>
