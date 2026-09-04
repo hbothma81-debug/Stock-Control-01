@@ -1,29 +1,24 @@
 import { useState, useMemo } from "react";
-import { Plus, X, Ban } from "lucide-react";
+import { Plus, X, Ban, AlertTriangle, PackagePlus, FileText, Upload, ChevronDown } from "lucide-react";
 import { C, S } from "../theme.js";
 import Section from "./Section.jsx";
 
-// Prince's screen. Jobs waiting to be nested, and the SigmaNest programs
-// he builds out of them.
+// Prince's screen, and very nearly the only one he uses.
 //
-// This replaces a Microsoft To Do list where he typed a program number and
-// a material and nothing else was tracked. The reason it cannot just be a
-// field on a job is that he combines several jobs onto one nest to use the
-// sheet properly: one program carries many jobs, and a job with two
-// materials lands on two programs.
+// Everything waiting to be nested is one list. What cannot wait -- a
+// re-cut somebody is short of, or a job marked urgent -- sits at the top
+// of it, outlined, saying Nest now. Same list rather than a separate box,
+// because he works down one thing at a time and a second list is a second
+// place to forget to look.
 //
-// No database calls in here. The parent owns all of that, the same way
-// UserManagement works -- this renders and collects, and calls back.
+// The tools that used to live on the Production card came with the
+// screen: the SigmaNest number, pulling stock, flagging a shortage,
+// notes, the nesting document. They sit behind a toggle on each row --
+// they are needed one job at a time, and putting them on every row turns
+// a list you can scan into a page you have to read.
+//
+// No database calls in here. The parent owns all of that.
 
-// What can go on a program: a job, or a shortage waiting to be re-cut.
-// Both are searched together because on the floor they are the same
-// decision -- a re-cut gets nested in with everything else of that
-// material rather than being handled on its own.
-//
-// Either way it is attached by identity, never by the SigmaNest number
-// typed to find it, so correcting that number later cannot break the
-// link. Searching covers both, because Prince reads a SigmaNest number
-// off his screen while the rest of the shop talks in job numbers.
 function matchCandidates(candidates, query) {
   const q = query.trim().toLowerCase();
   if (!q) return [];
@@ -38,7 +33,6 @@ function matchCandidates(candidates, query) {
     .slice(0, 8);
 }
 
-// One row in the picker, and the same wording on a chip once picked.
 function candidateLabel(c) {
   const bits = [c.sigmanest || "no SigmaNest #"];
   if (c.customer) bits.push(c.customer);
@@ -48,18 +42,20 @@ function candidateLabel(c) {
 
 export default function NestingView({
   machine,
-  jobsToNest,
+  rows,
   programs,
   candidates,
   materials,
   canManage,
+  actions,
+  SavedCheck,
+  Notes,
   onCreateProgram,
   onCancelProgram,
   onAddJobToProgram,
   onRemoveJobFromProgram,
   onMarkJobNested,
   onUpdateProgram,
-  SavedCheck,
 }) {
   const [building, setBuilding] = useState(false);
   const [newNumber, setNewNumber] = useState("");
@@ -67,8 +63,8 @@ export default function NestingView({
   const [picked, setPicked] = useState([]);
   const [jobQuery, setJobQuery] = useState("");
   const [saving, setSaving] = useState(false);
+  const [openRow, setOpenRow] = useState(null);
 
-  // Which program's "add another job" box is open, and what is typed in it.
   const [addingTo, setAddingTo] = useState(null);
   const [addQuery, setAddQuery] = useState("");
 
@@ -79,8 +75,6 @@ export default function NestingView({
 
   const addSuggestions = useMemo(() => {
     if (!addingTo) return [];
-    // A job already on this program should not be offered again, and
-    // neither should a re-cut already on it.
     const already = (addingTo.jobs || []).map((l) => (l.shortage_id ? "short:" + l.shortage_id : "job:" + l.job_id));
     return matchCandidates(candidates.filter((c) => !already.includes(c.key)), addQuery);
   }, [candidates, addQuery, addingTo]);
@@ -94,6 +88,16 @@ export default function NestingView({
     setNewMaterial("");
     setPicked([]);
     setJobQuery("");
+  }
+
+  // Straight from seeing a thing to acting on it: the builder opens with
+  // that item already on the program, so nothing is searched for twice.
+  function startProgramWith(candidate) {
+    setPicked(candidate ? [candidate] : []);
+    setNewNumber("");
+    setNewMaterial("");
+    setJobQuery("");
+    setBuilding(true);
   }
 
   async function submitProgram() {
@@ -117,13 +121,12 @@ export default function NestingView({
   }
 
   const canSubmit = !!newNumber.trim() && !!newMaterial && picked.length > 0 && !saving;
+  const nestNowCount = rows.filter((r) => r.nestNow).length;
 
   return (
     <div style={S.list}>
-      {/* ---------- build a program ---------- */}
-
       {canManage && !building && (
-        <button type="button" className="stk-btn" style={{ ...S.addBtn, width: "100%" }} onClick={() => setBuilding(true)}>
+        <button type="button" className="stk-btn" style={{ ...S.addBtn, width: "100%" }} onClick={() => startProgramWith(null)}>
           <Plus size={15} strokeWidth={2.5} />
           New program
         </button>
@@ -153,9 +156,7 @@ export default function NestingView({
             <div>
               <label style={S.label}>Material</label>
               {materials.length === 0 ? (
-                <div style={S.roleHint}>
-                  No laser materials set up yet. Add them under Stock Manager → Laser Materials first.
-                </div>
+                <div style={S.roleHint}>No laser materials set up yet. Add them under Stock Manager → Laser Materials first.</div>
               ) : (
                 <select style={S.input} value={newMaterial} onChange={(e) => setNewMaterial(e.target.value)}>
                   <option value="">Pick the material…</option>
@@ -169,7 +170,7 @@ export default function NestingView({
             </div>
 
             <div>
-              <label style={S.label}>Jobs on this program</label>
+              <label style={S.label}>On this program</label>
               {picked.length > 0 && (
                 <div style={{ ...S.chipRow, marginBottom: 6 }}>
                   {picked.map((c) => (
@@ -203,7 +204,7 @@ export default function NestingView({
                   style={S.input}
                   value={jobQuery}
                   onChange={(e) => setJobQuery(e.target.value)}
-                  placeholder="Type the SigmaNest number, or a job number…"
+                  placeholder="Add another — SigmaNest number, job number or customer…"
                 />
                 {suggestions.length > 0 && (
                   <div style={S.suggestDropdown}>
@@ -212,12 +213,7 @@ export default function NestingView({
                         key={c.key}
                         type="button"
                         className="stk-btn"
-                        style={{
-                          ...S.suggestItem,
-                          width: "100%",
-                          textAlign: "left",
-                          ...(c.kind === "shortage" ? { color: C.danger } : {}),
-                        }}
+                        style={{ ...S.suggestItem, width: "100%", textAlign: "left", ...(c.kind === "shortage" ? { color: C.danger } : {}) }}
                         onClick={() => {
                           setPicked((prev) => [...prev, c]);
                           setJobQuery("");
@@ -243,79 +239,45 @@ export default function NestingView({
               disabled={!canSubmit}
               onClick={submitProgram}
             >
-              {saving ? "Saving…" : `Create program${picked.length ? ` — ${picked.length} job${picked.length > 1 ? "s" : ""}` : ""}`}
+              {saving ? "Saving…" : `Create program${picked.length ? ` — ${picked.length} item${picked.length > 1 ? "s" : ""}` : ""}`}
             </button>
           </div>
         </div>
       )}
 
-      {/* ---------- waiting to be nested ---------- */}
-
-      <Section title="Waiting to be nested" count={jobsToNest.length}>
-        <>
-          {jobsToNest.length === 0 ? (
-            <div style={S.empty}>Nothing waiting. Every job with a nesting stage has been nested off.</div>
-          ) : (
-            jobsToNest.map(({ job, process, onPrograms }) => (
-              <div key={job.id} style={S.row}>
-                <div style={S.rowMain}>
-                  <span style={S.itemName}>{job.job_number}</span>
-                  <div style={S.rowMeta}>
-                    <span style={S.customerTag}>{job.customer || "No customer"}</span>
-                    <span style={S.partTag}>{job.laser_job_reference || "No SigmaNest #"}</span>
-                    {job.due_date && <span style={S.rowMeta}>Due {new Date(job.due_date).toLocaleDateString()}</span>}
-                  </div>
-                  {onPrograms.length > 0 ? (
-                    <div style={{ ...S.chipRow, marginTop: 4 }}>
-                      {onPrograms.map((p) => (
-                        <span
-                          key={p.id}
-                          style={{
-                            ...S.chip,
-                            borderColor: p.is_complete ? C.accentFinished : C.border,
-                            color: p.is_complete ? C.accentFinished : C.text,
-                          }}
-                        >
-                          {p.program_number} · {p.material}
-                          {p.is_complete ? " · cut" : ""}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={S.roleHint}>Not on a program yet.</div>
-                  )}
-                </div>
-                {canManage && (
-                  <div style={S.rowControls}>
-                    <label style={S.checkRow}>
-                      <input
-                        type="checkbox"
-                        checked={false}
-                        onChange={() => onMarkJobNested(job, process)}
-                      />
-                      Fully nested
-                    </label>
-                    <SavedCheck fieldKey={`nesting-${process.id}`} />
-                  </div>
-                )}
+      <Section title="To nest" count={rows.length}>
+        {rows.length === 0 ? (
+          <div style={S.empty}>Nothing waiting. Everything with a nesting stage has been nested off.</div>
+        ) : (
+          <>
+            {nestNowCount > 0 && (
+              <div style={{ ...S.roleHint, color: C.danger, marginBottom: 4 }}>
+                {nestNowCount} {nestNowCount === 1 ? "item needs" : "items need"} nesting now — someone is waiting on
+                {nestNowCount === 1 ? " it" : " them"}.
               </div>
-            ))
-          )}
-        </>
+            )}
+            {rows.map((r) => (
+              <NestRow
+                key={r.key}
+                row={r}
+                canManage={canManage}
+                expanded={openRow === r.key}
+                onToggleExpand={() => setOpenRow((k) => (k === r.key ? null : r.key))}
+                onNestNow={() => startProgramWith(r.candidate)}
+                onMarkJobNested={onMarkJobNested}
+                actions={actions}
+                SavedCheck={SavedCheck}
+                Notes={Notes}
+              />
+            ))}
+          </>
+        )}
       </Section>
-
-      <div style={S.roleHint}>
-        Tick <b>Fully nested</b> when there are no more programs coming for that job. Until then the laser cannot know
-        whether a job with parts still to nest is finished or only started.
-      </div>
-
-      {/* ---------- the programs ---------- */}
 
       <ProgramList
         title="Programs waiting to be cut"
         programs={openPrograms}
         emptyText="No programs waiting. Build one above."
-        collapsible={false}
         canManage={canManage}
         materials={materials}
         addingTo={addingTo}
@@ -349,6 +311,187 @@ export default function NestingView({
           onUpdateProgram={onUpdateProgram}
           SavedCheck={SavedCheck}
         />
+      )}
+    </div>
+  );
+}
+
+function NestRow({ row: r, canManage, expanded, onToggleExpand, onNestNow, onMarkJobNested, actions, SavedCheck, Notes }) {
+  const isShortage = r.kind === "shortage";
+  return (
+    <div
+      style={{
+        ...S.row,
+        flexDirection: "column",
+        alignItems: "stretch",
+        gap: 6,
+        ...(r.nestNow ? { border: `2px solid ${C.danger}`, borderRadius: 6, padding: 10 } : {}),
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 200px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={S.itemName}>{r.job?.job_number || "Unknown job"}</span>
+            {r.nestNow && (
+              <span style={{ ...S.chip, borderColor: C.danger, color: C.danger, fontWeight: 700 }}>Nest now</span>
+            )}
+            {isShortage && <span style={{ ...S.chip, borderColor: C.danger, color: C.danger }}>Re-cut</span>}
+          </div>
+          <div style={S.rowMeta}>
+            <span style={S.customerTag}>{r.job?.customer || "No customer"}</span>
+            <span style={S.partTag}>{r.job?.laser_job_reference || r.shortage?.board_number || "No SigmaNest #"}</span>
+            {r.job?.due_date && <span>Due {new Date(r.job.due_date).toLocaleDateString()}</span>}
+          </div>
+          {isShortage && r.detail && <div style={{ ...S.itemComment, color: C.danger }}>{r.detail}</div>}
+          {r.onPrograms && r.onPrograms.length > 0 ? (
+            <div style={{ ...S.chipRow, marginTop: 4 }}>
+              {r.onPrograms.map((p) => (
+                <span
+                  key={p.id}
+                  style={{
+                    ...S.chip,
+                    borderColor: p.is_complete ? C.accentFinished : C.border,
+                    color: p.is_complete ? C.accentFinished : C.text,
+                  }}
+                >
+                  {p.program_number} · {p.material}
+                  {p.is_complete ? " · cut" : ""}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div style={S.roleHint}>Not on a program yet.</div>
+          )}
+        </div>
+
+        {canManage && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-start" }}>
+            <button
+              type="button"
+              className="stk-btn"
+              style={r.nestNow ? { ...S.reqActionBtn, background: C.danger } : S.reqActionBtn}
+              onClick={onNestNow}
+            >
+              <Plus size={13} /> Nest it
+            </button>
+            {r.process && (
+              <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={onToggleExpand} title="Job tools">
+                <ChevronDown size={14} style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* The tools that came over from the Production card. One job at a
+          time, so they stay out of the way until asked for. */}
+      {expanded && r.process && canManage && (
+        <div
+          style={{
+            marginTop: 6,
+            paddingTop: 8,
+            borderTop: `1px solid ${C.border}`,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <div>
+            <label style={S.label}>SigmaNest job number</label>
+            <input
+              style={S.input}
+              defaultValue={r.job.laser_job_reference || ""}
+              placeholder="Not filled in yet"
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                if (v !== (r.job.laser_job_reference || "")) actions.onSaveSigmaNest(r.job, v);
+              }}
+            />
+            <SavedCheck fieldKey={`job-${r.job.id}-laser_job_reference`} />
+          </div>
+
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="stk-btn"
+              style={r.process.is_urgent ? { ...S.reqActionBtnMuted, color: C.danger, borderColor: C.danger } : S.reqActionBtnMuted}
+              onClick={() => actions.onToggleUrgent(r.process)}
+            >
+              {r.process.is_urgent ? "Unmark urgent" : "Mark urgent"}
+            </button>
+            <button
+              type="button"
+              className="stk-btn"
+              style={{ ...S.reqActionBtnMuted, color: C.danger, borderColor: C.danger }}
+              onClick={() => actions.onFlagShortage(r.job, r.process)}
+            >
+              <AlertTriangle size={13} /> Flag shortage
+            </button>
+            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => actions.onPullStock(r.job, r.process)}>
+              <PackagePlus size={13} /> Pull from stock
+            </button>
+          </div>
+
+          {r.allocations && r.allocations.length > 0 && (
+            <div>
+              <label style={S.label}>Material set aside</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {r.allocations.map((a) => (
+                  <span key={a.id} style={S.roleHint}>
+                    {a.item_name} — {Number(a.qty_allocated) - Number(a.qty_used)} reserved
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label style={S.label}>Notes</label>
+            <Notes value={r.process.notes} onCommit={(notes) => actions.onSaveNote(r.process, notes)} />
+          </div>
+
+          <div>
+            <label style={S.label}>Nesting document</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+              {(r.documents || []).map((doc) => (
+                <button key={doc.id} type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => actions.onViewDocument(doc)}>
+                  <FileText size={12} /> {doc.file_name}
+                </button>
+              ))}
+              <label style={{ ...S.reqActionBtnMuted, display: "inline-flex", cursor: "pointer", width: "fit-content" }}>
+                <Upload size={12} /> Upload document
+                <input
+                  type="file"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    if (file) actions.onUploadDocument(r.job.id, file, r.process.process_name);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+            </div>
+          </div>
+
+          {r.drawings && r.drawings.length > 0 && (
+            <div>
+              <label style={S.label}>Drawings</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+                {r.drawings.map((d, i) => (
+                  <button key={i} type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => actions.onViewDrawing(d)}>
+                    <FileText size={12} /> {d.partNumber} — {d.description}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <label style={S.checkRow}>
+            <input type="checkbox" checked={false} onChange={() => onMarkJobNested(r.job, r.process)} />
+            Fully nested — no more programs coming for this job
+          </label>
+          <SavedCheck fieldKey={`nesting-${r.process.id}`} />
+        </div>
       )}
     </div>
   );
@@ -398,11 +541,7 @@ function ProgramList({
                       <span style={S.itemName}>{p.program_number}</span>
                     )}
                     {canManage && materials.length > 0 ? (
-                      <select
-                        style={{ ...S.input, width: 150 }}
-                        value={p.material}
-                        onChange={(e) => onUpdateProgram(p, { material: e.target.value })}
-                      >
+                      <select style={{ ...S.input, width: 150 }} value={p.material} onChange={(e) => onUpdateProgram(p, { material: e.target.value })}>
                         {!materials.includes(p.material) && <option value={p.material}>{p.material}</option>}
                         {materials.map((m) => (
                           <option key={m} value={m}>
@@ -471,12 +610,7 @@ function ProgramList({
                                 key={c.key}
                                 type="button"
                                 className="stk-btn"
-                                style={{
-                                  ...S.suggestItem,
-                                  width: "100%",
-                                  textAlign: "left",
-                                  ...(c.kind === "shortage" ? { color: C.danger } : {}),
-                                }}
+                                style={{ ...S.suggestItem, width: "100%", textAlign: "left", ...(c.kind === "shortage" ? { color: C.danger } : {}) }}
                                 onClick={() => {
                                   onAddJobToProgram(p, c);
                                   setAddQuery("");
@@ -490,9 +624,7 @@ function ProgramList({
                         )}
                       </div>
                       {addQuery.trim() && addSuggestions.length === 0 && (
-                        <div style={{ ...S.roleHint, marginTop: 6 }}>
-                          Nothing matches that, or it is already on this program.
-                        </div>
+                        <div style={{ ...S.roleHint, marginTop: 6 }}>Nothing matches that, or it is already on this program.</div>
                       )}
                     </div>
                   )}
@@ -511,13 +643,7 @@ function ProgramList({
                     >
                       {isAdding ? "Cancel" : "Add job"}
                     </button>
-                    <button
-                      type="button"
-                      className="stk-btn"
-                      style={S.managerDelete}
-                      onClick={() => onCancelProgram(p)}
-                      title="Cancel this program"
-                    >
+                    <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => onCancelProgram(p)} title="Cancel this program">
                       <Ban size={13} />
                     </button>
                   </div>

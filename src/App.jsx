@@ -3078,6 +3078,7 @@ export default function StockControl() {
         },
       ]);
       fetchAllocations();
+      if (laserData !== null) fetchLaserData();
       if (jobDetail) refreshJobDetail();
     } catch (err) {
       console.error("Failed to use allocation:", err);
@@ -3183,26 +3184,43 @@ export default function StockControl() {
 
   // ---------- Laser 4kw: SigmaNest programs ----------
 
+  // Wraps an action carried over from a Production card so the laser
+  // screens re-read after it. Only when they are actually loaded, so it
+  // costs nothing for anyone who never opens the tab.
+  function alsoRefreshLaser(fn) {
+    return async (...args) => {
+      const result = await fn(...args);
+      if (laserData !== null) await fetchLaserData();
+      return result;
+    };
+  }
+
   // Jobs come from jobsList, which is already loaded for everyone as soon
   // as they sign in, so this only fetches what is specific to the tab.
   // Returns the rows rather than storing them, so marking a program cut
   // can work out which job stages to change from fresh data before any of
   // it reaches the screen.
   async function loadLaserRaw() {
-    const [programs, links, processes, shortages] = await Promise.all([
+    const [programs, links, processes, shortages, documents, allocations, quoteItems] = await Promise.all([
       fetchAllRows("laser_programs", { orderBy: "created_at", ascending: false }),
       fetchAllRows("laser_program_jobs", { orderBy: "created_at" }),
       fetchAllRows("job_processes", {
         select:
-          "id, job_id, process_name, is_complete, shortage_id, started_at, started_by, operator, assigned_to, completed_at",
+          "id, job_id, process_name, is_complete, shortage_id, started_at, started_by, operator, assigned_to, completed_at, is_urgent, notes",
       }),
       fetchAllRows("shortages", { orderBy: "created_at", ascending: false }),
+      fetchAllRows("job_documents", { orderBy: "created_at", ascending: false }),
+      fetchAllRows("job_allocations", { orderBy: "created_at" }),
+      fetchAllRows("job_quote_items", { select: "id, job_id, description, linked_item_id" }),
     ]);
     return {
       programs: programs || [],
       links: links || [],
       processes: processes || [],
       shortages: shortages || [],
+      documents: documents || [],
+      allocations: allocations || [],
+      quoteItems: quoteItems || [],
     };
   }
 
@@ -3212,7 +3230,15 @@ export default function StockControl() {
       setLaserData(await loadLaserRaw());
     } catch (err) {
       console.error("Failed to load laser programs:", err);
-      setLaserData({ programs: [], links: [], processes: [], shortages: [] });
+      setLaserData({
+        programs: [],
+        links: [],
+        processes: [],
+        shortages: [],
+        documents: [],
+        allocations: [],
+        quoteItems: [],
+      });
     }
   }
 
@@ -3220,7 +3246,15 @@ export default function StockControl() {
   // drop out here rather than being deleted, so one that was already cut
   // still exists in the history.
   function laserNestingData() {
-    const d = laserData || { programs: [], links: [], processes: [], shortages: [] };
+    const d = laserData || {
+      programs: [],
+      links: [],
+      processes: [],
+      shortages: [],
+      documents: [],
+      allocations: [],
+      quoteItems: [],
+    };
     const jobs = jobsList || [];
     const activeJobs = jobs.filter((j) => j.status === "in_progress");
     const jobById = new Map(jobs.map((j) => [j.id, j]));
@@ -3250,8 +3284,9 @@ export default function StockControl() {
     // A job is waiting to be nested while its own nesting stage is still
     // open. Matched on the name the way shortages are routed, so a shop
     // calling it "Nesting" or "Plate Nesting" both work. Catch-up stages
-    // belonging to a shortage are skipped -- those arrive in step 5.
-    const jobsToNest = [];
+    // belonging to a shortage are skipped -- the shortage itself is the
+    // row, further down.
+    const rows = [];
     for (const job of activeJobs) {
       const process = d.processes.find(
         (pr) =>
@@ -3260,11 +3295,51 @@ export default function StockControl() {
           isNestingProcess(pr.process_name) &&
           !pr.is_complete
       );
-      if (process) jobsToNest.push({ job, process, onPrograms: programsByJob[job.id] || [] });
+      if (!process) continue;
+      rows.push({
+        key: "job:" + job.id,
+        kind: "job",
+        // Urgent is the shop saying this one jumps the queue, so it earns
+        // the same outline a re-cut gets.
+        nestNow: !!process.is_urgent,
+        job,
+        process,
+        onPrograms: programsByJob[job.id] || [],
+        documents: d.documents.filter((doc) => doc.job_id === job.id && doc.process_name === process.process_name),
+        allocations: d.allocations.filter((a) => a.process_id === process.id && a.status !== "released"),
+        drawings: (d.quoteItems || [])
+          .filter((it) => it.job_id === job.id)
+          .map((it) => {
+            const linked = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
+            const drawing = linked?.partNumber ? drawingLookup[linked.partNumber.trim()] : null;
+            return drawing ? { description: it.description, partNumber: linked.partNumber, drawing } : null;
+          })
+          .filter(Boolean),
+      });
     }
-    jobsToNest.sort(
-      (a, b) => new Date(a.job.due_date || "2999-01-01") - new Date(b.job.due_date || "2999-01-01")
-    );
+
+    // A re-cut is its own row rather than something to search for. It is
+    // always nest-now: it exists because somebody is short of parts.
+    for (const sh of d.shortages) {
+      if (sh.status !== "flagged") continue;
+      const job = jobById.get(sh.job_id);
+      rows.push({
+        key: "short:" + sh.id,
+        kind: "shortage",
+        nestNow: true,
+        job: job || { id: sh.job_id, job_number: sh.job_number, customer: sh.customer },
+        process: null,
+        shortage: sh,
+        detail: shortageSummary(sh),
+        onPrograms: [],
+      });
+    }
+
+    // Anything nest-now first, then by when it is due.
+    rows.sort((a, b) => {
+      if (a.nestNow !== b.nestNow) return a.nestNow ? -1 : 1;
+      return new Date(a.job?.due_date || "2999-01-01") - new Date(b.job?.due_date || "2999-01-01");
+    });
 
     // What Prince can put on a program: the jobs themselves, and any
     // shortage still waiting to be re-cut. Both go through the same
@@ -3298,8 +3373,14 @@ export default function StockControl() {
       });
     }
 
-    return { jobsToNest, programs, candidates };
+    // Each row carries the picker entry it corresponds to, so pressing
+    // Nest it opens the builder with that item already on the program.
+    const byKey = new Map(candidates.map((c) => [c.key, c]));
+    for (const r of rows) r.candidate = byKey.get(r.key) || null;
+
+    return { rows, programs, candidates };
   }
+
 
   // The history is worth having but never worth blocking a change for: a
   // missing line in the log beats a program that would not save.
@@ -4008,6 +4089,7 @@ export default function StockControl() {
       }
       setShortageModal(null);
       fetchShortages();
+      if (laserData !== null) fetchLaserData();
     } catch (err) {
       console.error("Failed to flag shortage:", err);
       alert("That didn't save — check your connection and try again.");
@@ -9376,7 +9458,7 @@ export default function StockControl() {
           <div style={S.empty}>Loading programs…</div>
         ) : (
           (() => {
-            const { jobsToNest, programs, candidates } = laserNestingData();
+            const { rows, programs, candidates } = laserNestingData();
             const canNest = isAdmin || !!profile?.allowedProcessTypes?.some(isNestingProcess);
             const canCut = isAdmin || !!profile?.allowedProcessTypes?.some(isProgramLaserProcess);
             // Someone who only nests, or only cuts, still lands on their own
@@ -9396,10 +9478,10 @@ export default function StockControl() {
                 : laserView;
             return (
               <>
-                {(canNest || canCut) && (
+                {canNest && (
                   <div style={{ ...S.segRow, marginBottom: 10 }}>
                     {[
-                      ...(canNest ? [{ key: "nesting", label: "Nesting" }] : []),
+                      { key: "nesting", label: "Nesting" },
                       ...(canCut ? [{ key: "cutting", label: "Cutting" }] : []),
                       { key: "shortages", label: "Shortages" },
                     ].map((v) => (
@@ -9423,7 +9505,7 @@ export default function StockControl() {
                 {view === "nesting" ? (
                   <NestingView
                     machine={LASER_MACHINE}
-                    jobsToNest={jobsToNest}
+                    rows={rows}
                     programs={programs}
                     candidates={candidates}
                     materials={master.laserMaterials || []}
@@ -9435,6 +9517,18 @@ export default function StockControl() {
                     onMarkJobNested={markJobFullyNested}
                     onUpdateProgram={updateLaserProgram}
                     SavedCheck={SavedCheck}
+                    Notes={ExpandableProcessNotes}
+                    actions={{
+                      onSaveSigmaNest: alsoRefreshLaser(saveJobSigmaNestNumber),
+                      onToggleUrgent: alsoRefreshLaser(toggleProcessUrgent),
+                      onSaveNote: alsoRefreshLaser(saveProcessNote),
+                      onUploadDocument: alsoRefreshLaser(uploadJobDocument),
+                      // These two open a modal; their own submit refreshes.
+                      onFlagShortage: openShortageFlagModal,
+                      onPullStock: (job, process) => setPullStockModal({ job, process, dept: null, search: "" }),
+                      onViewDocument: viewJobDocument,
+                      onViewDrawing: (d) => openDrawingPreview(d.drawing),
+                    }}
                   />
                 ) : view === "cutting" ? (
                   <CutList
