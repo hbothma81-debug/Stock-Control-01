@@ -1421,20 +1421,39 @@ export default function StockControl() {
     };
   }, []);
 
+  // Permissions are read when the app loads. That used to be the only
+  // time they were read: tick somebody onto a department and nothing
+  // happened for them until they thought to refresh, which nobody does --
+  // it looks like the tick never saved.
+  //
+  // Re-read on coming back to the tab, and slowly in the background for a
+  // screen that stays open all day. Applied only when the row genuinely
+  // changed, so the ordinary case costs one small read and nothing else.
+  const lastProfileRef = useRef(null);
   useEffect(() => {
     if (!supabase || !session?.user) {
       setProfile(null);
+      lastProfileRef.current = null;
       return;
     }
     let cancelled = false;
-    supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", session.user.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (cancelled) return;
-        setProfile(
+
+    async function load() {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", session.user.id)
+        .maybeSingle();
+      if (cancelled) return;
+      // A failed re-read must never wipe what is already loaded. A phone
+      // waking up on bad signal would otherwise lock somebody out of
+      // their own screens until it recovered.
+      if (error) {
+        console.error("Failed to re-read permissions:", error);
+        return;
+      }
+      {
+        const next =
           data
             ? {
                 id: data.id,
@@ -1458,11 +1477,39 @@ export default function StockControl() {
                 theme: data.theme || "dark",
                 department: data.department || "",
               }
-            : null
-        );
-      });
+            : null;
+        const nextJson = JSON.stringify(next);
+        if (nextJson === lastProfileRef.current) return;
+        const first = lastProfileRef.current === null;
+        lastProfileRef.current = nextJson;
+        setProfile(next);
+        // Whatever is already on screen was built against the old
+        // permissions, so it has to be built again rather than left
+        // standing. Clearing these is what makes the tabs and department
+        // boxes match what the person is now allowed to see.
+        if (!first) {
+          setProductionQueue(null);
+          setLaserData(null);
+        }
+      }
+    }
+
+    load();
+
+    // Coming back to the tab is when a change is most likely to have
+    // happened, and the slow timer covers a screen nobody ever leaves.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", load);
+    const timer = setInterval(load, 120000);
+
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", load);
+      clearInterval(timer);
     };
   }, [session]);
 
