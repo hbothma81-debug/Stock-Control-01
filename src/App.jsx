@@ -6352,7 +6352,10 @@ export default function StockControl() {
       jobs.push(
         supabase.from("job_processes").update({ process_name: newValue }).eq("process_name", oldValue),
         supabase.from("job_documents").update({ process_name: newValue }).eq("process_name", oldValue),
-        supabase.from("shortages").update({ flagged_department: newValue }).eq("flagged_department", oldValue)
+        supabase.from("shortages").update({ flagged_department: newValue }).eq("flagged_department", oldValue),
+        // Keyed by name, so a rename has to carry them or the stage
+        // silently loses whatever it was set up to do.
+        supabase.from("process_type_settings").update({ process_name: newValue }).eq("process_name", oldValue)
       );
     }
     if (listKey === "customers") {
@@ -7956,6 +7959,7 @@ export default function StockControl() {
     } else {
       const newItem = { ...payload, id: form.id || uid() };
       setItems((prev) => [...prev, newItem]);
+      rememberStoresItem(newItem);
       closeAdd();
       if (addingServiceConsumableQty !== null) {
         // This item was created specifically for a service consumable
@@ -8209,7 +8213,100 @@ export default function StockControl() {
     });
   }
 
-  function removeMasterEntry(entry) {
+  // Deleting a process type used to be unguarded, and that is what left
+  // stages on jobs pointing at a name the list no longer had -- work that
+  // could never appear in anyone's Production tab again. Two things stop
+  // it now: the settings the app reads by name, and stages already on
+  // real jobs.
+  //
+  // Renaming stays open. A rename carries everything with it; removing
+  // does not, which is the whole difference.
+  // The Stores Catalog fills the form in when someone adds an item, but
+  // nothing ever wrote back to it -- so anything typed by hand stayed
+  // out, and the next person typed it again slightly differently. Three
+  // spellings of one insert is how you end up not knowing what you have.
+  //
+  // Adding stores stock now adds the item to the catalogue too, when the
+  // name is not already there. Matched loosely on case and spacing, so
+  // "SINGLE NOZZLE 2.0MM" and "Single Nozzle 2.0mm" count as the same
+  // thing rather than becoming two entries.
+  function rememberStoresItem(item) {
+    if (!item || item.mainCat !== "stores") return;
+    const name = (item.name || "").trim();
+    if (!name) return;
+    const key = name.toLowerCase().replace(/\s+/g, " ");
+    setMaster((prev) => {
+      const catalogue = prev.storesCatalog || [];
+      const already = catalogue.some((r) => (r.name || "").trim().toLowerCase().replace(/\s+/g, " ") === key);
+      if (already) return prev;
+      return {
+        ...prev,
+        storesCatalog: [
+          ...catalogue,
+          {
+            id: uid(),
+            code: item.partNumber || "",
+            name,
+            // Stores keeps its category in the customer field, the same
+            // way the rest of the stores screens read it.
+            category: item.customer || "",
+            supplier: item.supplier || "",
+            price: Number(item.value) || 0,
+          },
+        ],
+      };
+    });
+  }
+
+  async function removeMasterEntry(entry) {
+    const entryName = typeof entry === "string" ? entry : entry.name;
+
+    if (managerTab === "jobProcessTypes") {
+      const st = processTypeSettings[entryName];
+      const setUp = st && (st.hide_from_production || st.worked_in_laser_status || st.releases_on_start);
+      if (setUp) {
+        const doing = [
+          st.hide_from_production ? "it is worked outside the Production tab" : "",
+          st.worked_in_laser_status ? "it is the packing stage on Laser Status" : "",
+          st.releases_on_start ? "it opens the stages after it as soon as it is started" : "",
+        ]
+          .filter(Boolean)
+          .join(", ");
+        alert(
+          entryName +
+            " cannot be removed, because the app is set up around it: " +
+            doing +
+            ".\n\nRename it if you call it something else. Renaming carries all of that with it. Removing would not."
+        );
+        return;
+      }
+
+      try {
+        const { count, error } = await supabase
+          .from("job_processes")
+          .select("id", { count: "exact", head: true })
+          .eq("process_name", entryName);
+        if (error) throw error;
+        if (count > 0) {
+          alert(
+            entryName +
+              " is on " +
+              count +
+              " job stage" +
+              (count === 1 ? "" : "s") +
+              " right now.\n\nRemoving it would leave that work pointing at a stage this list no longer has, so it " +
+              "would never show in anyone's Production tab again. Finish those jobs first, or rename it instead."
+          );
+          return;
+        }
+      } catch (err) {
+        // Better to refuse than to delete without knowing.
+        console.error("Could not check whether that process type is in use:", err);
+        alert("Could not check whether that stage is still on any jobs, so nothing was removed. Try again in a moment.");
+        return;
+      }
+    }
+
     setMaster((prev) => {
       const filtered = prev[managerTab].filter((x) => (typeof x === "string" ? x !== entry : x.name !== entry.name));
       const sections =
