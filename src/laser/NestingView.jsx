@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { X, Ban, AlertTriangle, PackagePlus, FileText, Upload, ChevronDown } from "lucide-react";
+import { Plus, X, Ban, AlertTriangle, PackagePlus, FileText, Upload, ChevronDown } from "lucide-react";
 import { C, S } from "../theme.js";
 import Section from "./Section.jsx";
 
@@ -18,6 +18,30 @@ import Section from "./Section.jsx";
 // box, because he works down one thing at a time.
 //
 // No database calls in here. The parent owns all of that.
+
+// Used by the New program form, which searches rather than lists --
+// starting from a sheet means the jobs that fit it are not the ones on
+// screen.
+function matchCandidates(candidates, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  return candidates
+    .filter(
+      (c) =>
+        (c.sigmanest || "").toLowerCase().includes(q) ||
+        (c.job_number || "").toLowerCase().includes(q) ||
+        (c.customer || "").toLowerCase().includes(q) ||
+        (c.detail || "").toLowerCase().includes(q)
+    )
+    .slice(0, 8);
+}
+
+function candidateLabel(c) {
+  const bits = [c.sigmanest || "no SigmaNest #"];
+  if (c.customer) bits.push(c.customer);
+  if (c.detail) bits.push(c.detail);
+  return bits.join(" · ");
+}
 
 export default function NestingView({
   machine,
@@ -41,6 +65,53 @@ export default function NestingView({
   const [addingTo, setAddingTo] = useState(null);
   const [addQuery, setAddQuery] = useState("");
 
+  // The other way in: start from the sheet rather than from a job. Prince
+  // uses this when he has an offcut to fill and goes looking for what
+  // fits, which is the opposite direction from working down the list.
+  const [building, setBuilding] = useState(false);
+  const [newNumber, setNewNumber] = useState("");
+  const [newThickness, setNewThickness] = useState("");
+  const [newGrade, setNewGrade] = useState("");
+  const [picked, setPicked] = useState([]);
+  const [jobQuery, setJobQuery] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const suggestions = useMemo(
+    () => matchCandidates(candidates.filter((c) => !picked.some((x) => x.key === c.key)), jobQuery),
+    [candidates, jobQuery, picked]
+  );
+
+  function resetBuilder() {
+    setBuilding(false);
+    setNewNumber("");
+    setNewThickness("");
+    setNewGrade("");
+    setPicked([]);
+    setJobQuery("");
+  }
+
+  const canSubmit = !!newNumber.trim() && !!newThickness && !!newGrade && picked.length > 0 && !saving;
+
+  async function submitProgram() {
+    if (!canSubmit) return;
+    setSaving(true);
+    try {
+      const ok = await onCreateProgram({
+        program_number: newNumber.trim(),
+        material: `${newThickness} ${newGrade}`,
+        machine,
+        jobs: picked.map((c) => ({
+          job_id: c.job_id,
+          shortage_id: c.shortage_id || null,
+          sigmanest_number: c.sigmanest || "",
+        })),
+      });
+      if (ok) resetBuilder();
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const addSuggestions = useMemo(() => {
     if (!addingTo) return [];
     const q = addQuery.trim().toLowerCase();
@@ -63,6 +134,138 @@ export default function NestingView({
 
   return (
     <div style={S.list}>
+      {canManage && !building && (
+        <button type="button" className="stk-btn" style={{ ...S.addBtn, width: "100%" }} onClick={() => setBuilding(true)}>
+          <Plus size={15} strokeWidth={2.5} />
+          New program
+        </button>
+      )}
+
+      {canManage && building && (
+        <div style={{ ...S.deptCard, borderColor: C.accentRaw }}>
+          <div style={S.deptCardHead}>
+            <span style={{ fontWeight: 600, fontSize: 15 }}>New program on {machine}</span>
+            <button type="button" className="stk-btn" style={S.iconBtn} onClick={resetBuilder} title="Discard">
+              <X size={16} />
+            </button>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 160px" }}>
+                <label style={S.label}>Program number</label>
+                <input
+                  style={S.input}
+                  value={newNumber}
+                  onChange={(e) => setNewNumber(e.target.value)}
+                  placeholder="What the operator loads"
+                  autoFocus
+                />
+              </div>
+              <div style={{ flex: "1 1 120px" }}>
+                <label style={S.label}>Thickness</label>
+                <select style={S.input} value={newThickness} onChange={(e) => setNewThickness(e.target.value)}>
+                  <option value="">Pick…</option>
+                  {thicknesses.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ flex: "1 1 120px" }}>
+                <label style={S.label}>Grade</label>
+                <select style={S.input} value={newGrade} onChange={(e) => setNewGrade(e.target.value)}>
+                  <option value="">Pick…</option>
+                  {grades.map((g) => (
+                    <option key={g} value={g}>
+                      {g}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {thicknesses.length === 0 && (
+              <div style={S.roleHint}>No thicknesses set up yet — add them under Stock Manager → Laser Thicknesses.</div>
+            )}
+
+            <div>
+              <label style={S.label}>On this program</label>
+              {picked.length > 0 && (
+                <div style={{ ...S.chipRow, marginBottom: 6 }}>
+                  {picked.map((c) => (
+                    <span
+                      key={c.key}
+                      style={{
+                        ...S.chip,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        ...(c.kind === "shortage" ? { borderColor: C.danger, color: C.danger } : {}),
+                      }}
+                    >
+                      {c.job_number}
+                      {c.kind === "shortage" ? " · re-cut" : c.sigmanest ? ` · ${c.sigmanest}` : ""}
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={{ ...S.iconBtn, padding: 0, minWidth: 0 }}
+                        onClick={() => setPicked((prev) => prev.filter((x) => x.key !== c.key))}
+                        title="Take off this program"
+                      >
+                        <X size={13} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div style={{ position: "relative" }}>
+                <input
+                  style={S.input}
+                  value={jobQuery}
+                  onChange={(e) => setJobQuery(e.target.value)}
+                  placeholder="SigmaNest number, job number or customer…"
+                />
+                {suggestions.length > 0 && (
+                  <div style={S.suggestDropdown}>
+                    {suggestions.map((c) => (
+                      <button
+                        key={c.key}
+                        type="button"
+                        className="stk-btn"
+                        style={{ ...S.suggestItem, width: "100%", textAlign: "left", ...(c.kind === "shortage" ? { color: C.danger } : {}) }}
+                        onClick={() => {
+                          setPicked((prev) => [...prev, c]);
+                          setJobQuery("");
+                        }}
+                      >
+                        <b>{c.job_number}</b> {candidateLabel(c)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {jobQuery.trim() && suggestions.length === 0 && (
+                <div style={{ ...S.roleHint, marginTop: 6 }}>
+                  Nothing matches that. The job has to be in the app already — check the SigmaNest number is on it.
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              className="stk-btn"
+              style={canSubmit ? S.submitBtn : S.submitBtnDisabled}
+              disabled={!canSubmit}
+              onClick={submitProgram}
+            >
+              {saving ? "Saving…" : `Create program${picked.length ? ` — ${picked.length} item${picked.length > 1 ? "s" : ""}` : ""}`}
+            </button>
+          </div>
+        </div>
+      )}
+
       <Section title="To nest" count={rows.length}>
         {rows.length === 0 ? (
           <div style={S.empty}>Nothing waiting. Everything with a nesting stage has been nested off.</div>
