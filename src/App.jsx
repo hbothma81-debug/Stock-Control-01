@@ -9389,8 +9389,33 @@ export default function StockControl() {
                         <div className="stk-meta-row" style={{ ...S.rowMeta, marginTop: 6 }}>
                           <span>Raised by {po.createdBy}</span>
                           <span>{new Date(po.dateCreated).toLocaleDateString()}</span>
-                          <span>{po.lineItems.length} line{po.lineItems.length === 1 ? "" : "s"}</span>
+                          {po.jobNumber && <span>For {po.jobNumber}</span>}
+                          {po.reference && <span>Ref {po.reference}</span>}
                         </div>
+
+                        {/* What is actually on the order. Saying "1 line" and
+                            nothing else meant opening the receive screen just
+                            to remember what had been ordered. */}
+                        <div style={{ marginTop: 8 }}>
+                          <label style={S.label}>On this order</label>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+                            {(po.lineItems || []).map((li, i) => (
+                              <div
+                                key={i}
+                                style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", fontSize: 13.5 }}
+                              >
+                                <span style={{ fontWeight: 600, minWidth: 40 }}>{li.qty}</span>
+                                <span style={{ flex: "1 1 200px" }}>{li.description}</span>
+                                <span style={{ color: C.muted }}>R {Number(li.unitPrice || 0).toFixed(2)} each</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div style={S.roleHint}>
+                            Press Receive this PO to confirm what arrived. Anything short of what was ordered is set
+                            with Adjust on the line.
+                          </div>
+                        </div>
+
                         <div style={S.reqActions}>
                           <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => openReceiving(po)}>
                             <Check size={13} /> Receive this PO
@@ -12950,13 +12975,13 @@ export default function StockControl() {
                           type="button"
                           className="stk-btn"
                           style={{
-                            ...S.managerGroupHeader,
-                            ...S.managerGroupHeaderBtn,
-                            ...(open ? S.managerGroupHeaderActive : {}),
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                            width: "100%",
+                            ...S.productionPill,
+                            marginTop: 6,
+                            cursor: "pointer",
+                            color: C.text,
+                            ...(open
+                              ? { borderColor: C.accentRaw, background: C.accentTint, color: C.accentRaw }
+                              : {}),
                           }}
                           onClick={() =>
                             setOpenStoresCategories((prev) =>

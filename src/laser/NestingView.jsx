@@ -62,6 +62,7 @@ export default function NestingView({
   onUpdateProgram,
 }) {
   const [openRow, setOpenRow] = useState(null);
+  const [search, setSearch] = useState("");
   const [addingTo, setAddingTo] = useState(null);
   const [addQuery, setAddQuery] = useState("");
 
@@ -128,12 +129,41 @@ export default function NestingView({
       .slice(0, 8);
   }, [candidates, addQuery, addingTo]);
 
-  const openPrograms = programs.filter((p) => !p.is_complete);
-  const cutPrograms = programs.filter((p) => p.is_complete);
-  const nestNowCount = rows.filter((r) => r.nestNow).length;
+  // One box over the whole screen: a job number typed here should find
+  // the job waiting, the program it went on, and the one already cut,
+  // without having to know which list to look in.
+  const q = search.trim().toLowerCase();
+  const rowMatches = (r) =>
+    !q ||
+    (r.job?.job_number || "").toLowerCase().includes(q) ||
+    (r.job?.customer || "").toLowerCase().includes(q) ||
+    (r.job?.laser_job_reference || "").toLowerCase().includes(q) ||
+    (r.shortage?.board_number || "").toLowerCase().includes(q) ||
+    (r.onPrograms || []).some((pg) => (pg.program_number || "").toLowerCase().includes(q));
+  const programMatches = (pg) =>
+    !q ||
+    (pg.program_number || "").toLowerCase().includes(q) ||
+    (pg.material || "").toLowerCase().includes(q) ||
+    (pg.jobs || []).some(
+      (l) =>
+        (l.job_number || "").toLowerCase().includes(q) ||
+        (l.sigmanest_number || "").toLowerCase().includes(q)
+    );
+
+  const shownRows = rows.filter(rowMatches);
+  const openPrograms = programs.filter((p) => !p.is_complete).filter(programMatches);
+  const cutPrograms = programs.filter((p) => p.is_complete).filter(programMatches);
+  const nestNowCount = shownRows.filter((r) => r.nestNow).length;
 
   return (
     <div style={S.list}>
+      <input
+        style={S.input}
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Find a job, SigmaNest number, customer or program…"
+      />
+
       {canManage && !building && (
         <button type="button" className="stk-btn" style={{ ...S.addBtn, width: "100%" }} onClick={() => setBuilding(true)}>
           <Plus size={15} strokeWidth={2.5} />
@@ -266,9 +296,11 @@ export default function NestingView({
         </div>
       )}
 
-      <Section title="To nest" count={rows.length}>
-        {rows.length === 0 ? (
-          <div style={S.empty}>Nothing waiting. Everything with a nesting stage has been nested off.</div>
+      <Section title="To nest" count={shownRows.length}>
+        {shownRows.length === 0 ? (
+          <div style={S.empty}>
+            {q ? "Nothing waiting matches that." : "Nothing waiting. Everything with a nesting stage has been nested off."}
+          </div>
         ) : (
           <>
             {nestNowCount > 0 && (
@@ -276,11 +308,11 @@ export default function NestingView({
                 {nestNowCount} {nestNowCount === 1 ? "needs" : "need"} nesting now.
               </div>
             )}
-            {rows.map((r) => (
+            {shownRows.map((r) => (
               <NestRow
                 key={r.key}
                 row={r}
-                rows={rows}
+                candidates={candidates}
                 machine={machine}
                 thicknesses={thicknesses}
                 grades={grades}
@@ -365,7 +397,7 @@ function Field({ label, value, strong, muted }) {
 
 function NestRow({
   row: r,
-  rows,
+  candidates,
   machine,
   thicknesses,
   grades,
@@ -382,14 +414,30 @@ function NestRow({
   const [thickness, setThickness] = useState("");
   const [grade, setGrade] = useState("");
   const [alsoOn, setAlsoOn] = useState([]);
+  const [alsoQuery, setAlsoQuery] = useState("");
   const [saving, setSaving] = useState(false);
 
   const sigmanest = r.job?.laser_job_reference || r.shortage?.board_number || "";
   const programText = r.onPrograms && r.onPrograms.length > 0 ? r.onPrograms.map((p) => p.program_number).join(", ") : "";
 
-  // Anything else still waiting can ride on the same sheet. That is the
-  // whole reason programs exist -- one nest, several jobs.
-  const others = rows.filter((o) => o.key !== r.key && o.candidate);
+  // Anything else can ride on the same sheet -- that is the whole reason
+  // programs exist. Typed rather than ticked: a list of every waiting job
+  // against every row is a wall of boxes, and the ones that fit a sheet
+  // are rarely the ones near it in the list.
+  const alsoSuggestions = (() => {
+    const aq = alsoQuery.trim().toLowerCase();
+    if (!aq) return [];
+    const taken = [r.candidate?.key, ...alsoOn.map((c) => c.key)].filter(Boolean);
+    return (candidates || [])
+      .filter((c) => !taken.includes(c.key))
+      .filter(
+        (c) =>
+          (c.job_number || "").toLowerCase().includes(aq) ||
+          (c.sigmanest || "").toLowerCase().includes(aq) ||
+          (c.customer || "").toLowerCase().includes(aq)
+      )
+      .slice(0, 8);
+  })();
 
   const canCreate = !!programNumber.trim() && !!thickness && !!grade && !!r.candidate && !saving;
 
@@ -397,7 +445,7 @@ function NestRow({
     if (!canCreate) return;
     setSaving(true);
     try {
-      const chosen = [r.candidate, ...others.filter((o) => alsoOn.includes(o.key)).map((o) => o.candidate)];
+      const chosen = [r.candidate, ...alsoOn];
       const ok = await onCreateProgram({
         program_number: programNumber.trim(),
         // Stored as one line the way the machine reads it, built from the
@@ -415,6 +463,7 @@ function NestRow({
         setThickness("");
         setGrade("");
         setAlsoOn([]);
+        setAlsoQuery("");
       }
     } finally {
       setSaving(false);
@@ -520,26 +569,69 @@ function NestRow({
                 <div style={S.roleHint}>No thicknesses set up yet — add them under Stock Manager → Laser Thicknesses.</div>
               )}
 
-              {others.length > 0 && (
-                <div>
-                  <label style={S.label}>Anything else on the same sheet</label>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 4 }}>
-                    {others.map((o) => (
-                      <label key={o.key} style={{ ...S.checkRow, fontSize: 13.5 }}>
-                        <input
-                          type="checkbox"
-                          checked={alsoOn.includes(o.key)}
-                          onChange={() =>
-                            setAlsoOn((prev) => (prev.includes(o.key) ? prev.filter((k) => k !== o.key) : [...prev, o.key]))
-                          }
-                        />
-                        {o.job_number || o.job?.job_number}
-                        {o.kind === "shortage" ? " · re-cut" : o.job?.laser_job_reference ? ` · ${o.job.laser_job_reference}` : ""}
-                      </label>
+              <div>
+                <label style={S.label}>Anything else on the same sheet</label>
+                {alsoOn.length > 0 && (
+                  <div style={{ ...S.chipRow, marginBottom: 6 }}>
+                    {alsoOn.map((c) => (
+                      <span
+                        key={c.key}
+                        style={{
+                          ...S.chip,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          ...(c.kind === "shortage" ? { borderColor: C.danger, color: C.danger } : {}),
+                        }}
+                      >
+                        {c.job_number}
+                        {c.kind === "shortage" ? " · re-cut" : c.sigmanest ? ` · ${c.sigmanest}` : ""}
+                        <button
+                          type="button"
+                          className="stk-btn"
+                          style={{ ...S.iconBtn, padding: 0, minWidth: 0 }}
+                          onClick={() => setAlsoOn((prev) => prev.filter((x) => x.key !== c.key))}
+                          title="Take off this program"
+                        >
+                          <X size={13} />
+                        </button>
+                      </span>
                     ))}
                   </div>
+                )}
+                <div style={{ position: "relative" }}>
+                  <input
+                    style={S.input}
+                    value={alsoQuery}
+                    onChange={(e) => setAlsoQuery(e.target.value)}
+                    placeholder="Start typing a job or SigmaNest number…"
+                  />
+                  {alsoSuggestions.length > 0 && (
+                    <div style={S.suggestDropdown}>
+                      {alsoSuggestions.map((c) => (
+                        <button
+                          key={c.key}
+                          type="button"
+                          className="stk-btn"
+                          style={{
+                            ...S.suggestItem,
+                            width: "100%",
+                            textAlign: "left",
+                            ...(c.kind === "shortage" ? { color: C.danger } : {}),
+                          }}
+                          onClick={() => {
+                            setAlsoOn((prev) => [...prev, c]);
+                            setAlsoQuery("");
+                          }}
+                        >
+                          <b>{c.job_number}</b> {c.sigmanest || "no SigmaNest #"}
+                          {c.detail ? ` · ${c.detail}` : ""}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
 
               <button
                 type="button"

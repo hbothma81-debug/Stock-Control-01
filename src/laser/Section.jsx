@@ -4,37 +4,24 @@ import { C, S } from "../theme.js";
 
 // A titled block on the laser screens.
 //
-// Two jobs. It gives the headings more weight than the ones used
-// elsewhere in the app -- these screens are read at a machine, often at
-// arm's length, and the old 15px uppercase did not separate one list from
-// the next. And it collapses, so finished work can be there without
-// filling the screen.
+// The heading is a pill rather than a line of text, because a heading
+// that is also a control has to look like one. Flat text with a small
+// arrow reads as a label, and nobody taps a label.
 //
-// Anything already done starts closed. What is still to do is what the
-// person is looking at; what is finished is only there to check.
+// Everything collapses. What is finished starts shut; what is still to do
+// starts open.
 
-export default function Section({ title, count, collapsible = false, defaultOpen = true, children }) {
+export default function Section({ title, count, collapsible = true, defaultOpen = true, children }) {
   const [open, setOpen] = useState(defaultOpen);
   const shown = collapsible ? open : true;
 
-  const heading = (
+  const inner = (
     <>
-      <span
-        style={{
-          fontFamily: S.gradeTitle.fontFamily,
-          fontSize: 19,
-          fontWeight: 700,
-          letterSpacing: "0.01em",
-          flex: 1,
-          textAlign: "left",
-        }}
-      >
-        {title}
-      </span>
+      <span style={{ flex: 1, textAlign: "left", fontSize: 15.5, fontWeight: 700 }}>{title}</span>
       {count != null && <span style={S.gradeCount}>{count}</span>}
       {collapsible && (
         <ChevronDown
-          size={18}
+          size={16}
           style={{ transform: shown ? "none" : "rotate(-90deg)", transition: "transform .15s", flexShrink: 0 }}
         />
       )}
@@ -42,30 +29,25 @@ export default function Section({ title, count, collapsible = false, defaultOpen
   );
 
   return (
-    <div style={{ ...S.gradeBlock, marginTop: 14 }}>
+    <div style={{ marginTop: 14 }}>
       {collapsible ? (
         <button
           type="button"
-          className="stk-grade"
-          style={{ ...S.gradeHeader, width: "100%", paddingBottom: 8, borderBottom: `1px solid ${C.border}` }}
+          className="stk-btn"
+          style={{
+            ...S.productionPill,
+            cursor: "pointer",
+            color: C.text,
+            ...(shown ? { borderColor: C.accentRaw, background: C.accentTint, color: C.accentRaw } : {}),
+          }}
           onClick={() => setOpen((v) => !v)}
         >
-          {heading}
+          {inner}
         </button>
       ) : (
-        <div
-          style={{
-            ...S.gradeHeader,
-            width: "100%",
-            paddingBottom: 8,
-            borderBottom: `1px solid ${C.border}`,
-            cursor: "default",
-          }}
-        >
-          {heading}
-        </div>
+        <div style={{ ...S.productionPill, cursor: "default" }}>{inner}</div>
       )}
-      {shown && <div style={S.gradeItems}>{children}</div>}
+      {shown && <div style={{ ...S.gradeItems, marginTop: 8 }}>{children}</div>}
     </div>
   );
 }
