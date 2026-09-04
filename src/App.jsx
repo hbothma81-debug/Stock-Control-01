@@ -1156,6 +1156,9 @@ export default function StockControl() {
   const [scForm, setScForm] = useState({ stockCode: "", description: "", price: "", recommendedStock: "", customer: "", revision: "" });
   const [scCatalogForm, setScCatalogForm] = useState({ code: "", name: "", category: "", supplier: "", price: "" });
   const [storesCatalogQuery, setStoresCatalogQuery] = useState("");
+  // Which categories are open. Everything starts shut: the catalogue runs
+  // to hundreds of lines and almost every visit is about one category.
+  const [openStoresCategories, setOpenStoresCategories] = useState([]);
   const [newSupplierName, setNewSupplierName] = useState("");
   const [importFileLabel, setImportFileLabel] = useState("");
   const [importCustomer, setImportCustomer] = useState("");
@@ -12936,7 +12939,12 @@ export default function StockControl() {
                       }, {})
                   )
                     .sort((a, b) => a[0].localeCompare(b[0]))
-                    .map(([cat, list]) => (
+                    .map(([cat, list]) => {
+                      // A search has to open what it finds, or searching a
+                      // shut catalogue looks like it found nothing.
+                      const searching = !!storesCatalogQuery.trim();
+                      const open = searching || openStoresCategories.includes(cat);
+                      return (
                       <div key={cat}>
                         <button
                           type="button"
@@ -12944,14 +12952,27 @@ export default function StockControl() {
                           style={{
                             ...S.managerGroupHeader,
                             ...S.managerGroupHeaderBtn,
-                            ...(storesCatalogCategoryFilter === cat ? S.managerGroupHeaderActive : {}),
+                            ...(open ? S.managerGroupHeaderActive : {}),
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            width: "100%",
                           }}
-                          onClick={() => setStoresCatalogCategoryFilter((prev) => (prev === cat ? "" : cat))}
-                          title={storesCatalogCategoryFilter === cat ? "Showing only this category — tap to show all" : "Tap to show only this category"}
+                          onClick={() =>
+                            setOpenStoresCategories((prev) =>
+                              prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
+                            )
+                          }
+                          title={open ? "Tap to close" : "Tap to open"}
                         >
-                          {cat} · {list.length}
+                          <span style={{ flex: 1, textAlign: "left" }}>{cat}</span>
+                          <span style={S.gradeCount}>{list.length}</span>
+                          <ChevronDown
+                            size={15}
+                            style={{ transform: open ? "none" : "rotate(-90deg)", transition: "transform .15s", flexShrink: 0 }}
+                          />
                         </button>
-                        {list.map((r) => (
+                        {open && list.map((r) => (
                           <div key={r.id} style={S.managerRow}>
                             <EditableName value={r.code || ""} onCommit={(v) => updateStoresCatalogRow(r.id, "code", v)} style={{ maxWidth: 90 }} />
                             <EditableName value={r.name} onCommit={(v) => updateStoresCatalogRow(r.id, "name", v)} />
@@ -12992,7 +13013,8 @@ export default function StockControl() {
                           </div>
                         ))}
                       </div>
-                    ))}
+                      );
+                    })}
                   {(master.storesCatalog || []).length === 0 && <div style={S.empty}>Nothing here yet — add one above.</div>}
                 </div>
               </>
