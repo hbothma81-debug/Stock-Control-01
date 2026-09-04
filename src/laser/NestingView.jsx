@@ -316,6 +316,26 @@ export default function NestingView({
   );
 }
 
+// One labelled number. The label is what stops a program number being
+// read as a job number at a glance.
+function HeaderField({ label, value, strong, muted }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={S.label}>{label}</div>
+      <div
+        style={{
+          fontSize: strong ? 16 : 14.5,
+          fontWeight: strong ? 700 : 500,
+          color: muted ? C.muted : C.text,
+          fontStyle: muted ? "italic" : "normal",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
 function NestRow({ row: r, canManage, expanded, onToggleExpand, onNestNow, onMarkJobNested, actions, SavedCheck, Notes }) {
   const isShortage = r.kind === "shortage";
   return (
@@ -329,21 +349,40 @@ function NestRow({ row: r, canManage, expanded, onToggleExpand, onNestNow, onMar
       }}
     >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
-        <div style={{ flex: "1 1 200px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <span style={S.itemName}>{r.job?.job_number || "Unknown job"}</span>
-            {r.nestNow && (
+        <div style={{ flex: "1 1 240px" }}>
+          {r.nestNow && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
               <span style={{ ...S.chip, borderColor: C.danger, color: C.danger, fontWeight: 700 }}>Nest now</span>
-            )}
-            {isShortage && <span style={{ ...S.chip, borderColor: C.danger, color: C.danger }}>Re-cut</span>}
+              {/* Why, not just that. A red box with no reason gets ignored
+                  after the third one. */}
+              <span style={{ color: C.danger, fontSize: 13, fontWeight: 600 }}>{r.nestNowReason}</span>
+            </div>
+          )}
+
+          {/* The three numbers that matter, each said out loud. Job number,
+              SigmaNest number and program get confused for one another
+              constantly -- they are all just numbers until they are
+              labelled. */}
+          <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+            <HeaderField label="Job no" value={r.job?.job_number || "Unknown"} strong />
+            <HeaderField
+              label="SigmaNest job no"
+              value={r.job?.laser_job_reference || r.shortage?.board_number || "Not filled in"}
+              muted={!(r.job?.laser_job_reference || r.shortage?.board_number)}
+            />
+            <HeaderField
+              label={r.onPrograms && r.onPrograms.length > 1 ? "Program nos" : "Program no"}
+              value={r.onPrograms && r.onPrograms.length > 0 ? r.onPrograms.map((p) => p.program_number).join(", ") : "Not nested yet"}
+              muted={!(r.onPrograms && r.onPrograms.length > 0)}
+            />
           </div>
+
           <div style={S.rowMeta}>
             <span style={S.customerTag}>{r.job?.customer || "No customer"}</span>
-            <span style={S.partTag}>{r.job?.laser_job_reference || r.shortage?.board_number || "No SigmaNest #"}</span>
             {r.job?.due_date && <span>Due {new Date(r.job.due_date).toLocaleDateString()}</span>}
           </div>
           {isShortage && r.detail && <div style={{ ...S.itemComment, color: C.danger }}>{r.detail}</div>}
-          {r.onPrograms && r.onPrograms.length > 0 ? (
+          {r.onPrograms && r.onPrograms.length > 0 && (
             <div style={{ ...S.chipRow, marginTop: 4 }}>
               {r.onPrograms.map((p) => (
                 <span
@@ -359,8 +398,6 @@ function NestRow({ row: r, canManage, expanded, onToggleExpand, onNestNow, onMar
                 </span>
               ))}
             </div>
-          ) : (
-            <div style={S.roleHint}>Not on a program yet.</div>
           )}
         </div>
 

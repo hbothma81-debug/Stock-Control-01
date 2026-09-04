@@ -3300,8 +3300,10 @@ export default function StockControl() {
         key: "job:" + job.id,
         kind: "job",
         // Urgent is the shop saying this one jumps the queue, so it earns
-        // the same outline a re-cut gets.
+        // the same outline a re-cut gets. Saying which of the reasons it
+        // is matters: "nest now" without a why is just a red box.
         nestNow: !!process.is_urgent,
+        nestNowReason: process.is_urgent ? "Marked urgent" : "",
         job,
         process,
         onPrograms: programsByJob[job.id] || [],
@@ -3327,6 +3329,7 @@ export default function StockControl() {
         key: "short:" + sh.id,
         kind: "shortage",
         nestNow: true,
+        nestNowReason: "Short of parts — someone is waiting",
         job: job || { id: sh.job_id, job_number: sh.job_number, customer: sh.customer },
         process: null,
         shortage: sh,
