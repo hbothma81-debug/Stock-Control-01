@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Plus, X, Ban, AlertTriangle, PackagePlus, FileText, Upload, ChevronDown } from "lucide-react";
 import { C, S } from "../theme.js";
-import Section from "./Section.jsx";
+import Section from "../Section.jsx";
 
 // Prince's screen, and very nearly the only one he uses.
 //

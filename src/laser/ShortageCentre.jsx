@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { C, S } from "../theme.js";
-import Section from "./Section.jsx";
+import Section from "../Section.jsx";
 
 // Every shortage across every job, in one place.
 //

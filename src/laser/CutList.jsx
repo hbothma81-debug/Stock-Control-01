@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Check, Undo2 } from "lucide-react";
 import { C, S } from "../theme.js";
-import Section from "./Section.jsx";
+import Section from "../Section.jsx";
 
 // The laser operator's screen. A to-do list of programs to cut.
 //

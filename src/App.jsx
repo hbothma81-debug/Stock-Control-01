@@ -17,6 +17,7 @@ import EditableName from "./EditableName.jsx";
 import NestingView from "./laser/NestingView.jsx";
 import CutList from "./laser/CutList.jsx";
 import LaserStatus from "./laser/LaserStatus.jsx";
+import Section from "./Section.jsx";
 import ShortageCentre from "./laser/ShortageCentre.jsx";
 
 // window.storage is installed in main.jsx before this component ever
@@ -907,12 +908,10 @@ export default function StockControl() {
   // Received — dedicated state, separate from Usage Log's own, since
   // they're now two independent places in the app rather than one shared
   // view.
-  const [showReceivingHistory, setShowReceivingHistory] = useState(false);
   const [receivingHistoryDateFrom, setReceivingHistoryDateFrom] = useState("");
   const [receivingHistoryDateTo, setReceivingHistoryDateTo] = useState("");
   const [receivingHistorySearchQuery, setReceivingHistorySearchQuery] = useState("");
   const [showPoReport, setShowPoReport] = useState(false);
-  const [showCompletedPOs, setShowCompletedPOs] = useState(false);
   const [receivingPo, setReceivingPo] = useState(null);
   const [receivingLines, setReceivingLines] = useState([]);
   const [receivingDeliveryNote, setReceivingDeliveryNote] = useState("");
@@ -1087,7 +1086,6 @@ export default function StockControl() {
   // compact item cards — the middle level between the group list and one
   // item's own detail page.
   const [selectedGradeGroup, setSelectedGradeGroup] = useState(null);
-  const [showArchive, setShowArchive] = useState(false);
   const [showLowStock, setShowLowStock] = useState(false);
   const [archiveTypeFilter, setArchiveTypeFilter] = useState("");
   const [archiveDateFrom, setArchiveDateFrom] = useState("");
@@ -9122,12 +9120,8 @@ export default function StockControl() {
               .sort((a, b) => new Date(b.dateRequested) - new Date(a.dateRequested));
             if (list.length === 0) return null;
             return (
-              <div key={status} style={S.gradeBlock}>
-                <div style={S.gradeHeader}>
-                  <span style={S.gradeTitle}>{status}</span>
-                  <span style={S.gradeCount}>{list.length}</span>
-                </div>
-                <div style={S.gradeItems}>
+              <Section key={status} title={status === "pending" ? "Pending" : "Ordered"} count={list.length}>
+                <>
                   {status === "pending" ? (
                     // Grouped by supplier — the everyday need this serves:
                     // several separate requests for the same supplier,
@@ -9142,10 +9136,15 @@ export default function StockControl() {
                     )
                       .sort((a, b) => a[0].localeCompare(b[0]))
                       .map(([supplierName, supplierReqs]) => (
-                        <div key={supplierName} style={{ marginBottom: 14 }}>
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                            <span style={{ ...S.label, fontWeight: 700 }}>{supplierName} · {supplierReqs.length}</span>
-                            {canRaisePO && supplierName !== "No supplier set" && (
+                        // The PO button sits on the supplier it applies to.
+                        // Above the list it read as a page action, and it is
+                        // not one -- it orders these lines from this supplier.
+                        <Section
+                          key={supplierName}
+                          title={supplierName}
+                          count={supplierReqs.length}
+                          right={
+                            canRaisePO && supplierName !== "No supplier set" ? (
                               <button
                                 type="button"
                                 className="stk-btn"
@@ -9154,16 +9153,17 @@ export default function StockControl() {
                               >
                                 <FileText size={13} /> Raise PO for all {supplierReqs.length}
                               </button>
-                            )}
-                          </div>
+                            ) : null
+                          }
+                        >
                           {supplierReqs.map(renderRequisitionCard)}
-                        </div>
+                        </Section>
                       ))
                   ) : (
                     list.map(renderRequisitionCard)
                   )}
-                </div>
-              </div>
+                </>
+              </Section>
             );
           })}
 
@@ -9182,15 +9182,12 @@ export default function StockControl() {
           )}
 
           {canManageRequisitions && (
-            <div style={S.gradeBlock}>
-              <button className="stk-grade" style={S.gradeHeader} onClick={() => setShowArchive((v) => !v)}>
-                <ChevronDown size={15} style={{ transform: showArchive ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
-                <span style={S.gradeTitle}>Completed / Archived</span>
-                <span style={S.gradeCount}>
-                  {requisitions.filter((r) => ["received", "fulfilled", "cancelled"].includes(r.status)).length}
-                </span>
-              </button>
-              {showArchive && (
+            <Section
+              title="Completed / Archived"
+              defaultOpen={false}
+              count={requisitions.filter((r) => ["received", "fulfilled", "cancelled"].includes(r.status)).length}
+            >
+              {(
                 <>
                   <div style={S.filterBar}>
                     <div>
@@ -9250,7 +9247,7 @@ export default function StockControl() {
                   </div>
                 </>
               )}
-            </div>
+            </Section>
           )}
         </div>
       ) : tab === "purchaseOrders" ? (
@@ -9368,33 +9365,27 @@ export default function StockControl() {
               <>
                 <div style={{ ...S.gradeItems, marginTop: 10 }}>
                   {bySupplier.map(([supplierName, list]) => (
-                    <div key={supplierName} style={{ marginBottom: 14 }}>
-                      <div style={{ ...S.label, fontWeight: 700, marginBottom: 6 }}>{supplierName} · {list.length}</div>
+                    <Section key={supplierName} title={supplierName} count={list.length}>
                       {list.sort((a, b) => new Date(b.dateCreated) - new Date(a.dateCreated)).map(renderPoCard)}
-                    </div>
+                    </Section>
                   ))}
                   {outstanding.length === 0 && purchaseOrders.length > 0 && <div style={S.empty}>Nothing matches.</div>}
                 </div>
 
-                <div style={S.gradeBlock}>
-                  <button className="stk-grade" style={S.gradeHeader} onClick={() => setShowCompletedPOs((v) => !v)}>
-                    <ChevronDown size={15} style={{ transform: showCompletedPOs ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
-                    <span style={S.gradeTitle}>Received / Completed</span>
-                    <span style={S.gradeCount}>{purchaseOrders.filter((po) => po.status === "received").length}</span>
-                  </button>
-                  {showCompletedPOs && (
-                    <div style={S.gradeItems}>
-                      {[...purchaseOrders]
-                        .filter((po) => po.status === "received")
-                        .filter(matchesSearch)
-                        .sort((a, b) => new Date(b.receivedDate) - new Date(a.receivedDate))
-                        .map(renderPoCard)}
-                      {purchaseOrders.filter((po) => po.status === "received").filter(matchesSearch).length === 0 && (
-                        <div style={S.empty}>Nothing received matches.</div>
-                      )}
-                    </div>
+                <Section
+                  title="Received / Completed"
+                  defaultOpen={false}
+                  count={purchaseOrders.filter((po) => po.status === "received").length}
+                >
+                  {[...purchaseOrders]
+                    .filter((po) => po.status === "received")
+                    .filter(matchesSearch)
+                    .sort((a, b) => new Date(b.receivedDate) - new Date(a.receivedDate))
+                    .map(renderPoCard)}
+                  {purchaseOrders.filter((po) => po.status === "received").filter(matchesSearch).length === 0 && (
+                    <div style={S.empty}>Nothing received matches.</div>
                   )}
-                </div>
+                </Section>
               </>
             );
           })()}
@@ -9413,7 +9404,10 @@ export default function StockControl() {
           {purchaseOrders.filter((po) => po.status !== "received").length === 0 && (
             <div style={S.empty}>Nothing outstanding to receive.</div>
           )}
-          <div style={{ ...S.gradeItems, marginTop: 10 }}>
+          <Section
+            title="Outstanding"
+            count={purchaseOrders.filter((po) => po.status !== "received").length}
+          >
             {(() => {
               const rq = receivingSearchQuery.trim().toLowerCase();
               const list = [...purchaseOrders]
@@ -9498,15 +9492,11 @@ export default function StockControl() {
                 );
               });
             })()}
-          </div>
+          </Section>
 
-          <div style={S.gradeBlock}>
-            <button className="stk-grade" style={S.gradeHeader} onClick={() => setShowReceivingHistory((v) => !v)}>
-              <ChevronDown size={15} style={{ transform: showReceivingHistory ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
-              <span style={S.gradeTitle}>Completed / History</span>
-            </button>
-            {showReceivingHistory && (
-              <div style={{ marginTop: 10 }}>
+          <Section title="Completed / History" defaultOpen={false}>
+            {(
+              <div>
                 <div style={S.filterBar}>
                   <div>
                     <label style={S.label}>From</label>
@@ -9569,7 +9559,7 @@ export default function StockControl() {
                 })()}
               </div>
             )}
-          </div>
+          </Section>
         </div>
       ) : tab === "jobs" ? (
         <div style={S.list}>
