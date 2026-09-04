@@ -3746,6 +3746,7 @@ export default function StockControl() {
 
   const releasesOnStart = (name) => !!processTypeSettings[name]?.releases_on_start;
   const workedInLaserStatus = (name) => !!processTypeSettings[name]?.worked_in_laser_status;
+  const hideFromProduction = (name) => !!processTypeSettings[name]?.hide_from_production;
 
   function isProcessActionable(process, jobProcesses) {
     // A shortage's catch-up stages are their own sequence, running
@@ -3882,9 +3883,11 @@ export default function StockControl() {
       // truth — that department no longer exists.
       const byProcessType = {};
       for (const procType of master?.jobProcessTypes || []) {
-        // A stage worked on the Laser Status screen gets no box of its own.
-        // Two places to tick the same thing is two places to forget.
-        if (workedInLaserStatus(procType)) continue;
+        // A stage worked somewhere else gets no box of its own. Two places
+        // showing the same work is two places to tick it, and two places to
+        // forget. Nesting and Laser live in the Laser 4kw tab now; the
+        // packer works on Laser Status.
+        if (hideFromProduction(procType) || workedInLaserStatus(procType)) continue;
         if (profile.allowedProcessTypes.includes(procType)) byProcessType[procType] = [];
       }
 
