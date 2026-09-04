@@ -35,7 +35,6 @@ export const NAV_TABS = [
   { key: "poReports", label: "PO Reports" },
   { key: "usageLog", label: "Usage Log" },
   { key: "drawings", label: "Drawings" },
-  { key: "shortageCenter", label: "Shortage Center" },
 ];
 
 // The tab bar groups related divisions under a shared dropdown instead of
@@ -44,13 +43,12 @@ export const NAV_TABS = [
 // used the most) with everything else folded into a few logical groups.
 export const TAB_GROUPS = [
   { label: "Stock", keys: ["plate", "structural", "cncBar", "custom", "fasteners", "stores", "assets"] },
-  // Shortage Center is deliberately not in a group. A shortage is
-  // production work, not buying — something already made is missing and
-  // has to be re-cut — so it does not belong under Procurement. Left
-  // ungrouped it renders as its own button beside Production, which is
-  // where it belongs, without turning Production itself into a dropdown.
-  // Only shortage handlers see it, so the tab row does not grow for
-  // everyone else.
+  // Shortages used to be their own top-level button here. They now live
+  // inside the Laser 4kw tab beside Nesting and Cutting, because that is
+  // where one is dealt with: a re-cut goes on a program like any other
+  // work, and cutting that program is what resolves it. Keeping the list
+  // in a separate tab meant leaving the screen to look at it and coming
+  // back to act on it.
   { label: "Procurement", keys: ["requisitions", "purchaseOrders", "receiving"] },
   { label: "Records", keys: ["invoicing", "deliveryNotes", "invoiceRequests", "processSheets", "poReports", "usageLog", "drawings"] },
 ];

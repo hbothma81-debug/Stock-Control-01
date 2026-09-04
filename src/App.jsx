@@ -17,6 +17,7 @@ import EditableName from "./EditableName.jsx";
 import NestingView from "./laser/NestingView.jsx";
 import CutList from "./laser/CutList.jsx";
 import LaserStatus from "./laser/LaserStatus.jsx";
+import ShortageCentre from "./laser/ShortageCentre.jsx";
 
 // window.storage is installed in main.jsx before this component ever
 // renders — backed by Supabase. See src/lib/storage.js.
@@ -9382,16 +9383,29 @@ export default function StockControl() {
             const { jobsToNest, programs, candidates } = laserNestingData();
             const canNest = isAdmin || !!profile?.allowedProcessTypes?.some(isNestingProcess);
             const canCut = isAdmin || !!profile?.allowedProcessTypes?.some(isProgramLaserProcess);
-            // Someone who only nests, or only cuts, gets straight to their
-            // own screen with no switch to think about.
-            const view = !canNest ? "cutting" : !canCut ? "nesting" : laserView;
+            // Someone who only nests, or only cuts, still lands on their own
+            // screen; Shortages is there for everyone, so the switch always
+            // has at least two things on it now.
+            const view =
+              laserView === "shortages"
+                ? "shortages"
+                : !canNest
+                ? laserView === "nesting"
+                  ? "cutting"
+                  : laserView
+                : !canCut
+                ? laserView === "cutting"
+                  ? "nesting"
+                  : laserView
+                : laserView;
             return (
               <>
-                {canNest && canCut && (
+                {(canNest || canCut) && (
                   <div style={{ ...S.segRow, marginBottom: 10 }}>
                     {[
-                      { key: "nesting", label: "Nesting" },
-                      { key: "cutting", label: "Cutting" },
+                      ...(canNest ? [{ key: "nesting", label: "Nesting" }] : []),
+                      ...(canCut ? [{ key: "cutting", label: "Cutting" }] : []),
+                      { key: "shortages", label: "Shortages" },
                     ].map((v) => (
                       <button
                         key={v.key}
@@ -9426,13 +9440,19 @@ export default function StockControl() {
                     onUpdateProgram={updateLaserProgram}
                     SavedCheck={SavedCheck}
                   />
-                ) : (
+                ) : view === "cutting" ? (
                   <CutList
                     programs={programs}
                     materials={master.laserMaterials || []}
                     canCut={canCut}
                     onToggleCut={toggleProgramCut}
                     busyId={programBusyId}
+                  />
+                ) : (
+                  <ShortageCentre
+                    shortages={laserData ? laserData.shortages : null}
+                    summarise={shortageSummary}
+                    onGoToNesting={canNest ? () => setLaserView("nesting") : null}
                   />
                 )}
               </>

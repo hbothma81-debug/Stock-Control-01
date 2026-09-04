@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { Plus, X, Ban } from "lucide-react";
 import { C, S } from "../theme.js";
+import Section from "./Section.jsx";
 
 // Prince's screen. Jobs waiting to be nested, and the SigmaNest programs
 // he builds out of them.
@@ -250,12 +251,8 @@ export default function NestingView({
 
       {/* ---------- waiting to be nested ---------- */}
 
-      <div style={S.gradeBlock}>
-        <div style={S.gradeHeader}>
-          <span style={S.gradeTitle}>Waiting to be nested</span>
-          <span style={S.gradeCount}>{jobsToNest.length}</span>
-        </div>
-        <div style={S.gradeItems}>
+      <Section title="Waiting to be nested" count={jobsToNest.length}>
+        <>
           {jobsToNest.length === 0 ? (
             <div style={S.empty}>Nothing waiting. Every job with a nesting stage has been nested off.</div>
           ) : (
@@ -304,8 +301,8 @@ export default function NestingView({
               </div>
             ))
           )}
-        </div>
-      </div>
+        </>
+      </Section>
 
       <div style={S.roleHint}>
         Tick <b>Fully nested</b> when there are no more programs coming for that job. Until then the laser cannot know
@@ -318,6 +315,7 @@ export default function NestingView({
         title="Programs waiting to be cut"
         programs={openPrograms}
         emptyText="No programs waiting. Build one above."
+        collapsible={false}
         canManage={canManage}
         materials={materials}
         addingTo={addingTo}
@@ -337,6 +335,7 @@ export default function NestingView({
           title="Already cut"
           programs={cutPrograms}
           emptyText=""
+          collapsible
           canManage={canManage}
           materials={materials}
           addingTo={addingTo}
@@ -359,6 +358,7 @@ function ProgramList({
   title,
   programs,
   emptyText,
+  collapsible = false,
   canManage,
   materials,
   addingTo,
@@ -373,12 +373,8 @@ function ProgramList({
   SavedCheck,
 }) {
   return (
-    <div style={S.gradeBlock}>
-      <div style={S.gradeHeader}>
-        <span style={S.gradeTitle}>{title}</span>
-        <span style={S.gradeCount}>{programs.length}</span>
-      </div>
-      <div style={S.gradeItems}>
+    <Section title={title} count={programs.length} collapsible={collapsible} defaultOpen={!collapsible}>
+      <>
         {programs.length === 0 ? (
           emptyText ? <div style={S.empty}>{emptyText}</div> : null
         ) : (
@@ -530,7 +526,7 @@ function ProgramList({
             );
           })
         )}
-      </div>
-    </div>
+      </>
+    </Section>
   );
 }

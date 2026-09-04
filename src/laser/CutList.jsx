@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { Check, Undo2 } from "lucide-react";
 import { C, S } from "../theme.js";
+import Section from "./Section.jsx";
 
 // The laser operator's screen. A to-do list of programs to cut.
 //
@@ -62,32 +63,20 @@ export default function CutList({ programs, materials, canCut, onToggleCut, busy
         </div>
       ) : (
         groups.map((g) => (
-          <div key={g.material} style={S.gradeBlock}>
-            <div style={S.gradeHeader}>
-              <span style={S.gradeTitle}>{g.material}</span>
-              <span style={S.gradeCount}>{g.items.length}</span>
-            </div>
-            <div style={S.gradeItems}>
-              {g.items.map((p) => (
-                <ProgramRow key={p.id} program={p} canCut={canCut} onToggleCut={onToggleCut} busy={busyId === p.id} />
-              ))}
-            </div>
-          </div>
+          <Section key={g.material} title={g.material} count={g.items.length}>
+            {g.items.map((p) => (
+              <ProgramRow key={p.id} program={p} canCut={canCut} onToggleCut={onToggleCut} busy={busyId === p.id} />
+            ))}
+          </Section>
         ))
       )}
 
       {cut.length > 0 && (
-        <div style={S.gradeBlock}>
-          <div style={S.gradeHeader}>
-            <span style={S.gradeTitle}>Already cut</span>
-            <span style={S.gradeCount}>{cut.length}</span>
-          </div>
-          <div style={S.gradeItems}>
-            {cut.map((p) => (
-              <ProgramRow key={p.id} program={p} canCut={canCut} onToggleCut={onToggleCut} busy={busyId === p.id} />
-            ))}
-          </div>
-        </div>
+        <Section title="Already cut" count={cut.length} collapsible defaultOpen={false}>
+          {cut.map((p) => (
+            <ProgramRow key={p.id} program={p} canCut={canCut} onToggleCut={onToggleCut} busy={busyId === p.id} />
+          ))}
+        </Section>
       )}
     </div>
   );
