@@ -97,9 +97,47 @@ for (const file of jsxFiles(root)) {
   });
 }
 
-console.log(`\n${checked} file(s) checked, ${problems} problem(s) found.`);
+// ---- second pass: layout definitions that have gone missing ----
+//
+// A different kind of silent fault, and the name check above cannot see
+// it. If a style is deleted from theme.js while something still uses it,
+// nothing errors -- the style simply comes back as nothing, and that part
+// of the screen loses its colour, spacing or size with no warning at all.
+//
+// Anything reached by a built-up name (S["reqStatus_" + status]) is
+// counted as used, because searching for its name finds nothing even
+// though it is used constantly.
+
+const theme = fs.readFileSync(path.join(root, "theme.js"), "utf8");
+const styleBlock = theme.slice(theme.indexOf("export const S ="));
+const defined = new Set(
+  (styleBlock.match(/^ {2}([a-zA-Z_0-9]+):/gm) || []).map((x) => x.trim().replace(":", ""))
+);
+
+let styleUses = 0;
+let styleMissing = 0;
+for (const file of jsxFiles(root)) {
+  const code = fs.readFileSync(file, "utf8");
+  // A file with its own local set of styles is not using the shared one.
+  if (/^const S = \{/m.test(code)) continue;
+  for (const m of code.matchAll(/\bS\.([a-zA-Z_0-9]+)/g)) {
+    styleUses++;
+    if (!defined.has(m[1])) {
+      console.log(`\n${path.relative(__dirname, file)}`);
+      console.log(`  "S.${m[1]}" is used here but no longer exists in theme.js`);
+      console.log("  Nothing will break outright -- that part of the screen just loses its styling.");
+      styleMissing++;
+    }
+  }
+}
+
+problems += styleMissing;
+
+console.log(`\n${checked} file(s) checked for missing names.`);
+console.log(`${defined.size} layout definitions, ${styleUses} uses checked.`);
+console.log(`${problems} problem(s) found.`);
 if (problems === 0) {
-  console.log("No missing names. The app will not go blank for this reason.");
+  console.log("\nNothing is missing. The app will not go blank, and no screen has lost its styling.");
   console.log("It does not tell you the screens look right -- only signing in does that.");
 }
 process.exit(problems === 0 ? 0 : 1);
