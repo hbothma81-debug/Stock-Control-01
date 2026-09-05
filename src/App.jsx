@@ -1000,7 +1000,7 @@ export default function StockControl() {
   const [processSheetsDateTo, setProcessSheetsDateTo] = useState("");
   const [poReportsDateFrom, setPoReportsDateFrom] = useState("");
   const [poReportsDateTo, setPoReportsDateTo] = useState("");
-  const [allJobQuoteItems, setAllJobQuoteItems] = useState([]);
+
   const [jobsLoading, setJobsLoading] = useState(false);
   const [jobDetail, setJobDetail] = useState(null); // { job, processes, documents }
   // Which sub-section of the job detail page is showing — a full page now,
@@ -2527,17 +2527,21 @@ export default function StockControl() {
   async function fetchJobs() {
     if (!supabase) return;
     setJobsLoading(true);
-    // Four independent queries, run in parallel but each handled on its
+    // Three independent queries, run in parallel but each handled on its
     // own — Promise.allSettled rather than Promise.all specifically so a
-    // failure in one (job_invoice_requests, quote items, or delivery
-    // notes) never masks jobs that loaded successfully. Production's own,
-    // separate query only touches the jobs table directly, which is
-    // exactly why it could keep working while this combined fetch was
-    // failing as a whole and silently showing nothing.
-    const [jobsResult, invReqResult, quoteItemsResult, deliveryNotesResult] = await Promise.allSettled([
+    // failure in one (job_invoice_requests or delivery notes) never masks
+    // jobs that loaded successfully. Production's own, separate query only
+    // touches the jobs table directly, which is exactly why it could keep
+    // working while this combined fetch was failing as a whole and
+    // silently showing nothing.
+    //
+    // There were four. The fourth read every quote item of every job on
+    // every jobs load, to fill a variable nothing ever read -- the screens
+    // that need quote items fetch their own, for the one job they are
+    // showing.
+    const [jobsResult, invReqResult, deliveryNotesResult] = await Promise.allSettled([
       fetchAllRows("jobs", { orderBy: "created_at", ascending: false }),
       fetchAllRows("job_invoice_requests", { orderBy: "submitted_at", ascending: false }),
-      fetchAllRows("job_quote_items", { select: "id, job_id, item_status, qty, qty_invoiced" }),
       fetchAllRows("delivery_notes", { orderBy: "delivery_note_number", ascending: false }),
     ]);
 
@@ -2552,12 +2556,6 @@ export default function StockControl() {
     } else {
       console.error("Failed to load invoice requests:", invReqResult.reason);
       setJobInvoiceRequests([]);
-    }
-    if (quoteItemsResult.status === "fulfilled") {
-      setAllJobQuoteItems(quoteItemsResult.value || []);
-    } else {
-      console.error("Failed to load quote items:", quoteItemsResult.reason);
-      setAllJobQuoteItems([]);
     }
     if (deliveryNotesResult.status === "fulfilled") {
       setAllDeliveryNotes(deliveryNotesResult.value || []);
@@ -8815,7 +8813,6 @@ export default function StockControl() {
   return (
     <div style={S.page} data-stk-theme={profile?.theme || "dark"}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap');
         ${THEME_CSS}
         * { box-sizing: border-box; }
         input, select { font-family: inherit; }
