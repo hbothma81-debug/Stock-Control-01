@@ -18,6 +18,7 @@ import NestingView from "./laser/NestingView.jsx";
 import CutList from "./laser/CutList.jsx";
 import LaserStatus from "./laser/LaserStatus.jsx";
 import Section from "./Section.jsx";
+import RecordRow from "./RecordRow.jsx";
 import ShortageCentre from "./laser/ShortageCentre.jsx";
 
 // window.storage is installed in main.jsx before this component ever
@@ -10523,16 +10524,18 @@ export default function StockControl() {
                 return numB - numA;
               });
             return (
-              <div style={{ ...S.gradeItems, marginTop: 10 }}>
+              <Section title="Delivery notes" count={groups.length}>
                 {groups.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
                 {groups.map(({ group, first, job }) => (
-                  <div key={first.delivery_note_number} style={S.reqCard}>
-                    <div style={S.reqCardTop}>
-                      <span style={S.itemName}>{first.delivery_note_number}</span>
+                  <RecordRow
+                    key={first.delivery_note_number}
+                    title={first.delivery_note_number}
+                    summary={job ? `${job.job_number} — ${job.customer || "No customer"}` : "Job not found"}
+                    right={
                       <span style={S.roleHint}>{first.direction === "to_supplier" ? "To supplier" : "To customer"}</span>
-                    </div>
+                    }
+                  >
                     <div className="stk-meta-row" style={S.rowMeta}>
-                      <span>{job ? `${job.job_number} — ${job.customer || "No customer"}` : "Job not found"}</span>
                       <span>{first.recipient_name}</span>
                       <span>Sent by {first.created_by}</span>
                       <span>{new Date(first.created_at).toLocaleDateString()}</span>
@@ -10555,9 +10558,9 @@ export default function StockControl() {
                     >
                       <FileText size={13} /> View document
                     </button>
-                  </div>
+                  </RecordRow>
                 ))}
-              </div>
+              </Section>
             );
           })()}
         </div>
@@ -10588,25 +10591,25 @@ export default function StockControl() {
               .filter(({ job }) => !invoiceRequestsSearchQuery.trim() || (job?.job_number || "").toLowerCase().includes(invoiceRequestsSearchQuery.trim().toLowerCase()))
               .sort((a, b) => new Date(b.r.submitted_at) - new Date(a.r.submitted_at));
             return (
-              <div style={{ ...S.gradeItems, marginTop: 10 }}>
+              <Section title="Invoice requests" count={rows.length}>
                 {rows.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
                 {rows.map(({ r, job }) => (
-                  <div key={r.id} style={S.reqCard}>
-                    <div style={S.reqCardTop}>
-                      <span style={S.itemName}>{r.file_name}</span>
-                      {r.total_amount != null && <span style={S.roleHint}>R {Number(r.total_amount).toFixed(2)}</span>}
-                    </div>
+                  <RecordRow
+                    key={r.id}
+                    title={r.file_name}
+                    summary={job ? `${job.job_number} — ${job.customer || "No customer"}` : "Job not found"}
+                    right={r.total_amount != null ? <span style={S.roleHint}>R {Number(r.total_amount).toFixed(2)}</span> : null}
+                  >
                     <div className="stk-meta-row" style={S.rowMeta}>
-                      <span>{job ? `${job.job_number} — ${job.customer || "No customer"}` : "Job not found"}</span>
                       <span>Submitted by {r.submitted_by}</span>
                       <span>{new Date(r.submitted_at).toLocaleDateString()}</span>
                     </div>
                     <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 8 }} onClick={() => viewJobInvoiceRequest(r)}>
                       <FileText size={13} /> View document
                     </button>
-                  </div>
+                  </RecordRow>
                 ))}
-              </div>
+              </Section>
             );
           })()}
         </div>
@@ -10640,24 +10643,24 @@ export default function StockControl() {
                 .filter(({ d }) => !processSheetsDateTo || new Date(d.generated_at) <= new Date(processSheetsDateTo + "T23:59:59"))
                 .filter(({ job }) => !processSheetsSearchQuery.trim() || (job?.job_number || "").toLowerCase().includes(processSheetsSearchQuery.trim().toLowerCase()));
               return (
-                <div style={{ ...S.gradeItems, marginTop: 10 }}>
+                <Section title="Process sheets" count={rows.length}>
                   {rows.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
                   {rows.map(({ d, job }) => (
-                    <div key={d.id} style={S.reqCard}>
-                      <div style={S.reqCardTop}>
-                        <span style={S.itemName}>{d.file_name}</span>
-                      </div>
+                    <RecordRow
+                      key={d.id}
+                      title={d.file_name}
+                      summary={job ? `${job.job_number} — ${job.customer || "No customer"}` : "Job not found"}
+                    >
                       <div className="stk-meta-row" style={S.rowMeta}>
-                        <span>{job ? `${job.job_number} — ${job.customer || "No customer"}` : "Job not found"}</span>
                         <span>Printed by {d.generated_by}</span>
                         <span>{new Date(d.generated_at).toLocaleString()}</span>
                       </div>
                       <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 8 }} onClick={() => viewGeneratedDocument(d)}>
                         <FileText size={13} /> View document
                       </button>
-                    </div>
+                    </RecordRow>
                   ))}
-                </div>
+                </Section>
               );
             })()
           )}
@@ -10684,13 +10687,14 @@ export default function StockControl() {
                 .filter((d) => !poReportsDateFrom || new Date(d.generated_at) >= new Date(poReportsDateFrom))
                 .filter((d) => !poReportsDateTo || new Date(d.generated_at) <= new Date(poReportsDateTo + "T23:59:59"));
               return (
-                <div style={{ ...S.gradeItems, marginTop: 10 }}>
+                <Section title="PO reports" count={rows.length}>
                   {rows.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
                   {rows.map((d) => (
-                    <div key={d.id} style={S.reqCard}>
-                      <div style={S.reqCardTop}>
-                        <span style={S.itemName}>{d.file_name}</span>
-                      </div>
+                    <RecordRow
+                      key={d.id}
+                      title={d.file_name}
+                      summary={new Date(d.generated_at).toLocaleDateString()}
+                    >
                       <div className="stk-meta-row" style={S.rowMeta}>
                         <span>Generated by {d.generated_by}</span>
                         <span>{new Date(d.generated_at).toLocaleString()}</span>
@@ -10698,9 +10702,9 @@ export default function StockControl() {
                       <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 8 }} onClick={() => viewGeneratedDocument(d)}>
                         <FileText size={13} /> View document
                       </button>
-                    </div>
+                    </RecordRow>
                   ))}
-                </div>
+                </Section>
               );
             })()
           )}
@@ -10806,7 +10810,7 @@ export default function StockControl() {
               placeholder="Search item, job number, customer, or person…"
             />
           </div>
-          <div style={{ ...S.gradeItems, marginTop: 10 }}>
+          <Section title="Movements" count={usageLog.length}>
             {[...usageLog]
               .filter((u) => !usageTypeFilter || u.mainCat === usageTypeFilter)
               .filter((u) => !usageDirectionFilter || u.direction === usageDirectionFilter)
@@ -10824,9 +10828,11 @@ export default function StockControl() {
               })
               .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
               .map((u) => (
-                <div key={u.id} style={S.reqCard}>
-                  <div style={S.reqCardTop}>
-                    <span style={S.itemName}>{u.itemName}</span>
+                <RecordRow
+                  key={u.id}
+                  title={u.itemName}
+                  summary={u.jobNumber ? `Job: ${u.jobNumber}` : u.customer || ""}
+                  right={
                     <span style={{ ...S.reqStatusTag, ...(u.direction === "use" ? S.reqStatus_cancelled : S.reqStatus_ordered) }}>
                       {u.mainCat === "cncBar" && u.cutPieces > 1
                         ? `${u.direction === "use" ? "Used" : "Added"} ${u.cutPieces} × ${u.cutLength}mm`
@@ -10834,7 +10840,8 @@ export default function StockControl() {
                         ? `Used ${u.qty}mm`
                         : `${u.direction === "use" ? "Used" : "Added"} ${u.qty}`}
                     </span>
-                  </div>
+                  }
+                >
                   <div className="stk-meta-row" style={S.rowMeta}>
                     <span>By {u.by}</span>
                     <span>{new Date(u.timestamp).toLocaleString()}</span>
@@ -10842,10 +10849,10 @@ export default function StockControl() {
                     {u.customer && <span>Customer: {u.customer}</span>}
                   </div>
                   {u.note && <div style={S.itemComment}>{u.note}</div>}
-                </div>
+                </RecordRow>
               ))}
             {usageLog.length === 0 && <div style={S.empty}>Nothing here yet.</div>}
-          </div>
+          </Section>
             </>
           )}
         </div>
@@ -10904,19 +10911,22 @@ export default function StockControl() {
           {drawingSearchLoading && <div style={{ ...S.empty, marginTop: 10 }}>Loading…</div>}
 
           {!drawingSearchLoading && drawingSearchResults !== null && (
-            <div style={{ ...S.gradeItems, marginTop: 12 }}>
+            <Section title="Drawings" count={drawingSearchResults.length}>
               {drawingSearchResults.length === 0 && <div style={S.empty}>Nothing here yet — upload one to get started.</div>}
               {drawingSearchResults.map(([partNumber, revisions]) => {
                 const current = revisions.find((r) => r.status === "current") || revisions[0];
                 const history = revisions.filter((r) => r.id !== current.id);
                 return (
-                  <div key={partNumber} style={S.reqCard}>
-                    <div style={S.reqCardTop}>
-                      <span style={S.itemName}>{partNumber}</span>
+                  <RecordRow
+                    key={partNumber}
+                    title={partNumber}
+                    summary={current.description || current.customer || ""}
+                    right={
                       <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>
                         {current.customer_revision ? `Rev ${current.customer_revision}` : `Rev ${current.internal_revision}`}
                       </span>
-                    </div>
+                    }
+                  >
                     <div className="stk-meta-row" style={S.rowMeta}>
                       {current.customer && <span>Customer: {current.customer}</span>}
                       {current.description && <span>{current.description}</span>}
@@ -10966,10 +10976,10 @@ export default function StockControl() {
                         ))}
                       </div>
                     )}
-                  </div>
+                  </RecordRow>
                 );
               })}
-            </div>
+            </Section>
           )}
         </div>
       ) : (
