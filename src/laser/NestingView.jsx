@@ -161,7 +161,7 @@ export default function NestingView({
         style={S.input}
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Find a job, SigmaNest number, customer or program…"
+        placeholder="Search job, SigmaNest number, customer, or program…"
       />
 
       {canManage && !building && (

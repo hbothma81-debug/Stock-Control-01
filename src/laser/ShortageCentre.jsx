@@ -41,7 +41,7 @@ export default function ShortageCentre({ shortages, summarise, onGoToNesting }) 
         style={S.input}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search by job number, customer or SigmaNest number…"
+        placeholder="Search job number, customer, or SigmaNest number…"
       />
 
       <Section title="Open shortages" count={open.length}>

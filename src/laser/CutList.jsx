@@ -61,7 +61,7 @@ export default function CutList({ programs, thicknesses, canCut, onToggleCut, bu
         style={S.input}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Find a program, job number or SigmaNest number — to pull a rush job out of the queue…"
+        placeholder="Search program, job number, or SigmaNest number…"
       />
 
       {toCut.length === 0 ? (

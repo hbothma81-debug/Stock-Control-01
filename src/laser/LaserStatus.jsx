@@ -64,7 +64,7 @@ export default function LaserStatus({
         style={S.input}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Find a job, customer, program or packer…"
+        placeholder="Search job, customer, program, or packer…"
       />
 
       {filtered.length === 0 ? (

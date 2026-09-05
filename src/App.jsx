@@ -9086,7 +9086,7 @@ export default function StockControl() {
                 style={{ ...S.input, flex: 2, minWidth: 160 }}
                 value={requisitionsSearchQuery}
                 onChange={(e) => setRequisitionsSearchQuery(e.target.value)}
-                placeholder="Search by item, supplier, or who requested it…"
+                placeholder="Search item, supplier, or who requested it…"
               />
               <select
                 style={{ ...S.input, flex: 1, minWidth: 130 }}
@@ -9267,7 +9267,7 @@ export default function StockControl() {
                 style={{ ...S.input, flex: 2, minWidth: 160 }}
                 value={poSearchQuery}
                 onChange={(e) => setPoSearchQuery(e.target.value)}
-                placeholder="Search by PO number, supplier, or reference…"
+                placeholder="Search PO number, supplier, or reference…"
               />
               <select style={{ ...S.input, flex: 1, minWidth: 130 }} value={poSupplierFilter} onChange={(e) => setPoSupplierFilter(e.target.value)}>
                 <option value="">All suppliers</option>
@@ -9278,7 +9278,7 @@ export default function StockControl() {
             </div>
           )}
 
-          {purchaseOrders.length === 0 && <div style={S.empty}>No Purchase Orders yet.</div>}
+          {purchaseOrders.length === 0 && <div style={S.empty}>Nothing here yet.</div>}
           {(() => {
             const pq = poSearchQuery.trim().toLowerCase();
             const matchesSearch = (po) =>
@@ -9365,7 +9365,7 @@ export default function StockControl() {
                       {list.sort((a, b) => new Date(b.dateCreated) - new Date(a.dateCreated)).map(renderPoCard)}
                     </Section>
                   ))}
-                  {outstanding.length === 0 && purchaseOrders.length > 0 && <div style={S.empty}>Nothing matches.</div>}
+                  {outstanding.length === 0 && purchaseOrders.length > 0 && <div style={S.empty}>Nothing matches that.</div>}
                 </div>
 
                 <Section
@@ -9379,7 +9379,7 @@ export default function StockControl() {
                     .sort((a, b) => new Date(b.receivedDate) - new Date(a.receivedDate))
                     .map(renderPoCard)}
                   {purchaseOrders.filter((po) => po.status === "received").filter(matchesSearch).length === 0 && (
-                    <div style={S.empty}>Nothing received matches.</div>
+                    <div style={S.empty}>Nothing matches that.</div>
                   )}
                 </Section>
               </>
@@ -9394,7 +9394,7 @@ export default function StockControl() {
               style={{ ...S.input, marginTop: 10 }}
               value={receivingSearchQuery}
               onChange={(e) => setReceivingSearchQuery(e.target.value)}
-              placeholder="Search by PO number or supplier…"
+              placeholder="Search PO number or supplier…"
             />
           )}
           {purchaseOrders.filter((po) => po.status !== "received").length === 0 && (
@@ -9415,7 +9415,7 @@ export default function StockControl() {
                     (po.supplierName || "").toLowerCase().includes(rq)
                 )
                 .sort((a, b) => new Date(b.dateCreated) - new Date(a.dateCreated));
-              if (list.length === 0 && rq) return <div style={S.empty}>Nothing matches.</div>;
+              if (list.length === 0 && rq) return <div style={S.empty}>Nothing matches that.</div>;
               return list.map((po) => {
                 const isOpen = expandedReceivingId === po.id;
                 return (
@@ -9565,7 +9565,7 @@ export default function StockControl() {
             </button>
           )}
           {jobsLoading && <div style={{ ...S.empty, marginTop: 10 }}>Loading…</div>}
-          {!jobsLoading && jobsList?.length === 0 && <div style={S.empty}>No jobs yet.</div>}
+          {!jobsLoading && jobsList?.length === 0 && <div style={S.empty}>Nothing here yet.</div>}
 
           {jobsList?.length > 0 &&
             (() => {
@@ -9601,7 +9601,7 @@ export default function StockControl() {
                       style={{ ...S.input, flex: 2, minWidth: 160 }}
                       value={jobsSearchQuery}
                       onChange={(e) => setJobsSearchQuery(e.target.value)}
-                      placeholder="Search job #, customer, sales rep…"
+                      placeholder="Search job number, customer, or sales rep…"
                     />
                     <select style={{ ...S.input, flex: 1, minWidth: 130 }} value={jobsCustomerFilter} onChange={(e) => setJobsCustomerFilter(e.target.value)}>
                       <option value="">All customers</option>
@@ -9624,7 +9624,7 @@ export default function StockControl() {
                     <div style={S.managerListFullPage}>
                       {jobsList.filter((j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j)).map(renderJobRow)}
                       {jobsList.filter((j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j)).length === 0 && (
-                        <div style={S.empty}>Nothing active matches.</div>
+                        <div style={S.empty}>Nothing matches that.</div>
                       )}
                     </div>
                   </Section>
@@ -9637,7 +9637,7 @@ export default function StockControl() {
                     <div style={S.managerListFullPage}>
                       {jobsList.filter((j) => j.status === "invoiced" && matchesFilters(j)).map(renderJobRow)}
                       {jobsList.filter((j) => j.status === "invoiced" && matchesFilters(j)).length === 0 && (
-                        <div style={S.empty}>Nothing completed matches.</div>
+                        <div style={S.empty}>Nothing matches that.</div>
                       )}
                     </div>
                   </Section>
@@ -9813,7 +9813,7 @@ export default function StockControl() {
               return (
                 <>
                   {!productionLoading && visibleDepts.length === 0 && (
-                    <div style={S.empty}>{q ? "Nothing matches that search." : "Nothing outstanding right now."}</div>
+                    <div style={S.empty}>{q ? "Nothing matches that." : "Nothing outstanding right now."}</div>
                   )}
                   <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 6 }}>
                     {/* Laser Status sits first, where it falls in the flow:
@@ -10524,7 +10524,7 @@ export default function StockControl() {
               });
             return (
               <div style={{ ...S.gradeItems, marginTop: 10 }}>
-                {groups.length === 0 && <div style={S.empty}>No delivery notes match that search.</div>}
+                {groups.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
                 {groups.map(({ group, first, job }) => (
                   <div key={first.delivery_note_number} style={S.reqCard}>
                     <div style={S.reqCardTop}>
@@ -10589,7 +10589,7 @@ export default function StockControl() {
               .sort((a, b) => new Date(b.r.submitted_at) - new Date(a.r.submitted_at));
             return (
               <div style={{ ...S.gradeItems, marginTop: 10 }}>
-                {rows.length === 0 && <div style={S.empty}>No invoice requests match that search.</div>}
+                {rows.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
                 {rows.map(({ r, job }) => (
                   <div key={r.id} style={S.reqCard}>
                     <div style={S.reqCardTop}>
@@ -10641,7 +10641,7 @@ export default function StockControl() {
                 .filter(({ job }) => !processSheetsSearchQuery.trim() || (job?.job_number || "").toLowerCase().includes(processSheetsSearchQuery.trim().toLowerCase()));
               return (
                 <div style={{ ...S.gradeItems, marginTop: 10 }}>
-                  {rows.length === 0 && <div style={S.empty}>No process sheets match that search.</div>}
+                  {rows.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
                   {rows.map(({ d, job }) => (
                     <div key={d.id} style={S.reqCard}>
                       <div style={S.reqCardTop}>
@@ -10685,7 +10685,7 @@ export default function StockControl() {
                 .filter((d) => !poReportsDateTo || new Date(d.generated_at) <= new Date(poReportsDateTo + "T23:59:59"));
               return (
                 <div style={{ ...S.gradeItems, marginTop: 10 }}>
-                  {rows.length === 0 && <div style={S.empty}>No PO reports match that range.</div>}
+                  {rows.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
                   {rows.map((d) => (
                     <div key={d.id} style={S.reqCard}>
                       <div style={S.reqCardTop}>
@@ -10744,7 +10744,7 @@ export default function StockControl() {
                 const total = matches.reduce((sum, u) => sum + (u.lineCost || 0), 0);
                 return (
                   <div style={{ marginTop: 12 }}>
-                    {matches.length === 0 && <div style={S.empty}>No material logged against that job or customer yet.</div>}
+                    {matches.length === 0 && <div style={S.empty}>Nothing logged against that job or customer yet.</div>}
                     <div style={S.gradeItems}>
                       {matches.map((u) => (
                         <div key={u.id} style={S.reqCard}>
@@ -10844,7 +10844,7 @@ export default function StockControl() {
                   {u.note && <div style={S.itemComment}>{u.note}</div>}
                 </div>
               ))}
-            {usageLog.length === 0 && <div style={S.empty}>No usage recorded yet.</div>}
+            {usageLog.length === 0 && <div style={S.empty}>Nothing here yet.</div>}
           </div>
             </>
           )}
@@ -10905,7 +10905,7 @@ export default function StockControl() {
 
           {!drawingSearchLoading && drawingSearchResults !== null && (
             <div style={{ ...S.gradeItems, marginTop: 12 }}>
-              {drawingSearchResults.length === 0 && <div style={S.empty}>No drawings yet — upload some to get started.</div>}
+              {drawingSearchResults.length === 0 && <div style={S.empty}>Nothing here yet — upload one to get started.</div>}
               {drawingSearchResults.map(([partNumber, revisions]) => {
                 const current = revisions.find((r) => r.status === "current") || revisions[0];
                 const history = revisions.filter((r) => r.id !== current.id);
@@ -11284,7 +11284,7 @@ export default function StockControl() {
                     </button>
                   ))}
                 {items.filter((it) => it.mainCat === "assets" && it.status !== "removed").length === 0 && (
-                  <div style={S.empty}>Nothing here yet — add an item to get started.</div>
+                  <div style={S.empty}>Nothing here yet — add one above.</div>
                 )}
               </div>
 
@@ -11315,7 +11315,7 @@ export default function StockControl() {
                         </div>
                       ))}
                     {items.filter((it) => it.mainCat === "assets" && it.status === "removed").length === 0 && (
-                      <div style={S.empty}>Nothing removed yet.</div>
+                      <div style={S.empty}>Nothing here yet.</div>
                     )}
                   </div>
               </Section>
@@ -11437,7 +11437,7 @@ export default function StockControl() {
           <>
         {grouped.length === 0 && (
           <div style={S.empty}>
-            {query ? "Nothing matches that search." : "Nothing here yet — add an item to get started."}
+            {query ? "Nothing matches that." : "Nothing here yet — add one above."}
           </div>
         )}
         {!selectedGradeGroup ? (
@@ -11475,7 +11475,7 @@ export default function StockControl() {
               </button>
               <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>{selectedGradeGroup}</div>
               <div style={S.managerListFullPage}>
-                {list.length === 0 && <div style={S.empty}>Nothing here.</div>}
+                {list.length === 0 && <div style={S.empty}>Nothing here yet.</div>}
                 {list.map((it) => {
                   const low = isLowStock(it);
                   const linkedReq = tab !== "custom" ? activeRequisitionForItem(it.id) : null;
@@ -12925,7 +12925,7 @@ export default function StockControl() {
                     <div style={S.empty}>
                       {(items || []).filter((it) => it.mainCat === "custom").length === 0
                         ? "Nothing here yet — import a file or add one above."
-                        : "Nothing matches that search or customer filter."}
+                        : "Nothing matches that."}
                     </div>
                   )}
                 </div>
@@ -12991,7 +12991,7 @@ export default function StockControl() {
                     style={{ ...S.input, flex: 2 }}
                     value={storesCatalogQuery}
                     onChange={(e) => setStoresCatalogQuery(e.target.value)}
-                    placeholder="Search the catalog…"
+                    placeholder="Search catalog item…"
                   />
                   <select
                     style={{ ...S.input, flex: 1 }}
@@ -13124,7 +13124,7 @@ export default function StockControl() {
                         <span style={S.gradeCount}>{(master.customerContacts?.[cust] || []).length}</span>
                       </button>
                     ))}
-                    {master.customers.length === 0 && <div style={S.empty}>No customers yet — add one above.</div>}
+                    {master.customers.length === 0 && <div style={S.empty}>Nothing here yet — add one above.</div>}
                   </div>
                 </>
               ) : (
@@ -13241,7 +13241,7 @@ export default function StockControl() {
                         <span style={S.gradeCount}>{(s.contacts || []).length}</span>
                       </button>
                     ))}
-                    {master.suppliers.length === 0 && <div style={S.empty}>No suppliers yet — add one above.</div>}
+                    {master.suppliers.length === 0 && <div style={S.empty}>Nothing here yet — add one above.</div>}
                   </div>
                 </>
               ) : (
@@ -13809,7 +13809,7 @@ export default function StockControl() {
 
             <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 8 }}>
               {assetHistoryEntries === null && <div style={S.empty}>Loading history…</div>}
-              {assetHistoryEntries?.length === 0 && <div style={S.empty}>No history yet — add a note or log a reading above.</div>}
+              {assetHistoryEntries?.length === 0 && <div style={S.empty}>Nothing here yet — add a note or log a reading above.</div>}
               {assetHistoryEntries?.map((entry) => (
                 <div key={entry.id} style={S.reqCard}>
                   <div style={S.reqCardTop}>
@@ -15027,7 +15027,7 @@ export default function StockControl() {
                     </div>
                   ))}
                   {jobDetail.documents.filter((doc) => !doc.is_quote_file || isAdmin || profile?.isSalesPerson).length === 0 && (
-                    <div style={S.empty}>No documents yet.</div>
+                    <div style={S.empty}>Nothing here yet.</div>
                   )}
                 </div>
               </div>
@@ -16593,7 +16593,7 @@ export default function StockControl() {
               style={{ ...S.input, marginTop: 10 }}
               value={requisitionPickerQuery}
               onChange={(e) => setRequisitionPickerQuery(e.target.value)}
-              placeholder="Search by name, grade, or customer…"
+              placeholder="Search name, grade, or customer…"
             />
             <div style={{ ...S.managerList, marginTop: 10, maxHeight: "60vh", overflowY: "auto" }}>
               {(() => {
@@ -16611,7 +16611,7 @@ export default function StockControl() {
                   .slice(0, 50);
                 return (
                   <>
-                    {matches.length === 0 && <div style={S.empty}>No matching items.</div>}
+                    {matches.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
                     {matches.map((it) => (
                       <button
                         key={it.id}
