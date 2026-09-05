@@ -892,7 +892,6 @@ export default function StockControl() {
   // came back. { allocation, item, qty, offcut }
   const [useAllocationModal, setUseAllocationModal] = useState(null);
   const [assetRemoveModal, setAssetRemoveModal] = useState(null); // { item, reason, date }
-  const [showAssetArchive, setShowAssetArchive] = useState(false);
   const [poBuilder, setPoBuilder] = useState(null); // { supplierId, lineItems: [...], linkedRequisitionIds: [...], notes }
   const [poSearchQuery, setPoSearchQuery] = useState("");
   const [poSupplierFilter, setPoSupplierFilter] = useState("");
@@ -973,9 +972,6 @@ export default function StockControl() {
   // Which program is mid-save, so its button can say so and cannot be
   // pressed twice -- marking a program cut also rewrites job stages.
   const [programBusyId, setProgramBusyId] = useState(null);
-  const [invoicedSectionOpen, setInvoicedSectionOpen] = useState(false);
-  const [notificationsViewedOpen, setNotificationsViewedOpen] = useState(false);
-  const [jobsCompletedSectionOpen, setJobsCompletedSectionOpen] = useState(false);
   const [jobsSearchQuery, setJobsSearchQuery] = useState("");
   const [jobsCustomerFilter, setJobsCustomerFilter] = useState("");
   const [jobsSalesRepFilter, setJobsSalesRepFilter] = useState("");
@@ -9621,32 +9617,30 @@ export default function StockControl() {
                     </select>
                   </div>
 
-                  <label style={{ ...S.label, marginTop: 12, display: "block" }}>Active</label>
-                  <div style={{ ...S.managerListFullPage, marginTop: 6 }}>
-                    {jobsList.filter((j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j)).map(renderJobRow)}
-                    {jobsList.filter((j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j)).length === 0 && (
-                      <div style={S.empty}>Nothing active matches.</div>
-                    )}
-                  </div>
-
-                  <button
-                    type="button"
-                    className="stk-btn"
-                    style={{ ...S.productionPill, marginTop: 16 }}
-                    onClick={() => setJobsCompletedSectionOpen((o) => !o)}
+                  <Section
+                    title="Active"
+                    count={jobsList.filter((j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j)).length}
                   >
-                    <span>Completed</span>
-                    <span style={S.gradeCount}>{jobsList.filter((j) => j.status === "invoiced" && matchesFilters(j)).length}</span>
-                    <ChevronDown size={14} style={{ transform: jobsCompletedSectionOpen ? "rotate(180deg)" : "none" }} />
-                  </button>
-                  {jobsCompletedSectionOpen && (
-                    <div style={{ ...S.managerListFullPage, marginTop: 6 }}>
+                    <div style={S.managerListFullPage}>
+                      {jobsList.filter((j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j)).map(renderJobRow)}
+                      {jobsList.filter((j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j)).length === 0 && (
+                        <div style={S.empty}>Nothing active matches.</div>
+                      )}
+                    </div>
+                  </Section>
+
+                  <Section
+                    title="Completed"
+                    defaultOpen={false}
+                    count={jobsList.filter((j) => j.status === "invoiced" && matchesFilters(j)).length}
+                  >
+                    <div style={S.managerListFullPage}>
                       {jobsList.filter((j) => j.status === "invoiced" && matchesFilters(j)).map(renderJobRow)}
                       {jobsList.filter((j) => j.status === "invoiced" && matchesFilters(j)).length === 0 && (
                         <div style={S.empty}>Nothing completed matches.</div>
                       )}
                     </div>
-                  )}
+                  </Section>
                 </>
               );
             })()}
@@ -10374,7 +10368,7 @@ export default function StockControl() {
                 {notificationsList?.length > 0 && unread.length === 0 && (
                   <div style={S.empty}>Nothing new — everything's in "Already viewed" below.</div>
                 )}
-                <div style={{ ...S.gradeItems, marginTop: 10 }}>
+                <Section title="New" count={unread.length}>
                   {unread.map((n) => (
                     <div key={n.id} style={{ ...S.reqCard, borderLeft: `3px solid ${C.accentRaw}` }} onClick={() => markNotificationRead(n.id)}>
                       <div className="stk-meta-row" style={S.rowMeta}>
@@ -10384,21 +10378,10 @@ export default function StockControl() {
                       <div style={{ ...S.itemName, fontSize: 14.5, marginTop: 2 }}>{n.message}</div>
                     </div>
                   ))}
-                </div>
+                </Section>
                 {viewed.length > 0 && (
                   <>
-                    <button
-                      type="button"
-                      className="stk-btn"
-                      style={{ ...S.productionPill, marginTop: 16 }}
-                      onClick={() => setNotificationsViewedOpen((o) => !o)}
-                    >
-                      <span>Already viewed</span>
-                      <span style={S.gradeCount}>{viewed.length}</span>
-                      <ChevronDown size={14} style={{ transform: notificationsViewedOpen ? "rotate(180deg)" : "none" }} />
-                    </button>
-                    {notificationsViewedOpen && (
-                      <div style={{ ...S.gradeItems, marginTop: 6 }}>
+                      <Section title="Already viewed" defaultOpen={false} count={viewed.length}>
                         {viewed.map((n) => (
                           <div key={n.id} style={S.reqCard}>
                             <div className="stk-meta-row" style={S.rowMeta}>
@@ -10408,8 +10391,7 @@ export default function StockControl() {
                             <div style={{ ...S.itemName, fontSize: 14.5, marginTop: 2 }}>{n.message}</div>
                           </div>
                         ))}
-                      </div>
-                    )}
+                      </Section>
                   </>
                 )}
               </>
@@ -10421,11 +10403,14 @@ export default function StockControl() {
           <div style={S.roleHint}>
             Jobs marked Complete show up here, ready to invoice — create the real invoice in Sage, then mark it here to keep a record.
           </div>
-          <label style={S.label}>Outstanding</label>
-          {(jobsList || []).filter((j) => j.status !== "invoiced" && j.status !== "cancelled" && (j.status === "complete" || jobInvoiceRequests.some((r) => r.job_id === j.id))).length === 0 && (
-            <div style={S.empty}>Nothing waiting to be invoiced.</div>
-          )}
-          <div style={{ ...S.gradeItems, marginTop: 6 }}>
+          <Section
+            title="Outstanding"
+            count={(jobsList || []).filter((j) => j.status !== "invoiced" && j.status !== "cancelled" && (j.status === "complete" || jobInvoiceRequests.some((r) => r.job_id === j.id))).length}
+          >
+            {(jobsList || []).filter((j) => j.status !== "invoiced" && j.status !== "cancelled" && (j.status === "complete" || jobInvoiceRequests.some((r) => r.job_id === j.id))).length === 0 && (
+              <div style={S.empty}>Nothing waiting to be invoiced.</div>
+            )}
+            <div style={S.gradeItems}>
             {(jobsList || [])
               .filter((j) => j.status !== "invoiced" && j.status !== "cancelled" && (j.status === "complete" || jobInvoiceRequests.some((r) => r.job_id === j.id)))
               .map((job) => (
@@ -10458,20 +10443,15 @@ export default function StockControl() {
                   </div>
                 </div>
               ))}
-          </div>
+            </div>
+          </Section>
 
-          <button
-            type="button"
-            className="stk-btn"
-            style={{ ...S.productionPill, marginTop: 16 }}
-            onClick={() => setInvoicedSectionOpen((o) => !o)}
+          <Section
+            title="Invoiced"
+            defaultOpen={false}
+            count={(jobsList || []).filter((j) => j.status === "invoiced").length}
           >
-            <span>Invoiced</span>
-            <span style={S.gradeCount}>{(jobsList || []).filter((j) => j.status === "invoiced").length}</span>
-            <ChevronDown size={14} style={{ transform: invoicedSectionOpen ? "rotate(180deg)" : "none" }} />
-          </button>
-          {invoicedSectionOpen && (
-            <div style={{ ...S.gradeItems, marginTop: 6 }}>
+            <div style={S.gradeItems}>
               {(jobsList || [])
                 .filter((j) => j.status === "invoiced")
                 .map((job) => (
@@ -10499,7 +10479,7 @@ export default function StockControl() {
                   </div>
                 ))}
             </div>
-          )}
+          </Section>
         </div>
       ) : tab === "deliveryNotes" ? (
         <div style={S.list}>
@@ -11308,13 +11288,11 @@ export default function StockControl() {
                 )}
               </div>
 
-              <div style={{ ...S.gradeBlock, marginTop: 14 }}>
-                <button className="stk-grade" style={S.gradeHeader} onClick={() => setShowAssetArchive((v) => !v)}>
-                  <ChevronDown size={15} style={{ transform: showAssetArchive ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
-                  <span style={S.gradeTitle}>Removed / Archive</span>
-                  <span style={S.gradeCount}>{items.filter((it) => it.mainCat === "assets" && it.status === "removed").length}</span>
-                </button>
-                {showAssetArchive && (
+              <Section
+                title="Removed / Archive"
+                defaultOpen={false}
+                count={items.filter((it) => it.mainCat === "assets" && it.status === "removed").length}
+              >
                   <div style={S.gradeItems}>
                     {items
                       .filter((it) => it.mainCat === "assets" && it.status === "removed")
@@ -11340,8 +11318,7 @@ export default function StockControl() {
                       <div style={S.empty}>Nothing removed yet.</div>
                     )}
                   </div>
-                )}
-              </div>
+              </Section>
             </>
           ) : !assetDetailOpen ? (
             // Level 2: this manufacturer's assets, compact cards.
