@@ -1191,6 +1191,9 @@ export default function StockControl() {
   const [previewItem, setPreviewItem] = useState(null);
   const [previewData, setPreviewData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  // A document that could not be filed still gets shown, which on its own
+  // looks exactly like one that was. This is what lets the screen say so.
+  const [previewNotFiled, setPreviewNotFiled] = useState(false);
   const [allowDuplicate, setAllowDuplicate] = useState(false);
   const [priceUnitMode, setPriceUnitMode] = useState("perUnit"); // "perUnit" (sheet/metre) or "perKg"
 
@@ -4964,6 +4967,7 @@ export default function StockControl() {
       setPreviewLoading(true);
       setPreviewItem({ attachmentType: "pdf", attachmentName: fileName });
       setPreviewData(null);
+      setPreviewNotFiled(false);
     }
     try {
       const blob = doc.output("blob");
@@ -4990,8 +4994,12 @@ export default function StockControl() {
       if (showPreview) {
         // Storage failed — still show something rather than nothing, even
         // though this fallback can't be reopened later the way a real
-        // stored copy can.
+        // stored copy can. Which is exactly why it now says so: shown and
+        // filed look identical on screen, so somebody would carry on
+        // believing there was a copy, and only find out weeks later that
+        // the record is not there.
         setPreviewData(doc.output("bloburl"));
+        setPreviewNotFiled(true);
         setPreviewLoading(false);
       } else {
         alert("Couldn't save that document — check your connection and try again.");
@@ -13760,6 +13768,22 @@ export default function StockControl() {
             </div>
             {previewLoading && <div style={S.empty}>Loading…</div>}
             {!previewLoading && !previewData && <div style={S.empty}>Couldn't load this attachment.</div>}
+            {previewNotFiled && (
+              <div
+                style={{
+                  ...S.summaryBanner,
+                  color: C.danger,
+                  background: C.dangerTint,
+                  border: `1px solid ${C.danger}`,
+                  textAlign: "left",
+                  marginTop: 8,
+                }}
+              >
+                <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} /> This was made but not filed — it
+                will not be in your records afterwards. Print or download it now if you need it kept, then try
+                again when the connection is better.
+              </div>
+            )}
             {!previewLoading && previewData && previewItem.attachmentType === "image" && (
               <img src={previewData} alt={previewItem.attachmentName || "Attachment"} style={S.previewImage} />
             )}
