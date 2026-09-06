@@ -1260,10 +1260,12 @@ export default function StockControl() {
       }
     } catch (err) {
       console.error("Failed to load items:", err);
-      if (isInitialLoad) {
-        setLoadError((prev) => ({ ...prev, items: true }));
-        hadError = true;
-      }
+      // Recorded whether or not this is the first load. A refresh that
+      // fails is the case that matters most -- somebody in the yard on
+      // bad signal pressing Refresh -- and that used to record nothing,
+      // so the screen just kept showing stale data with no hint of it.
+      setLoadError((prev) => ({ ...prev, items: true }));
+      if (isInitialLoad) hadError = true;
     }
     try {
       const { master: loadedMaster } = await loadMasterFromTables();
@@ -1274,10 +1276,12 @@ export default function StockControl() {
       setLoadError((prev) => ({ ...prev, master: false }));
     } catch (err) {
       console.error("Failed to load master data:", err);
-      if (isInitialLoad) {
-        setLoadError((prev) => ({ ...prev, master: true }));
-        hadError = true;
-      }
+      // Recorded whether or not this is the first load. A refresh that
+      // fails is the case that matters most -- somebody in the yard on
+      // bad signal pressing Refresh -- and that used to record nothing,
+      // so the screen just kept showing stale data with no hint of it.
+      setLoadError((prev) => ({ ...prev, master: true }));
+      if (isInitialLoad) hadError = true;
     }
     try {
       const reqRows = await fetchAllRows("requisitions");
@@ -1287,10 +1291,12 @@ export default function StockControl() {
       setLoadError((prev) => ({ ...prev, requisitions: false }));
     } catch (err) {
       console.error("Failed to load requisitions:", err);
-      if (isInitialLoad) {
-        setLoadError((prev) => ({ ...prev, requisitions: true }));
-        hadError = true;
-      }
+      // Recorded whether or not this is the first load. A refresh that
+      // fails is the case that matters most -- somebody in the yard on
+      // bad signal pressing Refresh -- and that used to record nothing,
+      // so the screen just kept showing stale data with no hint of it.
+      setLoadError((prev) => ({ ...prev, requisitions: true }));
+      if (isInitialLoad) hadError = true;
     }
     try {
       const poRows = await fetchAllRows("purchase_orders");
@@ -1300,10 +1306,12 @@ export default function StockControl() {
       setLoadError((prev) => ({ ...prev, purchaseOrders: false }));
     } catch (err) {
       console.error("Failed to load purchase orders:", err);
-      if (isInitialLoad) {
-        setLoadError((prev) => ({ ...prev, purchaseOrders: true }));
-        hadError = true;
-      }
+      // Recorded whether or not this is the first load. A refresh that
+      // fails is the case that matters most -- somebody in the yard on
+      // bad signal pressing Refresh -- and that used to record nothing,
+      // so the screen just kept showing stale data with no hint of it.
+      setLoadError((prev) => ({ ...prev, purchaseOrders: true }));
+      if (isInitialLoad) hadError = true;
     }
     try {
       const usageRows = await fetchAllRows("usage_log");
@@ -1313,10 +1321,12 @@ export default function StockControl() {
       setLoadError((prev) => ({ ...prev, usageLog: false }));
     } catch (err) {
       console.error("Failed to load usage log:", err);
-      if (isInitialLoad) {
-        setLoadError((prev) => ({ ...prev, usageLog: true }));
-        hadError = true;
-      }
+      // Recorded whether or not this is the first load. A refresh that
+      // fails is the case that matters most -- somebody in the yard on
+      // bad signal pressing Refresh -- and that used to record nothing,
+      // so the screen just kept showing stale data with no hint of it.
+      setLoadError((prev) => ({ ...prev, usageLog: true }));
+      if (isInitialLoad) hadError = true;
     }
     setLastRefreshedAt(new Date());
     return hadError;
@@ -9011,6 +9021,57 @@ export default function StockControl() {
         </div>
       ) : (
         <>
+          {/* The app already recorded when one of the core loads failed,
+              but nothing ever showed it. So a dropped connection looked
+              exactly like an empty list -- somebody reads "no stock" and
+              acts on it. Now it says so, names what is missing, and
+              offers the retry rather than making anyone hunt for it. */}
+          {(() => {
+            const failedNames = {
+              items: "the stock list",
+              master: "your lists and settings",
+              requisitions: "requisitions",
+              purchaseOrders: "purchase orders",
+              usageLog: "the usage log",
+            };
+            const failed = Object.keys(failedNames).filter((k) => loadError[k]);
+            if (failed.length === 0) return null;
+            const names = failed.map((k) => failedNames[k]);
+            const list =
+              names.length === 1
+                ? names[0]
+                : names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
+            return (
+              <div
+                style={{
+                  ...S.summaryBanner,
+                  color: C.danger,
+                  background: C.dangerTint,
+                  border: `1px solid ${C.danger}`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span>
+                  <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} /> Couldn't load {list}. What you
+                  see may be out of date or missing — check your signal before acting on it.
+                </span>
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={{ ...S.reqActionBtn, background: C.danger }}
+                  onClick={manualRefresh}
+                  disabled={isRefreshing}
+                >
+                  <RefreshCw size={13} /> {isRefreshing ? "Trying…" : "Try again"}
+                </button>
+              </div>
+            );
+          })()}
+
           <div style={S.mainTabs} ref={mainTabsRef}>
             {(() => {
               const rendered = [];
