@@ -11166,10 +11166,12 @@ export default function StockControl() {
             Filters
           </button>
         )}
-        <button className="stk-btn" style={S.roleChip} onClick={() => exportDivision(tab)} title="Export this list to Excel">
-          <Download size={13} strokeWidth={2.5} />
-          Export
-        </button>
+        {isAdmin && (
+          <button className="stk-btn" style={S.roleChip} onClick={() => exportDivision(tab)} title="Export this list to Excel">
+            <Download size={13} strokeWidth={2.5} />
+            Export
+          </button>
+        )}
         {canAdd ? (
           <button className="stk-btn" style={S.addBtn} onClick={openAdd}>
             <PackagePlus size={16} strokeWidth={2.5} />
@@ -15926,10 +15928,12 @@ export default function StockControl() {
                 />
                 Import Excel
               </label>
-              <button type="button" className="stk-btn" style={S.roleChip} onClick={exportStockCodes}>
-                <Download size={13} />
-                Export
-              </button>
+              {isAdmin && (
+                <button type="button" className="stk-btn" style={S.roleChip} onClick={exportStockCodes}>
+                  <Download size={13} />
+                  Export
+                </button>
+              )}
             </div>
             {importFileLabel && <div style={{ fontFamily: F.mono, fontSize: 12.5, color: C.muted, marginTop: 4 }}>{importFileLabel}</div>}
             <label style={{ ...S.checkRow, marginTop: 8 }}>
