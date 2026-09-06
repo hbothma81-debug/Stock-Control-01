@@ -1,7 +1,4 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import * as XLSX from "xlsx";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import { supabase } from "./lib/supabaseClient.js";
 import {
   Plus, Minus, Search, Trash2, PackagePlus, AlertTriangle, X,
@@ -10,6 +7,30 @@ import {
   Wrench, Users, Eye, EyeOff, ShoppingCart, ClipboardList, Check, Package, Upload, RefreshCw,
 } from "lucide-react";
 import { F, C, S, THEME_CSS } from "./theme.js";
+
+// The spreadsheet and PDF libraries are roughly half of everything this
+// app downloads, and most of the people using it never export a
+// spreadsheet or make a PDF in their lives. They used to arrive on every
+// visit regardless -- on a phone on yard signal, that is a real wait for
+// something most people never touch.
+//
+// Now they are fetched the first time somebody actually presses Export or
+// generates a document, and kept for the rest of that visit. The first
+// press costs a moment; every press after it is instant.
+let xlsxLib = null;
+async function getXLSX() {
+  if (!xlsxLib) xlsxLib = await import("xlsx");
+  return xlsxLib;
+}
+
+let pdfLib = null;
+async function getPdf() {
+  if (!pdfLib) {
+    const [pdf, table] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+    pdfLib = { jsPDF: pdf.default, autoTable: table.default };
+  }
+  return pdfLib;
+}
 import { TABS, NAV_TABS, TAB_GROUPS, LASER_MACHINE } from "./constants.js";
 import UserManagement from "./UserManagement.jsx";
 import CompanyDetails from "./manager/CompanyDetails.jsx";
@@ -2767,7 +2788,8 @@ export default function StockControl() {
   // misaligned data. A broken formula on one specific cell (not a layout
   // problem, just bad data on that one line) gets flagged for that item
   // alone rather than rejecting the whole file.
-  function parseQuoteExcelFile(file) {
+  async function parseQuoteExcelFile(file) {
+    const XLSX = await getXLSX();
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -4584,7 +4606,7 @@ export default function StockControl() {
     // Stored as a real document accounts can open when ready — never
     // downloaded automatically. Visible from both the job itself and
     // the Invoicing tab, since accounts works from there.
-    const doc = buildDraftInvoiceDoc(job, lines);
+    const doc = await buildDraftInvoiceDoc(job, lines);
     const totalAmount = lines.reduce((sum, li) => sum + li.qty * li.unitPrice, 0);
     const fileName = `Invoice-Request-${job.job_number}-${Date.now()}.pdf`;
     const path = `${job.id}/${fileName}`;
@@ -4985,6 +5007,7 @@ export default function StockControl() {
   // to still be there to open later, both from the job page generally and
   // specifically when checking external items back in.
   async function buildDeliveryNoteDoc(note, lineItems, job) {
+    const { jsPDF, autoTable } = await getPdf();
     const doc = new jsPDF();
     const company = master.companyDetails || {};
     const leftX = 14;
@@ -5123,7 +5146,8 @@ export default function StockControl() {
   // A clearly-labeled draft, not a real tax invoice — the real one is
   // still made in Sage, but this gives accounts something concrete to
   // work from rather than nothing at all.
-  function buildDraftInvoiceDoc(job, lines) {
+  async function buildDraftInvoiceDoc(job, lines) {
+    const { jsPDF, autoTable } = await getPdf();
     const doc = new jsPDF();
     const company = master.companyDetails || {};
     const leftX = 14;
@@ -5178,6 +5202,7 @@ export default function StockControl() {
   // was failing silently on it. A real signed URL works exactly like any
   // other attached document, including that button.
   async function printJobSheet(job, processes, quoteItems, deliveryNotes) {
+    const { jsPDF, autoTable } = await getPdf();
     const doc = new jsPDF();
     const company = master.companyDetails || {};
     const leftX = 14;
@@ -6894,7 +6919,8 @@ export default function StockControl() {
 
   // ---- Purchase Orders ----
 
-  function buildPoDoc(po) {
+  async function buildPoDoc(po) {
+    const { jsPDF, autoTable } = await getPdf();
     const doc = new jsPDF();
     const company = master.companyDetails || {};
     const supplier = master.suppliers.find((s) => s.id === po.supplierId);
@@ -7271,7 +7297,7 @@ export default function StockControl() {
   // "Download" action too: the viewer already has its own download link,
   // so a second, differently-behaving button next to it was redundant.
   async function viewPoPdf(po) {
-    const doc = buildPoDoc(po);
+    const doc = await buildPoDoc(po);
     await generateAndStoreDocument({
       doc,
       documentType: "purchase_order",
@@ -7285,6 +7311,7 @@ export default function StockControl() {
   // A summary-table report across many POs at once — for spend review, not
   // for sending to a supplier, so this is a plain table, not a letterhead.
   async function generatePoReport() {
+    const { jsPDF, autoTable } = await getPdf();
     const matches = purchaseOrders
       .filter((po) => !poReportSupplier || po.supplierId === poReportSupplier)
       .filter((po) => !poReportStatus || (poReportStatus === "received" ? po.status === "received" : po.status !== "received"))
@@ -7726,7 +7753,8 @@ export default function StockControl() {
     setPreviewData(null);
   }
 
-  function exportDivision(mainCat) {
+  async function exportDivision(mainCat) {
+    const XLSX = await getXLSX();
     const rows = items
       .filter((it) => it.mainCat === mainCat)
       .map((it) => {
@@ -7793,7 +7821,8 @@ export default function StockControl() {
     XLSX.writeFile(wb, `${label.replace(/\s+/g, "-")}-${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
-  function exportStockCodes() {
+  async function exportStockCodes() {
+    const XLSX = await getXLSX();
     const rows = items
       .filter((it) => it.mainCat === "custom")
       .map((it) => ({
@@ -8636,7 +8665,8 @@ export default function StockControl() {
     setScCatalogForm({ code: "", name: "", category: scCatalogForm.category, supplier: scCatalogForm.supplier, price: "" });
   }
 
-  function handleImportFile(e) {
+  async function handleImportFile(e) {
+    const XLSX = await getXLSX();
     const file = e.target.files[0];
     if (!file) return;
     if (!importCustomer) {
