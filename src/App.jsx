@@ -4978,9 +4978,17 @@ export default function StockControl() {
         logoH = maxH;
         logoW = (imgProps.width / imgProps.height) * logoH;
       }
-      doc.addImage(company.logo, "JPEG", x, y, logoW, logoH);
+      // The format was hardcoded to JPEG, so a PNG -- which most logos
+      // are, for the transparent background -- could silently fail to
+      // draw. Read it off the picture itself instead.
+      const kind = /^data:image\/([a-z+]+)/i.exec(company.logo || "")?.[1]?.toUpperCase();
+      doc.addImage(company.logo, kind === "JPG" ? "JPEG" : kind || "PNG", x, y, logoW, logoH);
       return { width: logoW, height: logoH };
-    } catch {
+    } catch (err) {
+      // Still never worth failing the whole document over -- but silence
+      // here is why a missing logo looks like a mystery rather than a
+      // fixable problem.
+      console.error("The company logo could not be drawn on this document:", err);
       return { width: 0, height: 0 };
     }
   }
@@ -7092,11 +7100,13 @@ export default function StockControl() {
     const vatRate = po.vatRate != null ? po.vatRate : 15;
     autoTable(doc, {
       startY: y,
-      head: [["Description", "Qty", "Excl. Price", "VAT %", "Excl. Total", "Incl. Total"]],
-      body: po.lineItems.map((li) => {
+      head: [["#", "Part No", "Description", "Qty", "Excl. Price", "VAT %", "Excl. Total", "Incl. Total"]],
+      body: po.lineItems.map((li, i) => {
         const exclTotal = Number(li.qty) * Number(li.unitPrice);
         const inclTotal = exclTotal * (1 + vatRate / 100);
         return [
+          String(i + 1),
+          li.partNumber || "",
           li.description,
           String(li.qty),
           `R ${Number(li.unitPrice).toFixed(2)}`,
@@ -7107,6 +7117,20 @@ export default function StockControl() {
       }),
       theme: "grid",
       headStyles: { fillColor: [27, 29, 31] },
+      // Eight columns on A4 -- the description takes whatever is left so
+      // the numbers never wrap, which is what makes a priced order hard
+      // to read.
+      styles: { fontSize: 8, cellPadding: 1.5 },
+      columnStyles: {
+        0: { cellWidth: 8, halign: "right" },
+        1: { cellWidth: 24 },
+        2: { cellWidth: "auto" },
+        3: { cellWidth: 12, halign: "right" },
+        4: { cellWidth: 20, halign: "right" },
+        5: { cellWidth: 12, halign: "right" },
+        6: { cellWidth: 20, halign: "right" },
+        7: { cellWidth: 20, halign: "right" },
+      },
     });
 
     const afterTableY = (doc.lastAutoTable?.finalY || y + 20) + 8;
@@ -7413,7 +7437,7 @@ export default function StockControl() {
   function openPoBuilder(linkedRequisitionIds = [], prefillSupplierId = "", prefillLineItems = []) {
     setPoBuilder({
       supplierId: prefillSupplierId,
-      lineItems: prefillLineItems.length ? prefillLineItems : [{ description: "", qty: "", unitPrice: "" }],
+      lineItems: prefillLineItems.length ? prefillLineItems : [{ description: "", partNumber: "", qty: "", unitPrice: "" }],
       jobId: null,
       jobNumber: "",
       jobQuery: "",
@@ -7434,7 +7458,12 @@ export default function StockControl() {
     openPoBuilder(
       [],
       po.supplierId,
-      po.lineItems.map((li) => ({ description: li.description, qty: String(li.qty), unitPrice: String(li.unitPrice) }))
+      po.lineItems.map((li) => ({
+        description: li.description,
+        partNumber: li.partNumber || "",
+        qty: String(li.qty),
+        unitPrice: String(li.unitPrice),
+      }))
     );
   }
 
@@ -7443,7 +7472,10 @@ export default function StockControl() {
   }
 
   function addPoLineItem() {
-    setPoBuilder((b) => ({ ...b, lineItems: [...b.lineItems, { description: "", qty: "", unitPrice: "" }] }));
+    setPoBuilder((b) => ({
+      ...b,
+      lineItems: [...b.lineItems, { description: "", partNumber: "", qty: "", unitPrice: "" }],
+    }));
   }
 
   function updatePoLineItem(idx, field, value) {
@@ -7470,11 +7502,23 @@ export default function StockControl() {
   // supplier needs 10 pieces of 6m. The length lives on the stock item,
   // so it is put back on here rather than being baked into the label --
   // which also means requisitions raised before this fix get it too.
+  // What a supplier should see on the order. Deliberately not the label
+  // used inside the app: for a Stores item that label starts with where
+  // we keep it on the shelf, which is our business and not theirs.
   function poLineDescription(req) {
     const it = (items || []).find((x) => x.id === req.itemId);
+    const base =
+      it && it.mainCat === "stores" ? it.name || req.itemRawName || req.itemLabel : req.itemLabel;
     const metres = Number(it?.length) || 0;
-    if (!metres || !it?.trackLength) return req.itemLabel;
-    return `${req.itemLabel} — ${metres}m lengths`;
+    if (!metres || !it?.trackLength) return base;
+    return `${base} — ${metres}m lengths`;
+  }
+
+  // Blank for a line typed in by hand, and for every order raised before
+  // the part number was carried through at all.
+  function poLinePartNumber(req) {
+    const it = (items || []).find((x) => x.id === req.itemId);
+    return it?.partNumber || "";
   }
 
   function raisePoFromSelected() {
@@ -7482,6 +7526,7 @@ export default function StockControl() {
     if (selected.length === 0) return;
     const lineItems = selected.map((r) => ({
       description: poLineDescription(r),
+      partNumber: poLinePartNumber(r),
       qty: r.qty,
       unitPrice: resolvePoLineUnitPrice(r),
     }));
@@ -7500,6 +7545,7 @@ export default function StockControl() {
     if (reqList.length === 0) return;
     const lineItems = reqList.map((r) => ({
       description: poLineDescription(r),
+      partNumber: poLinePartNumber(r),
       qty: r.qty,
       unitPrice: resolvePoLineUnitPrice(r),
     }));
@@ -16533,6 +16579,12 @@ export default function StockControl() {
               <label style={S.label}>Line items</label>
               {poBuilder.lineItems.map((li, idx) => (
                 <div key={idx} style={S.poLineRow}>
+                  <input
+                    style={{ ...S.input, flex: 1, minWidth: 90 }}
+                    value={li.partNumber || ""}
+                    onChange={(e) => updatePoLineItem(idx, "partNumber", e.target.value)}
+                    placeholder="Part no"
+                  />
                   <input
                     style={{ ...S.input, flex: 3 }}
                     value={li.description}
