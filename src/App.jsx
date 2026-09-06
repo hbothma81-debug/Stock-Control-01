@@ -8825,6 +8825,12 @@ export default function StockControl() {
         .stk-editable:hover { border-color: ${C.border} !important; background: ${C.bg}; }
         .stk-editable:focus { border-color: ${C.accentRaw} !important; background: ${C.bg}; }
         .stk-meta-row > span { border: 1px solid ${C.border}; border-radius: 5px; padding: 2px 7px; display: inline-block; }
+        /* Filters sit next to each other and wrap when they run out of room. */
+        .stk-filter-bar > * { flex: 1 1 165px; min-width: 150px; }
+        .stk-filter-bar > input { flex: 2 1 220px; }
+        /* A From/To pair is one child holding two fields -- it needs room
+           for both, or the dates crush each other to nothing. */
+        .stk-filter-bar > .stk-date-pair { flex: 1 1 320px; min-width: 300px; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
 
@@ -9183,7 +9189,7 @@ export default function StockControl() {
             >
               {(
                 <>
-                  <div style={S.filterBar}>
+                  <div className="stk-filter-bar" style={S.filterBar}>
                     <div>
                       <label style={S.label}>Type</label>
                       <select style={S.input} value={archiveTypeFilter} onChange={(e) => setArchiveTypeFilter(e.target.value)}>
@@ -9193,7 +9199,7 @@ export default function StockControl() {
                         ))}
                       </select>
                     </div>
-                    <div style={S.formGrid}>
+                    <div className="stk-date-pair" style={S.formGrid}>
                       <div>
                         <label style={S.label}>From</label>
                         <input type="date" style={S.input} value={archiveDateFrom} onChange={(e) => setArchiveDateFrom(e.target.value)} />
@@ -9491,7 +9497,7 @@ export default function StockControl() {
           <Section title="Completed / History" defaultOpen={false}>
             {(
               <div>
-                <div style={S.filterBar}>
+                <div className="stk-filter-bar" style={S.filterBar}>
                   <div>
                     <label style={S.label}>From</label>
                     <input
@@ -10484,7 +10490,7 @@ export default function StockControl() {
           <div style={S.roleHint}>
             Every delivery note across every job, in sequence — like a delivery note book, so nothing issued ever goes untracked.
           </div>
-          <div style={S.filterBar}>
+          <div className="stk-filter-bar" style={S.filterBar}>
             <div>
               <label style={S.label}>From</label>
               <input type="date" style={S.input} value={deliveryNotesDateFrom} onChange={(e) => setDeliveryNotesDateFrom(e.target.value)} />
@@ -10564,7 +10570,7 @@ export default function StockControl() {
       ) : tab === "invoiceRequests" ? (
         <div style={S.list}>
           <div style={S.roleHint}>Every invoice request document generated across every job — its own book, separate from the Invoicing workflow itself.</div>
-          <div style={S.filterBar}>
+          <div className="stk-filter-bar" style={S.filterBar}>
             <div>
               <label style={S.label}>From</label>
               <input type="date" style={S.input} value={invoiceRequestsDateFrom} onChange={(e) => setInvoiceRequestsDateFrom(e.target.value)} />
@@ -10613,7 +10619,7 @@ export default function StockControl() {
       ) : tab === "processSheets" ? (
         <div style={S.list}>
           <div style={S.roleHint}>Every process sheet ever printed, with its job number — a running record, not just the latest reprint.</div>
-          <div style={S.filterBar}>
+          <div className="stk-filter-bar" style={S.filterBar}>
             <div>
               <label style={S.label}>From</label>
               <input type="date" style={S.input} value={processSheetsDateFrom} onChange={(e) => setProcessSheetsDateFrom(e.target.value)} />
@@ -10665,7 +10671,7 @@ export default function StockControl() {
       ) : tab === "poReports" ? (
         <div style={S.list}>
           <div style={S.roleHint}>Every PO spend report ever generated — each run is its own dated snapshot, not overwritten by the next one.</div>
-          <div style={S.filterBar}>
+          <div className="stk-filter-bar" style={S.filterBar}>
             <div>
               <label style={S.label}>From</label>
               <input type="date" style={S.input} value={poReportsDateFrom} onChange={(e) => setPoReportsDateFrom(e.target.value)} />
@@ -10772,7 +10778,7 @@ export default function StockControl() {
             </div>
           ) : (
             <>
-          <div style={S.filterBar}>
+          <div className="stk-filter-bar" style={S.filterBar}>
             <div>
               <label style={S.label}>Type</label>
               <select style={S.input} value={usageTypeFilter} onChange={(e) => setUsageTypeFilter(e.target.value)}>
@@ -10790,7 +10796,7 @@ export default function StockControl() {
                 <option value="add">Added only</option>
               </select>
             </div>
-            <div style={S.formGrid}>
+            <div className="stk-date-pair" style={S.formGrid}>
               <div>
                 <label style={S.label}>From</label>
                 <input type="date" style={S.input} value={usageDateFrom} onChange={(e) => setUsageDateFrom(e.target.value)} />
@@ -11038,7 +11044,7 @@ export default function StockControl() {
       </div>
 
       {showFilters && tab !== "custom" && tab !== "stores" && (
-        <div style={S.filterBar}>
+        <div className="stk-filter-bar" style={S.filterBar}>
           <div>
             <label style={S.label}>Material</label>
             <select style={S.input} value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)}>

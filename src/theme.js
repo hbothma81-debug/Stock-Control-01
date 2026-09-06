@@ -350,9 +350,16 @@ export const S = {
     fontWeight: 600,
   },
   filterBar: {
+    // A row that wraps, not a column. Stacked, the filters filled a
+    // phone screen on their own and the list they filter started below
+    // the fold -- you were setting a date range without being able to see
+    // what it was doing. Children get their widths from .stk-filter-bar
+    // in the stylesheet, since inline styles cannot reach them.
     display: "flex",
-    flexDirection: "column",
-    gap: 4,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "flex-end",
+    gap: 10,
     background: C.surface,
     border: `1px solid ${C.border}`,
     borderRadius: 8,
