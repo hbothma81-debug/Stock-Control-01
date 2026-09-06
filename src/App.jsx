@@ -984,6 +984,7 @@ export default function StockControl() {
   // Everything the Laser 4kw tab needs: the programs, which jobs are on
   // them, and the job stages so "waiting to be nested" can be worked out.
   const [laserData, setLaserData] = useState(null);
+  const [laserLoadFailed, setLaserLoadFailed] = useState(false);
   const [laserView, setLaserView] = useState("nesting");
   // Per process type: whether it releases the next stage when started
   // rather than when finished, and whether it is worked on the Laser
@@ -1053,6 +1054,9 @@ export default function StockControl() {
   const [drawingCustomerFilter, setDrawingCustomerFilter] = useState("");
   const [drawingLookup, setDrawingLookup] = useState({}); // { [partNumber]: { id, description } } — current revisions only, loaded once for fast "does this part have a drawing" checks elsewhere in the app
   const [drawingSearchLoading, setDrawingSearchLoading] = useState(false);
+  // An empty result and a failed one look identical on screen, and one of
+  // them tells the reader there is no drawing when there is.
+  const [drawingSearchFailed, setDrawingSearchFailed] = useState(false);
   const [expandedDrawingHistory, setExpandedDrawingHistory] = useState({});
   const [showDrawingUpload, setShowDrawingUpload] = useState(false);
   const [drawingUploadCustomer, setDrawingUploadCustomer] = useState("");
@@ -2215,9 +2219,11 @@ export default function StockControl() {
         grouped[d.part_number].push(d);
       });
       setDrawingSearchResults(Object.entries(grouped));
+      setDrawingSearchFailed(false);
     } catch (err) {
       console.error("Loading drawings failed:", err);
       setDrawingSearchResults([]);
+      setDrawingSearchFailed(true);
     }
     setDrawingSearchLoading(false);
   }
@@ -2258,9 +2264,13 @@ export default function StockControl() {
         .eq("status", "current")
         .maybeSingle();
       if (error) throw error;
+      // No row is a real answer -- there is no drawing for this part --
+      // and saying so beats a button that appears to do nothing.
       if (data) openDrawingPreview(data);
+      else alert(`No drawing on file for ${partNumber.trim()}.`);
     } catch (err) {
       console.error("Couldn't open drawing:", err);
+      alert("Couldn't open that drawing — check your signal and try again.");
     }
   }
 
@@ -3053,6 +3063,10 @@ export default function StockControl() {
       setJobDetail({ job, processes: processes || [], documents: documents || [], quoteItems: quoteItems || [], deliveryNotes: deliveryNotes || [], allocations: allocResult.data || [] });
     } catch (err) {
       console.error("Failed to load job detail:", err);
+      // Without this the modal simply never opens. Somebody taps a job,
+      // nothing happens, and they tap it again -- there is no way to tell
+      // a dropped connection from a dead button.
+      alert("Couldn't open that job — check your signal and try again.");
     }
     setJobDetailLoading(false);
   }
@@ -3319,8 +3333,13 @@ export default function StockControl() {
     if (!supabase) return;
     try {
       setLaserData(await loadLaserRaw());
+      setLaserLoadFailed(false);
     } catch (err) {
       console.error("Failed to load laser programs:", err);
+      // Prince works off this screen. Empty means "nothing to nest", which
+      // is a very different instruction from "we could not reach the
+      // database" -- and he would act on the first one.
+      setLaserLoadFailed(true);
       setLaserData({
         programs: [],
         links: [],
@@ -9751,6 +9770,14 @@ export default function StockControl() {
       ) : tab === "laser4kw" ? (
         laserData === null || jobsList === null ? (
           <div style={S.empty}>Loading programs…</div>
+        ) : laserLoadFailed ? (
+          // Empty means "nothing to nest", which is a very different
+          // instruction from "we could not reach the database" -- and
+          // Prince would act on the first one.
+          <div style={{ ...S.empty, color: C.danger }}>
+            Couldn't load the programs — check your signal and press Refresh. Do not read this as nothing to
+            nest.
+          </div>
         ) : (
           (() => {
             const { rows, programs, candidates } = laserNestingData();
@@ -11014,7 +11041,15 @@ export default function StockControl() {
 
           {!drawingSearchLoading && drawingSearchResults !== null && (
             <Section title="Drawings" count={drawingSearchResults.length}>
-              {drawingSearchResults.length === 0 && <div style={S.empty}>Nothing here yet — upload one to get started.</div>}
+              {drawingSearchResults.length === 0 &&
+                (drawingSearchFailed ? (
+                  <div style={{ ...S.empty, color: C.danger }}>
+                    Couldn't load the drawings — check your signal and search again. This is not the same as
+                    there being none.
+                  </div>
+                ) : (
+                  <div style={S.empty}>Nothing here yet — upload one to get started.</div>
+                ))}
               {drawingSearchResults.map(([partNumber, revisions]) => {
                 const current = revisions.find((r) => r.status === "current") || revisions[0];
                 const history = revisions.filter((r) => r.id !== current.id);
