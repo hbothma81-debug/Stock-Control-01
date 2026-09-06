@@ -283,7 +283,15 @@ async function loadMasterFromTables() {
 
   const companyRow = (companyRows.data || [])[0];
   result.companyDetails = companyRow
-    ? { name: companyRow.name, address: companyRow.address, phone: companyRow.phone, email: companyRow.email, vatNumber: companyRow.vat_number, regNumber: companyRow.reg_number }
+    ? {
+        name: companyRow.name,
+        address: companyRow.address,
+        phone: companyRow.phone,
+        email: companyRow.email,
+        vatNumber: companyRow.vat_number,
+        regNumber: companyRow.reg_number,
+        logo: companyRow.logo || "",
+      }
     : EMPTY_COMPANY_DETAILS;
 
   const counterMap = {};
@@ -419,7 +427,10 @@ function parseThickness(t) {
 // Downscale + recompress a photo before it goes anywhere near storage —
 // a phone photo can be several MB, which blows past what's reasonable to
 // keep for hundreds of stock lines.
-function compressImage(file, maxDim = 1600, quality = 0.75) {
+// keepTransparency matters for one thing: a company logo. A PNG with a
+// see-through background turned into a JPEG gains a black rectangle,
+// which on a white purchase order looks like a printing fault.
+function compressImage(file, maxDim = 1600, quality = 0.75, keepTransparency = false) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -440,7 +451,8 @@ function compressImage(file, maxDim = 1600, quality = 0.75) {
         canvas.height = height;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", quality));
+        const asPng = keepTransparency && /png/i.test(file.type || "");
+        resolve(asPng ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", quality));
       };
       img.onerror = reject;
       img.src = e.target.result;
@@ -1728,7 +1740,20 @@ export default function StockControl() {
     if (JSON.stringify(prev.companyDetails) !== JSON.stringify(newMaster.companyDetails)) {
       const c = newMaster.companyDetails || EMPTY_COMPANY_DETAILS;
       ops.push(
-        supabase.from("master_company_details").upsert({ id: 1, name: c.name || "", address: c.address || "", phone: c.phone || "", email: c.email || "", vat_number: c.vatNumber || "", reg_number: c.regNumber || "" })
+        supabase.from("master_company_details").upsert({
+          id: 1,
+          name: c.name || "",
+          address: c.address || "",
+          phone: c.phone || "",
+          email: c.email || "",
+          vat_number: c.vatNumber || "",
+          reg_number: c.regNumber || "",
+          // The logo was in neither the save nor the load, so it lived
+          // only in memory: it appeared the moment you chose it and was
+          // gone on the next visit. Nobody had ever successfully saved
+          // one, which is why no document has ever carried it.
+          logo: c.logo || "",
+        })
       );
     }
 
@@ -8723,7 +8748,7 @@ export default function StockControl() {
       return;
     }
     try {
-      const dataUrl = await compressImage(file, 400, 0.85);
+      const dataUrl = await compressImage(file, 400, 0.85, true);
       updateCompanyDetail("logo", dataUrl);
     } catch {
       alert("Couldn't process that image.");
