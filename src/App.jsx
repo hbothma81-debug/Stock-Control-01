@@ -976,6 +976,9 @@ export default function StockControl() {
   // state rather than being a permanent log.
   const [repairListItem, setRepairListItem] = useState(null);
   const [repairListEntries, setRepairListEntries] = useState(null);
+  // "Nothing outstanding" about a machine is a statement somebody acts
+  // on. It must not be what a failed load looks like.
+  const [repairListFailed, setRepairListFailed] = useState(false);
   const [repairListDescription, setRepairListDescription] = useState("");
   const [repairListBusy, setRepairListBusy] = useState(false);
   const [repairListResolvedOpen, setRepairListResolvedOpen] = useState(false);
@@ -1926,6 +1929,13 @@ export default function StockControl() {
         setProcessTypeSettings(map);
       } catch (err) {
         console.error("Failed to load process type settings:", err);
+        // Without these the Production tab silently rearranges itself:
+        // Nesting and Laser come back, Laser Status disappears. Better to
+        // say why than to let somebody think the app changed overnight.
+        alert(
+          "Couldn't load the stage settings, so the Production tab may show the wrong departments. " +
+            "Press Refresh — if it keeps happening, tell Heinrich before working off it."
+        );
       }
     })();
   }, [session]);
@@ -2366,11 +2376,13 @@ export default function StockControl() {
     setRepairListEntries(null);
     setRepairListDescription("");
     setRepairListResolvedOpen(false);
+    setRepairListFailed(false);
     try {
       setRepairListEntries(await fetchAssetRepairs(item.id));
     } catch (err) {
       console.error("Failed to load repair list:", err);
       setRepairListEntries([]);
+      setRepairListFailed(true);
     }
   }
 
@@ -14169,7 +14181,14 @@ export default function StockControl() {
             <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 8 }}>
               {repairListEntries === null && <div style={S.empty}>Loading…</div>}
               {repairListEntries?.filter((e) => e.status === "open").length === 0 && repairListEntries !== null && (
-                <div style={S.empty}>Nothing outstanding.</div>
+                repairListFailed ? (
+                  <div style={{ ...S.empty, color: C.danger }}>
+                    Couldn't load the repair list — check your signal. This is not the same as nothing being
+                    outstanding.
+                  </div>
+                ) : (
+                  <div style={S.empty}>Nothing outstanding.</div>
+                )
               )}
               {repairListEntries?.filter((e) => e.status === "open").map((entry) => (
                 <div key={entry.id} style={S.reqCard}>
