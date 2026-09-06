@@ -25,7 +25,7 @@ export default function Section({ title, count, collapsible = true, defaultOpen 
 
   const inner = (
     <>
-      <span style={{ flex: 1, textAlign: "left", fontSize: 15.5, fontWeight: 700 }}>{title}</span>
+      <span style={{ flex: 1, textAlign: "left", fontSize: 15, fontWeight: 700 }}>{title}</span>
       {count != null && <span style={S.gradeCount}>{count}</span>}
       {collapsible && (
         <ChevronDown

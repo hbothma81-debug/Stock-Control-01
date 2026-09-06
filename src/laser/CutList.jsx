@@ -94,7 +94,7 @@ function ProgramRow({ program, canCut, onToggleCut, busy }) {
   return (
     <div style={S.row}>
       <div style={S.rowMain}>
-        <span style={{ ...S.itemName, fontSize: 17, letterSpacing: "0.02em" }}>{p.program_number}</span>
+        <span style={{ ...S.itemName, fontSize: 18, letterSpacing: "0.02em" }}>{p.program_number}</span>
         <div style={S.rowMeta}>
           <span style={S.partTag}>{p.material}</span>
           {p.machine && <span style={S.partTag}>{p.machine}</span>}

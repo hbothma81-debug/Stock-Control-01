@@ -41,7 +41,7 @@ export default function RecordRow({ title, summary, right, children }) {
       >
         <span style={{ fontWeight: 700, fontSize: 15 }}>{title}</span>
         {summary != null && (
-          <span style={{ flex: 1, minWidth: 0, color: C.muted, fontSize: 13.5 }}>{summary}</span>
+          <span style={{ flex: 1, minWidth: 0, color: C.muted, fontSize: 14 }}>{summary}</span>
         )}
         {right != null && <span style={{ flexShrink: 0 }}>{right}</span>}
         <ChevronDown

@@ -693,7 +693,7 @@ function QtyProgressControl({ process, job, quoteItems, itemProgress, limitFor, 
         const canLog = Math.max(Math.min(remaining, flow.allowed - done), 0);
         return (
           <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 13, flex: "1 1 140px", color: itemDone ? C.accentFinished : C.text }}>
+            <span style={{ fontSize: 12.5, flex: "1 1 140px", color: itemDone ? C.accentFinished : C.text }}>
               {item.description || "Item"} — {done}/{itemQty}
             </span>
             {itemDone ? (
@@ -708,7 +708,7 @@ function QtyProgressControl({ process, job, quoteItems, itemProgress, limitFor, 
                   type="number"
                   min="0"
                   max={canLog}
-                  style={{ ...S.input, width: 64, fontSize: 13.5, padding: "5px 6px" }}
+                  style={{ ...S.input, width: 64, fontSize: 14, padding: "5px 6px" }}
                   value={inputs[item.id] || ""}
                   onChange={(e) => setInputs((prev) => ({ ...prev, [item.id]: e.target.value }))}
                   placeholder="Qty"
@@ -8856,7 +8856,7 @@ export default function StockControl() {
           <div style={{ fontFamily: F.mono, color: C.danger, fontSize: 15, marginBottom: 10 }}>
             Couldn't load your data — stopped here rather than risk overwriting anything.
           </div>
-          <div style={{ fontFamily: F.mono, color: C.muted, fontSize: 13.5, marginBottom: 16 }}>
+          <div style={{ fontFamily: F.mono, color: C.muted, fontSize: 14, marginBottom: 16 }}>
             This is usually a brief connection hiccup. Nothing has been changed or lost — refresh to try again.
           </div>
           <button className="stk-btn" style={S.addBtn} onClick={() => window.location.reload()}>
@@ -9585,7 +9585,7 @@ export default function StockControl() {
                             {(po.lineItems || []).map((li, i) => (
                               <div
                                 key={i}
-                                style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", fontSize: 13.5 }}
+                                style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", fontSize: 14 }}
                               >
                                 <span style={{ fontWeight: 600, minWidth: 40 }}>{li.qty}</span>
                                 <span style={{ flex: "1 1 200px" }}>{li.description}</span>
@@ -10505,7 +10505,7 @@ export default function StockControl() {
                         {n.job_number && <span style={{ fontWeight: 700, color: C.accentRaw }}>{n.job_number}</span>}
                         <span>{new Date(n.created_at).toLocaleString()}</span>
                       </div>
-                      <div style={{ ...S.itemName, fontSize: 14.5, marginTop: 2 }}>{n.message}</div>
+                      <div style={{ ...S.itemName, fontSize: 15, marginTop: 2 }}>{n.message}</div>
                     </div>
                   ))}
                 </Section>
@@ -10518,7 +10518,7 @@ export default function StockControl() {
                               {n.job_number && <span style={{ fontWeight: 700, color: C.accentRaw }}>{n.job_number}</span>}
                               <span>{new Date(n.created_at).toLocaleString()}</span>
                             </div>
-                            <div style={{ ...S.itemName, fontSize: 14.5, marginTop: 2 }}>{n.message}</div>
+                            <div style={{ ...S.itemName, fontSize: 15, marginTop: 2 }}>{n.message}</div>
                           </div>
                         ))}
                       </Section>
@@ -11095,7 +11095,7 @@ export default function StockControl() {
                       <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
                         {history.map((rev) => (
                           <div key={rev.id} style={S.managerRow}>
-                            <span style={{ fontSize: 13.5, color: C.muted }}>
+                            <span style={{ fontSize: 14, color: C.muted }}>
                               {rev.customer_revision ? `Rev ${rev.customer_revision}` : `Rev ${rev.internal_revision}`} —{" "}
                               {new Date(rev.created_at).toLocaleDateString()} · {rev.uploaded_by}
                             </span>
@@ -11525,7 +11525,7 @@ export default function StockControl() {
                   </button>
                   <div style={S.deptCard}>
                     <div style={S.deptCardHead}>
-                      <span style={{ fontWeight: 600, fontSize: 16 }}>{it.name}</span>
+                      <span style={{ fontWeight: 600, fontSize: 15 }}>{it.name}</span>
                       {canEditItems && (
                         <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => openEdit(it)} title="Edit item">
                           <Pencil size={13} />
@@ -14041,7 +14041,7 @@ export default function StockControl() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
                   {serviceNowConsumables.map((c, idx) => (
                     <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <span style={{ flex: 1, fontSize: 13.5 }}>
+                      <span style={{ flex: 1, fontSize: 14 }}>
                         {c.name} {c.source === "stores" && <span style={{ color: C.muted }}>(Stores)</span>}
                       </span>
                       <input
@@ -14304,7 +14304,7 @@ export default function StockControl() {
                         }
                         placeholder="Length (m)"
                       />
-                      <span style={{ color: C.muted, fontSize: 13 }}>×</span>
+                      <span style={{ color: C.muted, fontSize: 12.5 }}>×</span>
                       <input
                         style={{ ...S.input, width: 80, flexShrink: 0 }}
                         type="number"
@@ -14733,7 +14733,7 @@ export default function StockControl() {
                     {drawingUploadFiles.map((entry, idx) => (
                       <div key={idx} style={{ ...S.managerRow, opacity: entry.skip ? 0.6 : 1 }}>
                         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                          <span style={{ fontSize: 13.5, color: entry.partNumber ? C.text : C.danger }}>
+                          <span style={{ fontSize: 14, color: entry.partNumber ? C.text : C.danger }}>
                             {entry.file.name} → <strong>{entry.partNumber || "no part number"}</strong>
                           </span>
                           {entry.matchedStockCode ? (
@@ -15021,7 +15021,7 @@ export default function StockControl() {
                         {canEditThisJob && (
                           <div style={{ display: "flex", gap: 6, marginTop: 4, marginLeft: 22, flexWrap: "wrap" }}>
                             <select
-                              style={{ ...S.input, fontSize: 13.5, padding: "5px 8px", flex: "1 1 140px" }}
+                              style={{ ...S.input, fontSize: 14, padding: "5px 8px", flex: "1 1 140px" }}
                               value={p.assigned_to || ""}
                               onChange={(e) => updateJobProcessAssignee(p, jobDetail.job, e.target.value)}
                             >
@@ -15031,13 +15031,13 @@ export default function StockControl() {
                               ))}
                             </select>
                             <input
-                              style={{ ...S.input, fontSize: 13.5, padding: "5px 8px", flex: "1 1 140px" }}
+                              style={{ ...S.input, fontSize: 14, padding: "5px 8px", flex: "1 1 140px" }}
                               defaultValue={p.notes || ""}
                               onBlur={(e) => updateJobProcessField(p, "notes", e.target.value)}
                               placeholder="Notes"
                             />
                             <select
-                              style={{ ...S.input, fontSize: 13.5, padding: "5px 8px", width: 100, flexShrink: 0 }}
+                              style={{ ...S.input, fontSize: 14, padding: "5px 8px", width: 100, flexShrink: 0 }}
                               value={p.tracking_mode || "batch"}
                               onChange={(e) => updateJobProcessField(p, "tracking_mode", e.target.value)}
                               title="Batch: one tick completes the whole line. Each: a running count against the item's quantity."
@@ -15127,7 +15127,7 @@ export default function StockControl() {
                             key={a.id}
                             style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
                           >
-                            <span style={{ fontSize: 13.5, flex: "1 1 180px" }}>
+                            <span style={{ fontSize: 14, flex: "1 1 180px" }}>
                               {a.item_name || "Item"} — {outstanding} reserved
                               {a.note ? <span style={S.roleHint}> · {a.note}</span> : null}
                             </span>
@@ -15222,7 +15222,7 @@ export default function StockControl() {
                             onChange={(e) => setInvoiceQty(it.id, e.target.value)}
                             placeholder="Qty"
                             title={`Qty to invoice or deliver — up to ${remaining} remaining`}
-                            style={{ ...S.input, width: 64, fontSize: 13.5, padding: "5px 6px", marginTop: 1 }}
+                            style={{ ...S.input, width: 64, fontSize: 14, padding: "5px 6px", marginTop: 1 }}
                           />
                         )}
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -15552,7 +15552,7 @@ export default function StockControl() {
                       }
                       placeholder="What part needs to be cut"
                     />
-                    <span style={{ color: C.muted, fontSize: 13 }}>×</span>
+                    <span style={{ color: C.muted, fontSize: 12.5 }}>×</span>
                     <input
                       style={{ ...S.input, width: 80, flexShrink: 0 }}
                       type="number"

@@ -141,10 +141,10 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
         }}
       >
         <span style={{ fontWeight: 700, fontSize: 15 }}>{r.job.job_number}</span>
-        <span style={{ color: C.muted, fontSize: 13.5 }}>{r.job.customer || "no customer"}</span>
-        <span style={{ color: C.muted, fontSize: 13.5 }}>{r.job.laser_job_reference || "no SigmaNest #"}</span>
-        <span style={{ flex: 1, minWidth: 0, color: laser.tone, fontSize: 13.5, fontWeight: 600 }}>{laser.label}</span>
-        <span style={{ color: packTone, fontSize: 13.5, fontWeight: 600 }}>{packLabel}</span>
+        <span style={{ color: C.muted, fontSize: 14 }}>{r.job.customer || "no customer"}</span>
+        <span style={{ color: C.muted, fontSize: 14 }}>{r.job.laser_job_reference || "no SigmaNest #"}</span>
+        <span style={{ flex: 1, minWidth: 0, color: laser.tone, fontSize: 14, fontWeight: 600 }}>{laser.label}</span>
+        <span style={{ color: packTone, fontSize: 14, fontWeight: 600 }}>{packLabel}</span>
         <ChevronDown
           size={16}
           style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform .15s", flexShrink: 0 }}

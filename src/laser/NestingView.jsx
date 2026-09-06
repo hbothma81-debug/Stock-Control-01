@@ -503,9 +503,9 @@ function NestRow({
           </span>
         )}
         <span style={{ fontWeight: 700, fontSize: 15 }}>{r.job?.job_number || "Unknown"}</span>
-        <span style={{ color: C.muted, fontSize: 13.5 }}>{sigmanest || "no SigmaNest #"}</span>
-        <span style={{ color: C.muted, fontSize: 13.5 }}>{r.job?.customer || "no customer"}</span>
-        <span style={{ flex: 1, minWidth: 0, color: programText ? C.accentFinished : C.muted, fontSize: 13.5 }}>
+        <span style={{ color: C.muted, fontSize: 14 }}>{sigmanest || "no SigmaNest #"}</span>
+        <span style={{ color: C.muted, fontSize: 14 }}>{r.job?.customer || "no customer"}</span>
+        <span style={{ flex: 1, minWidth: 0, color: programText ? C.accentFinished : C.muted, fontSize: 14 }}>
           {programText || "not nested"}
         </span>
         <ChevronDown size={16} style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform .15s", flexShrink: 0 }} />
@@ -803,8 +803,8 @@ function ProgramList({
                   }}
                 >
                   <span style={{ fontWeight: 700, fontSize: 15 }}>{p.program_number}</span>
-                  <span style={{ color: C.muted, fontSize: 13.5 }}>{p.material}</span>
-                  <span style={{ flex: 1, minWidth: 0, color: C.muted, fontSize: 13.5 }}>{jobsText}</span>
+                  <span style={{ color: C.muted, fontSize: 14 }}>{p.material}</span>
+                  <span style={{ flex: 1, minWidth: 0, color: C.muted, fontSize: 14 }}>{jobsText}</span>
                   {p.is_complete && <span style={{ ...S.chip, color: C.accentFinished, borderColor: C.accentFinished }}>Cut</span>}
                   <ChevronDown size={16} style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform .15s", flexShrink: 0 }} />
                 </button>
