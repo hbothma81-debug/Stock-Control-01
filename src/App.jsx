@@ -9491,7 +9491,10 @@ export default function StockControl() {
                     onClick={() => setExpandedPoId(isOpen ? null : po.id)}
                   >
                     <span style={S.itemName}>{po.poNumber}</span>
-                    <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ flex: 1, minWidth: 0, color: C.muted, fontSize: 14 }}>
+                      {po.supplierName || "No supplier"}
+                    </span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
                       <span style={{ ...S.reqStatusTag, ...(po.status === "received" ? S.reqStatus_received : S.reqStatus_ordered) }}>
                         R{po.totalValue.toFixed(2)}
                       </span>
@@ -9503,7 +9506,8 @@ export default function StockControl() {
                       <div className="stk-meta-row" style={{ ...S.rowMeta, marginTop: 6 }}>
                         <span>Raised by {po.createdBy}</span>
                         <span>{new Date(po.dateCreated).toLocaleDateString()}</span>
-                        <span>{po.lineItems.length} line{po.lineItems.length === 1 ? "" : "s"}</span>
+                        {po.reference && <span>Ref {po.reference}</span>}
+                        {po.jobNumber && <span>For {po.jobNumber}</span>}
                         {po.status === "received" && (
                           <>
                             <span>Received by {po.receivedBy} on {new Date(po.receivedDate).toLocaleDateString()}</span>
@@ -9512,6 +9516,54 @@ export default function StockControl() {
                         )}
                       </div>
                       {po.notes && <div style={S.itemComment}>{po.notes}</div>}
+
+                      {/* The lines themselves, priced. Saying "3 lines" meant
+                          opening the PDF to find out what had been ordered and
+                          for how much, which is the one thing this screen is
+                          for. */}
+                      {(() => {
+                        const rate = po.vatRate != null ? po.vatRate : 15;
+                        const excl = (po.lineItems || []).reduce((sum, li) => sum + Number(li.qty) * Number(li.unitPrice), 0);
+                        const vat = po.vatTotal != null ? po.vatTotal : excl * (rate / 100);
+                        return (
+                          <div style={{ marginTop: 8 }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                              {(po.lineItems || []).map((li, i) => (
+                                <div
+                                  key={i}
+                                  style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", fontSize: 14 }}
+                                >
+                                  <span style={{ color: C.muted, minWidth: 16, textAlign: "right" }}>{i + 1}</span>
+                                  {li.partNumber && <span style={{ color: C.muted }}>{li.partNumber}</span>}
+                                  <span style={{ flex: "1 1 160px", minWidth: 0 }}>{li.description}</span>
+                                  <span style={{ fontWeight: 600 }}>{li.qty}</span>
+                                  <span style={{ color: C.muted }}>@ R {Number(li.unitPrice || 0).toFixed(2)}</span>
+                                  <span style={{ fontWeight: 600, minWidth: 74, textAlign: "right" }}>
+                                    R {(Number(li.qty) * Number(li.unitPrice)).toFixed(2)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                            <div
+                              style={{
+                                marginTop: 6,
+                                paddingTop: 6,
+                                borderTop: `1px solid ${C.border}`,
+                                display: "flex",
+                                justifyContent: "flex-end",
+                                gap: 14,
+                                flexWrap: "wrap",
+                                fontSize: 14,
+                              }}
+                            >
+                              <span style={{ color: C.muted }}>Excl. R {excl.toFixed(2)}</span>
+                              <span style={{ color: C.muted }}>VAT ({rate}%) R {vat.toFixed(2)}</span>
+                              <span style={{ fontWeight: 700 }}>Total R {po.totalValue.toFixed(2)}</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                       <div style={S.reqActions}>
                         <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => viewPoPdf(po)}>
                           <FileText size={13} /> View PDF
@@ -9528,25 +9580,21 @@ export default function StockControl() {
               );
             };
 
-            const outstanding = [...purchaseOrders].filter((po) => po.status !== "received").filter(matchesSearch);
-            const bySupplier = Object.entries(
-              outstanding.reduce((acc, po) => {
-                const k = po.supplierName || "No supplier";
-                (acc[k] = acc[k] || []).push(po);
-                return acc;
-              }, {})
-            ).sort((a, b) => a[0].localeCompare(b[0]));
+            // One list, newest first. Grouping by supplier meant hunting for
+            // a PO number across several collapsed headings when the number
+            // is the thing you are looking for -- the supplier just needs to
+            // be readable once you have found it.
+            const outstanding = [...purchaseOrders]
+              .filter((po) => po.status !== "received")
+              .filter(matchesSearch)
+              .sort((a, b) => new Date(b.dateCreated) - new Date(a.dateCreated));
 
             return (
               <>
-                <div style={{ ...S.gradeItems, marginTop: 10 }}>
-                  {bySupplier.map(([supplierName, list]) => (
-                    <Section key={supplierName} title={supplierName} count={list.length}>
-                      {list.sort((a, b) => new Date(b.dateCreated) - new Date(a.dateCreated)).map(renderPoCard)}
-                    </Section>
-                  ))}
-                  {outstanding.length === 0 && purchaseOrders.length > 0 && <div style={S.empty}>Nothing matches that.</div>}
-                </div>
+                <Section title="Outstanding" count={outstanding.length}>
+                  {outstanding.map(renderPoCard)}
+                  {outstanding.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
+                </Section>
 
                 <Section
                   title="Received / Completed"
