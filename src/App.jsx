@@ -6711,6 +6711,15 @@ export default function StockControl() {
   // unrepairable — and a job carrying stages from an old process list has
   // to be fixable by somebody.
   const canEditThisJob = canEditQty("jobs") && (!jobIsLocked || isAdmin);
+
+  // The files on the open job that this person is allowed to see. The
+  // quote itself is the exception: it carries pricing, so it stays with
+  // the people who deal in prices. Newest first -- the one just uploaded
+  // is the one being looked for.
+  const visibleJobFiles = ((jobDetail && jobDetail.documents) || [])
+    .filter((doc) => !doc.is_quote_file || isAdmin || profile?.isSalesPerson)
+    .slice()
+    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
   const editingLockedJob = jobIsLocked && isAdmin;
 
   const canAdd = isAdmin || !!profile?.canAddItems;
@@ -15810,6 +15819,10 @@ export default function StockControl() {
             {[
               { key: "overview", label: "Overview" },
               { key: "items", label: "Items" },
+              {
+                key: "files",
+                label: `Files${visibleJobFiles.length ? ` (${visibleJobFiles.length})` : ""}`,
+              },
               { key: "invoice", label: "Invoice" },
               { key: "delivery", label: "Delivery" },
             ].map((t) => (
@@ -16147,45 +16160,63 @@ export default function StockControl() {
                 );
               })()}
 
-              <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <label style={S.label}>Documents</label>
-                  {canEditThisJob && (
-                    <label className="stk-btn" style={{ ...S.reqActionBtnMuted, cursor: "pointer" }}>
-                      <Upload size={12} /> Upload
-                      <input
-                        type="file"
-                        style={{ display: "none" }}
-                        onChange={(e) => {
-                          const file = e.target.files[0];
-                          if (file) uploadJobDocument(jobDetail.job.id, file);
-                          e.target.value = "";
-                        }}
-                      />
-                    </label>
-                  )}
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-                  {jobDetail.documents
-                    .filter((doc) => !doc.is_quote_file || isAdmin || profile?.isSalesPerson)
-                    .map((doc) => (
+            </>
+          )}
+
+          {/* Everything on the job as a file: what was uploaded against the
+              job itself, and what was uploaded against a particular stage.
+              It used to sit at the bottom of Overview, below the process
+              checklist and the reserved stock, where a welder was never
+              going to scroll to find it. */}
+          {jobDetailTab === "files" && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <label style={S.label}>Files on this job</label>
+                {canEditThisJob && (
+                  <label className="stk-btn" style={{ ...S.reqActionBtnMuted, cursor: "pointer" }}>
+                    <Upload size={12} /> Upload
+                    <input
+                      type="file"
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        const file = e.target.files[0];
+                        if (file) uploadJobDocument(jobDetail.job.id, file);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                {visibleJobFiles.length === 0 ? (
+                  <div style={S.empty}>Nothing uploaded to this job yet.</div>
+                ) : (
+                  visibleJobFiles.map((doc) => (
                     <div key={doc.id} style={S.managerRow}>
-                      <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1, justifyContent: "flex-start" }} onClick={() => viewJobDocument(doc)}>
-                        <Paperclip size={13} /> {doc.file_name}
-                      </button>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <button
+                          type="button"
+                          className="stk-btn"
+                          style={{ ...S.reqActionBtnMuted, width: "100%", justifyContent: "flex-start" }}
+                          onClick={() => viewJobDocument(doc)}
+                        >
+                          <Paperclip size={13} /> {doc.file_name}
+                        </button>
+                        <div style={S.roleHint}>
+                          {doc.process_name ? `Uploaded against ${doc.process_name}` : "On the job"}
+                          {doc.created_at ? ` — ${new Date(doc.created_at).toLocaleString()}` : ""}
+                        </div>
+                      </div>
                       {isAdmin && (
                         <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => deleteJobDocument(doc)}>
                           <Trash2 size={13} />
                         </button>
                       )}
                     </div>
-                  ))}
-                  {jobDetail.documents.filter((doc) => !doc.is_quote_file || isAdmin || profile?.isSalesPerson).length === 0 && (
-                    <div style={S.empty}>Nothing here yet.</div>
-                  )}
-                </div>
+                  ))
+                )}
               </div>
-            </>
+            </div>
           )}
 
           {jobDetailTab === "items" && (
