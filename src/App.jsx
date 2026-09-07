@@ -1450,7 +1450,12 @@ export default function StockControl() {
       window.location.reload();
       return; // the page is going; leave the spinner up until it does
     }
-    await loadAllData(false);
+    // Notifications were read once, when the app started, and never
+    // again -- so a message that arrived while you were working showed up
+    // only after closing and opening the app. Refresh is exactly when
+    // someone wants to know, and the shortages and reservations beside
+    // them were loaded the same way and had the same problem.
+    await Promise.all([loadAllData(false), fetchNotifications(), fetchShortages(), fetchAllocations()]);
     setIsRefreshing(false);
   }
 
@@ -1489,9 +1494,14 @@ export default function StockControl() {
   // Automatic background refresh — every 60 seconds, only while the tab is
   // actually visible, so a phone with the app backgrounded isn't quietly
   // burning battery/data on a screen nobody's looking at.
+  //
+  // The unread badge is refreshed on the same beat. A badge that only
+  // counts what was there when you signed in is not a badge.
   useEffect(() => {
     const interval = setInterval(() => {
-      if (document.visibilityState === "visible") loadAllData(false);
+      if (document.visibilityState !== "visible") return;
+      loadAllData(false);
+      fetchNotifications();
     }, 60000);
     return () => clearInterval(interval);
   }, []);
@@ -3853,13 +3863,39 @@ export default function StockControl() {
   // the result. A notification that cannot be sent is never fatal -- the
   // thing it was telling you about has already happened -- but it is no
   // longer invisible.
+  // There are two ways a notification reaches somebody, and both are real:
+  // addressed to a person by id, or addressed to whoever is the sales rep
+  // on the job. The second is the older of the two and is how a rep hears
+  // anything at all about their own jobs.
+  //
+  // Requiring an id threw every one of those away. Six notifications, none
+  // of which reached the rep: a stage completed, items sent to invoice,
+  // items out on a delivery note, one checked back in, and a job invoiced.
+  // They were sent, accepted, and dropped on the floor here.
   async function sendNotifications(rows) {
-    const list = (Array.isArray(rows) ? rows : [rows]).filter((r) => r && r.recipient_id);
-    if (!supabase || list.length === 0) return;
+    const all = Array.isArray(rows) ? rows : [rows];
+    const list = all.filter((r) => r && (r.recipient_id || r.sales_rep));
+
+    // A job with no sales rep and no named recipient has nobody to tell.
+    // Worth saying out loud rather than dropping it quietly.
+    const nobody = all.filter((r) => r && !r.recipient_id && !r.sales_rep);
+    if (nobody.length) console.error("Notification addressed to nobody, so not sent:", nobody);
+
+    if (!supabase || list.length === 0) return { error: null };
     const { error } = await supabase.from("job_notifications").insert(
-      list.map((r) => ({ ...r, sales_rep: r.sales_rep || roleLabel }))
+      // The column cannot be null, and an empty one addresses nobody --
+      // which is what is wanted when the message already has a named
+      // recipient. Defaulting it to the sender's own name posted the
+      // message back to the sender, so whoever assigned a stage got
+      // "You've been assigned to..." about somebody else.
+      list.map((r) => ({ ...r, sales_rep: r.sales_rep || "" }))
     );
     if (error) console.error("Notification could not be sent:", error, list);
+    // Returned so a caller can say something when it matters. The stop
+    // report reads this, and was reading it off nothing at all: the
+    // destructure threw, the throw was caught by the handler around it,
+    // and the operator was told the report had failed when it had saved.
+    return { error };
   }
 
   async function logProgramEvent(programId, action, detail) {
