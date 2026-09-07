@@ -66,6 +66,7 @@ import LaserStatus from "./laser/LaserStatus.jsx";
 import Section from "./Section.jsx";
 import RecordRow from "./RecordRow.jsx";
 import ShortageCentre from "./laser/ShortageCentre.jsx";
+import { extractPdfTextItems, parseSigmaNestQuote, browserInflate } from "./lib/sigmanestQuote.js";
 
 // window.storage is installed in main.jsx before this component ever
 // renders — backed by Supabase. See src/lib/storage.js.
@@ -2788,6 +2789,7 @@ export default function StockControl() {
       quoteReference: "",
       customerPo: "",
       laserJobReference: "",
+      sigmaNestFile: null,
       materialLocation: "",
       buyOutNotes: "",
       selectedProcesses: [],
@@ -2966,6 +2968,37 @@ export default function StockControl() {
   // misaligned data. A broken formula on one specific cell (not a layout
   // problem, just bad data on that one line) gets flagged for that item
   // alone rather than rejecting the whole file.
+  // A SigmaNest quote PDF, straight off the nesting machine. Same layout
+  // every time, so what comes back is the quote number, who it is for,
+  // its note, and every line with its size, thickness, quantity and price.
+  //
+  // The reading is all in src/lib/sigmanestQuote.js, tested against real
+  // quotes -- single line and fourteen, one page and two, part names that
+  // wrap, and cells that are simply absent when empty.
+  async function parseSigmaNestQuoteFile(file) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const items = await extractPdfTextItems(bytes, browserInflate);
+    const quote = parseSigmaNestQuote(items);
+    if (!quote.ok) {
+      throw quote.reason === "no-table"
+        ? "That does not look like a SigmaNest quote — no parts table in it. Fill the job in by hand."
+        : "That quote has no priced lines in it. Fill the job in by hand.";
+    }
+    return quote;
+  }
+
+  // What a quote line is called on the floor. The part name on its own is
+  // usually just a number, which tells a welder nothing -- the size and
+  // thickness are what he is looking for.
+  function sigmaNestLineDescription(line) {
+    const bits = [line.partName || "Unnamed part"];
+    const shape = [line.size, line.thickness != null ? `${line.thickness}mm` : ""].filter(Boolean).join(" × ");
+    if (shape) bits.push(shape);
+    if (line.material) bits.push(line.material);
+    const base = bits.join(" — ");
+    return line.secondaryOps ? `${base} (${line.secondaryOps})` : base;
+  }
+
   async function parseQuoteExcelFile(file) {
     const XLSX = await getXLSX();
     return new Promise((resolve, reject) => {
@@ -17286,6 +17319,60 @@ export default function StockControl() {
 
             <div style={{ marginTop: 10 }}>
               <label style={S.label}>Quote (optional)</label>
+
+              {/* Straight off the nesting machine, no retyping. Sits beside
+                  the Excel one because they are the same job: get a quote
+                  into the form without doing it by hand. */}
+              <label className="stk-btn" style={{ ...S.addBtn, cursor: "pointer", justifyContent: "center", width: "100%", marginBottom: 6 }}>
+                <Upload size={13} /> {newJobForm.sigmaNestFile ? newJobForm.sigmaNestFile.name : "Upload SigmaNest Quote (PDF)"}
+                <input
+                  type="file"
+                  accept=".pdf"
+                  style={{ display: "none" }}
+                  onChange={async (e) => {
+                    const file = e.target.files[0] || null;
+                    setNewJobForm((f) => ({ ...f, sigmaNestFile: file }));
+                    if (!file) return;
+                    try {
+                      const quote = await parseSigmaNestQuoteFile(file);
+                      const matchedCustomer = (master.customers || []).find(
+                        (c) => c.toLowerCase() === (quote.customer || "").toLowerCase()
+                      );
+                      setNewJobForm((f) => ({
+                        ...f,
+                        customer: matchedCustomer || (quote.customer ? CUSTOM : f.customer),
+                        newCustomerName: matchedCustomer ? "" : quote.customer || f.newCustomerName,
+                        // The number SigmaNest knows this by, which is the
+                        // same field the nesting screen matches jobs on.
+                        laserJobReference: quote.quoteNumber || f.laserJobReference,
+                        description: quote.notes || f.description,
+                        quotedValue: quote.quotedTotal != null ? String(quote.quotedTotal) : f.quotedValue,
+                        quoteItems: quote.lines.map((line) => ({
+                          id: uid(),
+                          description: sigmaNestLineDescription(line),
+                          qty: line.qty != null ? String(line.qty) : "1",
+                          unitPrice: line.unitPrice != null ? String(line.unitPrice) : "",
+                          priceNeedsReview: line.unitPrice == null,
+                          linkedItemId: null,
+                        })),
+                      }));
+                      alert(
+                        `Pulled ${quote.lines.length} line(s) from ${quote.quoteNumber || "the quote"}` +
+                          (quote.customer ? ` for ${quote.customer}` : "") +
+                          ".\n\nCheck it against the PDF before saving — the prices especially."
+                      );
+                    } catch (err) {
+                      console.error("Failed to read the SigmaNest quote:", err);
+                      alert(
+                        typeof err === "string"
+                          ? err
+                          : "Couldn't read that PDF — fill the job in by hand."
+                      );
+                    }
+                  }}
+                />
+              </label>
+
               <label className="stk-btn" style={{ ...S.addBtn, cursor: "pointer", justifyContent: "center", width: "100%" }}>
                 <Upload size={13} /> {newJobForm.quoteExcelFile ? newJobForm.quoteExcelFile.name : "Upload Quote Excel"}
                   <input

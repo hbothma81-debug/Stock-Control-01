@@ -26,6 +26,8 @@ const KNOWN = new Set([
   "window", "document", "console", "navigator", "location", "history", "screen",
   "localStorage", "sessionStorage", "indexedDB", "fetch", "Headers", "Request", "Response",
   "URL", "URLSearchParams", "Blob", "File", "FileReader", "FormData", "AbortController",
+  // Unzipping a PDF in the browser without shipping a library to do it.
+  "DecompressionStream", "CompressionStream",
   "setTimeout", "clearTimeout", "setInterval", "clearInterval", "requestAnimationFrame",
   "cancelAnimationFrame", "queueMicrotask", "structuredClone", "alert", "confirm", "prompt",
   "Event", "CustomEvent", "FocusEvent", "MouseEvent", "KeyboardEvent", "Image", "Audio",
