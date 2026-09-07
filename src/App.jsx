@@ -3607,11 +3607,14 @@ export default function StockControl() {
       .filter((p) => !p.is_cancelled)
       .map((p) => ({ ...p, jobs: linksByProgram[p.id] || [] }));
 
+    // Each entry carries the link that put this job on that program, so the
+    // row can take it off again. A copy per job rather than the shared
+    // program object: the same program carries several jobs, each with its
+    // own link.
     const programsByJob = {};
     for (const p of programs) {
       for (const l of p.jobs) {
-        if (!programsByJob[l.job_id]) programsByJob[l.job_id] = [];
-        programsByJob[l.job_id].push(p);
+        (programsByJob[l.job_id] ||= []).push({ ...p, link: l });
       }
     }
 

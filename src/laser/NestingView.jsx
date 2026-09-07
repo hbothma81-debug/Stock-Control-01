@@ -345,6 +345,7 @@ export default function NestingView({
                 onToggle={() => setOpenRow((k) => (k === r.key ? null : r.key))}
                 onCreateProgram={onCreateProgram}
                 onSetNestingDone={onSetNestingDone}
+                onRemoveJobFromProgram={onRemoveJobFromProgram}
                 actions={actions}
                 SavedCheck={SavedCheck}
                 Notes={Notes}
@@ -451,6 +452,7 @@ function NestRow({
   onToggle,
   onCreateProgram,
   onSetNestingDone,
+  onRemoveJobFromProgram,
   actions,
   SavedCheck,
   Notes,
@@ -554,7 +556,15 @@ function NestRow({
         <span style={{ fontWeight: 700, fontSize: 15 }}>{r.job?.job_number || "Unknown"}</span>
         <span style={{ color: C.muted, fontSize: 14 }}>{sigmanest || "no SigmaNest #"}</span>
         <span style={{ color: C.muted, fontSize: 14 }}>{r.job?.customer || "no customer"}</span>
-        <span style={{ flex: 1, minWidth: 0, color: programText ? C.accentFinished : C.muted, fontSize: 14 }}>
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            color: programText ? C.accentFinished : C.muted,
+            fontSize: programText ? 15 : 14,
+            fontWeight: programText ? 700 : 400,
+          }}
+        >
           {programText || "not nested"}
         </span>
         <ChevronDown size={16} style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform .15s", flexShrink: 0 }} />
@@ -565,12 +575,82 @@ function NestRow({
           <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
             <Field label="Job no" value={r.job?.job_number || "Unknown"} strong />
             <Field label="SigmaNest job no" value={sigmanest || "Not filled in"} muted={!sigmanest} />
-            <Field
-              label={r.onPrograms && r.onPrograms.length > 1 ? "Program nos" : "Program no"}
-              value={programText || "Not nested yet"}
-              muted={!programText}
-            />
             {r.job?.due_date && <Field label="Due" value={new Date(r.job.due_date).toLocaleDateString()} />}
+          </div>
+
+          {/* What this job is nested on. It used to be a run of numbers on
+              one line, which is unreadable by the third one and tells you
+              nothing about the sheet -- and there was no way to take one
+              off again without going down to the program itself. */}
+          <div>
+            <label style={S.label}>
+              {hasPrograms
+                ? `Nested on ${r.onPrograms.length} program${r.onPrograms.length > 1 ? "s" : ""}`
+                : "Nested on"}
+            </label>
+            {!hasPrograms ? (
+              <div style={S.empty}>Not nested yet.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+                {r.onPrograms.map((pg) => (
+                  <div
+                    key={pg.link?.id || pg.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      flexWrap: "wrap",
+                      padding: "6px 8px",
+                      borderRadius: 6,
+                      border: `1px solid ${pg.is_complete ? C.accentFinished : C.border}`,
+                    }}
+                  >
+                    <span style={{ fontSize: 17, fontWeight: 700, letterSpacing: "0.02em" }}>
+                      {pg.program_number}
+                    </span>
+                    {pg.material && <span style={S.partTag}>{pg.material}</span>}
+                    {pg.sheet_name && <span style={S.partTag}>{pg.sheet_name}</span>}
+                    {pg.link?.shortage_id && (
+                      <span style={{ ...S.chip, borderColor: C.danger, color: C.danger }}>re-cut</span>
+                    )}
+                    <span
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        textAlign: "right",
+                        fontSize: 14,
+                        fontWeight: 600,
+                        color: pg.is_complete ? C.accentFinished : C.muted,
+                      }}
+                    >
+                      {pg.reported_at ? "Stopped" : pg.is_complete ? "Cut" : "Waiting to be cut"}
+                    </span>
+                    {canManage && pg.link && (
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={S.managerDelete}
+                        title={`Take ${r.job?.job_number || "this job"} off ${pg.program_number}`}
+                        onClick={() => {
+                          // The number is the biggest thing on the row and
+                          // the button sits right beside it, so this asks.
+                          if (
+                            window.confirm(
+                              `Take ${r.job?.job_number || "this job"} off program ${pg.program_number}?` +
+                                (pg.is_complete ? "\n\nThat program has already been cut." : "")
+                            )
+                          ) {
+                            onRemoveJobFromProgram(pg, pg.link);
+                          }
+                        }}
+                      >
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {r.kind === "shortage" && r.detail && <div style={{ ...S.itemComment, color: C.danger }}>{r.detail}</div>}
