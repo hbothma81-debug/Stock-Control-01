@@ -44,6 +44,8 @@ create table if not exists public.shifts (
   created_at     timestamptz not null default now()
 );
 
+alter table public.shifts enable row level security;
+
 create unique index if not exists shifts_name_idx on public.shifts (lower(name));
 
 -- A day is either set or off. Half a pair is neither, and would leave the
@@ -86,6 +88,8 @@ create table if not exists public.app_settings (
   constraint app_settings_single_row check (id)
 );
 
+alter table public.app_settings enable row level security;
+
 insert into public.app_settings (id) values (true) on conflict (id) do nothing;
 
 
@@ -95,9 +99,6 @@ insert into public.app_settings (id) values (true) on conflict (id) do nothing;
 -- where that changes, and these three tables are among the few that stay
 -- readable when somebody is locked out -- otherwise the screen cannot tell
 -- them what their hours are or let them ask.
-
-alter table public.shifts enable row level security;
-alter table public.app_settings enable row level security;
 
 do $do$
 begin
