@@ -3083,8 +3083,19 @@ export default function StockControl() {
   }
 
   async function openJobDetail(job) {
-    setJobDetail({ job, processes: [], documents: [], quoteItems: [], deliveryNotes: [], allocations: [] });
-    setJobDetailTab("overview");
+    // Re-opening the job already on screen is a refresh, not a new job.
+    // Every action inside a job comes back through here, so blanking it and
+    // resetting the tab threw you back to Overview each time you edited an
+    // item, marked a stage or added a delivery note. Same job: keep the tab
+    // you are on and what is already drawn, and swap the fresh data in when
+    // it lands.
+    const sameJob = jobDetail?.job?.id === job.id;
+    if (sameJob) {
+      setJobDetail((d) => (d ? { ...d, job } : d));
+    } else {
+      setJobDetail({ job, processes: [], documents: [], quoteItems: [], deliveryNotes: [], allocations: [], events: [] });
+      setJobDetailTab("overview");
+    }
     setJobDetailLoading(true);
     try {
       const [{ data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }, allocResult, eventsResult] = await Promise.all([
@@ -4965,7 +4976,12 @@ export default function StockControl() {
             sort_order: idx,
           }))
         );
+        if (itemError) throw itemError;
       }
+
+      // The old job's history stays with the old job. What carries over is
+      // one line saying where this one came from -- provenance, not baggage.
+      await logJobEvent(newJob.id, "copied", `from ${source.job_number}`);
 
       setCopyJobModal(null);
       fetchJobs();
@@ -15600,7 +15616,7 @@ export default function StockControl() {
 
           {jobDetailTab === "items" && (
             <>
-            {jobDetail.quoteItems.length > 0 && (
+            {(jobDetail.quoteItems.length > 0 || canEditThisJob) && (
               <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
                 <label style={S.label}>Quoted items</label>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
@@ -15741,6 +15757,9 @@ export default function StockControl() {
                     );
                   })}
                 </div>
+                {jobDetail.quoteItems.length === 0 && (
+                  <div style={S.empty}>Nothing quoted on this job yet.</div>
+                )}
 
                 {canEditThisJob && (
                   <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
@@ -15811,7 +15830,7 @@ export default function StockControl() {
                   )}
                 </Section>
 
-                {canEditThisJob && (
+                {canEditThisJob && jobDetail.quoteItems.length > 0 && (
                   <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                     <button
                       type="button"

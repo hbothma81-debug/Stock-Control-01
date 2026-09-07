@@ -58,6 +58,7 @@ function tableOf(node) {
 
 let unchecked = 0;
 let checked = 0;
+let unread = 0;
 
 for (const file of jsFiles(root)) {
   const code = fs.readFileSync(file, "utf8");
@@ -132,13 +133,41 @@ for (const file of jsFiles(root)) {
       console.log(`  ${callee.property.name} into "${table}" — nobody reads the result`);
       console.log(`  ${code.split("\n")[line - 1].trim().slice(0, 100)}`);
     },
+
+    // A captured error that nobody ever reads is the same silent failure
+    // as one never captured at all:
+    //
+    //     const { error: itemError } = await supabase...insert(rows);
+    //     // ...and itemError is never mentioned again
+    //
+    // The pass above sees the name and calls the write checked. This one
+    // follows the name and asks whether anything ever reads it. That gap
+    // is what let a copied job lose all its items in silence.
+    VariableDeclarator(p) {
+      const id = p.node.id;
+      if (!id || id.type !== "ObjectPattern" || !p.node.init) return;
+      if (!/\bsupabase\b/.test(code.slice(p.node.init.start, p.node.init.end))) return;
+
+      for (const prop of id.properties) {
+        if (!prop.key || prop.key.name !== "error") continue;
+        const local = prop.value && prop.value.name ? prop.value.name : "error";
+        const binding = p.scope.getBinding(local);
+        if (!binding || binding.references > 0) continue;
+        unread++;
+        const line = code.slice(0, p.node.start).split("\n").length;
+        console.log(`\n${path.relative(__dirname, file)}:${line}`);
+        console.log(`  "${local}" is captured and then never read — it can still fail in silence`);
+        console.log(`  ${code.split("\n")[line - 1].trim().slice(0, 100)}`);
+      }
+    },
   });
 }
 
-console.log(`\n${checked} write(s) checked properly, ${unchecked} not.`);
-if (unchecked === 0) {
+console.log(`\n${checked} write(s) capture their result, ${unchecked} do not.`);
+if (unread) console.log(`${unread} captured error(s) are never read afterwards.`);
+if (unchecked + unread === 0) {
   console.log("Every write reads its result. None can fail in silence.");
 } else {
   console.log("Each one above can fail with nothing on screen and nothing in the log.");
 }
-process.exit(unchecked === 0 ? 0 : 1);
+process.exit(unchecked + unread === 0 ? 0 : 1);
