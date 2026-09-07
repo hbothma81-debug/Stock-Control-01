@@ -10748,6 +10748,12 @@ export default function StockControl() {
               //
               // An invoiced job stops counting: what it shows is how long it
               // took, not how long ago it was.
+              // What a job is worth: its quoted lines added up, and failing
+              // that the Quoted value box. Most jobs have lines and no box,
+              // a few have the box and no lines, and either way the job is
+              // worth something.
+              const worthOf = (j) => jobLineTotals[j.id] || Number(j.quoted_value) || 0;
+
               const daysOnJob = (job) => {
                 const from = job.created_at ? new Date(job.created_at) : null;
                 if (!from || Number.isNaN(from.getTime())) return null;
@@ -10769,6 +10775,35 @@ export default function StockControl() {
                   <span style={{ fontSize: 15, color: C.text }}>{job.laser_job_reference || "No SigmaNest #"}</span>
                   <span style={{ fontSize: 15, color: C.text }}>{job.customer || "No customer"}</span>
                   <span style={{ fontSize: 15, color: C.text }}>{job.sales_rep || "No sales rep"}</span>
+
+                  {/* What it is worth, so the big ones can be picked out of
+                      a long list. Rounded to the rand: this is for choosing
+                      what to do next, not for quoting off. */}
+                  {canSeeValue &&
+                    (() => {
+                      const worth = worthOf(job);
+                      return (
+                        <span
+                          style={{
+                            ...S.chip,
+                            flexShrink: 0,
+                            ...(worth > 0
+                              ? { color: C.text, fontWeight: 700 }
+                              : { color: C.muted, fontStyle: "italic" }),
+                          }}
+                          title={
+                            worth > 0
+                              ? `R ${worth.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} — the quoted lines on this job, before VAT`
+                              : "Nothing priced on this job yet, so it counts for nothing in the total above"
+                          }
+                        >
+                          {worth > 0
+                            ? `R ${worth.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                            : "not priced"}
+                        </span>
+                      );
+                    })()}
+
                   {(() => {
                     const days = daysOnJob(job);
                     if (days === null) return null;
@@ -10828,12 +10863,6 @@ export default function StockControl() {
                       answers what they have on order. */}
                   {canSeeValue &&
                     (() => {
-                      // What a job is worth: its quoted lines added up, and
-                      // failing that the Quoted value box. Most jobs have
-                      // lines and no box, a few have the box and no lines,
-                      // and either way the job is worth something.
-                      const worthOf = (j) =>
-                        jobLineTotals[j.id] || Number(j.quoted_value) || 0;
                       const active = jobsList.filter(
                         (j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j)
                       );
