@@ -17,15 +17,38 @@ import { C, S } from "./theme.js";
 // button cannot sit inside another button, so that case gets a pill built
 // out of a row instead. The plain case keeps the markup it always had.
 
-export default function Section({ title, count, collapsible = true, defaultOpen = true, right, children }) {
+// `quiet` drops the amber fill an open pill normally gets. On most screens
+// that fill is doing something -- it says which block you are in. On
+// Requisitions the blocks nest, a supplier inside a status, and two filled
+// pills one inside the other is a lot of yellow to read past to reach the
+// thing you actually came for.
+//
+// `titleSize` lets the heading carry more weight than the pill around it,
+// which is what a supplier name wants: it is the thing being looked for,
+// and the pill is only its container.
+
+export default function Section({
+  title,
+  count,
+  collapsible = true,
+  defaultOpen = true,
+  right,
+  quiet = false,
+  titleSize = 15,
+  children,
+}) {
   const [open, setOpen] = useState(defaultOpen);
   const shown = collapsible ? open : true;
 
-  const activeStyle = shown ? { border: `1px solid ${C.accentRaw}`, background: C.accentTint, color: C.accentRaw } : {};
+  const activeStyle = shown
+    ? quiet
+      ? { border: `1px solid ${C.border}` }
+      : { border: `1px solid ${C.accentRaw}`, background: C.accentTint, color: C.accentRaw }
+    : {};
 
   const inner = (
     <>
-      <span style={{ flex: 1, textAlign: "left", fontSize: 15, fontWeight: 700 }}>{title}</span>
+      <span style={{ flex: 1, textAlign: "left", fontSize: titleSize, fontWeight: 700 }}>{title}</span>
       {count != null && <span style={S.gradeCount}>{count}</span>}
       {collapsible && (
         <ChevronDown

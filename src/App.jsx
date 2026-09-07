@@ -10229,7 +10229,15 @@ export default function StockControl() {
               .sort((a, b) => new Date(b.dateRequested) - new Date(a.dateRequested));
             if (list.length === 0) return null;
             return (
-              <Section key={status} title={status === "pending" ? "Pending" : "Ordered"} count={list.length}>
+              // Quiet, because on this screen the blocks nest -- a supplier
+              // inside a status -- and two filled pills one inside the other
+              // is a lot of yellow to read past.
+              <Section
+                key={status}
+                title={status === "pending" ? "Pending" : "Ordered"}
+                count={list.length}
+                quiet
+              >
                 <>
                   {status === "pending" ? (
                     // Grouped by supplier — the everyday need this serves:
@@ -10252,6 +10260,11 @@ export default function StockControl() {
                           key={supplierName}
                           title={supplierName}
                           count={supplierReqs.length}
+                          quiet
+                          // The supplier is what is being looked for on this
+                          // screen, so it carries more weight than the pill
+                          // around it or the lines under it.
+                          titleSize={18}
                           right={
                             canRaisePO && supplierName !== "No supplier set" ? (
                               <button
