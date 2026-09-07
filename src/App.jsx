@@ -3216,7 +3216,7 @@ export default function StockControl() {
       // the nesting side does not reach it, so opening the job showed an
       // empty box for a number that was already on the job -- and typing it
       // again was the obvious thing to do. Read the row itself.
-      const [jobResult, { data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }, allocResult, eventsResult] = await Promise.all([
+      const [jobResult, { data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }, allocResult, eventsResult, generatedResult] = await Promise.all([
         supabase.from("jobs").select("*").eq("id", job.id).single(),
         supabase.from("job_processes").select("*").eq("job_id", job.id).order("sort_order"),
         supabase.from("job_documents").select("*").eq("job_id", job.id).order("created_at", { ascending: false }),
@@ -3224,6 +3224,12 @@ export default function StockControl() {
         supabase.from("delivery_notes").select("*").eq("job_id", job.id).order("created_at", { ascending: false }),
         supabase.from("job_allocations").select("*").eq("job_id", job.id).order("created_at"),
         supabase.from("job_events").select("*").eq("job_id", job.id).order("acted_at", { ascending: false }),
+        // Documents the app produced for this job -- process sheets,
+        // delivery notes, purchase orders. They are kept apart from
+        // uploaded files and are listed under Records, which is the right
+        // place to see every sheet ever printed. It is the wrong place to
+        // be standing at a machine wanting this job's.
+        supabase.from("generated_documents").select("*").eq("job_id", job.id).order("generated_at", { ascending: false }),
       ]);
       if (procError) throw procError;
       if (docError) throw docError;
@@ -3244,6 +3250,9 @@ export default function StockControl() {
         deliveryNotes: deliveryNotes || [],
         allocations: allocResult.data || [],
         events: eventsResult.data || [],
+        // Not fatal, same as allocations: a job must still open if this
+        // table is unreadable.
+        generated: generatedResult.data || [],
       });
     } catch (err) {
       console.error("Failed to load job detail:", err);
@@ -6712,14 +6721,41 @@ export default function StockControl() {
   // to be fixable by somebody.
   const canEditThisJob = canEditQty("jobs") && (!jobIsLocked || isAdmin);
 
-  // The files on the open job that this person is allowed to see. The
-  // quote itself is the exception: it carries pricing, so it stays with
-  // the people who deal in prices. Newest first -- the one just uploaded
-  // is the one being looked for.
-  const visibleJobFiles = ((jobDetail && jobDetail.documents) || [])
-    .filter((doc) => !doc.is_quote_file || isAdmin || profile?.isSalesPerson)
-    .slice()
-    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  // Every file on the open job, whichever way it got there: uploaded by
+  // somebody, or produced by the app. Two different tables and two
+  // different ways of opening one, which is the app's problem and not the
+  // welder's -- he wants the drawing and the process sheet in one place.
+  //
+  // The quote file is the exception: it carries pricing, so it stays with
+  // the people who deal in prices. Newest first, since the one just made
+  // is usually the one being looked for.
+  const GENERATED_LABELS = {
+    process_sheet: "Process sheet",
+    delivery_note: "Delivery note",
+    purchase_order: "Purchase order",
+    job_card: "Job card",
+  };
+
+  const visibleJobFiles = [
+    ...((jobDetail && jobDetail.documents) || [])
+      .filter((doc) => !doc.is_quote_file || isAdmin || profile?.isSalesPerson)
+      .map((doc) => ({
+        key: "up:" + doc.id,
+        name: doc.file_name,
+        at: doc.created_at,
+        from: doc.process_name ? `Uploaded against ${doc.process_name}` : "Uploaded to the job",
+        open: () => viewJobDocument(doc),
+        remove: isAdmin ? () => deleteJobDocument(doc) : null,
+      })),
+    ...((jobDetail && jobDetail.generated) || []).map((g) => ({
+      key: "gen:" + g.id,
+      name: g.file_name,
+      at: g.generated_at,
+      from: `${GENERATED_LABELS[g.document_type] || g.document_type}${g.generated_by ? ` — ${g.generated_by}` : ""}`,
+      open: () => viewGeneratedDocument(g),
+      remove: null, // a record of what was printed is not ours to tidy away
+    })),
+  ].sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
   const editingLockedJob = jobIsLocked && isAdmin;
 
   const canAdd = isAdmin || !!profile?.canAddItems;
@@ -16191,24 +16227,24 @@ export default function StockControl() {
                 {visibleJobFiles.length === 0 ? (
                   <div style={S.empty}>Nothing uploaded to this job yet.</div>
                 ) : (
-                  visibleJobFiles.map((doc) => (
-                    <div key={doc.id} style={S.managerRow}>
+                  visibleJobFiles.map((f) => (
+                    <div key={f.key} style={S.managerRow}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <button
                           type="button"
                           className="stk-btn"
                           style={{ ...S.reqActionBtnMuted, width: "100%", justifyContent: "flex-start" }}
-                          onClick={() => viewJobDocument(doc)}
+                          onClick={f.open}
                         >
-                          <Paperclip size={13} /> {doc.file_name}
+                          <Paperclip size={13} /> {f.name}
                         </button>
                         <div style={S.roleHint}>
-                          {doc.process_name ? `Uploaded against ${doc.process_name}` : "On the job"}
-                          {doc.created_at ? ` — ${new Date(doc.created_at).toLocaleString()}` : ""}
+                          {f.from}
+                          {f.at ? ` — ${new Date(f.at).toLocaleString()}` : ""}
                         </div>
                       </div>
-                      {isAdmin && (
-                        <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => deleteJobDocument(doc)}>
+                      {f.remove && (
+                        <button type="button" className="stk-btn" style={S.managerDelete} onClick={f.remove}>
                           <Trash2 size={13} />
                         </button>
                       )}
