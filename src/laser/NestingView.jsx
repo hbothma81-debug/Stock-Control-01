@@ -50,7 +50,9 @@ export default function NestingView({
   candidates,
   thicknesses,
   grades,
+  sheetNames,
   canManage,
+  onClearReport,
   actions,
   SavedCheck,
   Notes,
@@ -62,6 +64,9 @@ export default function NestingView({
   onUpdateProgram,
 }) {
   const [openRow, setOpenRow] = useState(null);
+  // The operator hunts for the sheet on the rack, so he needs its name,
+  // not just a thickness and a program number.
+  const [newSheet, setNewSheet] = useState("");
   const [search, setSearch] = useState("");
   const [addingTo, setAddingTo] = useState(null);
   const [addQuery, setAddQuery] = useState("");
@@ -100,6 +105,7 @@ export default function NestingView({
       const ok = await onCreateProgram({
         program_number: newNumber.trim(),
         material: `${newThickness} ${newGrade}`,
+        sheet_name: newSheet.trim(),
         machine,
         jobs: picked.map((c) => ({
           job_id: c.job_id,
@@ -157,6 +163,11 @@ export default function NestingView({
 
   return (
     <div style={S.list}>
+      <datalist id="stk-sheet-names">
+        {(sheetNames || []).map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
       <input
         style={S.input}
         value={search}
@@ -213,6 +224,16 @@ export default function NestingView({
                     </option>
                   ))}
                 </select>
+              </div>
+              <div style={{ flex: "1 1 150px" }}>
+                <label style={S.label}>Sheet name</label>
+                <input
+                  style={S.input}
+                  list="stk-sheet-names"
+                  value={newSheet}
+                  onChange={(e) => setNewSheet(e.target.value)}
+                  placeholder="Which sheet"
+                />
               </div>
             </div>
 
@@ -313,6 +334,7 @@ export default function NestingView({
                 key={r.key}
                 row={r}
                 candidates={candidates}
+                sheetNames={sheetNames}
                 machine={machine}
                 thicknesses={thicknesses}
                 grades={grades}
@@ -335,6 +357,7 @@ export default function NestingView({
         programs={openPrograms}
         emptyText="Nothing nested yet."
         canManage={canManage}
+        onClearReport={onClearReport}
         thicknesses={thicknesses}
         grades={grades}
         addingTo={addingTo}
@@ -356,6 +379,7 @@ export default function NestingView({
           emptyText=""
           collapsible
           canManage={canManage}
+          onClearReport={onClearReport}
           thicknesses={thicknesses}
           grades={grades}
           addingTo={addingTo}
@@ -401,7 +425,9 @@ function NestRow({
   machine,
   thicknesses,
   grades,
+  sheetNames,
   canManage,
+
   expanded,
   onToggle,
   onCreateProgram,
@@ -415,6 +441,7 @@ function NestRow({
   const [grade, setGrade] = useState("");
   const [alsoOn, setAlsoOn] = useState([]);
   const [alsoQuery, setAlsoQuery] = useState("");
+  const [sheet, setSheet] = useState("");
   const [saving, setSaving] = useState(false);
 
   const sigmanest = r.job?.laser_job_reference || r.shortage?.board_number || "";
@@ -448,6 +475,7 @@ function NestRow({
       const chosen = [r.candidate, ...alsoOn];
       const ok = await onCreateProgram({
         program_number: programNumber.trim(),
+        sheet_name: sheet.trim(),
         // Stored as one line the way the machine reads it, built from the
         // two lists so nobody types "1.2mm MS" three different ways.
         material: `${thickness} ${grade}`,
@@ -462,6 +490,7 @@ function NestRow({
         setProgramNumber("");
         setThickness("");
         setGrade("");
+        setSheet("");
         setAlsoOn([]);
         setAlsoQuery("");
       }
@@ -562,6 +591,16 @@ function NestRow({
                       </option>
                     ))}
                   </select>
+                </div>
+                <div style={{ flex: "1 1 150px" }}>
+                  <label style={S.label}>Sheet name</label>
+                  <input
+                    style={S.input}
+                    list="stk-sheet-names"
+                    value={sheet}
+                    onChange={(e) => setSheet(e.target.value)}
+                    placeholder="Which sheet"
+                  />
                 </div>
               </div>
 
@@ -757,6 +796,7 @@ function ProgramList({
   emptyText,
   collapsible = false,
   canManage,
+  onClearReport,
   thicknesses,
   grades,
   addingTo,
@@ -804,13 +844,52 @@ function ProgramList({
                 >
                   <span style={{ fontWeight: 700, fontSize: 15 }}>{p.program_number}</span>
                   <span style={{ color: C.muted, fontSize: 14 }}>{p.material}</span>
+                  {p.sheet_name && <span style={{ color: C.muted, fontSize: 14 }}>{p.sheet_name}</span>}
                   <span style={{ flex: 1, minWidth: 0, color: C.muted, fontSize: 14 }}>{jobsText}</span>
+                  {p.reported_at && (
+                    <span style={{ ...S.chip, color: C.danger, border: `1px solid ${C.danger}`, fontWeight: 700 }}>
+                      Stopped
+                    </span>
+                  )}
                   {p.is_complete && <span style={{ ...S.chip, color: C.accentFinished, borderColor: C.accentFinished }}>Cut</span>}
                   <ChevronDown size={16} style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform .15s", flexShrink: 0 }} />
                 </button>
 
                 {expanded && (
                   <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 10 }}>
+                    {p.reported_at && (
+                      <div
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: 6,
+                          border: `1px solid ${C.danger}`,
+                          background: C.dangerTint,
+                          color: C.danger,
+                          fontSize: 14,
+                        }}
+                      >
+                        <b>Stopped at the machine</b> — {p.reported_reason}
+                        {p.reported_offcut_length && p.reported_offcut_width ? (
+                          <> · nest on offcut {p.reported_offcut_length} × {p.reported_offcut_width}</>
+                        ) : null}
+                        {p.reported_plate ? <> · use plate {p.reported_plate}</> : null}
+                        <div style={{ ...S.roleHint, color: C.danger }}>
+                          {p.reported_by}
+                          {p.reported_at ? ` — ${new Date(p.reported_at).toLocaleString()}` : ""}
+                        </div>
+                        {canManage && onClearReport && (
+                          <button
+                            type="button"
+                            className="stk-btn"
+                            style={{ ...S.reqActionBtn, marginTop: 8 }}
+                            onClick={() => onClearReport(p)}
+                            title="Sorted — take the stop off"
+                          >
+                            Sorted
+                          </button>
+                        )}
+                      </div>
+                    )}
                     {canManage && (
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <div style={{ flex: "1 1 150px" }}>

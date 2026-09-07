@@ -3343,7 +3343,7 @@ export default function StockControl() {
   // can work out which job stages to change from fresh data before any of
   // it reaches the screen.
   async function loadLaserRaw() {
-    const [programs, links, processes, shortages, documents, allocations, quoteItems] = await Promise.all([
+    const [programs, links, processes, shortages, documents, allocations, quoteItems, events] = await Promise.all([
       fetchAllRows("laser_programs", { orderBy: "created_at", ascending: false }),
       fetchAllRows("laser_program_jobs", { orderBy: "created_at" }),
       fetchAllRows("job_processes", {
@@ -3354,6 +3354,9 @@ export default function StockControl() {
       fetchAllRows("job_documents", { orderBy: "created_at", ascending: false }),
       fetchAllRows("job_allocations", { orderBy: "created_at" }),
       fetchAllRows("job_quote_items", { select: "id, job_id, description, linked_item_id" }),
+      // Notes and stop reports live in the event log, and both screens
+      // show them, so it has to come back with everything else.
+      fetchAllRows("laser_program_events", { orderBy: "acted_at" }),
     ]);
     return {
       programs: programs || [],
@@ -3363,7 +3366,119 @@ export default function StockControl() {
       documents: documents || [],
       allocations: allocations || [],
       quoteItems: quoteItems || [],
+      events: events || [],
     };
+  }
+
+  // A note on a program. Either side can leave one -- the operator
+  // saying what he found, Prince answering it -- and every one is kept,
+  // so a program carries the whole conversation rather than the last
+  // thing somebody typed.
+  async function addProgramNote(program, text) {
+    if (!supabase || !text.trim()) return false;
+    try {
+      await logProgramEvent(program.id, "note", text.trim());
+      await fetchLaserData();
+      return true;
+    } catch (err) {
+      console.error("Failed to add the note:", err);
+      alert("That note didn't save — check your signal and try again.");
+      return false;
+    }
+  }
+
+  // The operator hit something he cannot get past. The program stays on
+  // his list -- he may still cut it once somebody sorts the material out
+  // -- but it is marked, and the people who nest are told.
+  async function reportProgram(program, { reason, offcutLength, offcutWidth, plate }) {
+    if (!supabase || !reason.trim()) return false;
+    setProgramBusyId(program.id);
+    try {
+      const { error } = await supabase
+        .from("laser_programs")
+        .update({
+          reported_reason: reason.trim(),
+          reported_offcut_length: offcutLength ? Number(offcutLength) : null,
+          reported_offcut_width: offcutWidth ? Number(offcutWidth) : null,
+          reported_plate: plate || null,
+          reported_by: roleLabel,
+          reported_at: new Date().toISOString(),
+        })
+        .eq("id", program.id);
+      if (error) throw error;
+
+      const offcut = offcutLength && offcutWidth ? `${offcutLength} x ${offcutWidth}` : "";
+      const extra = [offcut && `offcut ${offcut}`, plate && `plate ${plate}`].filter(Boolean).join(", ");
+      await logProgramEvent(program.id, "stopped", reason.trim() + (extra ? ` (${extra})` : ""));
+
+      // Sent to whoever nests, not to Prince by name -- it still has to
+      // reach somebody when he is on leave.
+      const nesters = (people || []).filter(
+        (pn) => pn.isAdmin || (pn.allowedProcessTypes || []).some(isPlateNestingProcess)
+      );
+      const firstJob = (laserData?.links || []).find((l) => l.program_id === program.id);
+      const job = firstJob ? (jobsList || []).find((j) => j.id === firstJob.job_id) : null;
+      if (nesters.length && job) {
+        // insert() hands back an error rather than throwing one, so an
+        // unchecked call fails in complete silence -- which is exactly how
+        // this went out the first time.
+        const { error: noteError } = await supabase.from("job_notifications").insert(
+          nesters.map((pn) => ({
+            job_id: job.id,
+            job_number: job.job_number,
+            // Required by the table, and delivered on: notifications also
+            // reach a job's own sales rep, and a stopped program is
+            // squarely their problem too.
+            sales_rep: job.sales_rep || roleLabel,
+            recipient_id: pn.id,
+            message:
+              `Program ${program.program_number} stopped by ${roleLabel}: ${reason.trim()}` +
+              (extra ? ` — ${extra}` : ""),
+          }))
+        );
+        // Deliberately not fatal. By this point the report is saved and
+        // showing on both screens -- telling the operator it failed would
+        // be a lie, and he would send it again. Only the alert is missing,
+        // and that is what the message says.
+        if (noteError) {
+          console.error("The stop report saved, but nobody could be told:", noteError);
+          alert("Reported — but the notification didn't go out. Tell whoever nests directly.");
+        }
+      }
+      await fetchLaserData();
+      setProgramBusyId(null);
+      return true;
+    } catch (err) {
+      console.error("Failed to report the program:", err);
+      alert("That report didn't save — check your signal and try again.");
+      setProgramBusyId(null);
+      return false;
+    }
+  }
+
+  async function clearProgramReport(program) {
+    if (!supabase) return;
+    setProgramBusyId(program.id);
+    try {
+      const { error } = await supabase
+        .from("laser_programs")
+        .update({
+          reported_reason: null,
+          reported_offcut_length: null,
+          reported_offcut_width: null,
+          reported_plate: null,
+          reported_by: null,
+          reported_at: null,
+        })
+        .eq("id", program.id);
+      if (error) throw error;
+      await logProgramEvent(program.id, "report cleared", program.program_number);
+      await fetchLaserData();
+    } catch (err) {
+      console.error("Failed to clear the report:", err);
+      alert("That didn't save — check your signal and try again.");
+    }
+    setProgramBusyId(null);
   }
 
   async function fetchLaserData() {
@@ -3385,6 +3500,7 @@ export default function StockControl() {
         documents: [],
         allocations: [],
         quoteItems: [],
+        events: [],
       });
     }
   }
@@ -3548,12 +3664,12 @@ export default function StockControl() {
     }
   }
 
-  async function createLaserProgram({ program_number, material, machine, jobs }) {
+  async function createLaserProgram({ program_number, material, machine, sheet_name, jobs }) {
     if (!supabase) return false;
     try {
       const { data, error } = await supabase
         .from("laser_programs")
-        .insert({ program_number, material, machine, created_by: roleLabel })
+        .insert({ program_number, material, machine, sheet_name: sheet_name || null, created_by: roleLabel })
         .select("id")
         .single();
       if (error) throw error;
@@ -9963,7 +10079,9 @@ export default function StockControl() {
                     candidates={candidates}
                     thicknesses={master.laserThicknesses || []}
                     grades={(master.grades || []).map((g) => g.shortName || g.name)}
+                    sheetNames={master.sheetNames || []}
                     canManage={canNest}
+                    onClearReport={clearProgramReport}
                     onCreateProgram={createLaserProgram}
                     onCancelProgram={cancelLaserProgram}
                     onAddJobToProgram={addJobToLaserProgram}
@@ -9988,8 +10106,11 @@ export default function StockControl() {
                   <CutList
                     programs={programs}
                     thicknesses={master.laserThicknesses || []}
+                    events={laserData ? laserData.events : []}
                     canCut={canCut}
                     onToggleCut={toggleProgramCut}
+                    onReport={reportProgram}
+                    onAddNote={addProgramNote}
                     busyId={programBusyId}
                   />
                 ) : (

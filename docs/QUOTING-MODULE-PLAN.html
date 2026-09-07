@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Quoting module — plan</title>
+<style>
+  :root { --ink:#1a1a1a; --soft:#5a5a5a; --line:#c8c8c8; --tint:#f4f4f2; --accent:#8a5a00; }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:28px 22px 60px;
+    font:16px/1.6 Georgia,"Times New Roman",serif;
+    color:var(--ink); background:#fff;
+    max-width:900px; margin-inline:auto;
+  }
+  h1 { font-size:30px; margin:0 0 4px; line-height:1.2; }
+  h2 { font-size:21px; margin:34px 0 10px; padding-bottom:5px; border-bottom:2px solid var(--ink); }
+  h3 { font-size:17px; margin:22px 0 6px; }
+  .sub { color:var(--soft); font-style:italic; margin:0 0 24px; }
+  p, li { margin:0 0 10px; }
+  ul, ol { margin:0 0 14px; padding-left:22px; }
+  table { width:100%; border-collapse:collapse; margin:12px 0 18px; font-size:14.5px; }
+  th, td { border:1px solid var(--line); padding:6px 9px; text-align:left; vertical-align:top; }
+  th { background:var(--tint); font-weight:bold; }
+  code { font:14px ui-monospace,Consolas,monospace; background:var(--tint); padding:1px 4px; border-radius:3px; }
+  .note { border-left:4px solid var(--accent); background:var(--tint); padding:10px 14px; margin:14px 0; }
+  .stage { border:1px solid var(--line); padding:10px 14px; margin:0 0 10px; }
+  .stage b { display:block; margin-bottom:3px; }
+  footer { margin-top:40px; padding-top:12px; border-top:1px solid var(--line); color:var(--soft); font-size:13.5px; }
+
+  @media print {
+    body { padding:0; font-size:11.5pt; max-width:none; }
+    h1 { font-size:22pt; }
+    h2 { font-size:15pt; margin-top:20pt; page-break-after:avoid; }
+    h3 { font-size:12.5pt; page-break-after:avoid; }
+    table, .stage, .note { page-break-inside:avoid; }
+    tr { page-break-inside:avoid; }
+    @page { margin:16mm 14mm; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Quoting module — plan</h1>
+<p class="sub">Written 6 September 2026. Planning only; nothing has been built.</p>
+
+<p>This describes adding quoting to Stock Control so it replaces the Excel costing workbook. It is written to be read by you, not by a programmer.</p>
+
+<h2>1. What already exists that quoting can reuse</h2>
+<p>Quite a lot, and more than expected.</p>
+
+<h3>A material costing engine, already working</h3>
+<p>The app does not merely store prices — it works cost out from the size of a thing:</p>
+<table>
+  <tr><th>Kind of stock</th><th>How cost is worked out</th><th>Where the rate is set</th></tr>
+  <tr><td>Plate &amp; sheet</td><td>weight from length × width × thickness, then × R/kg</td><td>Stock Manager → Grades</td></tr>
+  <tr><td>Structural</td><td>metres × R/m</td><td>Stock Manager → Sections</td></tr>
+  <tr><td>CNC bar</td><td>weight from diameter and length, then × R/kg</td><td>Stock Manager → CNC Grades</td></tr>
+  <tr><td>Stores, fasteners, customer parts</td><td>price each, held on the item</td><td>the item itself</td></tr>
+</table>
+<p>This is the same maths your <b>KG PRICE</b> sheet does by hand. Quoting can call it rather than repeat it.</p>
+
+<h3>The rest</h3>
+<ul>
+  <li><b>Customer parts with part numbers and prices.</b> The Stock Manager tab still called "Stock Codes" now edits customer stock items. This is what a quote line picks from.</li>
+  <li><b>Jobs already have quote lines.</b> <code>job_quote_items</code> holds description, quantity, unit price and a link to a stock item, and already drives per-item production tracking and invoicing. An accepted quote's lines land here, so nothing downstream changes.</li>
+  <li><b>The document machinery.</b> Purchase orders build a PDF, upload it, record it and show it. Quotes use the same path.</li>
+  <li><b>Numbering.</b> A counters table issues the next PO and job number. Quote numbers join it.</li>
+  <li><b>Permissions.</b> Every screen is gated by a per-person tick list. Quoting adds its own.</li>
+  <li><b>The screen pattern.</b> Compact list, tap a row, full detail opens — as Jobs, Production and Assets already do.</li>
+</ul>
+<div class="note"><b>One thing that is not there.</b> Nothing in the app knows about hours or hourly rates. Laser cutting time, welding hours, CNC seconds and setup charges are all new.</div>
+
+<h2>2. What the Excel workbook actually does</h2>
+<p>Read from <code>ERS QU226339</code>. Nine sheets, in three layers.</p>
+
+<h3>The take-off sheets — where the work is measured</h3>
+<ul>
+  <li><b>STRUCTURAL-01 / -02</b> — one block per material, holding the material cost, a selling factor, and the laser settings: <b>rate per metre (30), pierce charge (5), handling (8), price per hour (1500)</b>, plus a <b>thickness-to-cutting-speed table</b> (1.2mm cuts at 18 m/min, 3mm at 8, 6mm at 3.5, 12mm at 0.6). Each row is a part.</li>
+  <li><b>CNC</b> — three machine rates (<b>750, 500 and 350 per hour</b>) plus a <b>setup charge of 750</b>, converted to a cost per second. Each row is a turned part.</li>
+  <li><b>KG PRICE</b> — cut-to-size plate priced by weight, at a rate per kg.</li>
+</ul>
+
+<h3>The costing sheet — where it is priced</h3>
+<p><b>QUO-01</b> breaks the quote into numbered items (1, 2, 3…), each with up to eleven cost lines beneath it (1.1, 1.2, 1.3…). The standard lines are <b>Laser, Structural and Welding</b>. Every line carries a unit (sum, ea, m, m², kg or hr), a quantity, a rate, an amount, a <b>cost</b>, a <b>markup %</b> and a resulting sell figure.</p>
+
+<h3>The outputs</h3>
+<ul>
+  <li><b>ERS QUOTE</b> — the customer-facing page: bill-to details, quote number, date, valid-until, representative, priced lines, terms, banking, subtotal, VAT and total.</li>
+  <li><b>MAT ORDER</b> — what to buy, by quote number and project.</li>
+  <li><b>CUTTING LIST-01 / -02</b> — parts to cut, with stock lengths.</li>
+</ul>
+<div class="note"><b>The shape to keep:</b> a quote is a small number of things you sell, and underneath each one a handful of cost lines that add up to it. That is the structure the tables follow.</div>
+
+<h2>3. Proposed tables</h2>
+<p>Eight new tables, all prefixed <code>quote_</code> so the module is obvious and can be removed cleanly.</p>
+
+<h3>quotes — one row per quote</h3>
+<table>
+  <tr><th>Field</th><th>Meaning</th></tr>
+  <tr><td>quote_number</td><td>QU-0001, issued by the counters table</td></tr>
+  <tr><td>revision, supersedes_id</td><td>A, B, C… and the revision it replaces</td></tr>
+  <tr><td>customer, contact_name / email / phone</td><td>who it goes to</td></tr>
+  <tr><td>project</td><td>free text, appears on the document</td></tr>
+  <tr><td>status</td><td>draft, sent, accepted, lost, expired</td></tr>
+  <tr><td>sales_rep_id</td><td>locked to whoever created it</td></tr>
+  <tr><td>quote_date, valid_until, delivery_lead_time</td><td>dates and lead time</td></tr>
+  <tr><td>custom_instructions, terms_text, vat_rate</td><td>what prints at the bottom</td></tr>
+  <tr><td>notes</td><td>internal, never printed</td></tr>
+  <tr><td>approved_by, approved_at</td><td>only used if approval is switched on</td></tr>
+  <tr><td>converted_job_id</td><td>the job it became</td></tr>
+</table>
+
+<h3>quote_items — the things you are selling</h3>
+<table>
+  <tr><th>Field</th><th>Meaning</th></tr>
+  <tr><td>description, unit, qty, sell_rate</td><td>what the customer sees</td></tr>
+  <tr><td>cost_total, sell_total</td><td>worked out from the cost lines</td></tr>
+  <tr><td>linked_item_id</td><td>the stock item, if a catalogue part</td></tr>
+</table>
+
+<h3>quote_cost_lines — the processes under each item</h3>
+<table>
+  <tr><th>Field</th><th>Meaning</th></tr>
+  <tr><td>quote_process_id</td><td>which of <b>your</b> processes this is — points at the master file below</td></tr>
+  <tr><td>process_name, calculator</td><td>copied in at the time, so an old quote still reads correctly after you rename or retire a process</td></tr>
+  <tr><td>inputs</td><td><b>the numbers that process asked for</b> — see below</td></tr>
+  <tr><td>unit, qty, cost_rate</td><td>what it costs us</td></tr>
+  <tr><td>markup_percent</td><td>added to get the sell figure</td></tr>
+  <tr><td>cost_amount, sell_amount</td><td>the result</td></tr>
+  <tr><td>linked_item_id</td><td>the stock item, when the line came from Stores</td></tr>
+</table>
+<div class="note"><b>Why <code>inputs</code> is one field rather than many columns.</b> Each process asks for different things — laser wants cut length, thickness and pierces; CNC wants billet diameter, finished length and parts per metre. Giving every process its own columns would mean a table thirty columns wide, mostly empty, and a new column every time a process is added. Instead each line keeps its own answers in one field, shaped by whichever process it is.<br><br>The trade-off, plainly: it keeps the table simple and makes a seventh process easy, but the database itself cannot check those numbers — the app has to. For a quote, where the money figures are stored separately as real columns, that is the right way round.</div>
+
+<h3>assemblies and assembly_lines — saved sets of parts</h3>
+<p>New, and worth its own explanation. An <b>assembly</b> is a quote item you have saved to use again: a set of parts and the processes that go with them, kept under a code so repeat work is picked rather than rebuilt.</p>
+<ul>
+  <li><b>assemblies</b> — code, name, description, customer (or blank for anything), notes, created by, active.</li>
+  <li><b>assembly_lines</b> — one row per part or process inside it, the same shape as a quote cost line. Building an assembly and building a quote item are then the same job.</li>
+</ul>
+<div class="note"><b>Used on a quote, an assembly is copied in, not linked to.</b> Choosing one drops its parts and processes into the item as ordinary lines you can then change. It does not stay tied to the assembly afterwards.<br><br>That matters more than it sounds. If quotes stayed linked, editing an assembly next year would silently change what a customer was quoted last year. Copying means an old quote always says what it said, and an assembly is free to improve.</div>
+<p><b>Where it lives:</b> its own tab in Stock Manager beside Stock Codes, as you asked.</p>
+
+<h3>quote_processes — your own list of processes</h3>
+<p>A master file in Stock Manager, separate from Job Process Types and editable in the same way. This is what the <b>Add process</b> menu reads.</p>
+<table>
+  <tr><th>Field</th><th>Meaning</th></tr>
+  <tr><td>name</td><td>what you call it — rename freely</td></tr>
+  <tr><td>calculator</td><td>which maths it uses, picked from the list below</td></tr>
+  <tr><td>sort_order</td><td>the order it appears in the menu</td></tr>
+  <tr><td>default_markup</td><td>optional, so a process can carry its usual margin</td></tr>
+  <tr><td>maps_to_job_process</td><td>which job stage it becomes, if the quote turns into a job</td></tr>
+  <tr><td>active</td><td>retire one without deleting history</td></tr>
+</table>
+<p><b>The names are yours; the maths is chosen.</b> The calculators the code knows are fixed:</p>
+<table>
+  <tr><th>Calculator</th><th>Asks for</th></tr>
+  <tr><td>laser_build</td><td>cut length, thickness, pierces — uses the speed table</td></tr>
+  <tr><td>flat_price</td><td>just a price, quoted off SigmaNest or judgement</td></tr>
+  <tr><td>per_metre</td><td>metres × a rate</td></tr>
+  <tr><td>per_weight</td><td>kilograms × a rate</td></tr>
+  <tr><td>rate_times_count</td><td>a rate and a count — R20 across 20 connections</td></tr>
+  <tr><td>per_area</td><td>square metres × a rate</td></tr>
+  <tr><td>cnc_seconds</td><td>billet, length, parts per metre, machine</td></tr>
+  <tr><td>from_stores</td><td>pick a stock item, take its cost</td></tr>
+  <tr><td>supplier_price</td><td>a price quoted to you, marked up</td></tr>
+</table>
+<div class="note">So you can add <b>Plasma Cutting</b> tomorrow, set it to <i>per metre</i>, give it a rate, and use it — without anyone touching code. What you cannot do is invent new maths, which is the right line to draw.<br><br><b>This is also the fix for the naming problem.</b> The calculator is stored on the row, not worked out from the name. Rename "Welding" to "Weld Shop" and it keeps costing exactly as before. Nothing in quoting ever matches on a name.</div>
+<p><b>Ships with your six</b> — Laser, Tube Laser, Welding, Structural, CNC, Surface Finish — plus From Stores, already pointed at the right calculators. You change them from there.</p>
+
+<h3>quote_rates, quote_cutting_speeds, quote_documents</h3>
+<ul>
+  <li><b>quote_rates</b> — everything currently buried in the spreadsheet: laser rate per metre, pierce, handling, price per hour, the three CNC rates, setup, welding per hour.</li>
+  <li><b>quote_cutting_speeds</b> — your 1.2mm → 18 m/min table, one row each.</li>
+  <li><b>quote_documents</b> — which quote, which revision, when, by whom, where the file is.</li>
+</ul>
+<p><b>How it links to what exists:</b> customer from your customer list, <code>linked_item_id</code> to real stock items, <code>sales_rep_id</code> to a real person, <code>converted_job_id</code> to the job. Nothing existing is altered.</p>
+
+<h2>4. Screens and flow</h2>
+<p>Compact list, tap to open. No expanding cards.</p>
+<ul>
+  <li><b>Quotes list</b> — one line each: quote number, customer, project, total, status, date. Search across all of it.</li>
+  <li><b>Quote detail</b> — a full screen like a job, with four tabs: <b>Details</b>, <b>Items</b>, <b>Costing</b> (your QUO-01, cost and sell side by side), <b>Document</b>.</li>
+  <li><b>Items</b> — <b>Add item</b> asks for a name and a quantity, nothing else. Each item shows its total and a <b>Build</b> button.</li>
+  <li><b>Rates</b> — a Stock Manager section for every rate and the cutting speed table, so the numbers are yours to change without anyone editing code.</li>
+</ul>
+
+<h3>Build — the heart of it</h3>
+<p>Pressing <b>Build</b> on an item opens that item's working. It lists the processes already on it and offers <b>Add process</b> — which reads whatever is in your <b>Quote Processes</b> list, shipping with <b>Laser · Tube Laser · Welding · Structural · CNC · Surface Finish</b> and <b>From Stores</b>, and yours to add to.</p>
+<p><b>Each one opens its own screen</b>, because they do not ask the same questions:</p>
+<table>
+  <tr><th>Process</th><th>How it is priced</th></tr>
+  <tr><td><b>Laser</b></td><td><b>Two ways.</b> Either <i>build it</i> — cut length, thickness and pierces, using the cutting speed table exactly as the spreadsheet does — or simply <i>enter a price</i>, quoted off SigmaNest. Charged as a sum or as each.</td></tr>
+  <tr><td><b>Tube Laser</b></td><td>Its own rate. Tube is not priced like flat.</td></tr>
+  <tr><td><b>Structural</b></td><td>Section, length and quantity → metres × R/m from your Sections list.</td></tr>
+  <tr><td><b>Welding</b></td><td><b>Three ways</b>, whichever suits the part: per metre of weld, by weight, or a rate × a count — R20 a connection point across 20 points.</td></tr>
+  <tr><td><b>CNC</b></td><td>Billet diameter, finished length, parts per metre and machine → seconds × that machine's rate, plus setup.</td></tr>
+  <tr><td><b>Surface Finish</b></td><td><b>Three ways</b>: per square metre, per kilogram, or a price straight from the supplier when it is bought in.</td></tr>
+  <tr><td><b>From Stores</b></td><td>Pick the stock item; it brings its cost. At quote stage that is all it does.</td></tr>
+</table>
+<p>Each screen ends the same way: a cost, <b>its own markup</b>, and a sell figure that goes back onto the item. So the item's total is the sum of its processes, and the quote total is the sum of its items — the same walk-up your spreadsheet does, but each step on its own screen instead of across nine tabs.</p>
+<p>An item can carry the same process more than once — two laser lines for two different thicknesses is normal.</p>
+<div class="note"><b>Where several pricing bases exist</b>, the screen asks which basis first, then shows only the fields that basis needs. Welding by weight asks for kilos; welding by connection asks for a rate and a count. Nothing irrelevant is ever on screen.<br><br><b>Stores lines do more later.</b> On the quote a stores line is only a cost. When the quote becomes a job, those lines become the job's material requirements — so the parts you priced are the parts the job expects, without anyone re-entering them.</div>
+<p><b>The flow:</b> draft → add items → build each item → generate PDF → mark sent → <b>Accepted</b> creates a job, or <b>Lost</b> closes it. A revision copies the quote to Rev B and links back.</p>
+
+<h2>5. Who can do what</h2>
+<table>
+  <tr><th>Tick</th><th>Allows</th></tr>
+  <tr><td>Quoting</td><td>See the tab and all quotes</td></tr>
+  <tr><td>Create quotes</td><td>Raise and edit their own</td></tr>
+  <tr><td>Approve quotes</td><td>Sign off before sending — only checked if approval is on</td></tr>
+  <tr><td>Convert to job</td><td>Turn an accepted quote into a job</td></tr>
+</table>
+<p>Sales people see every quote, not just their own, as you asked. The rep stays whoever created it and cannot be changed, exactly as purchase orders work. <b>Approval</b> is a per-person tick: a rep without it needs someone else to sign off. If nobody has the tick, approval is effectively off.</p>
+<p><b>Editing after sending is blocked.</b> Change a sent quote by raising a revision, so what the customer received still exists.</p>
+
+<h2>6. The quote document</h2>
+<p>Same machinery as the purchase order — build the PDF in the browser, upload it, record it, show it. No new mechanism. What differs:</p>
+<ul>
+  <li>Bill-to block with the customer contact</li>
+  <li>Quote number <b>and revision</b>, date, valid until, representative</li>
+  <li>Lines: item number, description, unit, quantity, rate, amount</li>
+  <li>Subtotal, VAT and total</li>
+  <li><b>Terms and conditions</b>, banking details, validity, delivery lead time, and your <b>custom instructions</b> paragraph</li>
+  <li>Your logo, from company details, as every document now does</li>
+</ul>
+
+<h2>7. Feature toggle</h2>
+<p>A <b>deployment setting</b>, as you asked: one setting, <code>VITE_QUOTING_ENABLED</code>, set per Vercel project. When off, the Quotes tab does not appear, the permission ticks do not appear, and nothing in the quoting folder is loaded by the browser at all.</p>
+<p>Because each customer has their own deployment, quoting is on for East Rand Supplies and absent everywhere else. It cannot be switched on from inside the app — which is the point of putting it there rather than in the database. The tables can sit unused in every project; empty tables cost nothing.</p>
+
+<h2>8. Build order</h2>
+<div class="stage"><b>Stage 1 — a quote you can send</b>Quotes list, quote detail, add item (name and quantity), a typed price per item, PDF with terms and totals, statuses. No Build screen yet. You could raise and issue a quote without Excel, but would still work the price out yourself.</div>
+<div class="stage"><b>Stage 2 — Build, with the two easy processes</b>The <b>Quote Processes</b> master file in Stock Manager first, since Add process reads it. Then the Build screen and the first two calculators: <b>From Stores</b> (pick a stock item, take its price) and <b>Welding</b> (hours × rate). Both are simple, and between them they prove the whole shape — item, processes underneath, markup, totals rolling up. Everything after this is another module of the same kind.</div>
+<div class="stage"><b>Stage 3 — the real calculators</b><b>Structural</b> (metres × R/m, already in the app), then <b>Laser</b> (cutting speed by thickness, rate per metre, pierces, handling), then <b>CNC</b> (seconds by machine, plus setup), then <b>Tube Laser</b> and <b>Surface Finish</b>. Rates and the cutting speed table move into Stock Manager first, so you own the numbers before the calculators use them. This is the stage that fully replaces the workbook, and it is deliberately last because it is the one that has to be right.</div>
+<div class="stage"><b>Stage 4 — quote to job</b>Accepted quote creates a job: items become job quote items, the process stages come from the processes used, and <b>stores lines become the job's material requirements</b>. Job numbering stays independent.</div>
+<div class="stage"><b>Stage 5 — assemblies</b>Save a built item as an assembly, a Stock Manager tab to manage them, and pick-an-assembly when adding a quote item. Deliberately after Stage 4: an assembly is a saved quote item, so the thing being saved has to be right first. Building it earlier would mean saving a shape still being changed.</div>
+<div class="stage"><b>Stage 6 — the extras</b>Revisions with history, material order list, cutting list, quote-to-order reporting.</div>
+<p>Each stage is usable on its own and tested on practice before going live.</p>
+
+<h2>9. Risks and what would need changing</h2>
+<p><b>Nothing existing needs altering.</b> New tables, new folder, new tab. The only shared things are the customer list, stock items, people and the counters table, and quoting only reads them.</p>
+<ul>
+  <li><b>This is a big module.</b> Stage 3 holds the real value and is the hardest. If it stalls you would issue quotes in the app and cost them in Excel, which is worse than either alone. Stage 1 is shaped to be useful on its own in case that happens.</li>
+  <li><b>App.jsx is 16,713 lines.</b> Quoting must not go in it — its own folder from the first line of code.</li>
+  <li><b>Two quote templates are in circulation.</b> The app's existing importer expects the description header on row 21; the workbook read here has it on row 12. That importer needs checking against real files.</li>
+  <li><b>Rates change.</b> The tables store the resulting numbers on the quote, not a live link, so an old quote keeps saying what it said. Re-pricing is deliberate.</li>
+  <li><b>Your database rules are open.</b> Every table is readable by any signed-in account, and quotes hold your margins. The new tables would start with the same weakness — this makes the security work already on your list more pressing, not less.</li>
+  <li><b>Weight maths lives in App.jsx.</b> Quoting needs it, so it moves to a shared file first. Small, mechanical, worth doing anyway.</li>
+</ul>
+
+<h2>10. Decisions made</h2>
+<p>Settled on 6 September 2026.</p>
+<table>
+  <tr><th>Question</th><th>Decision</th></tr>
+  <tr><td>Quote numbers</td><td><b>Start fresh at QU-0001.</b> The old QU226339 series stays with the workbook.</td></tr>
+  <tr><td>The customer's PDF</td><td>Shows the <b>sell price only</b>. No cost or margin on their copy.</td></tr>
+  <tr><td>Revisions</td><td><b>Same quote number</b>, shown as "QU-0001 Rev B".</td></tr>
+  <tr><td>Expiry</td><td>Marks itself <b>expired automatically</b> once past valid-until.</td></tr>
+  <tr><td>Lost quotes</td><td><b>A reason is recorded</b> — price, lead time, no reply.</td></tr>
+  <tr><td>Terms and banking</td><td><b>One set</b> from company settings, editable on an individual quote.</td></tr>
+  <tr><td>Seeing cost and margin</td><td><b>A tick in User Manager, for sales people only.</b> Others can open a quote and see the sell price, not what it cost or earns.</td></tr>
+  <tr><td>Converting to a job</td><td><b>Any accepted quote.</b> Approval is not required first.</td></tr>
+  <tr><td>The old workbook</td><td><b>The import stays permanently</b> — not a changeover crutch, a way in that never goes away.</td></tr>
+  <tr><td>Assembly contents</td><td>Saving one captures <b>the processes as well as the parts</b> — the whole build.</td></tr>
+  <tr><td>Assemblies on jobs</td><td><b>Yes</b>, usable directly on a job, not only through a quote.</td></tr>
+  <tr><td>Nested assemblies</td><td><b>No.</b> One level to begin with.</td></tr>
+  <tr><td>Assembly price</td><td><b>Carries a stored price.</b> It changes only when something inside is deliberately changed — it does not drift as rates move.</td></tr>
+  <tr><td>Assembly scope</td><td><b>Per customer.</b></td></tr>
+  <tr><td>Markup</td><td><b>Per line</b>, not once per item.</td></tr>
+</table>
+<div class="note"><b>On the assembly price, since it is subtle.</b> An assembly holds the price it was last costed at. Opening one and changing a part re-costs it and stores the new figure. Rates moving in the background do not touch it. So a repeat order quotes at the price you last agreed — but the screen will show when the parts inside would cost something different today, so you can choose to re-cost rather than be surprised.</div>
+
+<h2>11. The two process lists</h2>
+<p>Settled: <b>two separate lists, both editable, neither hard-coded.</b></p>
+<table>
+  <tr><th></th><th>Job Process Types</th><th>Quote Processes</th></tr>
+  <tr><td>Where</td><td>Stock Manager, as today</td><td>Stock Manager, new tab</td></tr>
+  <tr><td>What it drives</td><td>the factory flow and the Production tab</td><td>the Add process menu on a quote</td></tr>
+  <tr><td>Order matters</td><td>yes — it is the flow work moves through</td><td>only for the menu</td></tr>
+  <tr><td>Editable</td><td>yes, unchanged</td><td>yes</td></tr>
+</table>
+<p>Nothing about the existing job list changes. Quoting does not read it, rename it, or depend on it.</p>
+<p><b>They meet in one place only:</b> when an accepted quote becomes a job, each quote process looks at its <code>maps_to_job_process</code> field to decide which stage the job should get. A quote process with nothing mapped simply adds no stage. That mapping is a pointer you set once, not a name match, so renaming either side leaves it working.</p>
+<div class="note"><b>Why this is safer than hard-coding.</b> The fault that bit us three times today was code deciding what something <i>was</i> by reading its name. Storing the calculator on the row removes that entirely — from quoting at least. The job side keeps its existing name-matching, which is a known weakness already on your list, and quoting neither makes it worse nor depends on it.</div>
+
+<footer>Stock Control — East Rand Supplies · Quoting module plan · 6 September 2026 · planning document, nothing built</footer>
+
+</body>
+</html>
