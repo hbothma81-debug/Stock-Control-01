@@ -1047,7 +1047,9 @@ export default function StockControl() {
   const [showNewJob, setShowNewJob] = useState(false);
   const [newStockItemModal, setNewStockItemModal] = useState(null);
   const [markInvoicedModal, setMarkInvoicedModal] = useState(null);
-  const [invoiceQtyInputs, setInvoiceQtyInputs] = useState({}); // { [quoteItemId]: "3" }
+  const [invoiceQtyInputs, setInvoiceQtyInputs] = useState({});
+  const [newItemForm, setNewItemForm] = useState({ description: "", qty: "", unitPrice: "" });
+  const [jobHistoryOpen, setJobHistoryOpen] = useState(false); // { [quoteItemId]: "3" }
   const [deliveryNoteBatchModal, setDeliveryNoteBatchModal] = useState(null);
   const [copyJobModal, setCopyJobModal] = useState(null);
   const [editProcessesModal, setEditProcessesModal] = useState(null); // { job, selected: Set<string> }
@@ -3085,12 +3087,13 @@ export default function StockControl() {
     setJobDetailTab("overview");
     setJobDetailLoading(true);
     try {
-      const [{ data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }, allocResult] = await Promise.all([
+      const [{ data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }, allocResult, eventsResult] = await Promise.all([
         supabase.from("job_processes").select("*").eq("job_id", job.id).order("sort_order"),
         supabase.from("job_documents").select("*").eq("job_id", job.id).order("created_at", { ascending: false }),
         supabase.from("job_quote_items").select("*").eq("job_id", job.id).order("sort_order"),
         supabase.from("delivery_notes").select("*").eq("job_id", job.id).order("created_at", { ascending: false }),
         supabase.from("job_allocations").select("*").eq("job_id", job.id).order("created_at"),
+        supabase.from("job_events").select("*").eq("job_id", job.id).order("acted_at", { ascending: false }),
       ]);
       if (procError) throw procError;
       if (docError) throw docError;
@@ -3101,7 +3104,15 @@ export default function StockControl() {
       // if the table is missing (migration not run yet) or unreadable.
       // Throwing here took the whole job detail down with it.
       if (allocResult.error) console.error("Failed to load allocations (job detail still shown):", allocResult.error);
-      setJobDetail({ job, processes: processes || [], documents: documents || [], quoteItems: quoteItems || [], deliveryNotes: deliveryNotes || [], allocations: allocResult.data || [] });
+      setJobDetail({
+        job,
+        processes: processes || [],
+        documents: documents || [],
+        quoteItems: quoteItems || [],
+        deliveryNotes: deliveryNotes || [],
+        allocations: allocResult.data || [],
+        events: eventsResult.data || [],
+      });
     } catch (err) {
       console.error("Failed to load job detail:", err);
       // Without this the modal simply never opens. Somebody taps a job,
@@ -4962,6 +4973,99 @@ export default function StockControl() {
     } catch (err) {
       console.error("Failed to copy job:", err);
       alert("Couldn't copy that job — check your connection and try again.");
+    }
+  }
+
+  // Every change to a job writes one of these. An editable job with no
+  // history is worse than one that cannot be edited at all -- a quantity
+  // can move and nobody can say who moved it.
+  async function logJobEvent(jobId, action, detail) {
+    const { error } = await supabase.from("job_events").insert({
+      job_id: jobId,
+      action,
+      detail: detail || "",
+      acted_by: roleLabel,
+      acted_by_id: currentUser?.id || null,
+    });
+    if (error) console.error("Couldn't record that change in the job history:", error);
+  }
+
+  async function addJobQuoteItem(job, { description, qty, unitPrice, linkedItemId }) {
+    if (!supabase || !description.trim() || !(Number(qty) > 0)) return false;
+    try {
+      const nextOrder = (jobDetail?.quoteItems || []).reduce((m, i) => Math.max(m, Number(i.sort_order) || 0), -1) + 1;
+      const { error } = await supabase.from("job_quote_items").insert({
+        job_id: job.id,
+        description: description.trim(),
+        qty: Number(qty),
+        unit_price: Number(unitPrice) || 0,
+        linked_item_id: linkedItemId || null,
+        sort_order: nextOrder,
+      });
+      if (error) throw error;
+      await logJobEvent(job.id, "item added", `${qty} × ${description.trim()}`);
+      await openJobDetail(job);
+      fetchJobs();
+      return true;
+    } catch (err) {
+      console.error("Failed to add the item:", err);
+      alert("That item didn't save — check your signal and try again.");
+      return false;
+    }
+  }
+
+  // A quantity cannot go below what has already been invoiced. The
+  // invoice is out; the numbers would stop matching and there would be
+  // no honest way to reconcile them.
+  async function updateJobQuoteItem(job, item, field, rawValue) {
+    if (!supabase) return;
+    const label = { description: "description", qty: "quantity", unit_price: "price" }[field] || field;
+    let value = field === "description" ? String(rawValue).trim() : Number(rawValue);
+    if (field === "description" && !value) return;
+    if (field !== "description" && !(value >= 0)) return;
+    if (String(item[field] ?? "") === String(value)) return;
+
+    if (field === "qty" && value < Number(item.qty_invoiced || 0)) {
+      alert(
+        `${item.qty_invoiced} of these have already been invoiced, so the quantity cannot go below ${item.qty_invoiced}.`
+      );
+      await openJobDetail(job);
+      return;
+    }
+
+    try {
+      const { error } = await supabase.from("job_quote_items").update({ [field]: value }).eq("id", item.id);
+      if (error) throw error;
+      await logJobEvent(job.id, "item changed", `${item.description} — ${label} ${item[field]} to ${value}`);
+      await openJobDetail(job);
+      fetchJobs();
+    } catch (err) {
+      console.error("Failed to change the item:", err);
+      alert("That change didn't save — check your signal and try again.");
+    }
+  }
+
+  async function removeJobQuoteItem(job, item) {
+    if (!supabase) return;
+    if (Number(item.qty_invoiced || 0) > 0) {
+      alert("Some of this has already been invoiced, so it cannot be removed. Change the quantity instead.");
+      return;
+    }
+    const hasNote = (jobDetail?.deliveryNotes || []).some((dn) => dn.quote_item_id === item.id);
+    if (hasNote) {
+      alert("This has a delivery note against it, so it cannot be removed. Change the quantity instead.");
+      return;
+    }
+    if (!window.confirm(`Remove "${item.description}" from this job?`)) return;
+    try {
+      const { error } = await supabase.from("job_quote_items").delete().eq("id", item.id);
+      if (error) throw error;
+      await logJobEvent(job.id, "item removed", `${item.qty} × ${item.description}`);
+      await openJobDetail(job);
+      fetchJobs();
+    } catch (err) {
+      console.error("Failed to remove the item:", err);
+      alert("That didn't save — check your signal and try again.");
     }
   }
 
@@ -15524,8 +15628,44 @@ export default function StockControl() {
                         )}
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
-                            <span style={{ fontSize: 14, fontWeight: 600 }}>{it.qty}×</span>
-                            {it.description}
+                            {canEditThisJob ? (
+                              <>
+                                {/* Typed straight over. The quantity refuses to go
+                                    below what has already been invoiced. */}
+                                <input
+                                  type="number"
+                                  min={Number(it.qty_invoiced || 0)}
+                                  step="0.01"
+                                  defaultValue={it.qty}
+                                  onBlur={(e) => updateJobQuoteItem(jobDetail.job, it, "qty", e.target.value)}
+                                  style={{ ...S.input, width: 62, fontSize: 14, padding: "4px 6px" }}
+                                  title={
+                                    Number(it.qty_invoiced || 0) > 0
+                                      ? `${it.qty_invoiced} already invoiced — cannot go below that`
+                                      : "Quantity"
+                                  }
+                                />
+                                <input
+                                  defaultValue={it.description}
+                                  onBlur={(e) => updateJobQuoteItem(jobDetail.job, it, "description", e.target.value)}
+                                  style={{ ...S.input, flex: 1, minWidth: 90, fontSize: 14, padding: "4px 6px" }}
+                                />
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  defaultValue={it.unit_price}
+                                  onBlur={(e) => updateJobQuoteItem(jobDetail.job, it, "unit_price", e.target.value)}
+                                  style={{ ...S.input, width: 84, fontSize: 14, padding: "4px 6px" }}
+                                  title="Price each"
+                                />
+                              </>
+                            ) : (
+                              <>
+                                <span style={{ fontSize: 14, fontWeight: 600 }}>{it.qty}×</span>
+                                {it.description}
+                              </>
+                            )}
                             <SavedCheck fieldKey={`quoteitem-${it.id}`} />
                             <SavedCheck fieldKey={`quoteitem-price-${it.id}`} />
                             {status === "out_external" && (
@@ -15579,6 +15719,19 @@ export default function StockControl() {
                             </div>
                           )}
                         </div>
+                        {canEditThisJob &&
+                          Number(it.qty_invoiced || 0) === 0 &&
+                          !jobDetail.deliveryNotes.some((dn) => dn.quote_item_id === it.id) && (
+                            <button
+                              type="button"
+                              className="stk-btn"
+                              style={S.managerDelete}
+                              onClick={() => removeJobQuoteItem(jobDetail.job, it)}
+                              title="Remove this item from the job"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
                         {remaining <= 0 && (
                           <span style={{ ...S.roleHint, color: jobDetail.job.status === "invoiced" ? C.accentFinished : C.accentRaw }}>
                             {jobDetail.job.status === "invoiced" ? "Invoiced" : "Invoice requested — awaiting accounts"}
@@ -15588,6 +15741,76 @@ export default function StockControl() {
                     );
                   })}
                 </div>
+
+                {canEditThisJob && (
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+                    <label style={S.label}>Add an item</label>
+                    <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        style={{ ...S.input, width: 68 }}
+                        value={newItemForm.qty}
+                        onChange={(e) => setNewItemForm((f) => ({ ...f, qty: e.target.value }))}
+                        placeholder="Qty"
+                      />
+                      <input
+                        style={{ ...S.input, flex: "1 1 160px" }}
+                        value={newItemForm.description}
+                        onChange={(e) => setNewItemForm((f) => ({ ...f, description: e.target.value }))}
+                        placeholder="What it is"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        style={{ ...S.input, width: 96 }}
+                        value={newItemForm.unitPrice}
+                        onChange={(e) => setNewItemForm((f) => ({ ...f, unitPrice: e.target.value }))}
+                        placeholder="R each"
+                      />
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={S.reqActionBtn}
+                        disabled={!newItemForm.description.trim() || !(Number(newItemForm.qty) > 0)}
+                        onClick={async () => {
+                          const ok = await addJobQuoteItem(jobDetail.job, newItemForm);
+                          if (ok) setNewItemForm({ description: "", qty: "", unitPrice: "" });
+                        }}
+                      >
+                        <Plus size={13} /> Add
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Every change is kept and none of it can be edited or
+                    deleted afterwards, by anyone. History somebody can
+                    rewrite is not history. */}
+                <Section
+                  title="History"
+                  defaultOpen={false}
+                  count={(jobDetail.events || []).length}
+                >
+                  {(jobDetail.events || []).length === 0 ? (
+                    <div style={S.empty}>Nothing has been changed on this job yet.</div>
+                  ) : (
+                    (jobDetail.events || []).map((e) => (
+                      <div key={e.id} style={{ marginBottom: 6 }}>
+                        <div style={{ fontSize: 14 }}>
+                          <b>{e.action}</b> — {e.detail}
+                        </div>
+                        <div style={S.roleHint}>
+                          {e.acted_by}
+                          {e.acted_at ? ` — ${new Date(e.acted_at).toLocaleString()}` : ""}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </Section>
+
                 {canEditThisJob && (
                   <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                     <button
