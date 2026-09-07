@@ -48,13 +48,13 @@ create unique index if not exists shifts_name_idx on public.shifts (lower(name))
 
 -- A day is either set or off. Half a pair is neither, and would leave the
 -- rule in stage two guessing.
-do $$ begin
+do $do$ begin
   alter table public.shifts add constraint shifts_pairs_complete check (
     (weekday_start  is null) = (weekday_end  is null) and
     (saturday_start is null) = (saturday_end is null) and
     (sunday_start   is null) = (sunday_end   is null)
   );
-exception when duplicate_object then null; end $$;
+exception when duplicate_object then null; end $do$;
 
 
 -- ============ 2. Who is on what ============
@@ -99,7 +99,7 @@ insert into public.app_settings (id) values (true) on conflict (id) do nothing;
 alter table public.shifts enable row level security;
 alter table public.app_settings enable row level security;
 
-do $$
+do $do$
 begin
   if not exists (select 1 from pg_policies where schemaname = 'public'
                  and tablename = 'shifts' and policyname = 'Signed-in users can read shifts') then
@@ -137,7 +137,7 @@ begin
       using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.is_admin))
       with check (exists (select 1 from public.profiles p where p.id = auth.uid() and p.is_admin));
   end if;
-end $$;
+end $do$;
 
 
 -- ============ Check ============
