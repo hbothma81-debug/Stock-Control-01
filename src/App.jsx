@@ -10709,6 +10709,23 @@ export default function StockControl() {
                   (j.job_number || "").toLowerCase().includes(q) ||
                   (j.customer || "").toLowerCase().includes(q) ||
                   (j.sales_rep || "").toLowerCase().includes(q));
+              // How long this job has been with us. Counted from when it was
+              // created, which is the only moment every job has -- a stage
+              // being started is not, since plenty of jobs sit a while before
+              // anybody touches them, and that waiting is exactly the thing
+              // worth seeing.
+              //
+              // An invoiced job stops counting: what it shows is how long it
+              // took, not how long ago it was.
+              const daysOnJob = (job) => {
+                const from = job.created_at ? new Date(job.created_at) : null;
+                if (!from || Number.isNaN(from.getTime())) return null;
+                const to =
+                  job.status === "invoiced" && job.invoiced_at ? new Date(job.invoiced_at) : new Date();
+                const days = Math.floor((to - from) / 86400000);
+                return days >= 0 ? days : null;
+              };
+
               const renderJobRow = (job) => (
                 <button
                   key={job.id}
@@ -10721,6 +10738,22 @@ export default function StockControl() {
                   <span style={{ fontSize: 15, color: C.text }}>{job.laser_job_reference || "No SigmaNest #"}</span>
                   <span style={{ fontSize: 15, color: C.text }}>{job.customer || "No customer"}</span>
                   <span style={{ fontSize: 15, color: C.text }}>{job.sales_rep || "No sales rep"}</span>
+                  {(() => {
+                    const days = daysOnJob(job);
+                    if (days === null) return null;
+                    return (
+                      <span
+                        style={{ ...S.chip, flexShrink: 0 }}
+                        title={
+                          job.status === "invoiced"
+                            ? `Took ${days} day${days === 1 ? "" : "s"} from being booked in to being invoiced`
+                            : `Booked in ${days} day${days === 1 ? "" : "s"} ago`
+                        }
+                      >
+                        {days} day{days === 1 ? "" : "s"}
+                      </span>
+                    );
+                  })()}
                 </button>
               );
 
@@ -10746,6 +10779,45 @@ export default function StockControl() {
                       ))}
                     </select>
                   </div>
+
+                  {/* What is on the floor, in money. Same reading as the
+                      stock screens give: what these filters are showing, not
+                      the whole company -- so narrowing to one customer
+                      answers what they have on order. */}
+                  {canSeeValue &&
+                    (() => {
+                      const onOrder = jobsList
+                        .filter((j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j))
+                        .reduce((sum, j) => sum + (Number(j.quoted_value) || 0), 0);
+                      const priced = jobsList.filter(
+                        (j) =>
+                          (j.status === "in_progress" || j.status === "complete") &&
+                          matchesFilters(j) &&
+                          Number(j.quoted_value) > 0
+                      ).length;
+                      const total = jobsList.filter(
+                        (j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j)
+                      ).length;
+                      if (total === 0) return null;
+                      return (
+                        <div style={S.summaryBanner}>
+                          <span>
+                            R{" "}
+                            {onOrder.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+                            on order
+                          </span>
+                          {/* A job with no quoted value counts for nothing in
+                              that figure, so say how many, rather than let it
+                              read as the whole picture. */}
+                          {priced < total && (
+                            <span>
+                              {" · "}
+                              {total - priced} of {total} not priced
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                   <Section
                     title="Active"
