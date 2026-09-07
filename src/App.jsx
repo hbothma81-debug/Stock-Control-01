@@ -3935,12 +3935,22 @@ export default function StockControl() {
     }
   }
 
-  async function createLaserProgram({ program_number, material, machine, sheet_name, jobs }) {
+  async function createLaserProgram({ program_number, material, machine, sheet_name, sheets_required, jobs }) {
     if (!supabase) return false;
     try {
       const { data, error } = await supabase
         .from("laser_programs")
-        .insert({ program_number, material, machine, sheet_name: sheet_name || null, created_by: roleLabel })
+        .insert({
+          program_number,
+          material,
+          machine,
+          sheet_name: sheet_name || null,
+          // The same nest run several times off the same material. One
+          // unless somebody says otherwise, so nothing changes for the
+          // programs that are cut once and done.
+          sheets_required: Math.max(1, Math.round(Number(sheets_required) || 1)),
+          created_by: roleLabel,
+        })
         .select("id")
         .single();
       if (error) throw error;
@@ -4251,21 +4261,42 @@ export default function StockControl() {
     }
   }
 
-  async function toggleProgramCut(program) {
+  // How many sheets of a program have been cut. Everything else about a
+  // program being finished hangs off this: it is complete when the count
+  // reaches what was asked for, and a program needing one sheet behaves
+  // exactly as it always did -- one press takes it from 0 to 1, which is
+  // 1 of 1, which is cut.
+  //
+  // The count cannot go below nothing or above what was asked for. An
+  // operator who has cut a sixth of five has either mis-pressed or been
+  // told to cut more, and the second of those is Prince changing the
+  // number rather than the count quietly disagreeing with it.
+  async function setProgramCutCount(program, nextCount) {
     if (!supabase || programBusyId) return;
-    const nowCut = !program.is_complete;
+    const required = Math.max(1, Number(program.sheets_required) || 1);
+    const before = Math.max(0, Number(program.sheets_cut) || 0);
+    const cut = Math.min(Math.max(0, Math.round(Number(nextCount) || 0)), required);
+    if (cut === before) return;
+    const nowCut = cut >= required;
     setProgramBusyId(program.id);
     try {
       const { error } = await supabase
         .from("laser_programs")
         .update({
+          sheets_cut: cut,
           is_complete: nowCut,
           completed_by: nowCut ? roleLabel : "",
           completed_at: nowCut ? new Date().toISOString() : null,
         })
         .eq("id", program.id);
       if (error) throw error;
-      await logProgramEvent(program.id, nowCut ? "cut" : "un-cut", program.program_number);
+      await logProgramEvent(
+        program.id,
+        nowCut ? "cut" : cut > before ? "sheet cut" : "un-cut",
+        required > 1
+          ? `${program.program_number} — ${cut} of ${required}`
+          : program.program_number
+      );
 
       // Re-read before deciding anything: someone else may have cut the
       // other program this job is waiting on while this one was open.
@@ -4283,6 +4314,13 @@ export default function StockControl() {
     } finally {
       setProgramBusyId(null);
     }
+  }
+
+  // Cut, or not cut, in one press -- what the button did before there was
+  // a count, and still what it does for a program cut once.
+  function toggleProgramCut(program) {
+    const required = Math.max(1, Number(program.sheets_required) || 1);
+    return setProgramCutCount(program, program.is_complete ? 0 : required);
   }
 
   // Pressed when there are no more programs coming for that job. Without
@@ -10800,6 +10838,7 @@ export default function StockControl() {
                     events={laserData ? laserData.events : []}
                     canCut={canCut}
                     onToggleCut={toggleProgramCut}
+                    onSetCutCount={setProgramCutCount}
                     onReport={reportProgram}
                     onAddNote={addProgramNote}
                     busyId={programBusyId}

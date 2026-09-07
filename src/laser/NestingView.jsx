@@ -68,6 +68,9 @@ export default function NestingView({
   // The operator hunts for the sheet on the rack, so he needs its name,
   // not just a thickness and a program number.
   const [newSheet, setNewSheet] = useState("");
+  // How many times this same nest gets run off the material. One unless
+  // Prince says otherwise.
+  const [newRepeats, setNewRepeats] = useState("1");
   const [search, setSearch] = useState("");
   const [addingTo, setAddingTo] = useState(null);
   const [addQuery, setAddQuery] = useState("");
@@ -107,6 +110,7 @@ export default function NestingView({
         program_number: newNumber.trim(),
         material: `${newThickness} ${newGrade}`,
         sheet_name: newSheet.trim(),
+        sheets_required: newRepeats,
         machine,
         jobs: picked.map((c) => ({
           job_id: c.job_id,
@@ -235,6 +239,19 @@ export default function NestingView({
                   value={newSheet}
                   onChange={(e) => setNewSheet(e.target.value)}
                   placeholder="Which sheet"
+                />
+              </div>
+              <div style={{ flex: "0 0 108px" }}>
+                <label style={S.label}>How many</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputMode="numeric"
+                  style={S.input}
+                  value={newRepeats}
+                  onChange={(e) => setNewRepeats(e.target.value)}
+                  title="How many times this same nest is run off the material"
                 />
               </div>
             </div>
@@ -463,6 +480,7 @@ function NestRow({
   const [alsoOn, setAlsoOn] = useState([]);
   const [alsoQuery, setAlsoQuery] = useState("");
   const [sheet, setSheet] = useState("");
+  const [repeats, setRepeats] = useState("1");
   const [saving, setSaving] = useState(false);
 
   const sigmanest = r.job?.laser_job_reference || r.shortage?.board_number || "";
@@ -498,6 +516,7 @@ function NestRow({
       const ok = await onCreateProgram({
         program_number: programNumber.trim(),
         sheet_name: sheet.trim(),
+        sheets_required: repeats,
         // Stored as one line the way the machine reads it, built from the
         // two lists so nobody types "1.2mm MS" three different ways.
         material: `${thickness} ${grade}`,
@@ -623,7 +642,13 @@ function NestRow({
                         color: pg.is_complete ? C.accentFinished : C.muted,
                       }}
                     >
-                      {pg.reported_at ? "Stopped" : pg.is_complete ? "Cut" : "Waiting to be cut"}
+                      {pg.reported_at
+                        ? "Stopped"
+                        : Number(pg.sheets_required) > 1
+                          ? `${Math.min(Number(pg.sheets_cut) || 0, Number(pg.sheets_required))} of ${pg.sheets_required} cut`
+                          : pg.is_complete
+                            ? "Cut"
+                            : "Waiting to be cut"}
                     </span>
                     {canManage && pg.link && (
                       <button
@@ -705,6 +730,19 @@ function NestRow({
                     value={sheet}
                     onChange={(e) => setSheet(e.target.value)}
                     placeholder="Which sheet"
+                  />
+                </div>
+                <div style={{ flex: "0 0 108px" }}>
+                  <label style={S.label}>How many</label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputMode="numeric"
+                    style={S.input}
+                    value={repeats}
+                    onChange={(e) => setRepeats(e.target.value)}
+                    title="How many times this same nest is run off the material"
                   />
                 </div>
               </div>

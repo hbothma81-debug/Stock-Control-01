@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Check, Undo2, OctagonAlert, MessageSquare, X } from "lucide-react";
 import { C, S } from "../theme.js";
 import Section from "../Section.jsx";
@@ -16,7 +16,7 @@ import Section from "../Section.jsx";
 //
 // No database calls in here. The parent owns those.
 
-export default function CutList({ programs, thicknesses, events, canCut, onToggleCut, onReport, onAddNote, busyId }) {
+export default function CutList({ programs, thicknesses, events, canCut, onToggleCut, onSetCutCount, onReport, onAddNote, busyId }) {
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => {
@@ -79,6 +79,7 @@ export default function CutList({ programs, thicknesses, events, canCut, onToggl
               notes={(events || []).filter((e) => e.program_id === p.id && (e.action === "note" || e.action === "stopped"))}
               canCut={canCut}
               onToggleCut={onToggleCut}
+              onSetCutCount={onSetCutCount}
               onReport={onReport}
               onAddNote={onAddNote}
               busy={busyId === p.id}
@@ -97,6 +98,7 @@ export default function CutList({ programs, thicknesses, events, canCut, onToggl
               notes={(events || []).filter((e) => e.program_id === p.id && (e.action === "note" || e.action === "stopped"))}
               canCut={canCut}
               onToggleCut={onToggleCut}
+              onSetCutCount={onSetCutCount}
               onReport={onReport}
               onAddNote={onAddNote}
               busy={busyId === p.id}
@@ -108,8 +110,12 @@ export default function CutList({ programs, thicknesses, events, canCut, onToggl
   );
 }
 
-function ProgramRow({ program, notes, canCut, onToggleCut, onReport, onAddNote, busy }) {
+function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onReport, onAddNote, busy }) {
   const p = program;
+  const repeats = Math.max(1, Number(p.sheets_required) || 1);
+  const done = Math.min(Math.max(0, Number(p.sheets_cut) || 0), repeats);
+  const [countDraft, setCountDraft] = useState(String(done));
+  useEffect(() => setCountDraft(String(done)), [done]);
   const [showReport, setShowReport] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [reason, setReason] = useState("");
@@ -214,9 +220,90 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onReport, onAddNote, 
         )}
       </div>
 
+      {/* A program run more than once off the same material. How many are
+          left is the thing the operator needs at a glance, so it is said
+          in words and drawn as a bar -- he is reading this across a
+          workshop, not studying it. */}
+      {repeats > 1 && (
+        <div style={{ marginTop: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 15, fontWeight: 700, color: done >= repeats ? C.accentFinished : C.text }}>
+              {done} of {repeats} cut
+            </span>
+            {done < repeats && (
+              <span style={{ ...S.roleHint, color: C.accentRaw }}>{repeats - done} still to cut</span>
+            )}
+          </div>
+          <div
+            style={{
+              marginTop: 4,
+              height: 8,
+              borderRadius: 4,
+              background: C.border,
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                width: `${Math.round((Math.min(done, repeats) / repeats) * 100)}%`,
+                height: "100%",
+                background: done >= repeats ? C.accentFinished : C.accentRaw,
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {canCut && (
         <div style={S.rowControls}>
-          {p.is_complete ? (
+          {repeats > 1 ? (
+            <>
+              {done < repeats && (
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={{ ...S.reqActionBtn, background: C.accentRaw }}
+                  disabled={busy}
+                  onClick={() => onSetCutCount(p, done + 1)}
+                  title="One more sheet of this program is cut"
+                >
+                  <Check size={14} strokeWidth={2.5} /> {busy ? "Saving…" : "Cut one"}
+                </button>
+              )}
+
+              {/* For a program that repeats twenty times, pressing a button
+                  twenty times is silly. Type the number instead. */}
+              <input
+                type="number"
+                min="0"
+                max={repeats}
+                inputMode="numeric"
+                style={{ ...S.input, width: 74, textAlign: "center" }}
+                value={countDraft}
+                onChange={(e) => setCountDraft(e.target.value)}
+                onFocus={(e) => e.target.select()}
+                onBlur={() => {
+                  const n = Math.round(Number(countDraft));
+                  if (Number.isFinite(n) && n !== done) onSetCutCount(p, n);
+                  else setCountDraft(String(done));
+                }}
+                title={`How many of the ${repeats} are cut`}
+              />
+
+              {done > 0 && (
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={S.reqActionBtnMuted}
+                  disabled={busy}
+                  onClick={() => onSetCutCount(p, done - 1)}
+                  title="Take one back off"
+                >
+                  <Undo2 size={13} /> Undo one
+                </button>
+              )}
+            </>
+          ) : p.is_complete ? (
             <button
               type="button"
               className="stk-btn"
