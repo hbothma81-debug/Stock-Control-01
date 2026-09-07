@@ -1197,6 +1197,8 @@ export default function StockControl() {
   const [storesCatalogCategoryFilter, setStoresCatalogCategoryFilter] = useState("");
   const [managerSearchQuery, setManagerSearchQuery] = useState("");
   const [sectionTypeFilterInManager, setSectionTypeFilterInManager] = useState("");
+  const [managerSectionGrade, setManagerSectionGrade] = useState("");
+  const [sectionGradeFilterInManager, setSectionGradeFilterInManager] = useState("");
   const [scForm, setScForm] = useState({ stockCode: "", description: "", price: "", recommendedStock: "", customer: "", revision: "" });
   const [scCatalogForm, setScCatalogForm] = useState({ code: "", name: "", category: "", supplier: "", price: "" });
   const [storesCatalogQuery, setStoresCatalogQuery] = useState("");
@@ -6673,9 +6675,21 @@ export default function StockControl() {
   const effectiveSupplier = form.supplier === CUSTOM ? form.customSupplier.trim() : form.supplier.trim();
   const effectiveSheetName = form.sheetName === CUSTOM ? form.customSheetName.trim() : form.sheetName.trim();
 
+  // Sizes are held once per grade, so the same 50x50x5 appears as several
+  // rows. The picker wants the size itself -- the grade is chosen in its
+  // own field above -- so the names collapse to one each.
   const sectionOptionsForType = useMemo(() => {
     if (!master || !effectiveSectionType) return [];
-    return master.sections.filter((s) => (s.type || "") === effectiveSectionType).map((s) => s.name);
+    const seen = new Set();
+    const out = [];
+    for (const sec of master.sections) {
+      if ((sec.type || "") !== effectiveSectionType) continue;
+      const k = sec.name.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(sec.name);
+    }
+    return out;
   }, [master, effectiveSectionType]);
 
   function findFactor(listKey, name) {
@@ -6718,6 +6732,68 @@ export default function StockControl() {
     });
   }
 
+  // A section's price depends on its grade: the same 50x50x5 angle is one
+  // price in mild steel and another in S355. Rows are held per size AND
+  // grade so a stock report can be split by material.
+  //
+  // Rows saved before grades were split carry no grade. Rather than being
+  // stranded they stand in for any grade, so nothing that was priced
+  // before this stops being priced now.
+  const sameText = (a, b) => (a || "").trim().toLowerCase() === (b || "").trim().toLowerCase();
+
+  function isSectionRow(entry, name, grade) {
+    return sameText(entry.name, name) && sameText(entry.grade, grade);
+  }
+
+  function findSectionEntry(name, grade) {
+    const list = (master && master.sections) || [];
+    if (!(name || "").trim()) return null;
+    return (
+      list.find((sec) => isSectionRow(sec, name, grade)) ||
+      list.find((sec) => sameText(sec.name, name) && !(sec.grade || "").trim()) ||
+      null
+    );
+  }
+
+  function findSectionPrice(name, grade) {
+    const hit = findSectionEntry(name, grade);
+    return hit ? hit.price || 0 : 0;
+  }
+
+  // Weight is geometry, not grade -- a 50x50x5 angle weighs the same
+  // whichever steel it is -- so a size that has its kg/m filled in on any
+  // of its rows lends it to the others instead of reading zero.
+  function findSectionFactor(name, grade) {
+    const hit = findSectionEntry(name, grade);
+    if (hit && hit.factor) return hit.factor;
+    const any = ((master && master.sections) || []).find((sec) => sameText(sec.name, name) && sec.factor);
+    if (any) return any.factor;
+    return hit ? hit.factor : null;
+  }
+
+  // Create-or-update, keyed on the size and the grade together.
+  function setSectionPrice(name, grade, price, type) {
+    const clean = (name || "").trim();
+    if (!clean) return;
+    setMaster((prev) => {
+      const list = prev.sections || [];
+      if (!list.some((sec) => isSectionRow(sec, clean, grade))) {
+        const lend = list.find((sec) => sameText(sec.name, clean) && sec.factor);
+        return {
+          ...prev,
+          sections: [
+            ...list,
+            { name: clean, grade: (grade || "").trim(), factor: lend ? lend.factor : 0, price, type: type || "" },
+          ],
+        };
+      }
+      return {
+        ...prev,
+        sections: list.map((sec) => (isSectionRow(sec, clean, grade) ? { ...sec, price } : sec)),
+      };
+    });
+  }
+
   function findSectionType(name) {
     if (!master) return "";
     const hit = (master.sections || []).find((e) => e.name.toLowerCase() === (name || "").toLowerCase());
@@ -6749,13 +6825,13 @@ export default function StockControl() {
   }
 
   function structuralWeight(it) {
-    const kgPerM = findFactor("sections", it.name);
+    const kgPerM = findSectionFactor(it.name, it.grade);
     if (kgPerM == null) return null;
     return { perM: kgPerM, total: kgPerM * Number(it.qty || 0) * Number(it.length || 0) };
   }
 
   function structuralValue(it) {
-    const pricePerM = findPrice("sections", it.name);
+    const pricePerM = findSectionPrice(it.name, it.grade);
     const totalM = Number(it.qty || 0) * Number(it.length || 0);
     return { total: totalM * pricePerM };
   }
@@ -6890,12 +6966,25 @@ export default function StockControl() {
     });
   }
 
-  function ensureFactorEntry(listKey, name, defaultFactor, sectionType) {
+  // A section is the one list where the same name legitimately appears
+  // more than once -- once per grade -- so it is the pair that has to be
+  // unique, not the name.
+  function ensureFactorEntry(listKey, name, defaultFactor, sectionType, grade) {
     setMaster((prev) => {
       const list = prev[listKey] || [];
+      if (listKey === "sections") {
+        if (list.some((x) => isSectionRow(x, name, grade))) return prev;
+        const lend = list.find((x) => sameText(x.name, name) && x.factor);
+        return {
+          ...prev,
+          sections: [
+            ...list,
+            { name, grade: (grade || "").trim(), factor: lend ? lend.factor : defaultFactor, price: 0, type: sectionType || "" },
+          ],
+        };
+      }
       if (list.some((x) => x.name.toLowerCase() === name.toLowerCase())) return prev;
-      const extra = listKey === "sections" ? { type: sectionType || "" } : {};
-      return { ...prev, [listKey]: [...list, { name, factor: defaultFactor, price: 0, ...extra }] };
+      return { ...prev, [listKey]: [...list, { name, factor: defaultFactor, price: 0 }] };
     });
   }
 
@@ -7063,7 +7152,7 @@ export default function StockControl() {
       return w ? qty * w.perSheet * pricePerKg : 0;
     }
     if (item.mainCat === "structural") {
-      const pricePerM = findPrice("sections", item.name);
+      const pricePerM = findSectionPrice(item.name, item.grade);
       const metresPerPiece = item.trackLength ? Number(item.length || 0) : 1;
       return qty * metresPerPiece * pricePerM;
     }
@@ -8151,7 +8240,7 @@ export default function StockControl() {
   function resolveReqPrice(req) {
     if (!master) return 0;
     if (req.mainCat === "plate") return findPrice("grades", req.itemGrade);
-    if (req.mainCat === "structural") return findPrice("sections", req.itemRawName);
+    if (req.mainCat === "structural") return findSectionPrice(req.itemRawName, req.itemGrade);
     if (req.mainCat === "cncBar") return findPrice("cncGrades", req.itemGrade);
     const it = (items || []).find((i) => i.id === req.itemId);
     return it ? Number(it.value || 0) : 0;
@@ -8165,10 +8254,7 @@ export default function StockControl() {
         grades: prev.grades.map((g) => (g.name.toLowerCase() === (req.itemGrade || "").toLowerCase() ? { ...g, price } : g)),
       }));
     } else if (req.mainCat === "structural") {
-      setMaster((prev) => ({
-        ...prev,
-        sections: prev.sections.map((s) => (s.name.toLowerCase() === (req.itemRawName || "").toLowerCase() ? { ...s, price } : s)),
-      }));
+      setSectionPrice(req.itemRawName, req.itemGrade, price);
     } else if (req.mainCat === "cncBar") {
       setMaster((prev) => ({
         ...prev,
@@ -8416,7 +8502,9 @@ export default function StockControl() {
     }
     if (form.size === CUSTOM && effectiveSize) ensureStringEntry("sizes", effectiveSize);
     if (form.sectionType === CUSTOM && effectiveSectionType) ensureStringEntry("sectionTypes", effectiveSectionType);
-    if (form.section === CUSTOM && effectiveSection) ensureFactorEntry("sections", effectiveSection, 0, effectiveSectionType);
+    if (form.section === CUSTOM && effectiveSection) {
+      ensureFactorEntry("sections", effectiveSection, 0, effectiveSectionType, effectiveGrade);
+    }
     if (form.customer === CUSTOM && effectiveCustomer) ensureStringEntry("customers", effectiveCustomer);
     if (form.fastenerType === CUSTOM && effectiveFastenerType) ensureStringEntry("fastenerCategories", effectiveFastenerType);
     if (form.salesPerson === CUSTOM && effectiveSalesPerson) ensureStringEntry("salesPeople", effectiveSalesPerson);
@@ -8781,11 +8869,22 @@ export default function StockControl() {
       const factor = parseFloat(managerFactor) || 0;
       const price = parseFloat(managerPrice) || 0;
       // Adding a section always happens from within a specific type's
-      // detail view now, so that type is always known here.
-      const extra = managerTab === "sections" ? { type: sectionTypeFilterInManager } : managerTab === "grades" ? { shortName: managerShortName.trim() } : {};
+      // detail view now, so that type is always known here. The grade is
+      // picked alongside it: the same size in two grades is two rows, two
+      // prices, and two lines on a stock report.
+      const extra =
+        managerTab === "sections"
+          ? { type: sectionTypeFilterInManager, grade: managerSectionGrade.trim() }
+          : managerTab === "grades"
+            ? { shortName: managerShortName.trim() }
+            : {};
       setMaster((prev) => {
         const list = prev[managerTab] || [];
-        if (list.some((x) => x.name.toLowerCase() === val.toLowerCase())) return prev;
+        const clash =
+          managerTab === "sections"
+            ? list.some((x) => isSectionRow(x, val, managerSectionGrade))
+            : list.some((x) => x.name.toLowerCase() === val.toLowerCase());
+        if (clash) return prev;
         return { ...prev, [managerTab]: [...list, { name: val, factor, price, ...extra }] };
       });
       setManagerFactor("");
@@ -8915,7 +9014,13 @@ export default function StockControl() {
     }
 
     setMaster((prev) => {
-      const filtered = prev[managerTab].filter((x) => (typeof x === "string" ? x !== entry : x.name !== entry.name));
+      const filtered = prev[managerTab].filter((x) =>
+        typeof x === "string"
+          ? x !== entry
+          : managerTab === "sections"
+            ? !isSectionRow(x, entry.name, entry.grade)
+            : x.name !== entry.name
+      );
       const sections =
         managerTab === "sectionTypes"
           ? (prev.sections || []).map((s) => (s.type === entry ? { ...s, type: "" } : s))
@@ -8924,10 +9029,16 @@ export default function StockControl() {
     });
   }
 
-  function updateFactorField(name, field, newValue) {
+  // `grade` is only meaningful for sections, where a name is shared across
+  // grades and matching on it alone would edit every one of them at once.
+  function updateFactorField(name, field, newValue, grade) {
     setMaster((prev) => ({
       ...prev,
-      [managerTab]: prev[managerTab].map((x) => (x.name === name ? { ...x, [field]: parseFloat(newValue) || 0 } : x)),
+      [managerTab]: prev[managerTab].map((x) =>
+        (managerTab === "sections" ? isSectionRow(x, name, grade) : x.name === name)
+          ? { ...x, [field]: parseFloat(newValue) || 0 }
+          : x
+      ),
     }));
   }
 
@@ -8938,10 +9049,19 @@ export default function StockControl() {
     }));
   }
 
-  function updateSectionType(name, newType) {
+  function updateSectionType(name, newType, grade) {
     setMaster((prev) => ({
       ...prev,
-      sections: (prev.sections || []).map((x) => (x.name === name ? { ...x, type: newType } : x)),
+      sections: (prev.sections || []).map((x) => (isSectionRow(x, name, grade) ? { ...x, type: newType } : x)),
+    }));
+  }
+
+  function updateSectionGrade(name, oldGrade, newGrade) {
+    setMaster((prev) => ({
+      ...prev,
+      sections: (prev.sections || []).map((x) =>
+        isSectionRow(x, name, oldGrade) ? { ...x, grade: (newGrade || "").trim() } : x
+      ),
     }));
   }
 
@@ -13192,8 +13312,8 @@ export default function StockControl() {
                           </div>
                         </div>
                         {(() => {
-                          const kgPerM = findFactor("sections", effectiveSection);
-                          const currentPerM = findPrice("sections", effectiveSection);
+                          const kgPerM = findSectionFactor(effectiveSection, effectiveGrade);
+                          const currentPerM = findSectionPrice(effectiveSection, effectiveGrade);
                           const currentPerKg = kgPerM ? currentPerM / kgPerM : 0;
                           const displayValue = priceUnitMode === "perKg" ? currentPerKg : currentPerM;
                           // Pricing by weight needs a kg/m to convert with. Without
@@ -13221,12 +13341,12 @@ export default function StockControl() {
                                 onChange={(e) => {
                                   const v = parseFloat(e.target.value) || 0;
                                   const newPerM = priceUnitMode === "perKg" ? v * kgPerM : v;
-                                  setMaterialPrice("sections", effectiveSection, newPerM, { type: effectiveSectionType });
+                                  setSectionPrice(effectiveSection, effectiveGrade, newPerM, effectiveSectionType);
                                 }}
                               />
                               <div style={S.roleHint}>
                                 {kgPerM
-                                  ? `${kgPerM.toFixed(2)}kg per metre — this updates the ${effectiveSection} rate everywhere it's used.`
+                                  ? `${kgPerM.toFixed(2)}kg per metre — this updates the rate for ${effectiveSection} in ${effectiveGrade || "no grade"}, everywhere it's used. Other grades keep their own price.`
                                   : `Priced per metre. ${effectiveSection} has no kg/m set in Stock Manager, so it cannot be priced by weight.`}
                               </div>
                             </>
@@ -14129,6 +14249,18 @@ export default function StockControl() {
                       onChange={(e) => setManagerPrice(e.target.value)}
                       placeholder="R/m"
                     />
+                    {/* The same size in two grades is two rows with two
+                        prices, so the grade has to be chosen here. */}
+                    <select
+                      style={{ ...S.input, flex: 1 }}
+                      value={managerSectionGrade}
+                      onChange={(e) => setManagerSectionGrade(e.target.value)}
+                    >
+                      <option value="">No grade</option>
+                      {(master.grades || []).map((g) => (
+                        <option key={g.name} value={g.name}>{g.name}</option>
+                      ))}
+                    </select>
                     <button type="button" className="stk-btn" style={S.addBtn} onClick={addMasterEntry}>
                       <Plus size={15} strokeWidth={2.5} />
                       Add
@@ -14144,19 +14276,52 @@ export default function StockControl() {
                     />
                   )}
 
+                  {/* One material at a time, which is how a stock report
+                      will want them and how the yard is actually racked. */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+                    <label style={{ ...S.label, marginBottom: 0 }}>Material</label>
+                    <select
+                      style={{ ...S.input, flex: 1 }}
+                      value={sectionGradeFilterInManager}
+                      onChange={(e) => setSectionGradeFilterInManager(e.target.value)}
+                    >
+                      <option value="">All materials</option>
+                      {[
+                        ...new Set(
+                          master.sections
+                            .filter((sec) => (sec.type || "Ungrouped") === sectionTypeFilterInManager)
+                            .map((sec) => (sec.grade || "").trim())
+                        ),
+                      ]
+                        .sort((a, b) => a.localeCompare(b))
+                        .map((g) => (
+                          <option key={g || "__none__"} value={g || "__none__"}>
+                            {g || "No grade set"}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
                   <div style={S.managerListFullPage}>
                     {master.sections
                       .filter((s) => (s.type || "Ungrouped") === sectionTypeFilterInManager)
                       .filter((s) => s.name.toLowerCase().includes(managerSearchQuery.toLowerCase()))
+                      .filter(
+                        (s) =>
+                          !sectionGradeFilterInManager ||
+                          (sectionGradeFilterInManager === "__none__"
+                            ? !(s.grade || "").trim()
+                            : sameText(s.grade, sectionGradeFilterInManager))
+                      )
                       .map((entry) => (
-                        <div key={entry.name} style={S.managerRow}>
+                        <div key={`${entry.name}|${entry.grade || ""}`} style={S.managerRow}>
                           <EditableName value={entry.name} onCommit={(v) => renameMasterEntry(managerTab, entry.name, v)} />
                           <input
                             type="number"
                             step="0.01"
                             value={entry.factor === 0 ? "" : entry.factor}
                             placeholder="0"
-                            onChange={(e) => updateFactorField(entry.name, "factor", e.target.value)}
+                            onChange={(e) => updateFactorField(entry.name, "factor", e.target.value, entry.grade)}
                             style={S.managerFactorInput}
                             title="kg/m"
                           />
@@ -14165,13 +14330,24 @@ export default function StockControl() {
                             step="0.01"
                             value={!entry.price ? "" : entry.price}
                             placeholder="0"
-                            onChange={(e) => updateFactorField(entry.name, "price", e.target.value)}
+                            onChange={(e) => updateFactorField(entry.name, "price", e.target.value, entry.grade)}
                             style={S.managerFactorInput}
                             title="R/m"
                           />
                           <select
+                            value={entry.grade || ""}
+                            onChange={(e) => updateSectionGrade(entry.name, entry.grade, e.target.value)}
+                            style={{ ...S.managerFactorInput, width: 110 }}
+                            title="Material"
+                          >
+                            <option value="">No grade</option>
+                            {(master.grades || []).map((g) => (
+                              <option key={g.name} value={g.name}>{g.name}</option>
+                            ))}
+                          </select>
+                          <select
                             value={entry.type || ""}
-                            onChange={(e) => updateSectionType(entry.name, e.target.value)}
+                            onChange={(e) => updateSectionType(entry.name, e.target.value, entry.grade)}
                             style={{ ...S.managerFactorInput, width: 130 }}
                           >
                             <option value="">No type</option>
