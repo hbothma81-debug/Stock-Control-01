@@ -18,15 +18,40 @@ import { F, C, S, THEME_CSS } from "./theme.js";
 // generates a document, and kept for the rest of that visit. The first
 // press costs a moment; every press after it is instant.
 let xlsxLib = null;
+// The Excel and PDF builders are big, and most of a day's work never
+// touches either, so they are fetched only when something actually needs
+// one rather than sitting in the first download.
+//
+// The cost of that is this: putting a new version of the app out renames
+// those files, so a page that has been left open since before it went out
+// asks for a file that no longer exists. Every button that makes a
+// document then did nothing at all -- no preview, no message, nothing --
+// and the app looked broken when it only needed reloading. So say that.
+async function loadOnDemand(what, load) {
+  try {
+    return await load();
+  } catch (err) {
+    console.error(`Could not load the ${what}:`, err);
+    alert(
+      `This page could not load what it needs to build that ${what === "spreadsheet builder" ? "spreadsheet" : "document"}.\n\n` +
+        "It is almost always because the app has been updated since this page was opened. Reload the page and try again.\n\n" +
+        "If reloading does not fix it, check your internet connection."
+    );
+    throw err;
+  }
+}
+
 async function getXLSX() {
-  if (!xlsxLib) xlsxLib = await import("xlsx");
+  if (!xlsxLib) xlsxLib = await loadOnDemand("spreadsheet builder", () => import("xlsx"));
   return xlsxLib;
 }
 
 let pdfLib = null;
 async function getPdf() {
   if (!pdfLib) {
-    const [pdf, table] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+    const [pdf, table] = await loadOnDemand("PDF builder", () =>
+      Promise.all([import("jspdf"), import("jspdf-autotable")])
+    );
     pdfLib = { jsPDF: pdf.default, autoTable: table.default };
   }
   return pdfLib;
@@ -5959,7 +5984,13 @@ export default function StockControl() {
           `${s.reason}${s.is_priority === false ? "" : " · priority"}`,
           `${s.flagged_by}\n${s.flagged_department}`,
           s.board_number || "—",
-          s.status === "cut" ? "Re-cut complete" : s.status === "nested" ? "Being re-cut" : "Waiting on nesting",
+          s.status === "cut"
+            ? "Re-cut complete"
+            : s.status === "finishing"
+              ? "Cut — finishing off"
+              : s.status === "nested"
+                ? "Being re-cut"
+                : "Waiting on nesting",
         ]),
         theme: "grid",
         headStyles: { fillColor: [27, 29, 31] },
