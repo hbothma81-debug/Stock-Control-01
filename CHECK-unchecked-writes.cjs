@@ -86,7 +86,13 @@ for (const file of jsFiles(root)) {
       // read later?
       let cursor = p;
       let looksChecked = false;
-      for (let i = 0; i < 6 && cursor.parentPath; i++) {
+      // Each .eq() in a chain costs two steps outward, not one -- the
+      // property and then the call -- so six was only ever enough for the
+      // chains that happened to exist when this was written. One more .eq()
+      // than its neighbour and a perfectly checked write was reported as
+      // unchecked. The break on a statement boundary below is what actually
+      // stops the walk running somewhere it should not.
+      for (let i = 0; i < 20 && cursor.parentPath; i++) {
         cursor = cursor.parentPath;
         const t = cursor.node.type;
         // const { error } = await ...   /   const { data, error } = ...

@@ -258,6 +258,9 @@ async function loadMasterFromTables() {
         const entry = { name: r.name, factor: Number(r.factor), price: Number(r.price) };
         if (r.type != null) entry.type = r.type;
         if (r.short_name) entry.shortName = r.short_name;
+        // Only sections use this. An empty grade is a row that has not
+        // been split by material yet and stands in for any of them.
+        if (listName === "sections") entry.grade = r.grade || "";
         return entry;
       });
   }
@@ -1655,27 +1658,59 @@ export default function StockControl() {
     // name/factor/price lists: identity is the name within its list — a
     // same-name entry with a changed factor/price/type is a real update,
     // not a remove+add, so its row (and history) survives in place.
+    // A section is identified by its size AND its material: the same size
+    // exists in several grades, each with its own price. Keying on the name
+    // alone collapsed them -- the second row was never inserted and the
+    // grade never reached the database at all, so a split made on screen
+    // was gone by the next reload. Every other list here is still one row
+    // per name.
+    const rowKey = (listName, e) =>
+      listName === "sections" ? `${e.name}\u0000${(e.grade || "").trim()}` : e.name;
+
     for (const listName of MASTER_FACTOR_LISTS) {
       const prevList = prev[listName] || [];
       const nextList = newMaster[listName] || [];
       if (JSON.stringify(prevList) === JSON.stringify(nextList)) continue;
-      const prevByName = new Map(prevList.map((e) => [e.name, e]));
-      const nextByName = new Map(nextList.map((e) => [e.name, e]));
-      const added = nextList.filter((e) => !prevByName.has(e.name));
-      const removedNames = prevList.filter((e) => !nextByName.has(e.name)).map((e) => e.name);
-      const modified = nextList.filter((e) => prevByName.has(e.name) && JSON.stringify(prevByName.get(e.name)) !== JSON.stringify(e));
+      const prevByKey = new Map(prevList.map((e) => [rowKey(listName, e), e]));
+      const nextByKey = new Map(nextList.map((e) => [rowKey(listName, e), e]));
+      const added = nextList.filter((e) => !prevByKey.has(rowKey(listName, e)));
+      const removed = prevList.filter((e) => !nextByKey.has(rowKey(listName, e)));
+      const modified = nextList.filter(
+        (e) =>
+          prevByKey.has(rowKey(listName, e)) &&
+          JSON.stringify(prevByKey.get(rowKey(listName, e))) !== JSON.stringify(e)
+      );
       if (added.length) {
         ops.push(
-          supabase.from("master_factor_items").insert(added.map((e) => ({ id: uid(), list_name: listName, name: e.name, factor: e.factor || 0, price: e.price || 0, type: e.type ?? null, short_name: e.shortName || null })))
+          supabase.from("master_factor_items").insert(
+            added.map((e) => ({
+              id: uid(),
+              list_name: listName,
+              name: e.name,
+              factor: e.factor || 0,
+              price: e.price || 0,
+              type: e.type ?? null,
+              short_name: e.shortName || null,
+              grade: (e.grade || "").trim(),
+            }))
+          )
         );
       }
-      if (removedNames.length) {
-        ops.push(supabase.from("master_factor_items").delete().eq("list_name", listName).in("name", removedNames));
+      if (removed.length) {
+        if (listName === "sections") {
+          // One at a time: the row to remove is a size in a particular
+          // material, and its other materials stay.
+          for (const e of removed) {
+            ops.push(supabase.from("master_factor_items").delete().eq("list_name", listName).eq("name", e.name).eq("grade", (e.grade || "").trim()));
+          }
+        } else {
+          ops.push(supabase.from("master_factor_items").delete().eq("list_name", listName).in("name", removed.map((e) => e.name)));
+        }
       }
       for (const e of modified) {
-        ops.push(
-          supabase.from("master_factor_items").update({ factor: e.factor || 0, price: e.price || 0, type: e.type ?? null, short_name: e.shortName || null }).eq("list_name", listName).eq("name", e.name)
-        );
+        let q = supabase.from("master_factor_items").update({ factor: e.factor || 0, price: e.price || 0, type: e.type ?? null, short_name: e.shortName || null }).eq("list_name", listName).eq("name", e.name);
+        if (listName === "sections") q = q.eq("grade", (e.grade || "").trim());
+        ops.push(q);
       }
     }
 
@@ -3100,7 +3135,13 @@ export default function StockControl() {
     }
     setJobDetailLoading(true);
     try {
-      const [{ data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }, allocResult, eventsResult] = await Promise.all([
+      // The job handed in came from the Jobs list, which is loaded once and
+      // then sits there. Somebody else filling in the SigmaNest number on
+      // the nesting side does not reach it, so opening the job showed an
+      // empty box for a number that was already on the job -- and typing it
+      // again was the obvious thing to do. Read the row itself.
+      const [jobResult, { data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }, allocResult, eventsResult] = await Promise.all([
+        supabase.from("jobs").select("*").eq("id", job.id).single(),
         supabase.from("job_processes").select("*").eq("job_id", job.id).order("sort_order"),
         supabase.from("job_documents").select("*").eq("job_id", job.id).order("created_at", { ascending: false }),
         supabase.from("job_quote_items").select("*").eq("job_id", job.id).order("sort_order"),
@@ -3117,8 +3158,10 @@ export default function StockControl() {
       // if the table is missing (migration not run yet) or unreadable.
       // Throwing here took the whole job detail down with it.
       if (allocResult.error) console.error("Failed to load allocations (job detail still shown):", allocResult.error);
+      const fresh = jobResult.data || job;
+      if (jobResult.error) console.error("Couldn't re-read the job (showing the one from the list):", jobResult.error);
       setJobDetail({
-        job,
+        job: fresh,
         processes: processes || [],
         documents: documents || [],
         quoteItems: quoteItems || [],
@@ -9067,13 +9110,44 @@ export default function StockControl() {
     }));
   }
 
+  // Same size, different steel. The size and its kg/m do not change, only
+  // the price does, so a copy carries everything over and lands on the
+  // first material that has no row for this size yet -- change it on the
+  // row if that is not the one you wanted. It sits directly under the one
+  // it came from rather than at the bottom of the list.
+  function copySectionRow(entry) {
+    setMaster((prev) => {
+      const list = prev.sections || [];
+      const taken = new Set(
+        list.filter((x) => sameText(x.name, entry.name)).map((x) => (x.grade || "").trim().toLowerCase())
+      );
+      const free = (prev.grades || []).map((g) => g.name).find((g) => !taken.has(g.trim().toLowerCase()));
+      if (!free) {
+        alert(
+          `${entry.name} already has a row for every material on the list. Add the material under Stock Manager → Material Types first.`
+        );
+        return prev;
+      }
+      const idx = list.indexOf(entry);
+      const copy = { ...entry, grade: free };
+      return { ...prev, sections: [...list.slice(0, idx + 1), copy, ...list.slice(idx + 1)] };
+    });
+  }
+
   function updateSectionGrade(name, oldGrade, newGrade) {
-    setMaster((prev) => ({
-      ...prev,
-      sections: (prev.sections || []).map((x) =>
-        isSectionRow(x, name, oldGrade) ? { ...x, grade: (newGrade || "").trim() } : x
-      ),
-    }));
+    setMaster((prev) => {
+      const list = prev.sections || [];
+      // Two rows for the same size in the same material would be two
+      // prices for one thing, and only one of them could be right.
+      if (list.some((x) => isSectionRow(x, name, newGrade))) {
+        alert(`${name} already has a row for ${(newGrade || "").trim() || "no material"}.`);
+        return prev;
+      }
+      return {
+        ...prev,
+        sections: list.map((x) => (isSectionRow(x, name, oldGrade) ? { ...x, grade: (newGrade || "").trim() } : x)),
+      };
+    });
   }
 
 
@@ -14367,6 +14441,15 @@ export default function StockControl() {
                               <option key={t} value={t}>{t}</option>
                             ))}
                           </select>
+                          <button
+                            type="button"
+                            className="stk-btn"
+                            style={S.managerDelete}
+                            onClick={() => copySectionRow(entry)}
+                            title="Copy this size onto another material"
+                          >
+                            <Copy size={13} />
+                          </button>
                           <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeMasterEntry(entry)}>
                             <Trash2 size={13} />
                           </button>
