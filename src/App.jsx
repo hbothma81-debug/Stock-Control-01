@@ -3033,10 +3033,11 @@ export default function StockControl() {
         // free-text name with no actual link to a person.
         const assignedRows = newJobForm.selectedProcesses.filter((p) => p.assignedToId);
         if (assignedRows.length) {
-          await supabase.from("job_notifications").insert(
+          await sendNotifications(
             assignedRows.map((p) => ({
               job_id: job.id,
               job_number: job.job_number,
+              sales_rep: job.sales_rep,
               recipient_id: p.assignedToId,
               message: `You've been assigned to ${p.name} on ${job.job_number} (${job.customer || "no customer"})`,
             }))
@@ -3062,7 +3063,10 @@ export default function StockControl() {
         // Something after the job itself failed — clean up the orphaned
         // job row (its processes/quote items cascade-delete with it)
         // rather than leaving a half-created job cluttering the list.
-        await supabase.from("jobs").delete().eq("id", job.id);
+        const { error: rollbackError } = await supabase.from("jobs").delete().eq("id", job.id);
+        // Already handling one failure; a second one here means a half-made
+        // job is sitting in the list, and somebody has to know to remove it.
+        if (rollbackError) console.error("Couldn't clean up the half-created job:", rollbackError);
         throw innerErr;
       }
 
@@ -3422,7 +3426,7 @@ export default function StockControl() {
         // insert() hands back an error rather than throwing one, so an
         // unchecked call fails in complete silence -- which is exactly how
         // this went out the first time.
-        const { error: noteError } = await supabase.from("job_notifications").insert(
+        const { error: noteError } = await sendNotifications(
           nesters.map((pn) => ({
             job_id: job.id,
             job_number: job.job_number,
@@ -3650,15 +3654,37 @@ export default function StockControl() {
 
   // The history is worth having but never worth blocking a change for: a
   // missing line in the log beats a program that would not save.
+  // Every notification goes through here.
+  //
+  // Three of them were failing silently in production: assignment,
+  // shortage flagged, and shortage resolved. All three left out a column
+  // the table requires, and because a Supabase write hands back an error
+  // rather than throwing one, nothing anywhere said so. Staff were simply
+  // never told.
+  //
+  // So there is now one door. It fills in what the table needs and reads
+  // the result. A notification that cannot be sent is never fatal -- the
+  // thing it was telling you about has already happened -- but it is no
+  // longer invisible.
+  async function sendNotifications(rows) {
+    const list = (Array.isArray(rows) ? rows : [rows]).filter((r) => r && r.recipient_id);
+    if (!supabase || list.length === 0) return;
+    const { error } = await supabase.from("job_notifications").insert(
+      list.map((r) => ({ ...r, sales_rep: r.sales_rep || roleLabel }))
+    );
+    if (error) console.error("Notification could not be sent:", error, list);
+  }
+
   async function logProgramEvent(programId, action, detail) {
     try {
-      await supabase.from("laser_program_events").insert({
+      const { error } = await supabase.from("laser_program_events").insert({
         program_id: programId,
         action,
         detail: detail || "",
         acted_by: roleLabel,
         acted_by_id: currentUser?.id || null,
       });
+      if (error) throw error;
     } catch (err) {
       console.error("Failed to record program history:", err);
     }
@@ -4362,10 +4388,11 @@ export default function StockControl() {
       const recipientIds = new Set(handlerIds);
       if (nestingAssignedTo) recipientIds.add(nestingAssignedTo);
       if (recipientIds.size) {
-        await supabase.from("job_notifications").insert(
+        await sendNotifications(
           [...recipientIds].map((recipientId) => ({
             job_id: job.id,
             job_number: job.job_number,
+            sales_rep: job.sales_rep,
             recipient_id: recipientId,
             message: `Shortage flagged on ${job.job_number} (${job.customer || "no customer"}) by ${roleLabel}: ${items
               .map((i) => `${i.description} × ${i.qty}`)
@@ -4458,7 +4485,7 @@ export default function StockControl() {
       // Fully resolved — no one needs to go close this out separately.
       // The one person still waiting is whoever originally flagged it.
       if (shortage.flagged_by_id) {
-        await supabase.from("job_notifications").insert({
+        await sendNotifications({
           job_id: shortage.job_id,
           job_number: shortage.job_number,
           recipient_id: shortage.flagged_by_id,
@@ -4508,7 +4535,7 @@ export default function StockControl() {
           .eq("id", process.id);
         if (procError) throw procError;
         if (job.sales_rep) {
-          await supabase.from("job_notifications").insert({
+          await sendNotifications({
             job_id: job.id,
             job_number: job.job_number,
             sales_rep: job.sales_rep,
@@ -4651,7 +4678,7 @@ export default function StockControl() {
           .eq("shortage_id", process.shortage_id);
         if (runError) throw runError;
         const allDone = (runStages || []).length > 0 && runStages.every((p) => p.is_complete);
-        await supabase
+        const { error: shortError } = await supabase
           .from("shortages")
           .update(
             allDone
@@ -4659,13 +4686,14 @@ export default function StockControl() {
               : { status: "nested", cut_by: "", cut_at: "" }
           )
           .eq("id", process.shortage_id);
+        if (shortError) throw shortError;
         fetchShortages();
       }
 
       // Notify whoever's running this job the moment a process wraps up —
       // never on un-ticking, that's just a correction, not progress.
       if (nowComplete && job.sales_rep) {
-        await supabase.from("job_notifications").insert({
+        await sendNotifications({
           job_id: job.id,
           job_number: job.job_number,
           sales_rep: job.sales_rep,
@@ -4716,7 +4744,7 @@ export default function StockControl() {
       if (error) throw error;
       flashSaved(`process-${process.id}`);
       if (personId && personId !== process.assigned_to) {
-        await supabase.from("job_notifications").insert({
+        await sendNotifications({
           job_id: job.id,
           job_number: job.job_number,
           recipient_id: personId,
@@ -4771,7 +4799,7 @@ export default function StockControl() {
       lines.push({ description: it.description, qty, unitPrice: Number(it.unit_price) });
     }
     if (job.sales_rep) {
-      await supabase.from("job_notifications").insert({
+      await sendNotifications({
         job_id: job.id,
         job_number: job.job_number,
         sales_rep: job.sales_rep,
@@ -4902,7 +4930,7 @@ export default function StockControl() {
       ]);
 
       if (sourceProcesses?.length) {
-        await supabase.from("job_processes").insert(
+        const { error: procError } = await supabase.from("job_processes").insert(
           sourceProcesses.map((p) => ({
             job_id: newJob.id,
             process_name: p.process_name,
@@ -4911,9 +4939,12 @@ export default function StockControl() {
             sort_order: p.sort_order,
           }))
         );
+        // Without this a copy could quietly land with no stages at all --
+        // a job that looks right in the list and does nothing in the shop.
+        if (procError) throw procError;
       }
       if (sourceQuoteItems?.length) {
-        await supabase.from("job_quote_items").insert(
+        const { error: itemError } = await supabase.from("job_quote_items").insert(
           sourceQuoteItems.map((it, idx) => ({
             job_id: newJob.id,
             description: it.description,
@@ -5081,7 +5112,7 @@ export default function StockControl() {
       }
       setMaster((prev) => ({ ...prev, nextDeliveryNoteNumber: (prev.nextDeliveryNoteNumber || 1) + 1 }));
       if (m.job.sales_rep) {
-        await supabase.from("job_notifications").insert({
+        await sendNotifications({
           job_id: m.job.id,
           job_number: m.job.job_number,
           sales_rep: m.job.sales_rep,
@@ -5153,7 +5184,10 @@ export default function StockControl() {
       const blob = doc.output("blob");
       const { error: upError } = await supabase.storage.from(bucket).upload(path, blob, { upsert: true, contentType: "application/pdf" });
       if (upError) throw upError;
-      await supabase.from("generated_documents").insert({
+      // The file is already uploaded by this point. If the record of it
+      // fails, the document exists but nothing can find it again -- which
+      // looks exactly like it was never made.
+      const { error: recordError } = await supabase.from("generated_documents").insert({
         document_type: documentType,
         bucket,
         storage_path: path,
@@ -5162,6 +5196,7 @@ export default function StockControl() {
         related_id: relatedId ? String(relatedId) : null,
         generated_by: roleLabel,
       });
+      if (recordError) throw recordError;
       if (showPreview) {
         const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 3600);
         if (error) throw error;
@@ -5317,7 +5352,7 @@ export default function StockControl() {
         if (statusError) throw statusError;
       }
       if (job.sales_rep) {
-        await supabase.from("job_notifications").insert({
+        await sendNotifications({
           job_id: job.id,
           job_number: job.job_number,
           sales_rep: job.sales_rep,
@@ -5677,7 +5712,7 @@ export default function StockControl() {
         .eq("item_status", "invoice_requested");
       if (itemsError) throw itemsError;
       if (job.sales_rep) {
-        await supabase.from("job_notifications").insert({
+        await sendNotifications({
           job_id: job.id,
           job_number: job.job_number,
           sales_rep: job.sales_rep,
@@ -5776,7 +5811,8 @@ export default function StockControl() {
   async function markNotificationRead(id) {
     setNotificationsList((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
     try {
-      await supabase.from("job_notifications").update({ is_read: true }).eq("id", id);
+      const { error } = await supabase.from("job_notifications").update({ is_read: true }).eq("id", id);
+      if (error) throw error;
     } catch (err) {
       console.error("Failed to mark notification read:", err);
     }
