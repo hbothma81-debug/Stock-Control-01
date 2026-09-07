@@ -1070,6 +1070,9 @@ export default function StockControl() {
   const [shortageModal, setShortageModal] = useState(null);
   const [productionLoading, setProductionLoading] = useState(false);
   const [jobInvoiceRequests, setJobInvoiceRequests] = useState([]);
+  // What each job's quoted lines add up to, by job. Only ever read for
+  // the total above the Jobs list.
+  const [jobLineTotals, setJobLineTotals] = useState({});
   const [allDeliveryNotes, setAllDeliveryNotes] = useState([]);
   const [generatedDocuments, setGeneratedDocuments] = useState(null);
   const [deliveryNotesSearchQuery, setDeliveryNotesSearchQuery] = useState("");
@@ -2753,10 +2756,19 @@ export default function StockControl() {
     // every jobs load, to fill a variable nothing ever read -- the screens
     // that need quote items fetch their own, for the one job they are
     // showing.
-    const [jobsResult, invReqResult, deliveryNotesResult] = await Promise.allSettled([
+    const [jobsResult, invReqResult, deliveryNotesResult, quoteLinesResult] = await Promise.allSettled([
       fetchAllRows("jobs", { orderBy: "created_at", ascending: false }),
       fetchAllRows("job_invoice_requests", { orderBy: "submitted_at", ascending: false }),
       fetchAllRows("delivery_notes", { orderBy: "delivery_note_number", ascending: false }),
+      // Two columns of every quoted line, which is where a job's money
+      // actually is. The Quoted value box on the job is optional and
+      // mostly empty, so a total built on it alone reads zero while the
+      // jobs underneath are worth plenty.
+      //
+      // A wider version of this fetch was taken out once for filling a
+      // variable nothing read. This one is two columns and puts a number
+      // on screen.
+      fetchAllRows("job_quote_items", { select: "job_id, qty, unit_price" }),
     ]);
 
     if (jobsResult.status === "fulfilled") {
@@ -2776,6 +2788,21 @@ export default function StockControl() {
     } else {
       console.error("Failed to load delivery notes:", deliveryNotesResult.reason);
       setAllDeliveryNotes([]);
+    }
+    if (quoteLinesResult.status === "fulfilled") {
+      const totals = {};
+      for (const line of quoteLinesResult.value || []) {
+        const value = (Number(line.qty) || 0) * (Number(line.unit_price) || 0);
+        if (!value) continue;
+        totals[line.job_id] = (totals[line.job_id] || 0) + value;
+      }
+      setJobLineTotals(totals);
+    } else {
+      // Not fatal. The jobs list is the point of this fetch's failure
+      // being survivable -- the total simply falls back to the Quoted
+      // value box, which is what it used before.
+      console.error("Failed to load quoted lines (the total will be lower than it should be):", quoteLinesResult.reason);
+      setJobLineTotals({});
     }
     setJobsLoading(false);
   }
@@ -10801,18 +10828,18 @@ export default function StockControl() {
                       answers what they have on order. */}
                   {canSeeValue &&
                     (() => {
-                      const onOrder = jobsList
-                        .filter((j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j))
-                        .reduce((sum, j) => sum + (Number(j.quoted_value) || 0), 0);
-                      const priced = jobsList.filter(
-                        (j) =>
-                          (j.status === "in_progress" || j.status === "complete") &&
-                          matchesFilters(j) &&
-                          Number(j.quoted_value) > 0
-                      ).length;
-                      const total = jobsList.filter(
+                      // What a job is worth: its quoted lines added up, and
+                      // failing that the Quoted value box. Most jobs have
+                      // lines and no box, a few have the box and no lines,
+                      // and either way the job is worth something.
+                      const worthOf = (j) =>
+                        jobLineTotals[j.id] || Number(j.quoted_value) || 0;
+                      const active = jobsList.filter(
                         (j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j)
-                      ).length;
+                      );
+                      const onOrder = active.reduce((sum, j) => sum + worthOf(j), 0);
+                      const priced = active.filter((j) => worthOf(j) > 0).length;
+                      const total = active.length;
                       if (total === 0) return null;
                       return (
                         <div style={S.summaryBanner}>

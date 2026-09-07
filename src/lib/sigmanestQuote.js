@@ -251,16 +251,24 @@ export function parseSigmaNestQuote(items) {
     }
   }
 
-  const totalAt = find(items, "TOTAL :");
-  const quotedTotal = totalAt
-    ? Math.max(
-        ...items
-          .filter((i) => i.page === totalAt.page && i.x > totalAt.x && Math.abs(i.y - totalAt.y) <= 6)
-          .map((i) => toNumber(i.text))
-          .filter((n) => n !== null),
-        -Infinity
-      )
-    : null;
+  // The figure written to the right of a totals label.
+  const totalBeside = (label) => {
+    const at = find(items, label);
+    if (!at) return null;
+    const numbers = items
+      .filter((i) => i.page === at.page && i.x > at.x && Math.abs(i.y - at.y) <= 6)
+      .map((i) => toNumber(i.text))
+      .filter((n) => n !== null);
+    return numbers.length ? Math.max(...numbers) : null;
+  };
+
+  // Two totals on the page, and which one is wanted matters. The lines add
+  // up to the sub total; VAT is added after. Everywhere else in the app a
+  // job is worth what its lines come to, so taking the VAT-inclusive figure
+  // here would make one job read fifteen percent bigger than the same work
+  // typed in by hand.
+  const subTotal = totalBeside("SUB TOTAL :");
+  const grandTotal = totalBeside("TOTAL :");
 
   return {
     ok: lines.length > 0,
@@ -269,7 +277,9 @@ export function parseSigmaNestQuote(items) {
     customer,
     notes,
     lines,
-    quotedTotal: Number.isFinite(quotedTotal) ? quotedTotal : null,
+    quotedTotal: subTotal ?? grandTotal,
+    subTotal,
+    totalIncludingVat: grandTotal,
   };
 }
 
