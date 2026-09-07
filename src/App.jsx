@@ -6694,14 +6694,28 @@ export default function StockControl() {
   // Used by the R/unit ⇄ R/kg price toggle on the Add/Edit form — writes
   // straight back to the shared grade or section price, same underlying
   // value Requisitions and Stock Manager already read from.
-  function setMaterialPrice(listKey, name, price) {
-    const q = (name || "").toLowerCase();
-    setMaster((prev) => ({
-      ...prev,
-      [listKey]: (prev[listKey] || []).map((x) =>
-        x.name.toLowerCase() === q || (x.shortName || "").toLowerCase() === q ? { ...x, price } : x
-      ),
-    }));
+  //
+  // A material being priced for the first time is not in that list yet --
+  // it is being typed into the form as you go. This used to map over the
+  // list, match nothing, and drop the price, so the box you had just typed
+  // 250 into went straight back to 0 with nothing said. It now adds the
+  // entry when it is missing, which is what saving the item does anyway.
+  //
+  // `extra` carries what that new entry needs to be worth having: the
+  // section's type so it lands in the right group, or a grade's density so
+  // weights still calculate.
+  function setMaterialPrice(listKey, name, price, extra = {}) {
+    const clean = (name || "").trim();
+    if (!clean) return;
+    const q = clean.toLowerCase();
+    setMaster((prev) => {
+      const list = prev[listKey] || [];
+      const matches = (x) => x.name.toLowerCase() === q || (x.shortName || "").toLowerCase() === q;
+      if (!list.some(matches)) {
+        return { ...prev, [listKey]: [...list, { name: clean, factor: 0, price, ...extra }] };
+      }
+      return { ...prev, [listKey]: list.map((x) => (matches(x) ? { ...x, price } : x)) };
+    });
   }
 
   function findSectionType(name) {
@@ -13017,7 +13031,7 @@ export default function StockControl() {
                                 onChange={(e) => {
                                   const v = parseFloat(e.target.value) || 0;
                                   const newPerKg = priceUnitMode === "perKg" ? v : perSheetWeight > 0 ? v / perSheetWeight : 0;
-                                  setMaterialPrice("grades", effectiveGrade, newPerKg);
+                                  setMaterialPrice("grades", effectiveGrade, newPerKg, { factor: 7.85 });
                                 }}
                               />
                               <div style={S.roleHint}>
@@ -13128,7 +13142,7 @@ export default function StockControl() {
                                 onChange={(e) => {
                                   const v = parseFloat(e.target.value) || 0;
                                   const newPerKg = priceUnitMode === "perKg" ? v : v / perM;
-                                  setMaterialPrice("cncGrades", effectiveGrade, newPerKg);
+                                  setMaterialPrice("cncGrades", effectiveGrade, newPerKg, { factor: 7.85 });
                                 }}
                               />
                               <div style={S.roleHint}>
@@ -13207,7 +13221,7 @@ export default function StockControl() {
                                 onChange={(e) => {
                                   const v = parseFloat(e.target.value) || 0;
                                   const newPerM = priceUnitMode === "perKg" ? v * kgPerM : v;
-                                  setMaterialPrice("sections", effectiveSection, newPerM);
+                                  setMaterialPrice("sections", effectiveSection, newPerM, { type: effectiveSectionType });
                                 }}
                               />
                               <div style={S.roleHint}>
