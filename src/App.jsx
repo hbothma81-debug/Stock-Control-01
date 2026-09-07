@@ -3670,7 +3670,42 @@ export default function StockControl() {
     const byKey = new Map(candidates.map((c) => [c.key, c]));
     for (const r of rows) r.candidate = byKey.get(r.key) || null;
 
-    return { rows, programs, candidates };
+    // What Prince has finished nesting. Kept rather than cleared, so the
+    // screen answers "what did I nest, and when" as well as "what is
+    // left". Every job, not just the active ones -- a job finished last
+    // month was still nested, and that is the whole point of a history.
+    // A job counts as nested only when nothing of it is still waiting.
+    // Some jobs carry the nesting stage twice, and finding one completed
+    // copy listed a job as finished while its other copy was still on the
+    // To nest list -- the same job in both places, saying two things.
+    const stillToNest = new Set(rows.filter((r) => r.kind === "job").map((r) => r.job.id));
+
+    const nestedRows = [];
+    for (const job of jobs) {
+      if (stillToNest.has(job.id)) continue;
+      const process = d.processes.find(
+        (pr) =>
+          pr.job_id === job.id &&
+          !pr.shortage_id &&
+          isPlateNestingProcess(pr.process_name) &&
+          pr.is_complete
+      );
+      if (!process) continue;
+      const onPrograms = programsByJob[job.id] || [];
+      nestedRows.push({
+        key: "nested:" + job.id,
+        kind: "nested",
+        job,
+        process,
+        onPrograms,
+        cutCount: onPrograms.filter((pg) => pg.is_complete).length,
+      });
+    }
+    nestedRows.sort(
+      (a, b) => new Date(b.process.completed_at || 0) - new Date(a.process.completed_at || 0)
+    );
+
+    return { rows, nestedRows, programs, candidates };
   }
 
 
@@ -4026,14 +4061,23 @@ export default function StockControl() {
     }
   }
 
-  // Ticked when there are no more programs coming for that job. Without
+  // Pressed when there are no more programs coming for that job. Without
   // it the app cannot tell a job with parts still to nest apart from one
   // that is finished, so the laser stage would complete too early.
-  async function markJobFullyNested(job, process) {
+  //
+  // It goes both ways. The button is the only thing that moves a job off
+  // Prince's list, so pressing it by mistake used to mean going into the
+  // job itself to put it back. Un-doing here re-opens the laser stage
+  // too, through the same sync that closed it.
+  async function setJobNestingDone(job, process, done = true) {
     try {
       const { error } = await supabase
         .from("job_processes")
-        .update({ is_complete: true, completed_by: roleLabel, completed_at: new Date().toISOString() })
+        .update({
+          is_complete: done,
+          completed_by: done ? roleLabel : null,
+          completed_at: done ? new Date().toISOString() : null,
+        })
         .eq("id", process.id);
       if (error) throw error;
       flashSaved("nesting-" + process.id);
@@ -4044,7 +4088,7 @@ export default function StockControl() {
       setLaserData(changed > 0 ? await loadLaserRaw() : fresh);
       if (productionQueue !== null) fetchProductionQueue();
     } catch (err) {
-      console.error("Failed to mark nesting complete:", err);
+      console.error("Failed to change the nesting stage:", err);
       alert("That didn't save — check your connection and try again.");
     }
   }
@@ -10183,7 +10227,7 @@ export default function StockControl() {
           </div>
         ) : (
           (() => {
-            const { rows, programs, candidates } = laserNestingData();
+            const { rows, nestedRows, programs, candidates } = laserNestingData();
             const canNest = isAdmin || !!profile?.allowedProcessTypes?.some(isPlateNestingProcess);
             const canCut = isAdmin || !!profile?.allowedProcessTypes?.some(isProgramLaserProcess);
             // Someone who only nests, or only cuts, still lands on their own
@@ -10231,6 +10275,7 @@ export default function StockControl() {
                   <NestingView
                     machine={LASER_MACHINE}
                     rows={rows}
+                    nestedRows={nestedRows}
                     programs={programs}
                     candidates={candidates}
                     thicknesses={master.laserThicknesses || []}
@@ -10242,7 +10287,7 @@ export default function StockControl() {
                     onCancelProgram={cancelLaserProgram}
                     onAddJobToProgram={addJobToLaserProgram}
                     onRemoveJobFromProgram={removeJobFromLaserProgram}
-                    onMarkJobNested={markJobFullyNested}
+                    onSetNestingDone={setJobNestingDone}
                     onUpdateProgram={updateLaserProgram}
                     SavedCheck={SavedCheck}
                     Notes={ExpandableProcessNotes}

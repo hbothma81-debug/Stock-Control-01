@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Plus, X, Ban, AlertTriangle, PackagePlus, FileText, Upload, ChevronDown } from "lucide-react";
+import { Plus, X, Ban, AlertTriangle, PackagePlus, FileText, Upload, ChevronDown, Check, Undo2 } from "lucide-react";
 import { C, S } from "../theme.js";
 import Section from "../Section.jsx";
 
@@ -46,6 +46,7 @@ function candidateLabel(c) {
 export default function NestingView({
   machine,
   rows,
+  nestedRows,
   programs,
   candidates,
   thicknesses,
@@ -60,7 +61,7 @@ export default function NestingView({
   onCancelProgram,
   onAddJobToProgram,
   onRemoveJobFromProgram,
-  onMarkJobNested,
+  onSetNestingDone,
   onUpdateProgram,
 }) {
   const [openRow, setOpenRow] = useState(null);
@@ -157,6 +158,7 @@ export default function NestingView({
     );
 
   const shownRows = rows.filter(rowMatches);
+  const shownNested = (nestedRows || []).filter(rowMatches);
   const openPrograms = programs.filter((p) => !p.is_complete).filter(programMatches);
   const cutPrograms = programs.filter((p) => p.is_complete).filter(programMatches);
   const nestNowCount = shownRows.filter((r) => r.nestNow).length;
@@ -342,7 +344,7 @@ export default function NestingView({
                 expanded={openRow === r.key}
                 onToggle={() => setOpenRow((k) => (k === r.key ? null : r.key))}
                 onCreateProgram={onCreateProgram}
-                onMarkJobNested={onMarkJobNested}
+                onSetNestingDone={onSetNestingDone}
                 actions={actions}
                 SavedCheck={SavedCheck}
                 Notes={Notes}
@@ -352,10 +354,22 @@ export default function NestingView({
         )}
       </Section>
 
+      {/* What Prince has finished. Shut by default and kept for good --
+          it answers "what did I nest last week", which nothing else did. */}
+      <Section title="Nested" count={shownNested.length} collapsible defaultOpen={false}>
+        {shownNested.length === 0 ? (
+          <div style={S.empty}>{q ? "Nothing nested matches that." : "Nothing finished yet."}</div>
+        ) : (
+          shownNested.map((r) => (
+            <NestedRow key={r.key} row={r} canManage={canManage} onSetNestingDone={onSetNestingDone} />
+          ))
+        )}
+      </Section>
+
       <ProgramList
         title="Programs waiting to be cut"
         programs={openPrograms}
-        emptyText="Nothing nested yet."
+        emptyText="Nothing waiting to be cut."
         canManage={canManage}
         onClearReport={onClearReport}
         thicknesses={thicknesses}
@@ -431,7 +445,7 @@ function NestRow({
   expanded,
   onToggle,
   onCreateProgram,
-  onMarkJobNested,
+  onSetNestingDone,
   actions,
   SavedCheck,
   Notes,
@@ -446,6 +460,7 @@ function NestRow({
 
   const sigmanest = r.job?.laser_job_reference || r.shortage?.board_number || "";
   const programText = r.onPrograms && r.onPrograms.length > 0 ? r.onPrograms.map((p) => p.program_number).join(", ") : "";
+  const hasPrograms = (r.onPrograms || []).length > 0;
 
   // Anything else can ride on the same sheet -- that is the whole reason
   // programs exist. Typed rather than ticked: a list of every waiting job
@@ -558,7 +573,12 @@ function NestRow({
           {/* ---- nest it, right here ---- */}
           {canManage && (
             <div style={{ border: `1px solid ${C.accentRaw}`, borderRadius: 6, padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>Nest it on {machine}</div>
+              <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                <Plus size={14} />
+                {hasPrograms
+                  ? `Add another program — ${r.onPrograms.length} already on this job`
+                  : `Nest it on ${machine}`}
+              </div>
 
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <div style={{ flex: "1 1 160px" }}>
@@ -777,14 +797,78 @@ function NestRow({
                 </div>
               )}
 
-              <label style={S.checkRow}>
-                <input type="checkbox" checked={false} onChange={() => onMarkJobNested(r.job, r.process)} />
-                Fully nested — no more programs coming for this job
-              </label>
+              {/* The only thing that moves a job off this list. It used to
+                  be a checkbox below the drawings, which nobody found, so
+                  jobs sat here with every program already cut. */}
+              <div>
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={hasPrograms ? S.submitBtn : S.submitBtnDisabled}
+                  disabled={!hasPrograms}
+                  onClick={() => onSetNestingDone(r.job, r.process, true)}
+                >
+                  <Check size={14} /> Done nesting — nothing more coming for this job
+                </button>
+                {!hasPrograms && (
+                  <div style={{ ...S.roleHint, marginTop: 4 }}>
+                    Nothing nested on this job yet. Cut outside the app? Tick its nesting stage on the job itself.
+                  </div>
+                )}
+              </div>
               <SavedCheck fieldKey={`nesting-${r.process.id}`} />
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// One line per job Prince has finished, newest first. No chevron: there is
+// nothing behind it he has to act on. The only control is Undo, because
+// the button that put it here is easy to press by accident and putting a
+// job back used to mean going into the job itself.
+function NestedRow({ row: r, canManage, onSetNestingDone }) {
+  const sigmanest = r.job?.laser_job_reference || "";
+  const total = (r.onPrograms || []).length;
+  const allCut = total > 0 && r.cutCount === total;
+  return (
+    <div
+      style={{
+        padding: "8px 10px",
+        borderRadius: 6,
+        border: `1px solid ${C.border}`,
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        flexWrap: "wrap",
+      }}
+    >
+      <span style={{ fontWeight: 700, fontSize: 15 }}>{r.job?.job_number || "Unknown"}</span>
+      <span style={{ color: C.muted, fontSize: 14 }}>{sigmanest || "no SigmaNest #"}</span>
+      <span style={{ color: C.muted, fontSize: 14 }}>{r.job?.customer || "no customer"}</span>
+      <span style={{ flex: 1, minWidth: 0, fontSize: 14, color: C.accentFinished }}>
+        {(r.onPrograms || []).map((p) => p.program_number).join(", ")}
+      </span>
+      <span style={{ ...S.chip, flexShrink: 0, ...(allCut ? { color: C.accentFinished, borderColor: C.accentFinished } : {}) }}>
+        {total === 0 ? "no programs" : allCut ? "all cut" : `${r.cutCount} of ${total} cut`}
+      </span>
+      {r.process?.completed_at && (
+        <span style={{ ...S.roleHint, flexShrink: 0 }}>
+          {new Date(r.process.completed_at).toLocaleDateString()}
+        </span>
+      )}
+      {canManage && (
+        <button
+          type="button"
+          className="stk-btn"
+          style={S.reqActionBtnMuted}
+          onClick={() => onSetNestingDone(r.job, r.process, false)}
+          title="Put this back on the To nest list"
+        >
+          <Undo2 size={12} /> Undo
+        </button>
       )}
     </div>
   );
