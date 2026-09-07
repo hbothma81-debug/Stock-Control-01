@@ -1407,8 +1407,49 @@ export default function StockControl() {
     return hadError;
   }
 
+  // Whether a newer version of the app has been put out since this page
+  // was opened.
+  //
+  // The file names carry a fingerprint of what is in them, so a new
+  // version means a new name. The page that is running knows the name it
+  // started with; asking the server for the current one and comparing the
+  // two is the whole test.
+  //
+  // Anything unexpected -- no signal, a name that does not look like a
+  // built file, running from the dev server -- answers no. This decides
+  // whether to reload the page, and reloading someone in the middle of
+  // typing on a guess is worse than not reloading at all.
+  async function newVersionIsOut() {
+    try {
+      const res = await fetch(`/index.html?t=${Date.now()}`, { cache: "no-store" });
+      if (!res.ok) return false;
+      const html = await res.text();
+      const wanted = (html.match(/\/assets\/index-[A-Za-z0-9_-]+\.js/) || [])[0];
+      if (!wanted) return false;
+      const running = [...document.querySelectorAll('script[type="module"][src]')].map(
+        (el) => new URL(el.src, window.location.href).pathname
+      );
+      return running.length > 0 && !running.includes(wanted);
+    } catch {
+      return false;
+    }
+  }
+
+  // Refresh means "show me what is actually true now", and until this it
+  // only meant the data. New code needed the app closed and opened again,
+  // which is what everyone was doing -- and a page left open across a
+  // deploy quietly loses anything that builds a document, with nothing on
+  // screen to say why.
+  //
+  // So it re-reads the data as before, and reloads the page outright when
+  // there is a new version to pick up. Reloading re-reads the data anyway,
+  // so nothing is lost by doing one instead of the other.
   async function manualRefresh() {
     setIsRefreshing(true);
+    if (await newVersionIsOut()) {
+      window.location.reload();
+      return; // the page is going; leave the spinner up until it does
+    }
     await loadAllData(false);
     setIsRefreshing(false);
   }
