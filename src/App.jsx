@@ -3570,6 +3570,10 @@ export default function StockControl() {
       }
     }
 
+    const shortagesOnAProgram = new Set(
+      programs.flatMap((p) => (p.jobs || []).map((l) => l.shortage_id)).filter(Boolean)
+    );
+
     // A job is waiting to be nested while its own nesting stage is still
     // open. Matched on the name the way shortages are routed, so a shop
     // calling it "Nesting" or "Plate Nesting" both work. Catch-up stages
@@ -3611,14 +3615,26 @@ export default function StockControl() {
 
     // A re-cut is its own row rather than something to search for. It is
     // always nest-now: it exists because somebody is short of parts.
+    //
+    // It belongs here until it is actually on a program, not merely until
+    // somebody says it is nested. The Shortage nested button on the
+    // nesting department screen predates programs and sets the status
+    // without putting the shortage on anything -- so a re-cut marked that
+    // way left this list while going onto nothing, and became invisible to
+    // the one person who could act on it. One on live sat like that for
+    // days, showing as "on its way" with nothing on its way.
     for (const sh of d.shortages) {
-      if (sh.status !== "flagged") continue;
+      if (sh.status === "cut" || sh.status === "finishing") continue;
+      if (shortagesOnAProgram.has(sh.id)) continue;
       const job = jobById.get(sh.job_id);
       rows.push({
         key: "short:" + sh.id,
         kind: "shortage",
         nestNow: true,
-        nestNowReason: "Short of parts — someone is waiting",
+        nestNowReason:
+          sh.status === "nested"
+            ? "Marked nested, but not on any program"
+            : "Short of parts — someone is waiting",
         job: job || { id: sh.job_id, job_number: sh.job_number, customer: sh.customer },
         process: null,
         shortage: sh,
