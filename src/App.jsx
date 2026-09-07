@@ -4352,6 +4352,14 @@ export default function StockControl() {
     try {
       const { error } = await supabase.from("jobs").update({ laser_job_reference: value }).eq("id", job.id);
       if (error) throw error;
+      // The number lives on the job's own row, and every screen showing it
+      // -- the nesting row, the Production card, the Jobs list -- reads
+      // that from jobsList. Only the laser data was being refreshed, which
+      // holds programs and stages and not this, so a good save left the old
+      // number sitting on screen. That reads as "it did not save", and the
+      // next thing anyone does is type it in again.
+      flashSaved(`job-${job.id}-laser_job_reference`);
+      await fetchJobs();
       fetchProductionQueue();
       if (jobDetail?.job.id === job.id) refreshJobDetail();
     } catch (err) {
@@ -5907,6 +5915,9 @@ export default function StockControl() {
       const { error } = await supabase.from("jobs").update({ [field]: value }).eq("id", jobId);
       if (error) throw error;
       flashSaved(`job-${jobId}-${field}`);
+      // Same reason as above: the list behind the job you have open reads
+      // from jobsList, so without this it keeps showing what it loaded.
+      await fetchJobs();
       if (jobDetail?.job.id === jobId) refreshJobDetail();
     } catch (err) {
       console.error("Failed to update job field:", err);
@@ -10918,6 +10929,7 @@ export default function StockControl() {
                                     if (e.target.value !== (job.laser_job_reference || "")) saveJobSigmaNestNumber(job, e.target.value.trim());
                                   }}
                                 />
+                                <SavedCheck fieldKey={`job-${job.id}-laser_job_reference`} />
                               </div>
                             )}
                             {job.description && <div style={S.roleHint}>{job.description}</div>}
