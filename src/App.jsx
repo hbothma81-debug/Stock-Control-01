@@ -9109,11 +9109,18 @@ export default function StockControl() {
             ? !isSectionRow(x, entry.name, entry.grade)
             : x.name !== entry.name
       );
-      const sections =
-        managerTab === "sectionTypes"
-          ? (prev.sections || []).map((s) => (s.type === entry ? { ...s, type: "" } : s))
-          : prev.sections;
-      return { ...prev, [managerTab]: filtered, sections };
+      const next = { ...prev, [managerTab]: filtered };
+      // Removing a section type leaves its sections behind: they lose the
+      // group they were filed under, not their kg/m or their price.
+      //
+      // This used to set `sections` unconditionally alongside the filtered
+      // list. On the sections tab itself both keys were "sections", and the
+      // second one put the unfiltered list straight back -- so deleting a
+      // section quietly did nothing at all, and always had.
+      if (managerTab === "sectionTypes") {
+        next.sections = (prev.sections || []).map((sec) => (sec.type === entry ? { ...sec, type: "" } : sec));
+      }
+      return next;
     });
   }
 
@@ -14426,13 +14433,22 @@ export default function StockControl() {
                     {master.sections
                       .filter((s) => (s.type || "Ungrouped") === sectionTypeFilterInManager)
                       .filter((s) => s.name.toLowerCase().includes(managerSearchQuery.toLowerCase()))
-                      .filter(
-                        (s) =>
-                          !sectionGradeFilterInManager ||
-                          (sectionGradeFilterInManager === "__none__"
-                            ? !(s.grade || "").trim()
-                            : sameText(s.grade, sectionGradeFilterInManager))
-                      )
+                      .filter((s) => {
+                        const want = sectionGradeFilterInManager;
+                        if (!want) return true;
+                        const matches = (x) =>
+                          want === "__none__" ? !(x.grade || "").trim() : sameText(x.grade, want);
+                        // The chosen material can go away -- its last row
+                        // deleted, or moved to another type. The dropdown then
+                        // falls back to showing All materials while the filter
+                        // still holds the old one, and every row disappears with
+                        // nothing on screen saying why. A material that is no
+                        // longer there filters nothing.
+                        const stillThere = master.sections.some(
+                          (x) => (x.type || "Ungrouped") === sectionTypeFilterInManager && matches(x)
+                        );
+                        return !stillThere || matches(s);
+                      })
                       .map((entry) => (
                         <div key={`${entry.name}|${entry.grade || ""}`} style={S.managerRow}>
                           <EditableName value={entry.name} onCommit={(v) => renameMasterEntry(managerTab, entry.name, v)} />
