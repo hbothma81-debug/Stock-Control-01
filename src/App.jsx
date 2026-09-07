@@ -782,15 +782,28 @@ function ExpandableProcessNotes({ value, onCommit }) {
   const [expanded, setExpanded] = useState(false);
   const [val, setVal] = useState(value || "");
   useEffect(() => setVal(value || ""), [value]);
+  // Shut, this used to be a line of small grey text with no border, no
+  // padding and no background -- it read as a caption rather than
+  // something you press, and there was nothing showing where to aim. It
+  // now wears the same box it turns into, so the target is obvious, the
+  // whole of it is clickable, and opening it does not shift the layout.
   if (!expanded) {
     return (
       <button
         type="button"
         className="stk-btn"
-        style={{ ...S.roleHint, textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer", width: "100%" }}
+        style={{
+          ...S.input,
+          minHeight: 38,
+          textAlign: "left",
+          cursor: "text",
+          color: value ? C.text : C.muted,
+          fontSize: 14,
+          whiteSpace: "pre-wrap",
+        }}
         onClick={() => setExpanded(true)}
       >
-        {value ? `Note: ${value}` : "+ Add note"}
+        {value || "Add a note…"}
       </button>
     );
   }
