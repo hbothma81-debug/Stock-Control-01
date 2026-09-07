@@ -4015,9 +4015,11 @@ export default function StockControl() {
           .eq("id", stage.id);
         if (error) throw error;
       }
-      if (nowCut && sh.status !== "cut") {
-        await markShortageCut(sh);
-      } else if (!nowCut && sh.status === "cut") {
+      if (nowCut) {
+        await refreshShortageStatus(sh, { offTheLaser: true });
+      } else if (sh.status === "cut" || sh.status === "finishing") {
+        // Un-cutting the program puts the parts back on the machine, so
+        // the shortage is waiting to be cut again.
         const { error } = await supabase
           .from("shortages")
           .update({ status: "nested", cut_by: "", cut_at: "" })
@@ -4541,28 +4543,75 @@ export default function StockControl() {
     }
   }
 
-  async function markShortageCut(shortage) {
-    try {
-      const { error } = await supabase
-        .from("shortages")
-        .update({ status: "cut", cut_by: roleLabel, cut_at: new Date().toISOString() })
-        .eq("id", shortage.id);
-      if (error) throw error;
-      // Fully resolved — no one needs to go close this out separately.
-      // The one person still waiting is whoever originally flagged it.
-      if (shortage.flagged_by_id) {
-        await sendNotifications({
-          job_id: shortage.job_id,
-          job_number: shortage.job_number,
-          recipient_id: shortage.flagged_by_id,
-          message: `Shortage cut and ready — ${shortageSummary(shortage)} for ${shortage.job_number} (${shortage.customer || "no customer"})`,
-        });
-      }
-      fetchShortages();
-    } catch (err) {
-      console.error("Failed to update shortage:", err);
-      alert("That didn't save — check your connection and try again.");
+  // A shortage is finished when the replacement parts have been through
+  // every catch-up stage. Whoever flagged it is waiting for finished
+  // parts, not a cut blank -- packing that is five brackets short still
+  // cannot pack them straight off the laser.
+  //
+  // Two places used to decide this and they decided it differently.
+  // Marking the program cut resolved the shortage outright; ticking any
+  // stage in Production then pushed it back open unless everything was
+  // done. Since a shortage's catch-up stages run all the way up to the
+  // stage that raised it, that was the normal case, not an edge case: a
+  // shortage closed itself at the laser and re-opened moments later,
+  // labelled as still needing cutting when it had already been cut.
+  //
+  // So: one rule, called from both. "cut" has always meant fully
+  // resolved in this table and still does. "finishing" is the state in
+  // between -- off the laser, catch-up work still running -- which the
+  // app previously had no way to say.
+  async function refreshShortageStatus(shortage, { offTheLaser = false } = {}) {
+    const { data: stages, error } = await supabase
+      .from("job_processes")
+      .select("process_name, is_complete")
+      .eq("shortage_id", shortage.id);
+    if (error) throw error;
+
+    const list = stages || [];
+    const outstanding = list.filter((st) => !st.is_complete).map((st) => st.process_name);
+
+    // Whether the parts are off the laser is read from the catch-up work
+    // itself, not from the status. Rows left saying the wrong thing by the
+    // old pair of rules then correct themselves the next time anyone
+    // touches the shortage, instead of sitting there claiming they still
+    // need cutting long after they were cut.
+    const offLaser =
+      offTheLaser ||
+      shortage.status === "cut" ||
+      shortage.status === "finishing" ||
+      list.some((st) => isProgramLaserProcess(st.process_name) && st.is_complete);
+
+    let next;
+    if (outstanding.length === 0) next = "cut";
+    else if (offLaser) next = "finishing";
+    else return shortage.status; // genuinely still waiting for the laser
+    if (next === shortage.status) return next;
+
+    const { error: upError } = await supabase
+      .from("shortages")
+      .update(
+        next === "cut"
+          ? { status: "cut", cut_by: roleLabel, cut_at: new Date().toISOString() }
+          : { status: "finishing", cut_by: "", cut_at: "" }
+      )
+      .eq("id", shortage.id);
+    if (upError) throw upError;
+
+    // Whoever flagged it is the one waiting, so they hear twice: once
+    // when the parts come off the laser, once when they are ready.
+    if (shortage.flagged_by_id) {
+      await sendNotifications({
+        job_id: shortage.job_id,
+        job_number: shortage.job_number,
+        recipient_id: shortage.flagged_by_id,
+        message:
+          next === "cut"
+            ? `Shortage cut and ready — ${shortageSummary(shortage)} for ${shortage.job_number} (${shortage.customer || "no customer"})`
+            : `Shortage off the laser — ${shortageSummary(shortage)} for ${shortage.job_number}, still to go through ${outstanding.join(", ")}`,
+      });
     }
+    fetchShortages();
+    return next;
   }
 
   // "Each"-tracked processes complete themselves once the running count
@@ -4734,26 +4783,22 @@ export default function StockControl() {
         .eq("id", process.id);
       if (error) throw error;
 
-      // A shortage is only genuinely resolved once its replacement has
-      // been through every catch-up stage — not when it comes off the
-      // laser. Closing it here means the trail ends where the work does.
+      // Ticking a catch-up stage may have been the last one. Same rule as
+      // the laser side uses -- this used to be a second, different one,
+      // and the two undid each other.
       if (process.shortage_id) {
-        const { data: runStages, error: runError } = await supabase
-          .from("job_processes")
-          .select("is_complete")
-          .eq("shortage_id", process.shortage_id);
-        if (runError) throw runError;
-        const allDone = (runStages || []).length > 0 && runStages.every((p) => p.is_complete);
-        const { error: shortError } = await supabase
+        const { data: sh, error: shError } = await supabase
           .from("shortages")
-          .update(
-            allDone
-              ? { status: "cut", cut_by: roleLabel, cut_at: new Date().toISOString() }
-              : { status: "nested", cut_by: "", cut_at: "" }
-          )
-          .eq("id", process.shortage_id);
-        if (shortError) throw shortError;
-        fetchShortages();
+          .select("*")
+          .eq("id", process.shortage_id)
+          .single();
+        if (shError) throw shError;
+        if (sh) await refreshShortageStatus(sh);
+        // The Shortages screen reads the laser data, not the shortage list
+        // this refreshes -- two separate copies -- so without this the
+        // status changes in the database and the screen carries on showing
+        // what it loaded earlier.
+        if (laserData !== null) await fetchLaserData();
       }
 
       // Notify whoever's running this job the moment a process wraps up —
@@ -10316,7 +10361,16 @@ export default function StockControl() {
                   />
                 ) : (
                   <ShortageCentre
-                    shortages={laserData ? laserData.shortages : null}
+                    shortages={
+                      laserData
+                        ? laserData.shortages.map((sh) => ({
+                            ...sh,
+                            waitingOn: laserData.processes
+                              .filter((pr) => pr.shortage_id === sh.id && !pr.is_complete)
+                              .map((pr) => pr.process_name),
+                          }))
+                        : null
+                    }
                     summarise={shortageSummary}
                     onGoToNesting={canNest ? () => setLaserView("nesting") : null}
                   />
@@ -10588,7 +10642,7 @@ export default function StockControl() {
                                   type="button"
                                   className="stk-btn"
                                   style={{ ...S.reqActionBtn, marginTop: 6, width: "100%" }}
-                                  onClick={() => (isNestingProcess(procType) ? markShortageNested(s) : markShortageCut(s))}
+                                  onClick={() => (isNestingProcess(procType) ? markShortageNested(s) : refreshShortageStatus(s, { offTheLaser: true }))}
                                 >
                                   {isNestingProcess(procType) ? "Shortage nested" : "Shortage cut"}
                                 </button>

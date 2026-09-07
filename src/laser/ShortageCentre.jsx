@@ -31,7 +31,14 @@ export default function ShortageCentre({ shortages, summarise, onGoToNesting }) 
     };
   }, [shortages, query]);
 
-  const statusLabel = { flagged: "Needs nesting", nested: "On its way — needs cutting" };
+  // "finishing" is off the laser with catch-up work still running. It used
+  // to show as "needs cutting", which was a lie -- it had been cut, and
+  // whoever read that went looking for a program that did not exist.
+  const statusLabel = {
+    flagged: "Needs nesting",
+    nested: "On its way — needs cutting",
+    finishing: "Cut — finishing off",
+  };
 
   if (shortages === null) return <div style={S.empty}>Loading…</div>;
 
@@ -67,12 +74,21 @@ export default function ShortageCentre({ shortages, summarise, onGoToNesting }) 
                   Flagged by {s.flagged_by} ({s.flagged_department})
                 </span>
                 <span>{new Date(s.created_at).toLocaleString()}</span>
-                {s.status === "nested" && <span>Nested by {s.nested_by}</span>}
+                {(s.status === "nested" || s.status === "finishing") && s.nested_by && (
+                  <span>Nested by {s.nested_by}</span>
+                )}
               </div>
               {s.status === "flagged" && (
                 <div style={{ ...S.roleHint, marginTop: 4 }}>
                   Waiting to go on a program. Put it on one from the Nesting screen and it is nested; cutting that
-                  program is what closes it.
+                  program is what cuts it.
+                </div>
+              )}
+              {s.status === "finishing" && (
+                <div style={{ ...S.roleHint, marginTop: 4 }}>
+                  {(s.waitingOn || []).length > 0
+                    ? `Already cut. Still to go through ${s.waitingOn.join(", ")} before the parts are ready.`
+                    : "Already cut. Nothing left outstanding — it should close itself next time a stage is ticked."}
                 </div>
               )}
             </div>
