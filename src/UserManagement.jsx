@@ -20,6 +20,7 @@ import { NAV_TABS, EXTRA_SECTIONS, SECTIONS } from "./constants.js";
 export default function UserManagement({
   people,
   master,
+  shifts,
   updatePersonField,
   updatePersonPermission,
   toggleProcessTypeAccess,
@@ -202,6 +203,42 @@ export default function UserManagement({
               />
               Is a Shortage Handler (always notified of shortages, sees the Shortage Center tab)
             </label>
+            {/* Which shift this person works. Nothing is enforced yet --
+                setting it changes nothing about their day until the lockout
+                itself is built -- so the whole shop can be put on shifts and
+                checked over first.
+
+                Nobody gets private hours: somebody starting at 05:00 goes on
+                an Early shift, so when hours change there is one place to
+                look instead of twelve. */}
+            <div style={{ marginTop: 8 }}>
+              <label style={S.label}>Shift</label>
+              <select
+                style={S.input}
+                value={p.shiftId || ""}
+                onChange={(e) => updatePersonField(p.id, "shiftId", e.target.value || null)}
+              >
+                <option value="">Not restricted</option>
+                {(shifts || []).map((sh) => (
+                  <option key={sh.id} value={sh.id}>{sh.name}</option>
+                ))}
+              </select>
+              {(shifts || []).length === 0 && (
+                <div style={S.roleHint}>
+                  No shifts set up yet — add them under Stock Manager → Time Manager.
+                </div>
+              )}
+            </div>
+
+            <label style={{ ...S.checkRow, marginTop: 8 }}>
+              <input
+                type="checkbox"
+                checked={!!p.canManageShifts}
+                onChange={(e) => updatePersonField(p.id, "canManageShifts", e.target.checked)}
+              />
+              Can manage shifts (the Time Manager, and answering requests for after-hours access)
+            </label>
+
             <div style={{ marginTop: 8 }}>
               <label style={S.label}>Department</label>
               <select

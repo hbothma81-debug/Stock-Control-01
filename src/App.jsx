@@ -90,6 +90,7 @@ const MANAGER_TABS = [
   { key: "sheetNames", label: "Sheet Names" },
   { key: "storesCatalog", label: "Stores Catalog" },
   { key: "companyDetails", label: "Company Details" },
+  { key: "shifts", label: "Time Manager" },
   { key: "departments", label: "User Management" },
 ];
 
@@ -1247,6 +1248,8 @@ export default function StockControl() {
   const [managerSearchQuery, setManagerSearchQuery] = useState("");
   const [sectionTypeFilterInManager, setSectionTypeFilterInManager] = useState("");
   const [managerSectionGrade, setManagerSectionGrade] = useState("");
+  const [shiftsList, setShiftsList] = useState([]);
+  const [newShiftName, setNewShiftName] = useState("");
   const [sectionGradeFilterInManager, setSectionGradeFilterInManager] = useState("");
   const [scForm, setScForm] = useState({ stockCode: "", description: "", price: "", recommendedStock: "", customer: "", revision: "" });
   const [scCatalogForm, setScCatalogForm] = useState({ code: "", name: "", category: "", supplier: "", price: "" });
@@ -1623,6 +1626,7 @@ export default function StockControl() {
                 canRaisePO: !!data.can_raise_po,
                 canViewUsageLog: !!data.can_view_usage_log,
                 canManageInvoicing: !!data.can_manage_invoicing,
+                canManageShifts: !!data.can_manage_shifts,
                 allowedProcessTypes: data.allowed_process_types || [],
                 isSalesPerson: !!data.is_sales_person,
                 isShortageHandler: !!data.is_shortage_handler,
@@ -6624,8 +6628,118 @@ export default function StockControl() {
     setDrawingUploadCustomer("");
   }
 
+  // The shop's shifts. A shift is a fact about the shop rather than about
+  // a person -- nights are 18:00 to 06:00 whoever is on them -- so it is
+  // set once here and people are put on it.
+  //
+  // Nothing enforces any of this yet. This is the settings, and they do
+  // nothing until the rule that reads them is built.
+  async function loadShifts() {
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase.from("shifts").select("*").order("name");
+      if (error) throw error;
+      setShiftsList(data || []);
+    } catch (err) {
+      console.error("Failed to load shifts:", err);
+      setShiftsList([]);
+    }
+  }
+
+  async function addShift(name) {
+    const clean = (name || "").trim();
+    if (!supabase || !clean) return;
+    try {
+      const { error } = await supabase.from("shifts").insert({ name: clean, created_by: roleLabel });
+      if (error) throw error;
+      await loadShifts();
+    } catch (err) {
+      console.error("Failed to add the shift:", err);
+      alert(
+        err?.code === "23505"
+          ? `There is already a shift called ${clean}.`
+          : "That didn't save — check your connection and try again."
+      );
+    }
+  }
+
+  // A day is either set or off, never half -- the database refuses a half
+  // pair, and a half-set day would leave the rule guessing anyway.
+  //
+  // But a day is typed one end at a time, so between the first box and the
+  // second there is always a moment where it IS half. Writing that moment
+  // to the database is what the constraint refuses, and rightly. So the
+  // half-typed day is held on screen and only written once both ends are
+  // there. Clearing either end means "this day is off", and writes both
+  // away together.
+  async function updateShiftTimes(shift, dayKey, which, value) {
+    if (!supabase) return;
+    const startCol = `${dayKey}_start`;
+    const endCol = `${dayKey}_end`;
+
+    const next = {
+      [startCol]: which === "start" ? value || null : shift[startCol] || null,
+      [endCol]: which === "end" ? value || null : shift[endCol] || null,
+    };
+    // Clearing one end turns the day off.
+    if (!value) {
+      next[startCol] = null;
+      next[endCol] = null;
+    }
+
+    setShiftsList((prev) => prev.map((sh) => (sh.id === shift.id ? { ...sh, ...next } : sh)));
+
+    // Still waiting on the other end. Shown, not saved.
+    if ((next[startCol] && !next[endCol]) || (!next[startCol] && next[endCol])) return;
+
+    try {
+      const { error } = await supabase.from("shifts").update(next).eq("id", shift.id);
+      if (error) throw error;
+      flashSaved(`shift-${shift.id}`);
+    } catch (err) {
+      console.error("Failed to save the shift times:", err);
+      alert("That didn't save — check your connection and try again.");
+      await loadShifts();
+    }
+  }
+
+  async function renameShift(shift, name) {
+    const clean = (name || "").trim();
+    if (!supabase || !clean || clean === shift.name) return;
+    try {
+      const { error } = await supabase.from("shifts").update({ name: clean }).eq("id", shift.id);
+      if (error) throw error;
+      await loadShifts();
+    } catch (err) {
+      console.error("Failed to rename the shift:", err);
+      alert("That didn't save — check your connection and try again.");
+      await loadShifts();
+    }
+  }
+
+  async function removeShift(shift) {
+    if (!supabase) return;
+    const on = (people || []).filter((pp) => pp.shiftId === shift.id);
+    const ok = window.confirm(
+      on.length
+        ? `Remove the ${shift.name} shift?\n\n${on.length} ${on.length === 1 ? "person goes" : "people go"} back to not being restricted.`
+        : `Remove the ${shift.name} shift?`
+    );
+    if (!ok) return;
+    try {
+      const { error } = await supabase.from("shifts").delete().eq("id", shift.id);
+      if (error) throw error;
+      await loadShifts();
+      await loadPeople();
+    } catch (err) {
+      console.error("Failed to remove the shift:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
   async function loadPeople() {
     if (!supabase) return;
+    loadShifts();
     const { data } = await supabase.from("profiles").select("*").order("created_at");
     setPeople(
       (data || []).map((d) => ({
@@ -6647,6 +6761,8 @@ export default function StockControl() {
         allowedProcessTypes: d.allowed_process_types || [],
         isSalesPerson: !!d.is_sales_person,
         isShortageHandler: !!d.is_shortage_handler,
+        shiftId: d.shift_id || null,
+        canManageShifts: !!d.can_manage_shifts,
         department: d.department || "",
       }))
     );
@@ -6667,6 +6783,8 @@ export default function StockControl() {
     allowedProcessTypes: "allowed_process_types",
     isSalesPerson: "is_sales_person",
     isShortageHandler: "is_shortage_handler",
+    shiftId: "shift_id",
+    canManageShifts: "can_manage_shifts",
     theme: "theme",
     department: "department",
   };
@@ -14696,10 +14814,147 @@ export default function StockControl() {
                 updateCompanyDetail={updateCompanyDetail}
                 handleCompanyLogoSelect={handleCompanyLogoSelect}
               />
+            ) : managerTab === "shifts" ? (
+              // The shop's shifts, set once. Nothing enforces them yet --
+              // this is the settings, and they do nothing until the rule
+              // that reads them is built. So it is safe to put the whole
+              // shop in here and check it reads back right.
+              (isAdmin || profile?.canManageShifts) ? (
+                <div style={S.list}>
+                  <div style={S.roleHint}>
+                    The hours each shift works. Set once here, and people are put on a shift under User
+                    Management — so changing a shift changes it for everyone on it.
+                  </div>
+                  <div style={{ ...S.roleHint, color: C.accentRaw }}>
+                    Nothing is enforced yet. Whatever you set in here, everybody carries on exactly as they do
+                    today until the lockout itself is built.
+                  </div>
+
+                  <div style={S.managerAddRow}>
+                    <input
+                      style={{ ...S.input, flex: 1 }}
+                      value={newShiftName}
+                      onChange={(e) => setNewShiftName(e.target.value)}
+                      placeholder="Add a shift — Day, Night, Office…"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addShift(newShiftName);
+                          setNewShiftName("");
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={S.addBtn}
+                      onClick={() => {
+                        addShift(newShiftName);
+                        setNewShiftName("");
+                      }}
+                    >
+                      <Plus size={15} strokeWidth={2.5} /> Add
+                    </button>
+                  </div>
+
+                  <div style={S.managerListFullPage}>
+                    {shiftsList.length === 0 && (
+                      <div style={S.empty}>No shifts set up yet. Add one above.</div>
+                    )}
+                    {shiftsList.map((sh) => {
+                      const on = (people || []).filter((pp) => pp.shiftId === sh.id).length;
+                      return (
+                        <div
+                          key={sh.id}
+                          style={{
+                            border: `1px solid ${C.border}`,
+                            borderRadius: 6,
+                            padding: "12px 14px",
+                            marginBottom: 8,
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                            <EditableName value={sh.name} onCommit={(v) => renameShift(sh, v)} />
+                            <span style={S.gradeCount}>
+                              {on} {on === 1 ? "person" : "people"}
+                            </span>
+                            <SavedCheck fieldKey={`shift-${sh.id}`} />
+                            <span style={{ flex: 1 }} />
+                            <button
+                              type="button"
+                              className="stk-btn"
+                              style={S.managerDelete}
+                              onClick={() => removeShift(sh)}
+                              title="Remove this shift"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+
+                          {/* A day is either set or off. Clearing either end
+                              clears both, because half a day is neither. */}
+                          {[
+                            { key: "weekday", label: "Mon – Fri" },
+                            { key: "saturday", label: "Saturday" },
+                            { key: "sunday", label: "Sunday" },
+                          ].map((day) => {
+                            const start = sh[`${day.key}_start`] || "";
+                            const end = sh[`${day.key}_end`] || "";
+                            const overnight = start && end && end <= start;
+                            return (
+                              <div
+                                key={day.key}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  marginTop: 8,
+                                  flexWrap: "wrap",
+                                }}
+                              >
+                                <span style={{ ...S.label, width: 84, marginBottom: 0 }}>{day.label}</span>
+                                <input
+                                  type="time"
+                                  style={{ ...S.input, width: 130 }}
+                                  value={start.slice(0, 5)}
+                                  onChange={(e) => updateShiftTimes(sh, day.key, "start", e.target.value)}
+                                />
+                                <span style={{ color: C.muted }}>to</span>
+                                <input
+                                  type="time"
+                                  style={{ ...S.input, width: 130 }}
+                                  value={end.slice(0, 5)}
+                                  onChange={(e) => updateShiftTimes(sh, day.key, "end", e.target.value)}
+                                />
+                                {!start && !end && <span style={S.roleHint}>off</span>}
+                                {/* A day is saved as a pair. Say so, rather
+                                    than let a half-typed day look finished. */}
+                                {!!start !== !!end && (
+                                  <span style={{ ...S.chip, color: C.danger, borderColor: C.danger }}>
+                                    needs both times
+                                  </span>
+                                )}
+                                {overnight && (
+                                  <span style={{ ...S.chip, color: C.accentRaw, borderColor: C.accentRaw }}>
+                                    runs to the next morning
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div style={S.empty}>Time Manager is for admins and whoever they put on it.</div>
+              )
             ) : managerTab === "departments" && isAdmin ? (
               <UserManagement
                 people={people}
                 master={master}
+                shifts={shiftsList}
                 updatePersonField={updatePersonField}
                 updatePersonPermission={updatePersonPermission}
                 toggleProcessTypeAccess={toggleProcessTypeAccess}
