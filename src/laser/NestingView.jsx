@@ -386,7 +386,12 @@ export default function NestingView({
         SavedCheck={SavedCheck}
       />
 
-      {cutPrograms.length > 0 && (
+      {/* Cut programs are the operator's business, and the Cutting tab
+          keeps that history in full -- so this screen is Prince's three
+          lists and nothing else. It still comes back when he searches,
+          because the box above promises to find a program wherever it is,
+          and a cut one would otherwise be findable nowhere on his screen. */}
+      {q && cutPrograms.length > 0 && (
         <ProgramList
           title="Already cut"
           programs={cutPrograms}
