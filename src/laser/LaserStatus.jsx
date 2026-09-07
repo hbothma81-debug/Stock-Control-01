@@ -20,6 +20,11 @@ import { C, S } from "../theme.js";
 // A job appears here as soon as its first program is cut, so the packer
 // can start looking for parts while the rest is still being cut.
 //
+// Re-cuts appear here too, on their own rows. A shortage is raised by the
+// person who is short, usually the packer, and the replacement parts have
+// to get back to them -- so this is where that is ticked off, and ticking
+// it is what finally closes the shortage.
+//
 // One line per job, the same as the nesting screen. Both states are on
 // that line, so the packer can read the whole list at a glance and only
 // opens the one he is about to work on.
@@ -54,6 +59,7 @@ export default function LaserStatus({
         (r.job.customer || "").toLowerCase().includes(q) ||
         (r.job.laser_job_reference || "").toLowerCase().includes(q) ||
         (r.packerName || "").toLowerCase().includes(q) ||
+        (r.detail || "").toLowerCase().includes(q) ||
         r.programs.some((p) => (p.program_number || "").toLowerCase().includes(q))
     );
   }, [rows, query]);
@@ -76,10 +82,10 @@ export default function LaserStatus({
       ) : (
         filtered.map((r) => (
           <StatusRow
-            key={r.job.id}
+            key={r.key}
             row={r}
-            expanded={openRow === r.job.id}
-            onToggle={() => setOpenRow((k) => (k === r.job.id ? null : r.job.id))}
+            expanded={openRow === r.key}
+            onToggle={() => setOpenRow((k) => (k === r.key ? null : r.key))}
             canPack={canPack}
             busyId={busyId}
             onTakeJob={onTakeJob}
@@ -118,7 +124,13 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
         borderRadius: 6,
         // A missing packing stage is a fault, not a state, so it is the one
         // thing shouted at from the closed line.
-        border: !r.process ? `2px solid ${C.danger}` : taken ? `1px solid ${C.accentRaw}` : `1px solid ${C.border}`,
+        border: !r.process
+          ? `2px solid ${C.danger}`
+          : r.isRecut
+            ? `2px solid ${C.danger}`
+            : taken
+              ? `1px solid ${C.accentRaw}`
+              : `1px solid ${C.border}`,
       }}
     >
       {/* The line. Everything else waits behind the chevron. */}
@@ -140,9 +152,16 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
           flexWrap: "wrap",
         }}
       >
+        {r.isRecut && (
+          <span style={{ ...S.chip, borderColor: C.danger, color: C.danger, fontWeight: 700, flexShrink: 0 }}>
+            Re-cut
+          </span>
+        )}
         <span style={{ fontWeight: 700, fontSize: 15 }}>{r.job.job_number}</span>
         <span style={{ color: C.muted, fontSize: 14 }}>{r.job.customer || "no customer"}</span>
-        <span style={{ color: C.muted, fontSize: 14 }}>{r.job.laser_job_reference || "no SigmaNest #"}</span>
+        {!r.isRecut && (
+          <span style={{ color: C.muted, fontSize: 14 }}>{r.job.laser_job_reference || "no SigmaNest #"}</span>
+        )}
         <span style={{ flex: 1, minWidth: 0, color: laser.tone, fontSize: 14, fontWeight: 600 }}>{laser.label}</span>
         <span style={{ color: packTone, fontSize: 14, fontWeight: 600 }}>{packLabel}</span>
         <ChevronDown
@@ -153,6 +172,11 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
 
       {expanded && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+          {r.isRecut && (
+            <div style={{ ...S.itemComment, color: C.danger, marginBottom: 6 }}>
+              {r.detail} — back from the laser. Ticking this off is what closes the shortage.
+            </div>
+          )}
           {r.job.due_date && <div style={S.roleHint}>Due {new Date(r.job.due_date).toLocaleDateString()}</div>}
 
           {/* ---- laser side: worked out, never typed in ---- */}
@@ -234,15 +258,19 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
                 )}
 
                 {/* The packer is the one who finds parts missing off a
-                    nest, so this is where a shortage gets raised. */}
-                <button
-                  type="button"
-                  className="stk-btn"
-                  style={{ ...S.reqActionBtnMuted, color: C.danger, border: `1px solid ${C.danger}` }}
-                  onClick={() => onFlagShortage(r)}
-                >
-                  <AlertTriangle size={13} /> Flag shortage
-                </button>
+                    nest, so this is where a shortage gets raised. Not on a
+                    re-cut though: a shortage on a shortage is not something
+                    anything downstream knows how to follow. */}
+                {!r.isRecut && (
+                  <button
+                    type="button"
+                    className="stk-btn"
+                    style={{ ...S.reqActionBtnMuted, color: C.danger, border: `1px solid ${C.danger}` }}
+                    onClick={() => onFlagShortage(r)}
+                  >
+                    <AlertTriangle size={13} /> Flag shortage
+                  </button>
+                )}
               </div>
             )}
 

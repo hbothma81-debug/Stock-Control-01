@@ -3945,11 +3945,41 @@ export default function StockControl() {
       // Nothing off the machine yet is nothing for the packer to look for.
       if (!programs.some((pg) => pg.is_complete)) continue;
       rows.push({
+        key: "job:" + job.id,
         job,
         process: packing || null,
         programs,
         packerName: packing?.operator || packing?.started_by || "",
         isMine: !!currentUser?.id && !!packing && packing.assigned_to === currentUser.id,
+      });
+    }
+
+    // A re-cut has to get back to the person who was short of it, and that
+    // person is the packer. Its packing stage belongs to the shortage
+    // rather than to the job, so it was skipped above -- and Production
+    // skips Packer entirely, because the packer works here. Between the
+    // two, a re-cut's packing had nowhere in the whole app to be ticked,
+    // and every shortage the packer raised stayed open for good.
+    for (const sh of d.shortages || []) {
+      if (sh.status === "cut") continue;
+      const packing = (d.processes || []).find(
+        (pr) => pr.shortage_id === sh.id && workedInLaserStatus(pr.process_name) && !pr.is_complete
+      );
+      if (!packing) continue;
+      // Nothing off the machine yet is nothing to come and collect.
+      const programs = live.filter((pg) => d.links.some((l) => l.program_id === pg.id && l.shortage_id === sh.id));
+      if (!programs.some((pg) => pg.is_complete)) continue;
+      const job = jobs.find((j) => j.id === sh.job_id);
+      rows.push({
+        key: "recut:" + sh.id,
+        isRecut: true,
+        shortage: sh,
+        detail: shortageSummary(sh),
+        job: job || { id: sh.job_id, job_number: sh.job_number, customer: sh.customer },
+        process: packing,
+        programs,
+        packerName: packing.operator || packing.started_by || "",
+        isMine: !!currentUser?.id && packing.assigned_to === currentUser.id,
       });
     }
     rows.sort(
@@ -3991,6 +4021,10 @@ export default function StockControl() {
         .update({ is_complete: true, completed_by: roleLabel, completed_at: new Date().toISOString() })
         .eq("id", row.process.id);
       if (error) throw error;
+      // Packing a re-cut is usually the last catch-up stage there is, so
+      // this is the moment the shortage is genuinely finished. Same rule
+      // as everywhere else decides that.
+      if (row.shortage) await refreshShortageStatus(row.shortage);
       await fetchLaserData();
       if (productionQueue !== null) fetchProductionQueue();
     } catch (err) {
