@@ -2987,16 +2987,16 @@ export default function StockControl() {
     return quote;
   }
 
-  // What a quote line is called on the floor. The part name on its own is
-  // usually just a number, which tells a welder nothing -- the size and
-  // thickness are what he is looking for.
+  // What a quote line is called: whatever SigmaNest calls the part, and
+  // nothing else.
+  //
+  // Where a part has no name of its own SigmaNest gives it a number, and
+  // that number is traceable back to it -- so a line reading "100" is not
+  // the gap it looks like. This used to add the size and thickness on the
+  // end to make it read better, which buried the one part of it anybody
+  // can look up.
   function sigmaNestLineDescription(line) {
-    const bits = [line.partName || "Unnamed part"];
-    const shape = [line.size, line.thickness != null ? `${line.thickness}mm` : ""].filter(Boolean).join(" × ");
-    if (shape) bits.push(shape);
-    if (line.material) bits.push(line.material);
-    const base = bits.join(" — ");
-    return line.secondaryOps ? `${base} (${line.secondaryOps})` : base;
+    return line.partName || "Unnamed part";
   }
 
   async function parseQuoteExcelFile(file) {
