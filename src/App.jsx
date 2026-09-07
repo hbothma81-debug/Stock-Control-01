@@ -205,6 +205,10 @@ const isProgramLaserProcess = (name) =>
 // type could ever collide with.
 const LASER_STATUS_DEPT = "__laser_status__";
 
+// A job open longer than this is worth a second look on the Jobs list.
+// One place, so changing it changes it everywhere it is mentioned.
+const JOB_AGE_WARNING_DAYS = 15;
+
 // A shortage can cover several missing parts. Older ones, and any saved
 // before the app could hold more than one, carry a single description and
 // quantity instead — so read items where they exist and fall back to the
@@ -10741,13 +10745,24 @@ export default function StockControl() {
                   {(() => {
                     const days = daysOnJob(job);
                     if (days === null) return null;
+                    // Fifteen days is where a job stops being in progress and
+                    // starts being a question. Only while it is still open --
+                    // on an invoiced one the number is history, and colouring
+                    // history red says something is wrong when nothing is.
+                    const tooLong = days >= JOB_AGE_WARNING_DAYS && job.status !== "invoiced";
                     return (
                       <span
-                        style={{ ...S.chip, flexShrink: 0 }}
+                        style={{
+                          ...S.chip,
+                          flexShrink: 0,
+                          ...(tooLong ? { color: C.danger, borderColor: C.danger, fontWeight: 700 } : {}),
+                        }}
                         title={
                           job.status === "invoiced"
                             ? `Took ${days} day${days === 1 ? "" : "s"} from being booked in to being invoiced`
-                            : `Booked in ${days} day${days === 1 ? "" : "s"} ago`
+                            : tooLong
+                              ? `Booked in ${days} days ago — over ${JOB_AGE_WARNING_DAYS}`
+                              : `Booked in ${days} day${days === 1 ? "" : "s"} ago`
                         }
                       >
                         {days} day{days === 1 ? "" : "s"}
