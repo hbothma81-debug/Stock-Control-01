@@ -14863,6 +14863,10 @@ export default function StockControl() {
                     )}
                     {shiftsList.map((sh) => {
                       const on = (people || []).filter((pp) => pp.shiftId === sh.id).length;
+                      // Every day off is not a shift, it is a lock. Worth saying
+                      // out loud, because a new shift starts out looking exactly
+                      // like this and it is not obvious.
+                      const hasHours = !!(sh.weekday_start || sh.saturday_start || sh.sunday_start);
                       return (
                         <div
                           key={sh.id}
@@ -14878,6 +14882,11 @@ export default function StockControl() {
                             <span style={S.gradeCount}>
                               {on} {on === 1 ? "person" : "people"}
                             </span>
+                            {!hasHours && (
+                              <span style={{ ...S.chip, color: C.danger, borderColor: C.danger }}>
+                                no hours set — nobody on this shift would get in
+                              </span>
+                            )}
                             <SavedCheck fieldKey={`shift-${sh.id}`} />
                             <span style={{ flex: 1 }} />
                             <button
