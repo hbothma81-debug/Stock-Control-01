@@ -10654,14 +10654,27 @@ export default function StockControl() {
                                   <span>Reason: {s.reason}</span>
                                   <span>Flagged by {s.flagged_by} ({s.flagged_department})</span>
                                 </div>
-                                <button
-                                  type="button"
-                                  className="stk-btn"
-                                  style={{ ...S.reqActionBtn, marginTop: 6, width: "100%" }}
-                                  onClick={() => (isNestingProcess(procType) ? markShortageNested(s) : refreshShortageStatus(s, { offTheLaser: true }))}
-                                >
-                                  {isNestingProcess(procType) ? "Shortage nested" : "Shortage cut"}
-                                </button>
+                                {/* There used to be a "Shortage nested" button here, from
+                                    before re-cuts went on programs. It set the shortage to
+                                    nested without putting it on anything, so the re-cut
+                                    dropped off the To nest list and onto no program -- gone
+                                    from every screen while somebody waited for the parts.
+                                    Putting it on a program does all of this properly, so
+                                    that is the only way in now. */}
+                                {isNestingProcess(procType) ? (
+                                  <div style={{ ...S.roleHint, marginTop: 6 }}>
+                                    Put this on a program from the Nesting screen — that is what nests it.
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="stk-btn"
+                                    style={{ ...S.reqActionBtn, marginTop: 6, width: "100%" }}
+                                    onClick={() => refreshShortageStatus(s, { offTheLaser: true })}
+                                  >
+                                    Shortage cut
+                                  </button>
+                                )}
                               </div>
                             ))}
                           </div>
