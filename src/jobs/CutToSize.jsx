@@ -168,6 +168,60 @@ export default function CutToSize({
         </div>
       )}
 
+      {/* Bar by bar: what the saw operator actually works from. Each bar
+          lists its pieces in cutting order, longest first, so the offcut
+          is the last thing off the saw. This is the layout the printed
+          cutting list will carry. */}
+      {groups.some((g) => g.bars.length > 0) && (
+        <div style={{ marginBottom: 10 }}>
+          <label style={S.label}>Cutting order</label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
+            {groups
+              .filter((g) => g.bars.length > 0)
+              .map((g) => (
+                <div key={g.key}>
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>
+                    {g.section}
+                    {g.grade ? ` ${g.grade}` : ""} — {g.bars.length} × {fmtM(g.stockLengthM)}
+                    <span style={{ ...S.roleHint, fontWeight: 400 }}>
+                      {" "}
+                      ({g.trimFront ? `${TRIM_MM} mm trim, ` : ""}
+                      {fmtMm(g.usableMm)} usable)
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                    {g.bars.map((bar, i) => (
+                      <div key={i} style={{ ...S.managerRow, flexWrap: "wrap", gap: 6, alignItems: "baseline" }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, minWidth: 44 }}>Bar {i + 1}</span>
+                        <span style={{ fontSize: 13, flex: 1, minWidth: 120 }}>
+                          {bar.pieces.map((p, j) => (
+                            <span key={j}>
+                              {j > 0 && <span style={{ color: C.muted }}> + </span>}
+                              {Math.round(p.lengthMm).toLocaleString()}
+                              {p.drawingNo && <span style={S.roleHint}> {p.drawingNo}</span>}
+                            </span>
+                          ))}
+                          <span style={S.roleHint}> mm</span>
+                        </span>
+                        <span
+                          style={{
+                            ...S.chip,
+                            flexShrink: 0,
+                            ...(offcutIsKeepable(bar.offcutMm) ? { color: C.accentFinished, fontWeight: 700 } : { color: C.muted }),
+                          }}
+                          title={offcutIsKeepable(bar.offcutMm) ? "Long enough to go back to stock" : `Under ${MIN_OFFCUT_MM.toLocaleString()} mm — scrap`}
+                        >
+                          {fmtMm(bar.offcutMm)} {offcutIsKeepable(bar.offcutMm) ? "keep" : "scrap"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
       <label style={S.label}>Parts to cut</label>
       {(lines || []).length === 0 && <div style={S.empty}>Nothing on the cut list yet.</div>}
       <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>

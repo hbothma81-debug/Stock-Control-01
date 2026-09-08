@@ -83,23 +83,14 @@ export function planBars(lines) {
   const out = [];
   for (const g of groups.values()) {
     const sorted = [...g.pieces].sort((a, b) => b.lengthMm - a.lengthMm);
-    const bars = [];
-    const tooLong = [];
-    for (const piece of sorted) {
-      const needs = piece.lengthMm + KERF_MM;
-      if (needs > g.usableMm) {
-        tooLong.push(piece);
-        continue;
-      }
-      let bar = bars.find((b) => b.usedMm + needs <= g.usableMm);
-      if (!bar) {
-        bar = { pieces: [], usedMm: 0, offcutMm: g.usableMm };
-        bars.push(bar);
-      }
-      bar.pieces.push(piece);
-      bar.usedMm += needs;
-      bar.offcutMm = g.usableMm - bar.usedMm;
-    }
+    const tooLong = sorted.filter((p) => p.lengthMm + KERF_MM > g.usableMm);
+    const fits = sorted.filter((p) => p.lengthMm + KERF_MM <= g.usableMm);
+    // Two ways of packing, keep the better. First fit puts a piece on the
+    // first bar with room; best fit puts it where it leaves the least
+    // room. Neither always wins, so both are tried. Fewer bars wins; on a
+    // tie, the layout whose biggest offcut is biggest -- one long piece
+    // back in the rack beats two short ones in the scrap bin.
+    const bars = betterOf(packBars(fits, g.usableMm, "first"), packBars(fits, g.usableMm, "best"));
     out.push({
       key: g.key,
       section: g.section,
@@ -114,6 +105,41 @@ export function planBars(lines) {
     });
   }
   return out;
+}
+
+// Pieces arrive longest first. Each one goes on a bar, and the bar is
+// chosen by `rule`: "first" takes the first bar with room, "best" the bar
+// that would be left with the least room. A new bar when none has room.
+// Within a bar the pieces stay longest first, which is the cutting order:
+// the offcut is the last thing off the saw.
+function packBars(pieces, usableMm, rule) {
+  const bars = [];
+  for (const piece of pieces) {
+    const needs = piece.lengthMm + KERF_MM;
+    let bar = null;
+    if (rule === "best") {
+      for (const b of bars) {
+        const room = usableMm - b.usedMm;
+        if (room >= needs && (!bar || room < usableMm - bar.usedMm)) bar = b;
+      }
+    } else {
+      bar = bars.find((b) => b.usedMm + needs <= usableMm) || null;
+    }
+    if (!bar) {
+      bar = { pieces: [], usedMm: 0, offcutMm: usableMm };
+      bars.push(bar);
+    }
+    bar.pieces.push(piece);
+    bar.usedMm += needs;
+    bar.offcutMm = usableMm - bar.usedMm;
+  }
+  return bars;
+}
+
+function betterOf(a, b) {
+  if (a.length !== b.length) return a.length < b.length ? a : b;
+  const biggest = (bars) => bars.reduce((max, bar) => Math.max(max, bar.offcutMm), 0);
+  return biggest(b) > biggest(a) ? b : a;
 }
 
 // Structural stock that could be one of this group's bars: the same
