@@ -1250,6 +1250,9 @@ export default function StockControl() {
   const [managerSectionGrade, setManagerSectionGrade] = useState("");
   const [shiftsList, setShiftsList] = useState([]);
   const [newShiftName, setNewShiftName] = useState("");
+  const [closuresList, setClosuresList] = useState([]);
+  const [newClosureDate, setNewClosureDate] = useState("");
+  const [newClosureNote, setNewClosureNote] = useState("");
   const [sectionGradeFilterInManager, setSectionGradeFilterInManager] = useState("");
   const [scForm, setScForm] = useState({ stockCode: "", description: "", price: "", recommendedStock: "", customer: "", revision: "" });
   const [scCatalogForm, setScCatalogForm] = useState({ code: "", name: "", category: "", supplier: "", price: "" });
@@ -6689,6 +6692,27 @@ export default function StockControl() {
     );
   }
 
+  // The tick box. Switching a day off leaves its times exactly where they
+  // are, so putting Saturday back next month does not mean typing 07:30
+  // and 14:00 again.
+  async function toggleShiftDay(shift, dayKey, on) {
+    if (!supabase) return;
+    const now = shift.days_off || [];
+    const next = on ? now.filter((d) => d !== dayKey) : [...new Set([...now, dayKey])];
+    setShiftsList((prev) =>
+      prev.map((sh) => (sh.id === shift.id ? { ...sh, days_off: next } : sh))
+    );
+    try {
+      const { error } = await supabase.from("shifts").update({ days_off: next }).eq("id", shift.id);
+      if (error) throw error;
+      flashSaved(`shift-${shift.id}`);
+    } catch (err) {
+      console.error("Failed to switch that day:", err);
+      alert("That didn't save — check your connection and try again.");
+      await loadShifts();
+    }
+  }
+
   async function updateShiftTimes(shift, dayKey, which, value) {
     if (!supabase) return;
     const startCol = `${dayKey}_start`;
@@ -6760,9 +6784,54 @@ export default function StockControl() {
     }
   }
 
+  // Days the whole shop is shut. One row per date, and it applies to every
+  // shift -- it is the shop that is closed, not one team.
+  async function loadClosures() {
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase.from("shop_closures").select("*").order("closed_on");
+      if (error) throw error;
+      setClosuresList(data || []);
+    } catch (err) {
+      console.error("Failed to load the shut days:", err);
+      setClosuresList([]);
+    }
+  }
+
+  async function addClosure(date, note) {
+    if (!supabase || !date) return;
+    try {
+      const { error } = await supabase
+        .from("shop_closures")
+        .insert({ closed_on: date, note: (note || "").trim(), created_by: roleLabel });
+      if (error) throw error;
+      await loadClosures();
+    } catch (err) {
+      console.error("Failed to book that day off:", err);
+      alert(
+        err?.code === "23505"
+          ? "That day is already booked off."
+          : "That didn't save — check your connection and try again."
+      );
+    }
+  }
+
+  async function removeClosure(closure) {
+    if (!supabase) return;
+    try {
+      const { error } = await supabase.from("shop_closures").delete().eq("closed_on", closure.closed_on);
+      if (error) throw error;
+      await loadClosures();
+    } catch (err) {
+      console.error("Failed to remove that day:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
   async function loadPeople() {
     if (!supabase) return;
     loadShifts();
+    loadClosures();
     const { data } = await supabase.from("profiles").select("*").order("created_at");
     setPeople(
       (data || []).map((d) => ({
@@ -14891,8 +14960,9 @@ export default function StockControl() {
                       // Every day off is not a shift, it is a lock. Worth saying
                       // out loud, because a new shift starts out looking exactly
                       // like this and it is not obvious.
-                      const hasHours = !!(
-                        sh.weekday_start || sh.friday_start || sh.saturday_start || sh.sunday_start
+                      const daysOff = sh.days_off || [];
+                      const hasHours = ["weekday", "friday", "saturday", "sunday"].some(
+                        (d) => sh[`${d}_start`] && !daysOff.includes(d)
                       );
                       return (
                         <div
@@ -14938,6 +15008,7 @@ export default function StockControl() {
                             const start = sh[`${day.key}_start`] || "";
                             const end = sh[`${day.key}_end`] || "";
                             const overnight = start && end && end <= start;
+                            const dayOn = !daysOff.includes(day.key);
                             return (
                               <div
                                 key={day.key}
@@ -14949,34 +15020,53 @@ export default function StockControl() {
                                   flexWrap: "wrap",
                                 }}
                               >
-                                <span style={{ ...S.label, width: 84, marginBottom: 0 }}>{day.label}</span>
+                                <input
+                                  type="checkbox"
+                                  checked={dayOn}
+                                  onChange={(e) => toggleShiftDay(sh, day.key, e.target.checked)}
+                                  title={dayOn ? "Switch this day off" : "Switch this day back on"}
+                                />
+                                <span
+                                  style={{
+                                    ...S.label,
+                                    width: 76,
+                                    marginBottom: 0,
+                                    opacity: dayOn ? 1 : 0.5,
+                                  }}
+                                >
+                                  {day.label}
+                                </span>
                                 <input
                                   type="time"
-                                  style={{ ...S.input, width: 130 }}
+                                  style={{ ...S.input, width: 130, opacity: dayOn ? 1 : 0.45 }}
                                   value={start.slice(0, 5)}
                                   onChange={(e) => updateShiftTimes(sh, day.key, "start", e.target.value)}
                                 />
                                 <span style={{ color: C.muted }}>to</span>
                                 <input
                                   type="time"
-                                  style={{ ...S.input, width: 130 }}
+                                  style={{ ...S.input, width: 130, opacity: dayOn ? 1 : 0.45 }}
                                   value={end.slice(0, 5)}
                                   onChange={(e) => updateShiftTimes(sh, day.key, "end", e.target.value)}
                                 />
-                                {!start && !end && <span style={S.roleHint}>off</span>}
+                                {/* Two different kinds of off, and the
+                                    difference matters: one has hours waiting
+                                    for it, the other has none. */}
+                                {!dayOn && <span style={S.roleHint}>switched off</span>}
+                                {dayOn && !start && !end && <span style={S.roleHint}>no hours set</span>}
                                 {/* Otherwise changing Mon-Thu and seeing Friday
                                     change with it looks like a bug. */}
-                                {day.key === "friday" && start && fridayFollows(sh) && (
+                                {dayOn && day.key === "friday" && start && fridayFollows(sh) && (
                                   <span style={S.chip}>following Mon – Thu</span>
                                 )}
                                 {/* A day is saved as a pair. Say so, rather
                                     than let a half-typed day look finished. */}
-                                {!!start !== !!end && (
+                                {dayOn && !!start !== !!end && (
                                   <span style={{ ...S.chip, color: C.danger, borderColor: C.danger }}>
                                     needs both times
                                   </span>
                                 )}
-                                {overnight && (
+                                {dayOn && overnight && (
                                   <span style={{ ...S.chip, color: C.accentRaw, borderColor: C.accentRaw }}>
                                     runs to the next morning
                                   </span>
@@ -14984,6 +15074,95 @@ export default function StockControl() {
                               </div>
                             );
                           })}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Public holidays and shutdown days. One list for the whole
+                      shop, because it is the shop that is shut, not one team. */}
+                  <div style={{ marginTop: 22 }}>
+                    <label style={S.label}>Days the whole shop is shut</label>
+                    <div style={S.roleHint}>
+                      Public holidays and shutdown days, booked in advance. These apply to every shift, and to
+                      everybody on one — so you set a holiday once rather than switching four shifts off.
+                    </div>
+
+                    <div style={S.managerAddRow}>
+                      <input
+                        type="date"
+                        style={{ ...S.input, width: 170 }}
+                        value={newClosureDate}
+                        onChange={(e) => setNewClosureDate(e.target.value)}
+                      />
+                      <input
+                        style={{ ...S.input, flex: 1 }}
+                        value={newClosureNote}
+                        onChange={(e) => setNewClosureNote(e.target.value)}
+                        placeholder="What for — Heritage Day, stocktake, December shutdown…"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addClosure(newClosureDate, newClosureNote);
+                            setNewClosureDate("");
+                            setNewClosureNote("");
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={S.addBtn}
+                        disabled={!newClosureDate}
+                        onClick={() => {
+                          addClosure(newClosureDate, newClosureNote);
+                          setNewClosureDate("");
+                          setNewClosureNote("");
+                        }}
+                      >
+                        <Plus size={15} strokeWidth={2.5} /> Add
+                      </button>
+                    </div>
+
+                    {closuresList.length === 0 && (
+                      <div style={S.empty}>No days booked off. Add one above.</div>
+                    )}
+
+                    {closuresList.map((c) => {
+                      // A day that has already been and gone still matters for
+                      // the record, but it should not read like something coming up.
+                      const past = c.closed_on < new Date().toISOString().slice(0, 10);
+                      return (
+                        <div
+                          key={c.closed_on}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: "8px 10px",
+                            borderBottom: `1px solid ${C.border}`,
+                            opacity: past ? 0.5 : 1,
+                          }}
+                        >
+                          <span style={{ fontWeight: 600, minWidth: 150 }}>
+                            {new Date(`${c.closed_on}T00:00:00`).toLocaleDateString("en-ZA", {
+                              weekday: "short",
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                            })}
+                          </span>
+                          <span style={{ color: C.muted, flex: 1 }}>{c.note}</span>
+                          {past && <span style={S.roleHint}>past</span>}
+                          <button
+                            type="button"
+                            className="stk-btn"
+                            style={S.managerDelete}
+                            onClick={() => removeClosure(c)}
+                            title="The shop is open that day after all"
+                          >
+                            <Trash2 size={13} />
+                          </button>
                         </div>
                       );
                     })}

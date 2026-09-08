@@ -68,6 +68,17 @@ end $do$;
 
 -- A day is either set or off. Half a pair is neither, and would leave the
 -- rule in stage two guessing.
+-- Switching a day off used to mean clearing both times, which threw them
+-- away -- so putting Saturday back meant typing 07:30 and 14:00 again.
+-- The times now stay put and the day's name goes in here instead, which
+-- is what the tick box on each line writes to.
+--
+-- One column rather than four booleans, so the rule below takes one more
+-- argument instead of four. The words in it are the same words the screen
+-- shows: weekday, friday, saturday, sunday.
+alter table public.shifts
+  add column if not exists days_off text[] not null default '{}';
+
 alter table public.shifts drop constraint if exists shifts_pairs_complete;
 
 alter table public.shifts add constraint shifts_pairs_complete check (
@@ -91,6 +102,25 @@ alter table public.profiles
 -- requests, so a Friday evening request does not wait for one person.
 alter table public.profiles
   add column if not exists can_manage_shifts boolean not null default false;
+
+
+-- ============ 2b. Days the whole shop is shut ============
+--
+-- Public holidays and shutdown days. One row per date, and it applies to
+-- every shift -- it is the shop that is closed, not one team.
+--
+-- A closure removes the shift that STARTS on that date. So if the Monday
+-- is a holiday, Sunday night's shift still runs through to Monday
+-- morning, and Monday night's does not start.
+
+create table if not exists public.shop_closures (
+  closed_on  date primary key,
+  note       text not null default '',
+  created_by text not null default '',
+  created_at timestamptz not null default now()
+);
+
+alter table public.shop_closures enable row level security;
 
 
 -- ============ 3. The master switch ============
@@ -130,6 +160,26 @@ begin
   if not exists (select 1 from pg_policies where schemaname = 'public'
                  and tablename = 'shifts' and policyname = 'Shift managers can change shifts') then
     create policy "Shift managers can change shifts" on public.shifts
+      for all
+      using (
+        exists (select 1 from public.profiles p
+                where p.id = auth.uid() and (p.is_admin or p.can_manage_shifts))
+      )
+      with check (
+        exists (select 1 from public.profiles p
+                where p.id = auth.uid() and (p.is_admin or p.can_manage_shifts))
+      );
+  end if;
+
+  if not exists (select 1 from pg_policies where schemaname = 'public'
+                 and tablename = 'shop_closures' and policyname = 'Signed-in users can read closures') then
+    create policy "Signed-in users can read closures" on public.shop_closures
+      for select using (auth.role() = 'authenticated');
+  end if;
+
+  if not exists (select 1 from pg_policies where schemaname = 'public'
+                 and tablename = 'shop_closures' and policyname = 'Shift managers can change closures') then
+    create policy "Shift managers can change closures" on public.shop_closures
       for all
       using (
         exists (select 1 from public.profiles p

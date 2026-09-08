@@ -42,13 +42,16 @@
 -- have changed, so the old shape goes first.
 drop function if exists public.shift_verdict(timestamptz, time, time, time, time, time, time);
 drop function if exists public.shift_day_window(date, time, time, time, time, time, time);
+drop function if exists public.shift_verdict(timestamptz, time, time, time, time, time, time, time, time);
+drop function if exists public.shift_day_window(date, time, time, time, time, time, time, time, time);
 
 create or replace function public.shift_day_window(
   p_date           date,
   p_weekday_start  time, p_weekday_end  time,
   p_friday_start   time, p_friday_end   time,
   p_saturday_start time, p_saturday_end time,
-  p_sunday_start   time, p_sunday_end   time
+  p_sunday_start   time, p_sunday_end   time,
+  p_days_off       text[] default '{}'
 )
 returns table (starts_at timestamp, ends_at timestamp)
 language sql
@@ -62,20 +65,26 @@ as $body$
     end
   from (
     select
-      case extract(isodow from p_date)::int
-        when 5 then p_friday_start
-        when 6 then p_saturday_start
-        when 7 then p_sunday_start
-        else        p_weekday_start
-      end as on_at,
-      case extract(isodow from p_date)::int
-        when 5 then p_friday_end
-        when 6 then p_saturday_end
-        when 7 then p_sunday_end
-        else        p_weekday_end
-      end as off_at
+      d.name,
+      case d.name when 'friday'   then p_friday_start
+                  when 'saturday' then p_saturday_start
+                  when 'sunday'   then p_sunday_start
+                  else                 p_weekday_start end as on_at,
+      case d.name when 'friday'   then p_friday_end
+                  when 'saturday' then p_saturday_end
+                  when 'sunday'   then p_sunday_end
+                  else                 p_weekday_end   end as off_at
+    from (
+      select case extract(isodow from p_date)::int
+               when 5 then 'friday'
+               when 6 then 'saturday'
+               when 7 then 'sunday'
+               else        'weekday'
+             end as name
+    ) d
   ) s
-  where s.on_at is not null;
+  where s.on_at is not null
+    and not (s.name = any (coalesce(p_days_off, '{}'::text[])));
 $body$;
 
 
@@ -95,7 +104,8 @@ create or replace function public.shift_verdict(
   p_weekday_start  time, p_weekday_end  time,
   p_friday_start   time, p_friday_end   time,
   p_saturday_start time, p_saturday_end time,
-  p_sunday_start   time, p_sunday_end   time
+  p_sunday_start   time, p_sunday_end   time,
+  p_days_off       text[] default '{}'
 )
 returns table (verdict_allowed boolean, verdict_ends timestamptz, verdict_next timestamptz)
 language plpgsql
@@ -120,8 +130,12 @@ begin
       p_weekday_start,  p_weekday_end,
       p_friday_start,   p_friday_end,
       p_saturday_start, p_saturday_end,
-      p_sunday_start,   p_sunday_end
+      p_sunday_start,   p_sunday_end,
+      p_days_off
     ) win
+    where not exists (
+      select 1 from public.shop_closures c where c.closed_on = g.d::date
+    )
     order by win.starts_at
   loop
     if shop_now >= w.s and shop_now < w.e then
@@ -206,7 +220,8 @@ begin
     sh.weekday_start,  sh.weekday_end,
     sh.friday_start,   sh.friday_end,
     sh.saturday_start, sh.saturday_end,
-    sh.sunday_start,   sh.sunday_end
+    sh.sunday_start,   sh.sunday_end,
+    sh.days_off
   );
 
   return query select
@@ -218,81 +233,87 @@ begin
 end;
 $body$;
 
-grant execute on function public.shift_day_window(date, time, time, time, time, time, time, time, time) to authenticated;
-grant execute on function public.shift_verdict(timestamptz, time, time, time, time, time, time, time, time) to authenticated;
+grant execute on function public.shift_day_window(date, time, time, time, time, time, time, time, time, text[]) to authenticated;
+grant execute on function public.shift_verdict(timestamptz, time, time, time, time, time, time, time, time, text[]) to authenticated;
 grant execute on function public.shift_access(uuid, timestamptz) to authenticated;
 
 
 -- ============ Self-test ============
 --
--- Twenty-three awkward moments, each with the answer written down first.
+-- Twenty-five awkward moments, each with the answer written down first.
 -- Every time in a label is the time on the wall in Johannesburg; the +00 in
 -- the middle is that same moment as the database sees it.
 --
 -- 2026-09-07 is a Monday, so that week runs Mon the 7th to Sun the 13th,
 -- and Friday is the 11th.
 --
--- You should get one row back: "23 of 23 passed". Anything that failed is
+-- You should get one row back: "25 of 25 passed". Anything that failed is
 -- listed under it, and a handful of worked examples.
 
-with cases (n, label, at_utc, ws, we, fs, fe, sas, sae, sus, sue, want) as (values
+with cases (n, label, at_utc, ws, we, fs, fe, sas, sae, sus, sue, offdays, want) as (values
   -- Night: Mon-Thu 18:00 to 06:00, Friday the same, weekend off
   ( 1, 'Night, Wed 19:00 - on shift',
-       timestamptz '2026-09-09 17:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
+       timestamptz '2026-09-09 17:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, '{}'::text[], true),
   ( 2, 'Night, Thu 02:00 - still on last nights shift',
-       timestamptz '2026-09-10 00:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
+       timestamptz '2026-09-10 00:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, '{}'::text[], true),
   ( 3, 'Night, Thu 05:59 - last minute of it',
-       timestamptz '2026-09-10 03:59+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
+       timestamptz '2026-09-10 03:59+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, '{}'::text[], true),
   ( 4, 'Night, Thu 06:00 - shift is over',
-       timestamptz '2026-09-10 04:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, false),
+       timestamptz '2026-09-10 04:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, '{}'::text[], false),
   ( 5, 'Night, Mon 17:59 - one minute early',
-       timestamptz '2026-09-07 15:59+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, false),
+       timestamptz '2026-09-07 15:59+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, '{}'::text[], false),
   ( 6, 'Night, Mon 18:00 - on the dot',
-       timestamptz '2026-09-07 16:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
+       timestamptz '2026-09-07 16:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, '{}'::text[], true),
   ( 7, 'Night, Sat 02:00 - Fridays shift runs into Saturday',
-       timestamptz '2026-09-12 00:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
+       timestamptz '2026-09-12 00:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, '{}'::text[], true),
   ( 8, 'Night, Sat 19:00 - Saturday is off',
-       timestamptz '2026-09-12 17:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, false),
+       timestamptz '2026-09-12 17:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, '{}'::text[], false),
   ( 9, 'Night, Sun 12:00 - Sunday is off',
-       timestamptz '2026-09-13 10:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, false),
+       timestamptz '2026-09-13 10:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, '{}'::text[], false),
   (10, 'Night, Wed 18:30 - THE CLOCK: in UTC this reads 16:30 and gets refused',
-       timestamptz '2026-09-09 16:30+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
+       timestamptz '2026-09-09 16:30+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, '{}'::text[], true),
   (11, 'Night, Wed 06:30 - morning, and this is not a morning shift',
-       timestamptz '2026-09-09 04:30+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, false),
+       timestamptz '2026-09-09 04:30+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, '{}'::text[], false),
   (12, 'Night with FRIDAY OFF, Sat 02:00 - nothing left to run into Saturday',
-       timestamptz '2026-09-12 00:00+00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, null::time, null::time, false),
+       timestamptz '2026-09-12 00:00+00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, null::time, null::time, '{}'::text[], false),
 
   -- Day: Mon-Thu 07:00 to 17:00, Friday 07:00 to 14:00, Saturday 08:00 to 14:00
   (13, 'Day, Wed 08:00 - on shift',
-       timestamptz '2026-09-09 06:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, true),
+       timestamptz '2026-09-09 06:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, '{}'::text[], true),
   (14, 'Day, Wed 16:59 - last minute of it',
-       timestamptz '2026-09-09 14:59+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, true),
+       timestamptz '2026-09-09 14:59+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, '{}'::text[], true),
   (15, 'Day, Wed 17:00 - knocked off',
-       timestamptz '2026-09-09 15:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, false),
+       timestamptz '2026-09-09 15:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, '{}'::text[], false),
   (16, 'Day, Wed 03:00 - no carry over, it is not a night shift',
-       timestamptz '2026-09-09 01:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, false),
+       timestamptz '2026-09-09 01:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, '{}'::text[], false),
   (17, 'Day, FRI 13:00 - inside Fridays shorter day',
-       timestamptz '2026-09-11 11:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, true),
+       timestamptz '2026-09-11 11:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, '{}'::text[], true),
   (18, 'Day, FRI 14:00 - Friday knocks off at two',
-       timestamptz '2026-09-11 12:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, false),
+       timestamptz '2026-09-11 12:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, '{}'::text[], false),
   (19, 'Day, FRI 16:00 - would have been on shift under the old Mon-Fri hours',
-       timestamptz '2026-09-11 14:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, false),
+       timestamptz '2026-09-11 14:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, '{}'::text[], false),
   (20, 'Day, Sat 09:00 - Saturday hours',
-       timestamptz '2026-09-12 07:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, true),
+       timestamptz '2026-09-12 07:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, '{}'::text[], true),
   (21, 'Day, Sat 15:00 - after Saturday hours',
-       timestamptz '2026-09-12 13:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, false),
+       timestamptz '2026-09-12 13:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, '{}'::text[], false),
 
   -- The two odd ones
   (22, 'Round the clock, Wed 03:00 - 00:00 to 00:00 means all day',
-       timestamptz '2026-09-09 01:00+00', time '00:00', time '00:00', time '00:00', time '00:00', null::time, null::time, null::time, null::time, true),
+       timestamptz '2026-09-09 01:00+00', time '00:00', time '00:00', time '00:00', time '00:00', null::time, null::time, null::time, null::time, '{}'::text[], true),
   (23, 'A shift with no hours at all - nobody on it ever gets in',
-       timestamptz '2026-09-09 10:00+00', null::time, null::time, null::time, null::time, null::time, null::time, null::time, null::time, false)
+       timestamptz '2026-09-09 10:00+00', null::time, null::time, null::time, null::time, null::time, null::time, null::time, null::time, '{}'::text[], false),
+
+  -- The tick box: same Saturday hours, day switched off
+  (24, 'Day with SATURDAY SWITCHED OFF, Sat 09:00 - hours still set, day is off',
+       timestamptz '2026-09-12 07:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, '{saturday}'::text[], false),
+  (25, 'Day with SATURDAY SWITCHED OFF, Wed 08:00 - the rest of the week is untouched',
+       timestamptz '2026-09-09 06:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, '{saturday}'::text[], true)
 ),
 run as (
   select c.n, c.label, c.want, v.verdict_allowed as got, v.verdict_ends, v.verdict_next,
          (v.verdict_allowed = c.want) as ok
   from cases c
-  cross join lateral public.shift_verdict(c.at_utc, c.ws, c.we, c.fs, c.fe, c.sas, c.sae, c.sus, c.sue) v
+  cross join lateral public.shift_verdict(c.at_utc, c.ws, c.we, c.fs, c.fe, c.sas, c.sae, c.sus, c.sue, c.offdays) v
 )
 select 0 as sort, 'self-test' as thing,
        count(*) filter (where ok)::text || ' of ' || count(*)::text || ' passed' as result
@@ -306,5 +327,38 @@ select 2, 'worked example - ' || label,
        case when got
             then 'in, until ' || to_char(verdict_ends at time zone 'Africa/Johannesburg', 'Dy DD Mon HH24:MI')
             else 'out' || coalesce(', back in ' || to_char(verdict_next at time zone 'Africa/Johannesburg', 'Dy DD Mon HH24:MI'), ', never') end
-from run where n in (7, 12, 17, 18, 19, 23)
+from run where n in (7, 17, 18, 24, 25, 23)
 order by sort, thing;
+
+
+-- ============ Holiday check ============
+--
+-- The rule reads the closures table, so this one cannot be answered with
+-- made-up numbers alone. It books a holiday on a date nobody will ever
+-- work, asks the rule about it, takes the holiday straight back out, and
+-- then tells you what happened.
+--
+-- If you ever do book the 1st of January 2099 off, tell me and I will move
+-- this date.
+
+insert into public.shop_closures (closed_on, note)
+values (date '2099-01-01', 'self-test only, removed by the next statement')
+on conflict (closed_on) do nothing;
+
+create temp table zz_holiday_check as
+select
+  not (select verdict_allowed from public.shift_verdict(
+         timestamptz '2099-01-01 07:00+00',
+         time '07:00', time '17:00', time '07:00', time '14:00',
+         time '08:00', time '14:00', null::time, null::time, '{}'::text[])) as shut,
+  (select verdict_allowed from public.shift_verdict(
+         timestamptz '2098-12-31 07:00+00',
+         time '07:00', time '17:00', time '07:00', time '14:00',
+         time '08:00', time '14:00', null::time, null::time, '{}'::text[])) as open_the_day_before;
+
+delete from public.shop_closures where closed_on = date '2099-01-01';
+
+select 'holiday check' as step,
+       case when (select shut and open_the_day_before from zz_holiday_check)
+            then 'a booked day closes the shop, the day before is unaffected, and the test holiday has been removed'
+            else 'HOLIDAYS ARE NOT WORKING - tell Claude' end as result;
