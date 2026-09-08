@@ -130,7 +130,11 @@ function uid() {
 // field gets the correct default (0 / false / "") rather than guessing
 // from a value that's already absent.
 const ITEM_DB_FIELDS = [
-  ["mainCat", "main_cat", "text"], ["loc", "loc", "text"], ["low", "low", "num"], ["salesPerson", "sales_person", "text"],
+  ["mainCat", "main_cat", "text"],
+  // Where this part is made, remembered so the next job with it comes in
+  // tagged. One of MADE_ON_OPTIONS or blank. Needs setup-made-on-tag.sql
+  // on the database first, or saving any stock item fails.
+  ["madeOn", "made_on", "text"], ["loc", "loc", "text"], ["low", "low", "num"], ["salesPerson", "sales_person", "text"],
   ["customer", "customer", "text"], ["supplier", "supplier", "text"], ["grade", "grade", "text"], ["size", "size", "text"],
   ["thickness", "thickness", "text"], ["name", "name", "text"], ["sheetName", "sheet_name", "text"], ["stockType", "stock_type", "text"],
   ["comment", "comment", "text"], ["unit", "unit", "text"], ["trackLength", "track_length", "bool"], ["length", "length", "num"],
@@ -3314,6 +3318,9 @@ export default function StockControl() {
             qty: Number(it.qty),
             unit_price: Number(it.unitPrice) || 0,
             linked_item_id: it.linkedItemId || null,
+            // A line picked from the customer's parts comes in tagged
+            // with where that part is made, if the part remembers.
+            made_on: (it.linkedItemId && (items || []).find((i) => i.id === it.linkedItemId)?.madeOn) || "",
             sort_order: idx,
           }));
           const { error: quoteItemError } = await supabase.from("job_quote_items").insert(quoteItemRows);
@@ -5604,12 +5611,17 @@ export default function StockControl() {
     if (!supabase || !description.trim() || !(Number(qty) > 0)) return false;
     try {
       const nextOrder = (jobDetail?.quoteItems || []).reduce((m, i) => Math.max(m, Number(i.sort_order) || 0), -1) + 1;
+      // A line added against a stock part comes in tagged with where that
+      // part is made, if the part remembers. That is the whole point of
+      // remembering it.
+      const linkedItem = linkedItemId ? (items || []).find((i) => i.id === linkedItemId) : null;
       const { error } = await supabase.from("job_quote_items").insert({
         job_id: job.id,
         description: description.trim(),
         qty: Number(qty),
         unit_price: Number(unitPrice) || 0,
         linked_item_id: linkedItemId || null,
+        made_on: linkedItem?.madeOn || "",
         sort_order: nextOrder,
       });
       if (error) throw error;
@@ -5627,6 +5639,76 @@ export default function StockControl() {
   // A quantity cannot go below what has already been invoiced. The
   // invoice is out; the numbers would stop matching and there would be
   // no honest way to reconcile them.
+  // Where a job's line is made, worked out from what we already know.
+  // The remembered tag on the linked stock part wins. Failing that, the
+  // part's own kind decides: plate is cut on the laser, tube and pipe on
+  // the tube laser, round bar on the CNC. A line with no part is read
+  // for the shop's tube shorthand -- SHS, RHS, CHS, tube, pipe -- and
+  // nothing else, because guessing plate from a description would send
+  // gussets to the wrong machine silently. Blank means "could not tell".
+  function guessMadeOn(quoteItem, linkedItem) {
+    if (linkedItem?.madeOn) return linkedItem.madeOn;
+    if (linkedItem?.mainCat === "plate") return "laser";
+    if (linkedItem?.mainCat === "structural") {
+      const type = (master?.sections || []).find((s) => s.name === linkedItem.name)?.type || "";
+      if (/tube|pipe/i.test(type)) return "tube_laser";
+      if (/round bar/i.test(type)) return "cnc";
+    }
+    if (/\b(shs|rhs|chs|tube|pipe)\b/i.test(quoteItem.description || "")) return "tube_laser";
+    return "";
+  }
+
+  // Sets the tag on one line, and remembers it on the linked stock part
+  // so the next job with that part comes in tagged. The part is changed
+  // in state the way every other stock edit is, and the auto-save carries
+  // it to the database. Clearing the tag on a line does not clear the
+  // part: one odd job should not forget what a part is.
+  async function setJobItemMadeOn(job, item, code) {
+    if (!supabase || (item.made_on || "") === code) return;
+    try {
+      const { error } = await supabase.from("job_quote_items").update({ made_on: code }).eq("id", item.id);
+      if (error) throw error;
+      flashSaved(`quoteitem-madeon-${item.id}`);
+      if (code && item.linked_item_id) {
+        setItems((prev) => prev.map((i) => (i.id === item.linked_item_id && i.madeOn !== code ? { ...i, madeOn: code } : i)));
+      }
+      await logJobEvent(job.id, "item changed", `${item.description} — made on ${madeOnLabel(code) || "(cleared)"}`);
+      await openJobDetail(job);
+    } catch (err) {
+      console.error("Failed to set where the item is made:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  // Fills in every blank tag it can guess, and says how many it could
+  // not. Never touches a line that already has a tag.
+  async function guessRestMadeOn(job, quoteItems) {
+    if (!supabase) return;
+    const blanks = (quoteItems || []).filter((it) => !it.made_on);
+    let tagged = 0;
+    try {
+      for (const it of blanks) {
+        const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
+        const code = guessMadeOn(it, linkedItem);
+        if (!code) continue;
+        const { error } = await supabase.from("job_quote_items").update({ made_on: code }).eq("id", it.id);
+        if (error) throw error;
+        tagged += 1;
+      }
+      if (tagged > 0) await logJobEvent(job.id, "item changed", `${tagged} item(s) tagged with where they are made`);
+      await openJobDetail(job);
+      const left = blanks.length - tagged;
+      alert(
+        tagged === 0
+          ? "Couldn't tell for any of them. Set each one from its dropdown."
+          : `Tagged ${tagged}.${left > 0 ? ` ${left} still need a tag — set those from their dropdowns.` : ""}`
+      );
+    } catch (err) {
+      console.error("Failed to guess where items are made:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
   async function updateJobQuoteItem(job, item, field, rawValue) {
     if (!supabase) return;
     const label = { description: "description", qty: "quantity", unit_price: "price" }[field] || field;
@@ -17983,6 +18065,30 @@ export default function StockControl() {
             {(jobDetail.quoteItems.length > 0 || canEditThisJob) && (
               <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
                 <label style={S.label}>Quoted items</label>
+                {/* Where each line is made decides which cutting stage
+                    lists it. A job with blanks behaves as it always did,
+                    every line on every stage, so the count is here to be
+                    noticed and the button to clear it in one press. */}
+                {(() => {
+                  const untagged = jobDetail.quoteItems.filter((it) => !it.made_on).length;
+                  if (untagged === 0 || !canEditThisJob) return null;
+                  return (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                      <span style={{ ...S.roleHint, color: C.accentRaw, fontWeight: 600 }}>
+                        {untagged} of {jobDetail.quoteItems.length} not tagged with where they are made
+                      </span>
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={S.reqActionBtnMuted}
+                        onClick={() => guessRestMadeOn(jobDetail.job, jobDetail.quoteItems)}
+                        title="Fills in the blanks it can tell from the part or the description. Never changes a line that is already tagged."
+                      >
+                        Guess the rest
+                      </button>
+                    </div>
+                  );
+                })()}
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
                   {jobDetail.quoteItems.map((it) => {
                     const remaining = Number(it.qty) - Number(it.qty_invoiced);
@@ -18055,6 +18161,38 @@ export default function StockControl() {
                           <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
                             <span style={S.roleHint}>R{Number(it.unit_price).toFixed(2)} each</span>
                             <span style={S.roleHint}>— Invoiced {it.qty_invoiced} / {it.qty}</span>
+                            {/* Where this line is made. Blank shows on
+                                every stage, as before. */}
+                            {canEditThisJob ? (
+                              <>
+                                <select
+                                  value={it.made_on || ""}
+                                  onChange={(e) => setJobItemMadeOn(jobDetail.job, it, e.target.value)}
+                                  style={{
+                                    ...S.input,
+                                    width: "auto",
+                                    fontSize: 12.5,
+                                    padding: "2px 6px",
+                                    marginLeft: 6,
+                                    // The whole border, not just its colour:
+                                    // S.input sets border as one value and
+                                    // React refuses to mix the two.
+                                    ...(it.made_on ? {} : { border: `1px solid ${C.accentRaw}` }),
+                                  }}
+                                  title="Where this item is made. Decides which cutting stage lists it."
+                                >
+                                  <option value="">Made on…</option>
+                                  {MADE_ON_OPTIONS.map((o) => (
+                                    <option key={o.code} value={o.code}>
+                                      {o.label}
+                                    </option>
+                                  ))}
+                                </select>
+                                <SavedCheck fieldKey={`quoteitem-madeon-${it.id}`} />
+                              </>
+                            ) : (
+                              it.made_on && <span style={S.roleHint}>— {madeOnLabel(it.made_on)}</span>
+                            )}
                           </div>
                           {linkedItem && (
                             <div style={S.roleHint}>
