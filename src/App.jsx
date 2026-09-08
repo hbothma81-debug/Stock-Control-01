@@ -14866,7 +14866,9 @@ export default function StockControl() {
                       // Every day off is not a shift, it is a lock. Worth saying
                       // out loud, because a new shift starts out looking exactly
                       // like this and it is not obvious.
-                      const hasHours = !!(sh.weekday_start || sh.saturday_start || sh.sunday_start);
+                      const hasHours = !!(
+                        sh.weekday_start || sh.friday_start || sh.saturday_start || sh.sunday_start
+                      );
                       return (
                         <div
                           key={sh.id}
@@ -14903,7 +14905,8 @@ export default function StockControl() {
                           {/* A day is either set or off. Clearing either end
                               clears both, because half a day is neither. */}
                           {[
-                            { key: "weekday", label: "Mon – Fri" },
+                            { key: "weekday", label: "Mon – Thu" },
+                            { key: "friday", label: "Friday" },
                             { key: "saturday", label: "Saturday" },
                             { key: "sunday", label: "Sunday" },
                           ].map((day) => {

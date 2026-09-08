@@ -31,8 +31,11 @@ create table if not exists public.shifts (
   id             uuid primary key default gen_random_uuid(),
   name           text not null,
 
-  weekday_start  time,
+  weekday_start  time,          -- Mon to Thu
   weekday_end    time,
+
+  friday_start   time,
+  friday_end     time,
 
   saturday_start time,
   saturday_end   time,
@@ -48,15 +51,31 @@ alter table public.shifts enable row level security;
 
 create unique index if not exists shifts_name_idx on public.shifts (lower(name));
 
+-- Friday used to sit inside the Mon-Fri group. On a table that already
+-- exists, add it and carry the old hours across, so no shift already set
+-- up quietly loses its Friday. Guarded, so running this again does not
+-- undo a Friday somebody has since changed or switched off.
+do $do$
+begin
+  if not exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'shifts'
+                   and column_name = 'friday_start') then
+    alter table public.shifts add column friday_start time;
+    alter table public.shifts add column friday_end   time;
+    update public.shifts set friday_start = weekday_start, friday_end = weekday_end;
+  end if;
+end $do$;
+
 -- A day is either set or off. Half a pair is neither, and would leave the
 -- rule in stage two guessing.
-do $do$ begin
-  alter table public.shifts add constraint shifts_pairs_complete check (
-    (weekday_start  is null) = (weekday_end  is null) and
-    (saturday_start is null) = (saturday_end is null) and
-    (sunday_start   is null) = (sunday_end   is null)
-  );
-exception when duplicate_object then null; end $do$;
+alter table public.shifts drop constraint if exists shifts_pairs_complete;
+
+alter table public.shifts add constraint shifts_pairs_complete check (
+  (weekday_start  is null) = (weekday_end  is null) and
+  (friday_start   is null) = (friday_end   is null) and
+  (saturday_start is null) = (saturday_end is null) and
+  (sunday_start   is null) = (sunday_end   is null)
+);
 
 
 -- ============ 2. Who is on what ============

@@ -42,8 +42,11 @@ create table if not exists public.shifts (
   id             uuid primary key default gen_random_uuid(),
   name           text not null,
 
-  weekday_start  time,
+  weekday_start  time,          -- Mon to Thu
   weekday_end    time,
+
+  friday_start   time,
+  friday_end     time,
 
   saturday_start time,
   saturday_end   time,
@@ -59,15 +62,31 @@ alter table public.shifts enable row level security;
 
 create unique index if not exists shifts_name_idx on public.shifts (lower(name));
 
+-- Friday used to sit inside the Mon-Fri group. On a table that already
+-- exists, add it and carry the old hours across, so no shift already set
+-- up quietly loses its Friday. Guarded, so running this again does not
+-- undo a Friday somebody has since changed or switched off.
+do $do$
+begin
+  if not exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'shifts'
+                   and column_name = 'friday_start') then
+    alter table public.shifts add column friday_start time;
+    alter table public.shifts add column friday_end   time;
+    update public.shifts set friday_start = weekday_start, friday_end = weekday_end;
+  end if;
+end $do$;
+
 -- A day is either set or off. Half a pair is neither, and would leave the
 -- rule in stage two guessing.
-do $do$ begin
-  alter table public.shifts add constraint shifts_pairs_complete check (
-    (weekday_start  is null) = (weekday_end  is null) and
-    (saturday_start is null) = (saturday_end is null) and
-    (sunday_start   is null) = (sunday_end   is null)
-  );
-exception when duplicate_object then null; end $do$;
+alter table public.shifts drop constraint if exists shifts_pairs_complete;
+
+alter table public.shifts add constraint shifts_pairs_complete check (
+  (weekday_start  is null) = (weekday_end  is null) and
+  (friday_start   is null) = (friday_end   is null) and
+  (saturday_start is null) = (saturday_end is null) and
+  (sunday_start   is null) = (sunday_end   is null)
+);
 
 
 -- ============ 2. Who is on what ============
@@ -191,9 +210,16 @@ end $do$;
 -- End before start means it runs into the next morning: 18:00 to 06:00 is a
 -- night shift, not a typo. End equal to start means a full 24 hours.
 
+-- Friday now has its own hours, so both of these take two more times
+-- than they did. Postgres will not replace a function whose arguments
+-- have changed, so the old shape goes first.
+drop function if exists public.shift_verdict(timestamptz, time, time, time, time, time, time);
+drop function if exists public.shift_day_window(date, time, time, time, time, time, time);
+
 create or replace function public.shift_day_window(
   p_date           date,
   p_weekday_start  time, p_weekday_end  time,
+  p_friday_start   time, p_friday_end   time,
   p_saturday_start time, p_saturday_end time,
   p_sunday_start   time, p_sunday_end   time
 )
@@ -210,11 +236,13 @@ as $body$
   from (
     select
       case extract(isodow from p_date)::int
+        when 5 then p_friday_start
         when 6 then p_saturday_start
         when 7 then p_sunday_start
         else        p_weekday_start
       end as on_at,
       case extract(isodow from p_date)::int
+        when 5 then p_friday_end
         when 6 then p_saturday_end
         when 7 then p_sunday_end
         else        p_weekday_end
@@ -238,6 +266,7 @@ $body$;
 create or replace function public.shift_verdict(
   p_at             timestamptz,
   p_weekday_start  time, p_weekday_end  time,
+  p_friday_start   time, p_friday_end   time,
   p_saturday_start time, p_saturday_end time,
   p_sunday_start   time, p_sunday_end   time
 )
@@ -262,6 +291,7 @@ begin
     cross join lateral public.shift_day_window(
       g.d::date,
       p_weekday_start,  p_weekday_end,
+      p_friday_start,   p_friday_end,
       p_saturday_start, p_saturday_end,
       p_sunday_start,   p_sunday_end
     ) win
@@ -347,6 +377,7 @@ begin
   select * into v from public.shift_verdict(
     p_at,
     sh.weekday_start,  sh.weekday_end,
+    sh.friday_start,   sh.friday_end,
     sh.saturday_start, sh.saturday_end,
     sh.sunday_start,   sh.sunday_end
   );
@@ -360,72 +391,81 @@ begin
 end;
 $body$;
 
-grant execute on function public.shift_day_window(date, time, time, time, time, time, time) to authenticated;
-grant execute on function public.shift_verdict(timestamptz, time, time, time, time, time, time) to authenticated;
+grant execute on function public.shift_day_window(date, time, time, time, time, time, time, time, time) to authenticated;
+grant execute on function public.shift_verdict(timestamptz, time, time, time, time, time, time, time, time) to authenticated;
 grant execute on function public.shift_access(uuid, timestamptz) to authenticated;
 
 
 -- ============ Self-test ============
 --
--- Nineteen awkward moments, each with the answer written down beforehand.
+-- Twenty-three awkward moments, each with the answer written down first.
 -- Every time in a label is the time on the wall in Johannesburg; the +00 in
 -- the middle is that same moment as the database sees it.
 --
--- 2026-09-07 is a Monday, so that week runs Mon the 7th to Sun the 13th.
+-- 2026-09-07 is a Monday, so that week runs Mon the 7th to Sun the 13th,
+-- and Friday is the 11th.
 --
--- You should get one row back: "19 of 19 passed". Anything that failed is
--- listed under it, and a handful of worked examples at the bottom.
+-- You should get one row back: "23 of 23 passed". Anything that failed is
+-- listed under it, and a handful of worked examples.
 
-with cases (n, label, at_utc, ws, we, sas, sae, sus, sue, want) as (values
-  -- Night shift: Mon-Fri 18:00 to 06:00, weekend off
+with cases (n, label, at_utc, ws, we, fs, fe, sas, sae, sus, sue, want) as (values
+  -- Night: Mon-Thu 18:00 to 06:00, Friday the same, weekend off
   ( 1, 'Night, Wed 19:00 - on shift',
-       timestamptz '2026-09-09 17:00+00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
+       timestamptz '2026-09-09 17:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
   ( 2, 'Night, Thu 02:00 - still on last nights shift',
-       timestamptz '2026-09-10 00:00+00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
+       timestamptz '2026-09-10 00:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
   ( 3, 'Night, Thu 05:59 - last minute of it',
-       timestamptz '2026-09-10 03:59+00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
+       timestamptz '2026-09-10 03:59+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
   ( 4, 'Night, Thu 06:00 - shift is over',
-       timestamptz '2026-09-10 04:00+00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, false),
+       timestamptz '2026-09-10 04:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, false),
   ( 5, 'Night, Mon 17:59 - one minute early',
-       timestamptz '2026-09-07 15:59+00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, false),
+       timestamptz '2026-09-07 15:59+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, false),
   ( 6, 'Night, Mon 18:00 - on the dot',
-       timestamptz '2026-09-07 16:00+00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
+       timestamptz '2026-09-07 16:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
   ( 7, 'Night, Sat 02:00 - Fridays shift runs into Saturday',
-       timestamptz '2026-09-12 00:00+00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
+       timestamptz '2026-09-12 00:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
   ( 8, 'Night, Sat 19:00 - Saturday is off',
-       timestamptz '2026-09-12 17:00+00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, false),
+       timestamptz '2026-09-12 17:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, false),
   ( 9, 'Night, Sun 12:00 - Sunday is off',
-       timestamptz '2026-09-13 10:00+00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, false),
+       timestamptz '2026-09-13 10:00+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, false),
   (10, 'Night, Wed 18:30 - THE CLOCK: in UTC this reads 16:30 and gets refused',
-       timestamptz '2026-09-09 16:30+00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
+       timestamptz '2026-09-09 16:30+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, true),
   (11, 'Night, Wed 06:30 - morning, and this is not a morning shift',
-       timestamptz '2026-09-09 04:30+00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, false),
+       timestamptz '2026-09-09 04:30+00', time '18:00', time '06:00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, false),
+  (12, 'Night with FRIDAY OFF, Sat 02:00 - nothing left to run into Saturday',
+       timestamptz '2026-09-12 00:00+00', time '18:00', time '06:00', null::time, null::time, null::time, null::time, null::time, null::time, false),
 
-  -- Day shift: Mon-Fri 07:00 to 17:00, Saturday 08:00 to 14:00, Sunday off
-  (12, 'Day, Wed 08:00 - on shift',
-       timestamptz '2026-09-09 06:00+00', time '07:00', time '17:00', time '08:00', time '14:00', null::time, null::time, true),
-  (13, 'Day, Wed 16:59 - last minute of it',
-       timestamptz '2026-09-09 14:59+00', time '07:00', time '17:00', time '08:00', time '14:00', null::time, null::time, true),
-  (14, 'Day, Wed 17:00 - knocked off',
-       timestamptz '2026-09-09 15:00+00', time '07:00', time '17:00', time '08:00', time '14:00', null::time, null::time, false),
-  (15, 'Day, Wed 03:00 - no carry over, it is not a night shift',
-       timestamptz '2026-09-09 01:00+00', time '07:00', time '17:00', time '08:00', time '14:00', null::time, null::time, false),
-  (16, 'Day, Sat 09:00 - Saturday hours',
-       timestamptz '2026-09-12 07:00+00', time '07:00', time '17:00', time '08:00', time '14:00', null::time, null::time, true),
-  (17, 'Day, Sat 15:00 - after Saturday hours',
-       timestamptz '2026-09-12 13:00+00', time '07:00', time '17:00', time '08:00', time '14:00', null::time, null::time, false),
+  -- Day: Mon-Thu 07:00 to 17:00, Friday 07:00 to 14:00, Saturday 08:00 to 14:00
+  (13, 'Day, Wed 08:00 - on shift',
+       timestamptz '2026-09-09 06:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, true),
+  (14, 'Day, Wed 16:59 - last minute of it',
+       timestamptz '2026-09-09 14:59+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, true),
+  (15, 'Day, Wed 17:00 - knocked off',
+       timestamptz '2026-09-09 15:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, false),
+  (16, 'Day, Wed 03:00 - no carry over, it is not a night shift',
+       timestamptz '2026-09-09 01:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, false),
+  (17, 'Day, FRI 13:00 - inside Fridays shorter day',
+       timestamptz '2026-09-11 11:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, true),
+  (18, 'Day, FRI 14:00 - Friday knocks off at two',
+       timestamptz '2026-09-11 12:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, false),
+  (19, 'Day, FRI 16:00 - would have been on shift under the old Mon-Fri hours',
+       timestamptz '2026-09-11 14:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, false),
+  (20, 'Day, Sat 09:00 - Saturday hours',
+       timestamptz '2026-09-12 07:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, true),
+  (21, 'Day, Sat 15:00 - after Saturday hours',
+       timestamptz '2026-09-12 13:00+00', time '07:00', time '17:00', time '07:00', time '14:00', time '08:00', time '14:00', null::time, null::time, false),
 
   -- The two odd ones
-  (18, 'Round the clock, Wed 03:00 - 00:00 to 00:00 means all day',
-       timestamptz '2026-09-09 01:00+00', time '00:00', time '00:00', null::time, null::time, null::time, null::time, true),
-  (19, 'A shift with no hours at all - nobody on it ever gets in',
-       timestamptz '2026-09-09 10:00+00', null::time, null::time, null::time, null::time, null::time, null::time, false)
+  (22, 'Round the clock, Wed 03:00 - 00:00 to 00:00 means all day',
+       timestamptz '2026-09-09 01:00+00', time '00:00', time '00:00', time '00:00', time '00:00', null::time, null::time, null::time, null::time, true),
+  (23, 'A shift with no hours at all - nobody on it ever gets in',
+       timestamptz '2026-09-09 10:00+00', null::time, null::time, null::time, null::time, null::time, null::time, null::time, null::time, false)
 ),
 run as (
   select c.n, c.label, c.want, v.verdict_allowed as got, v.verdict_ends, v.verdict_next,
          (v.verdict_allowed = c.want) as ok
   from cases c
-  cross join lateral public.shift_verdict(c.at_utc, c.ws, c.we, c.sas, c.sae, c.sus, c.sue) v
+  cross join lateral public.shift_verdict(c.at_utc, c.ws, c.we, c.fs, c.fe, c.sas, c.sae, c.sus, c.sue) v
 )
 select 0 as sort, 'self-test' as thing,
        count(*) filter (where ok)::text || ' of ' || count(*)::text || ' passed' as result
@@ -439,5 +479,5 @@ select 2, 'worked example - ' || label,
        case when got
             then 'in, until ' || to_char(verdict_ends at time zone 'Africa/Johannesburg', 'Dy DD Mon HH24:MI')
             else 'out' || coalesce(', back in ' || to_char(verdict_next at time zone 'Africa/Johannesburg', 'Dy DD Mon HH24:MI'), ', never') end
-from run where n in (2, 4, 7, 8, 10, 19)
+from run where n in (7, 12, 17, 18, 19, 23)
 order by sort, thing;
