@@ -1266,6 +1266,10 @@ export default function StockControl() {
     next_start: null,
     reason: "not checked yet",
   });
+  const [myAccessRequest, setMyAccessRequest] = useState(null);
+  const [waitingAccessRequests, setWaitingAccessRequests] = useState([]);
+  const [accessReason, setAccessReason] = useState("");
+  const [askingForAccess, setAskingForAccess] = useState(false);
   const [newClosureDate, setNewClosureDate] = useState("");
   const [newClosureNote, setNewClosureNote] = useState("");
   const [sectionGradeFilterInManager, setSectionGradeFilterInManager] = useState("");
@@ -6691,6 +6695,80 @@ export default function StockControl() {
     setDrawingUploadCustomer("");
   }
 
+  // A Friday that runs late, a machine that has to be finished tonight.
+  // Without this every one of those means editing shift times and
+  // remembering to put them back, which is the step that gets forgotten.
+  //
+  // A grant carries its own end, so nothing has to run to take it away --
+  // the time simply passes.
+  async function loadAccessRequests() {
+    if (!supabase || !profile) return;
+    try {
+      const mine = await supabase
+        .from("shift_access_requests")
+        .select("*")
+        .eq("person_id", profile.id)
+        .order("asked_at", { ascending: false })
+        .limit(1);
+      if (mine.error) throw mine.error;
+      setMyAccessRequest(mine.data?.[0] || null);
+
+      if (isAdmin || profile.canManageShifts) {
+        const waiting = await supabase
+          .from("shift_access_requests")
+          .select("*")
+          .eq("state", "waiting")
+          .order("asked_at", { ascending: true });
+        if (waiting.error) throw waiting.error;
+        setWaitingAccessRequests(waiting.data || []);
+      }
+    } catch (err) {
+      console.error("Failed to load the access requests:", err);
+    }
+  }
+
+  async function askForAccess() {
+    if (!supabase || !profile) return;
+    setAskingForAccess(true);
+    try {
+      const { error } = await supabase.from("shift_access_requests").insert({
+        person_id: profile.id,
+        reason: accessReason.trim(),
+      });
+      if (error) throw error;
+      setAccessReason("");
+      await loadAccessRequests();
+    } catch (err) {
+      console.error("Failed to ask for access:", err);
+      alert("That didn't send — check your connection and try again.");
+    } finally {
+      setAskingForAccess(false);
+    }
+  }
+
+  // hours null means no. Anything else is yes, for that many hours from
+  // now -- the clock starts when it is answered, not when it was asked.
+  async function decideAccessRequest(request, hours) {
+    if (!supabase || !profile) return;
+    const fields = hours
+      ? {
+          state: "granted",
+          good_until: new Date(Date.now() + hours * 3600 * 1000).toISOString(),
+        }
+      : { state: "refused", good_until: null };
+    try {
+      const { error } = await supabase
+        .from("shift_access_requests")
+        .update({ ...fields, decided_by: profile.id, decided_at: new Date().toISOString() })
+        .eq("id", request.id);
+      if (error) throw error;
+      await loadAccessRequests();
+    } catch (err) {
+      console.error("Failed to answer that request:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
   // Is this person inside their shift right now? The whole answer comes
   // from the database -- one rule, in one place, and the same one the
   // security rules will use later. The screen only reports it.
@@ -6723,11 +6801,15 @@ export default function StockControl() {
   // a save fails.
   useEffect(() => {
     if (!session) return undefined;
-    checkShiftAccess();
-    const timer = setInterval(checkShiftAccess, 60000);
+    const both = () => {
+      checkShiftAccess();
+      loadAccessRequests();
+    };
+    both();
+    const timer = setInterval(both, 60000);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session]);
+  }, [session, profile?.id]);
 
   // The shop's shifts. A shift is a fact about the shop rather than about
   // a person -- nights are 18:00 to 06:00 whoever is on them -- so it is
@@ -10162,6 +10244,7 @@ export default function StockControl() {
   // still saw the stock value and could open Stock Manager. A lockout that
   // only covers the middle of the page is not a lockout.
   const lockedOut = !!profile && !shiftAccess.allowed;
+  const canManageShifts = !!(isAdmin || profile?.canManageShifts);
 
   if (loadRetriesExhausted) {
     return (
@@ -10278,6 +10361,19 @@ export default function StockControl() {
               <option value="medium">Medium theme</option>
               <option value="light">Light theme</option>
             </select>
+          )}
+          {canManageShifts && !lockedOut && waitingAccessRequests.length > 0 && (
+            <button
+              className="stk-btn"
+              style={S.pendingReqBadge}
+              onClick={() => {
+                setShowManager(true);
+                setManagerTab("shifts");
+              }}
+            >
+              <ClipboardList size={14} strokeWidth={2.5} />
+              {waitingAccessRequests.length} asking to work
+            </button>
           )}
           {canAccessStockManager && !lockedOut && (
             <button className="stk-btn" style={S.roleChip} onClick={() => setShowManager(true)}>
@@ -10412,6 +10508,47 @@ export default function StockControl() {
             <div style={{ ...S.roleHint, marginTop: 10 }}>
               Leave this open and it will let you in by itself when the time comes.
             </div>
+            {/* Asking beats the alternative, which is editing the shift
+                times for everyone and remembering to put them back. */}
+            {myAccessRequest?.state === "waiting" ? (
+              <div style={{ ...S.roleHint, marginTop: 16 }}>
+                You asked at{" "}
+                {new Date(myAccessRequest.asked_at).toLocaleTimeString("en-ZA", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+                . Waiting for someone to answer.
+                {myAccessRequest.reason ? ` — "${myAccessRequest.reason}"` : ""}
+              </div>
+            ) : (
+              <div style={{ marginTop: 16 }}>
+                {myAccessRequest?.state === "refused" && (
+                  <div style={{ ...S.roleHint, color: C.danger, marginBottom: 8 }}>
+                    Your last ask was turned down.
+                  </div>
+                )}
+                <input
+                  style={{ ...S.input, width: "100%" }}
+                  value={accessReason}
+                  onChange={(e) => setAccessReason(e.target.value)}
+                  placeholder="Why do you need in? — machine to finish, delivery landing…"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      askForAccess();
+                    }
+                  }}
+                />
+                <button
+                  className="stk-btn"
+                  style={{ ...S.addBtn, marginTop: 8, width: "100%" }}
+                  onClick={askForAccess}
+                  disabled={askingForAccess}
+                >
+                  {askingForAccess ? "Sending…" : "Ask to be let in"}
+                </button>
+              </div>
+            )}
             <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 16 }}>
               <button className="stk-btn" style={S.roleChip} onClick={checkShiftAccess}>
                 Check again
@@ -15106,6 +15243,74 @@ export default function StockControl() {
                     Nothing is enforced yet. Whatever you set in here, everybody carries on exactly as they do
                     today until the lockout itself is built.
                   </div>
+
+                  {/* Somebody standing at a machine, waiting. It goes at the
+                      top, above the shift times, because it is the only part
+                      of this screen with a person attached to it. */}
+                  {waitingAccessRequests.length > 0 && (
+                    <div
+                      style={{
+                        border: `1px solid ${C.accentRaw}`,
+                        background: C.accentTint,
+                        borderRadius: 6,
+                        padding: "12px 14px",
+                        marginBottom: 14,
+                      }}
+                    >
+                      <div style={{ ...S.label, color: C.accentRaw }}>
+                        {waitingAccessRequests.length}{" "}
+                        {waitingAccessRequests.length === 1 ? "person is" : "people are"} asking to work
+                        outside their hours
+                      </div>
+                      {waitingAccessRequests.map((r) => {
+                        const who = (people || []).find((pp) => pp.id === r.person_id);
+                        return (
+                          <div
+                            key={r.id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 10,
+                              flexWrap: "wrap",
+                              marginTop: 10,
+                            }}
+                          >
+                            <span style={{ fontWeight: 600 }}>{who?.name || who?.email || "Somebody"}</span>
+                            <span style={{ color: C.muted, flex: 1, minWidth: 140 }}>
+                              {r.reason || "no reason given"}
+                            </span>
+                            <span style={S.roleHint}>
+                              asked{" "}
+                              {new Date(r.asked_at).toLocaleTimeString("en-ZA", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                            {[2, 4, 8].map((h) => (
+                              <button
+                                key={h}
+                                type="button"
+                                className="stk-btn"
+                                style={S.reqActionBtn}
+                                onClick={() => decideAccessRequest(r, h)}
+                                title={`Let them in for ${h} hours from now`}
+                              >
+                                {h}h
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              className="stk-btn"
+                              style={{ ...S.reqActionBtn, background: C.danger }}
+                              onClick={() => decideAccessRequest(r, null)}
+                            >
+                              No
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
 
                   <div style={S.managerAddRow}>
                     <input

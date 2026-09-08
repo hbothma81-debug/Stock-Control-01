@@ -154,88 +154,13 @@ end;
 $body$;
 
 
--- ============ 3. The question the app will ask ============
---
--- Everything that can let somebody in, in the order it is checked:
---
---   the master switch is off      -> everybody in, which is where we are today
---   they are an admin             -> always in
---   they are on no shift          -> in
---   their shift has been deleted  -> in
---
--- Admins are never locked out, on purpose. The master switch is the way out
--- of a bad lockout and only an admin can move it, so an admin who could
--- lock themselves out could lock the whole shop out with no way back in.
---
--- security definer so that somebody who has been locked out can still ask
--- why, and be told their own hours, once stage four tightens things up.
-
-create or replace function public.shift_access(
-  p_user uuid        default auth.uid(),
-  p_at   timestamptz default now()
-)
-returns table (allowed boolean, ends_at timestamptz, next_start timestamptz, reason text)
-language plpgsql
-stable
-security definer
-set search_path = public
-as $body$
-declare
-  switch_on boolean;
-  me        record;
-  sh        record;
-  v         record;
-begin
-  select coalesce(a.shift_lockout_on, false) into switch_on from public.app_settings a where a.id;
-
-  if not coalesce(switch_on, false) then
-    return query select true, null::timestamptz, null::timestamptz, 'the lockout is switched off'::text;
-    return;
-  end if;
-
-  select p.is_admin, p.shift_id into me from public.profiles p where p.id = p_user;
-  if not found then
-    return query select true, null::timestamptz, null::timestamptz, 'no profile found'::text;
-    return;
-  end if;
-
-  if me.is_admin then
-    return query select true, null::timestamptz, null::timestamptz, 'admins are never locked out'::text;
-    return;
-  end if;
-
-  if me.shift_id is null then
-    return query select true, null::timestamptz, null::timestamptz, 'not on a shift'::text;
-    return;
-  end if;
-
-  select * into sh from public.shifts s where s.id = me.shift_id;
-  if not found then
-    return query select true, null::timestamptz, null::timestamptz, 'that shift has been deleted'::text;
-    return;
-  end if;
-
-  select * into v from public.shift_verdict(
-    p_at,
-    sh.weekday_start,  sh.weekday_end,
-    sh.friday_start,   sh.friday_end,
-    sh.saturday_start, sh.saturday_end,
-    sh.sunday_start,   sh.sunday_end,
-    sh.days_off
-  );
-
-  return query select
-    v.verdict_allowed,
-    v.verdict_ends,
-    v.verdict_next,
-    (case when v.verdict_allowed then 'on shift: ' || sh.name
-          else 'outside ' || sh.name || ' hours' end)::text;
-end;
-$body$;
+-- shift_access -- the question the app actually asks -- has moved to
+-- setup-shift-lockout-3-requests.sql, because what it answers now
+-- depends on the requests table that lives there. One definition, in the
+-- file that owns everything it reads.
 
 grant execute on function public.shift_day_window(date, time, time, time, time, time, time, time, time, text[]) to authenticated;
 grant execute on function public.shift_verdict(timestamptz, time, time, time, time, time, time, time, time, text[]) to authenticated;
-grant execute on function public.shift_access(uuid, timestamptz) to authenticated;
 
 
 -- ============ Self-test ============
