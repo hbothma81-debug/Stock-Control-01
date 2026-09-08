@@ -225,6 +225,25 @@ const inOtherLaserLane = (mine, other) =>
   (isTubeLaserProcess(mine) && isPlateLaserProcess(other)) ||
   (isPlateLaserProcess(mine) && isTubeLaserProcess(other));
 
+// Where an item is made. Stored as a fixed code, shown as a label, so
+// nobody can end up with "Tube Laser" and "tube laser" as two different
+// things. The database refuses anything else (setup-made-on-tag.sql).
+//
+// On a job's line and on the stock part it is one of the five. On a stage
+// (Stock Manager -> Job Process Types) it says which tag that stage cuts,
+// and blank means every item -- bending, delivery, invoicing. Assembly is
+// never a stage's setting: nothing cuts an assembly.
+//
+// Plan: docs/MADE-ON-TAG-PLAN.md.
+const MADE_ON_OPTIONS = [
+  { code: "laser", label: "Laser" },
+  { code: "tube_laser", label: "Tube laser" },
+  { code: "cnc", label: "CNC" },
+  { code: "cut_to_size", label: "Cut to size" },
+  { code: "assembly", label: "Assembly" },
+];
+const madeOnLabel = (code) => MADE_ON_OPTIONS.find((o) => o.code === code)?.label || "";
+
 // Laser Status is not a process type, so it needs a key that no process
 // type could ever collide with.
 const LASER_STATUS_DEPT = "__laser_status__";
@@ -4543,6 +4562,30 @@ export default function StockControl() {
   const releasesOnStart = (name) => !!processTypeSettings[name]?.releases_on_start;
   const workedInLaserStatus = (name) => !!processTypeSettings[name]?.worked_in_laser_status;
   const hideFromProduction = (name) => !!processTypeSettings[name]?.hide_from_production;
+  // Which tag a stage cuts; blank means every item.
+  const cutsMadeOn = (name) => processTypeSettings[name]?.cuts_made_on || "";
+
+  // One setting on one stage, saved straight to the settings table and
+  // mirrored into state so the dropdown does not snap back. The row is
+  // created if the stage has never had a setting before: most stages
+  // have none, because the other three settings were only ever written
+  // by SQL scripts.
+  async function saveProcessTypeSetting(processName, field, value) {
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase
+        .from("process_type_settings")
+        .upsert({ process_name: processName, [field]: value, updated_at: new Date().toISOString() }, { onConflict: "process_name" })
+        .select()
+        .single();
+      if (error) throw error;
+      setProcessTypeSettings((prev) => ({ ...prev, [processName]: data }));
+      flashSaved(`pts-${processName}-${field}`);
+    } catch (err) {
+      console.error("Failed to save the stage setting:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
 
   function isProcessActionable(process, jobProcesses) {
     // A shortage's catch-up stages are their own sequence, running
@@ -10191,12 +10234,13 @@ export default function StockControl() {
 
     if (managerTab === "jobProcessTypes") {
       const st = processTypeSettings[entryName];
-      const setUp = st && (st.hide_from_production || st.worked_in_laser_status || st.releases_on_start);
+      const setUp = st && (st.hide_from_production || st.worked_in_laser_status || st.releases_on_start || st.cuts_made_on);
       if (setUp) {
         const doing = [
           st.hide_from_production ? "it is worked outside the Production tab" : "",
           st.worked_in_laser_status ? "it is the packing stage on Laser Status" : "",
           st.releases_on_start ? "it opens the stages after it as soon as it is started" : "",
+          st.cuts_made_on ? `it cuts the ${madeOnLabel(st.cuts_made_on)} items` : "",
         ]
           .filter(Boolean)
           .join(", ");
@@ -16364,7 +16408,7 @@ export default function StockControl() {
                   <div style={{ ...S.roleHint, marginTop: 10 }}>
                     {managerTab === "laserThicknesses"
                       ? "This order is how the laser's cut list groups programs together. Put them in the order that suits the machine — thinnest first — because left alphabetical, 10mm sorts next to 1.2mm. The grade is picked separately, from Material Types."
-                      : "This order is the factory flow — top to bottom is the sequence work moves through the shop. Use the arrows to change it. Every job follows this order, new or already running, and every department is listed in it."}
+                      : "This order is the factory flow — top to bottom is the sequence work moves through the shop. Use the arrows to change it. Every job follows this order, new or already running, and every department is listed in it. The dropdown says which items a stage cuts: point the tube stages at Tube laser, the plate stages and the packer at Laser, and leave everything after cutting on Every item."}
                   </div>
                 )}
 
@@ -16430,6 +16474,29 @@ export default function StockControl() {
                         return (
                         <div key={entry} style={S.managerRow}>
                           <EditableName value={entry} onCommit={(v) => renameMasterEntry(managerTab, entry, v)} />
+                          {/* Which items this stage cuts. A cutting stage
+                              lists only its own items once the tag is on
+                              them; a stage left on "Every item" is one
+                              after cutting -- bending, delivery. Saved to
+                              the settings table, so it survives a rename. */}
+                          {managerTab === "jobProcessTypes" && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                              <select
+                                value={cutsMadeOn(entry)}
+                                onChange={(e) => saveProcessTypeSetting(entry, "cuts_made_on", e.target.value)}
+                                style={{ ...S.input, width: "auto", fontSize: 13, padding: "4px 6px" }}
+                                title="Which items this stage cuts. Leave on Every item for stages after cutting."
+                              >
+                                <option value="">Every item</option>
+                                {MADE_ON_OPTIONS.filter((o) => o.code !== "assembly").map((o) => (
+                                  <option key={o.code} value={o.code}>
+                                    Cuts: {o.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <SavedCheck fieldKey={`pts-${entry}-cuts_made_on`} />
+                            </div>
+                          )}
                           <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
                             {reorderable && (
                               <>
