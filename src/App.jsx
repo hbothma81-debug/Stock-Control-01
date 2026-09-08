@@ -12044,7 +12044,15 @@ export default function StockControl() {
                     >
                       <span style={S.itemName}>{po.poNumber} — {po.supplierName || "No supplier"}</span>
                       <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>R{po.totalValue.toFixed(2)}</span>
+                        {/* Signing for a delivery does not need the price of it.
+                            Receiving is the widest audience of the three
+                            Procurement screens -- its own permission, held by
+                            people with no purchase-order access at all -- so this
+                            is the one place "Can see Rand values" can be honoured
+                            without stopping anybody doing their job. */}
+                        {canSeeValue && (
+                          <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>R{po.totalValue.toFixed(2)}</span>
+                        )}
                         <ChevronDown size={16} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
                       </span>
                     </button>
@@ -12070,7 +12078,9 @@ export default function StockControl() {
                               >
                                 <span style={{ fontWeight: 600, minWidth: 40 }}>{li.qty}</span>
                                 <span style={{ flex: "1 1 200px" }}>{li.description}</span>
-                                <span style={{ color: C.muted }}>R {Number(li.unitPrice || 0).toFixed(2)} each</span>
+                                {canSeeValue && (
+                                  <span style={{ color: C.muted }}>R {Number(li.unitPrice || 0).toFixed(2)} each</span>
+                                )}
                               </div>
                             ))}
                           </div>
