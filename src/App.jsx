@@ -2903,8 +2903,30 @@ export default function StockControl() {
       buyOutNotes: "",
       selectedProcesses: [],
       quoteItems: [],
+      cutItems: [],
     });
     setShowNewJob(true);
+  }
+
+  // The cut-to-size lines typed on the New Job form, before the job
+  // exists to save them against. Same shape as a job_cut_items row, with
+  // a temporary id, so the tab's own screen can show and edit them.
+  function addNewJobCutItem(line) {
+    setNewJobForm((f) => ({
+      ...f,
+      cutItems: [...(f.cutItems || []), { ...line, id: uid(), qty_cut: 0, sort_order: (f.cutItems || []).length }],
+    }));
+    return true;
+  }
+  function updateNewJobCutItem(item, field, rawValue) {
+    const textFields = ["drawing_no", "section", "grade", "note"];
+    const value = field === "trim_front" ? !!rawValue : textFields.includes(field) ? String(rawValue).trim() : Number(rawValue);
+    if (field === "section" && !value) return;
+    if (!textFields.includes(field) && field !== "trim_front" && !(value >= 0)) return;
+    setNewJobForm((f) => ({ ...f, cutItems: (f.cutItems || []).map((it) => (it.id === item.id ? { ...it, [field]: value } : it)) }));
+  }
+  function removeNewJobCutItem(item) {
+    setNewJobForm((f) => ({ ...f, cutItems: (f.cutItems || []).filter((it) => it.id !== item.id) }));
   }
 
   function addNewJobQuoteItem() {
@@ -3303,6 +3325,14 @@ export default function StockControl() {
           tracking_mode: p.trackingMode || "batch",
           sort_order: idx,
         }));
+        // A job with a cut list needs the saw stage, the same as adding a
+        // line inside an existing job gives it one. Only if the stage
+        // exists in the process list and was not ticked already.
+        const newCutItems = newJobForm.cutItems || [];
+        const cutStageName = (master?.jobProcessTypes || []).find((n) => sameText(n, "Cut To Size"));
+        if (newCutItems.length && cutStageName && !processRows.some((p) => sameText(p.process_name, cutStageName))) {
+          processRows.push({ job_id: job.id, process_name: cutStageName, operator: "", assigned_to: null, tracking_mode: "batch", sort_order: processRows.length });
+        }
         const { error: procError } = await supabase.from("job_processes").insert(processRows);
         if (procError) throw procError;
 
@@ -3337,6 +3367,32 @@ export default function StockControl() {
           }));
           const { error: quoteItemError } = await supabase.from("job_quote_items").insert(quoteItemRows);
           if (quoteItemError) throw quoteItemError;
+        }
+
+        // The cut list. Not fatal: the job, its stages and its items are
+        // in by now, and losing all of that over the saw lines would be
+        // the wrong trade. They can be typed again on the job's tab.
+        if (newCutItems.length) {
+          const cutRows = newCutItems.map((c, idx) => ({
+            job_id: job.id,
+            sort_order: idx,
+            drawing_no: c.drawing_no || "",
+            linked_item_id: c.linked_item_id || null,
+            section: c.section || "",
+            grade: c.grade || "",
+            cut_length_mm: Number(c.cut_length_mm) || 0,
+            qty: Number(c.qty) || 0,
+            stock_length_m: Number(c.stock_length_m) || 6,
+            trim_front: c.trim_front !== false,
+            note: c.note || "",
+          }));
+          const { error: cutError } = await supabase.from("job_cut_items").insert(cutRows);
+          if (cutError) {
+            console.error("Failed to save the cut list on the new job:", cutError);
+            alert(
+              `The job was created, but its ${cutRows.length} cut-to-size line${cutRows.length === 1 ? "" : "s"} did not save: ${cutError.message || "unknown error"}. Add them again on the job's Cut to size tab.`
+            );
+          }
         }
 
         if (newJobForm.quoteExcelFile) await uploadJobDocument(job.id, newJobForm.quoteExcelFile, null, true);
@@ -19828,6 +19884,34 @@ export default function StockControl() {
                   placeholder="Total quoted value, for comparing against actual cost later"
                 />
               </div>
+            </div>
+
+            {/* The saw lines, if the job has any, typed here and saved
+                with the job. The tab's own screen, holding the lines in
+                the form until there is a job to keep them on. */}
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+              <label style={S.label}>Cut to size (optional)</label>
+              <CutToSize
+                lines={newJobForm.cutItems || []}
+                canEdit={true}
+                canSeeValue={canSeeValue}
+                sections={master.sections || []}
+                customerItems={
+                  newJobForm.customer && newJobForm.customer !== CUSTOM
+                    ? (items || []).filter((i) => i.mainCat === "custom" && i.customer === newJobForm.customer)
+                    : []
+                }
+                items={items || []}
+                findSectionFactor={findSectionFactor}
+                findSectionPrice={findSectionPrice}
+                findSectionType={findSectionType}
+                allocations={[]}
+                requisitions={requisitions || []}
+                onAdd={addNewJobCutItem}
+                onUpdate={updateNewJobCutItem}
+                onRemove={removeNewJobCutItem}
+                SavedCheck={SavedCheck}
+              />
             </div>
 
             <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
