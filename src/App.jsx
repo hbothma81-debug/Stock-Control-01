@@ -4249,10 +4249,18 @@ export default function StockControl() {
         programs,
         packerName: packing?.operator || packing?.started_by || "",
         isMine: !!currentUser?.id && !!packing && packing.assigned_to === currentUser.id,
-        // For a packing stage set to Each: the job's items, and how many
-        // of each this stage has already packed.
-        quoteItems: (d.quoteItems || []).filter((it) => it.job_id === job.id),
+        // For a packing stage set to Each: the lines this stage handles
+        // (the plate packer sees plate lines, not the tube laser's), and
+        // how many of each it has already packed.
+        quoteItems: packing
+          ? itemsForStage(packing.process_name, (d.quoteItems || []).filter((it) => it.job_id === job.id))
+          : (d.quoteItems || []).filter((it) => it.job_id === job.id),
         itemProgress: packing ? (d.itemProgress || []).filter((ip) => ip.job_process_id === packing.id) : [],
+        // Every line is another machine's: said out loud, single tick kept.
+        nothingToCut:
+          packing && stageHasNothingToCut(packing.process_name, (d.quoteItems || []).filter((it) => it.job_id === job.id))
+            ? nothingToCutText(packing.process_name)
+            : "",
       });
     }
 
@@ -4572,6 +4580,31 @@ export default function StockControl() {
   // Which tag a stage cuts; blank means every item.
   const cutsMadeOn = (name) => processTypeSettings[name]?.cuts_made_on || "";
 
+  // Whether a stage handles a given line. A stage that cuts a machine's
+  // items takes the lines tagged for that machine, and lines with no tag
+  // at all -- an untagged job behaves exactly as it always did. It never
+  // takes another machine's lines, and never an assembly: nothing cuts an
+  // assembly. A stage with no machine (bending, delivery, invoicing)
+  // takes everything.
+  function stageTakesItem(processName, quoteItem) {
+    const tag = cutsMadeOn(processName);
+    if (!tag) return true;
+    const made = quoteItem?.made_on || "";
+    return !made || made === tag;
+  }
+  const itemsForStage = (processName, quoteItems) => (quoteItems || []).filter((it) => stageTakesItem(processName, it));
+
+  // A cutting stage on a job whose lines are all tagged for other
+  // machines has nothing to do. It must not finish itself -- a wrongly
+  // tagged job would sail through nesting unnoticed -- so it is said out
+  // loud instead, and the stage keeps a single tick.
+  function stageHasNothingToCut(processName, quoteItems) {
+    return !!cutsMadeOn(processName) && (quoteItems || []).length > 0 && itemsForStage(processName, quoteItems).length === 0;
+  }
+  const nothingToCutText = (processName) =>
+    `No items on this job are tagged for the ${madeOnLabel(cutsMadeOn(processName)) || "this"} machine. ` +
+    "Tag them on the job's Items tab, or take this stage off the job.";
+
   // One setting on one stage, saved straight to the settings table and
   // mirrored into state so the dropdown does not snap back. The row is
   // created if the stage has never had a setting before: most stages
@@ -4640,6 +4673,10 @@ export default function StockControl() {
       if (flowRank(p.process_name) >= mine) continue;
       // The other laser is a separate lane, not an earlier stage.
       if (inOtherLaserLane(process.process_name, p.process_name)) continue;
+      // A stage that never handles this line cannot hold it back: a CNC
+      // part does not wait for the plate laser, an assembly waits for
+      // no cutting stage at all.
+      if (!stageTakesItem(p.process_name, quoteItem)) continue;
       if ((p.tracking_mode || "batch") !== "each") {
         return { allowed: 0, waitingOn: p.process_name };
       }
@@ -6600,11 +6637,13 @@ export default function StockControl() {
       y += 3;
       autoTable(doc, {
         startY: y,
-        head: [["Item", "Qty", "Invoiced", "Outstanding"]],
+        // Made on: which machine each line goes to, so the paper matches
+        // what each cutting stage on screen will list.
+        head: [["Item", "Made on", "Qty", "Invoiced", "Outstanding"]],
         body: quoteItems.map((it) => {
           const qty = Number(it.qty) || 0;
           const invoiced = Number(it.qty_invoiced) || 0;
-          return [it.description || "", qty, invoiced, Math.max(qty - invoiced, 0)];
+          return [it.description || "", madeOnLabel(it.made_on) || "—", qty, invoiced, Math.max(qty - invoiced, 0)];
         }),
         theme: "grid",
         headStyles: { fillColor: [27, 29, 31] },
@@ -12645,12 +12684,21 @@ export default function StockControl() {
                             >
                               <PackagePlus size={13} /> Pull from stock
                             </button>
+                            {/* A cutting stage lists only the lines tagged
+                                for its machine (and untagged ones). With
+                                nothing to cut it says so and keeps a single
+                                tick rather than finishing itself. */}
+                            {stageHasNothingToCut(process.process_name, quoteItems) && (
+                              <div style={{ ...S.roleHint, color: C.accentRaw, fontWeight: 600, marginTop: 6 }}>
+                                {nothingToCutText(process.process_name)}
+                              </div>
+                            )}
                             <div style={{ marginTop: 6 }}>
-                              {process.tracking_mode === "each" ? (
+                              {process.tracking_mode === "each" && !stageHasNothingToCut(process.process_name, quoteItems) ? (
                                 <QtyProgressControl
                                   process={process}
                                   job={job}
-                                  quoteItems={quoteItems}
+                                  quoteItems={itemsForStage(process.process_name, quoteItems)}
                                   itemProgress={itemProgress}
                                   limitFor={(item) => itemFlowLimit(process, stagesOnJob, progressOnJob, item)}
                                   onSubmit={submitProcessItemProgress}
@@ -17817,7 +17865,17 @@ export default function StockControl() {
                           </div>
                         )}
                         {p.tracking_mode === "each" && !p.is_complete && (
-                          <div style={{ ...S.roleHint, marginLeft: 22 }}>Each-mode progress is tracked per item on the Production tab.</div>
+                          <div style={{ ...S.roleHint, marginLeft: 22 }}>
+                            Each-mode progress is tracked per item on the Production tab
+                            {cutsMadeOn(p.process_name)
+                              ? ` — the ${madeOnLabel(cutsMadeOn(p.process_name))} lines, ${itemsForStage(p.process_name, jobDetail.quoteItems).length} of ${jobDetail.quoteItems.length}.`
+                              : "."}
+                          </div>
+                        )}
+                        {stageHasNothingToCut(p.process_name, jobDetail.quoteItems) && (
+                          <div style={{ ...S.roleHint, marginLeft: 22, color: C.accentRaw, fontWeight: 600 }}>
+                            {nothingToCutText(p.process_name)}
+                          </div>
                         )}
                         {/* Material set aside for this stage. Shown here as
                             well as on the operator's screen so whoever

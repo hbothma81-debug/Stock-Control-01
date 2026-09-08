@@ -119,7 +119,9 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
   const busy = !!r.process && busyId === r.process.id;
   // Packed item by item rather than as one tick. A re-cut is never: its
   // parts are the shortage's, not lines on the job.
-  const perItem = !r.isRecut && r.process?.tracking_mode === "each" && !!ItemProgress;
+  // With every line tagged for another machine there is nothing to count,
+  // so the single tick stays and the row says why.
+  const perItem = !r.isRecut && r.process?.tracking_mode === "each" && !!ItemProgress && !r.nothingToCut;
 
   const packLabel = !r.process
     ? "No packing stage"
@@ -230,6 +232,9 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
                 Its parts are coming off the laser, but Packer was never added to this job — so nothing here can be
                 taken, and nothing after packing will open. Open the job, press Edit processes, and add it.
               </div>
+            )}
+            {r.nothingToCut && (
+              <div style={{ ...S.roleHint, color: C.accentRaw, fontWeight: 600 }}>{r.nothingToCut}</div>
             )}
             {taken && r.process?.started_at && (
               <div style={S.roleHint}>Taken {new Date(r.process.started_at).toLocaleString()}</div>
