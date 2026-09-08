@@ -8937,6 +8937,19 @@ export default function StockControl() {
       .filter((it) => (it.partNumber || "").trim());
   }, [items]);
 
+  // The same items again, by description, because half the time the code is
+  // the thing nobody remembers. One entry per description -- two items with
+  // the same wording would otherwise show as two identical suggestions.
+  const poDescriptionLookup = useMemo(() => {
+    const seen = new Set();
+    return poPartLookup.filter((it) => {
+      const name = (it.name || "").trim();
+      if (!name || seen.has(name.toLowerCase())) return false;
+      seen.add(name.toLowerCase());
+      return true;
+    });
+  }, [poPartLookup]);
+
   // Typing a part number fills the rest of the line in. If nothing matches,
   // the other fields are left alone -- somebody ordering something we have
   // never stocked still types it by hand, as before.
@@ -8955,6 +8968,32 @@ export default function StockControl() {
               ...(hit
                 ? {
                     description: li.description.trim() ? li.description : hit.name || "",
+                    unitPrice: li.unitPrice ? li.unitPrice : String(Number(hit.value) || ""),
+                  }
+                : {}),
+            }
+          : li
+      ),
+    }));
+  }
+
+  // The other way round: type what the thing is called and the code and
+  // price follow. Same rule -- anything already on the line is left alone.
+  function fillPoLineFromDescription(idx, value) {
+    const typed = value.trim().toLowerCase();
+    const hit = typed
+      ? poPartLookup.find((it) => (it.name || "").toLowerCase() === typed)
+      : null;
+    setPoBuilder((b) => ({
+      ...b,
+      lineItems: b.lineItems.map((li, i) =>
+        i === idx
+          ? {
+              ...li,
+              description: value,
+              ...(hit
+                ? {
+                    partNumber: (li.partNumber || "").trim() ? li.partNumber : hit.partNumber || "",
                     unitPrice: li.unitPrice ? li.unitPrice : String(Number(hit.value) || ""),
                   }
                 : {}),
@@ -19695,6 +19734,15 @@ export default function StockControl() {
                   </option>
                 ))}
               </datalist>
+              {/* Either box finds the item: the code when somebody has it,
+                  the description when they only know what it is. */}
+              <datalist id="po-descriptions">
+                {poDescriptionLookup.map((it) => (
+                  <option key={it.id} value={it.name}>
+                    {it.partNumber}
+                  </option>
+                ))}
+              </datalist>
               {poBuilder.lineItems.map((li, idx) => {
                 const typed = (li.partNumber || "").trim().toLowerCase();
                 const hits = typed
@@ -19712,7 +19760,8 @@ export default function StockControl() {
                   <input
                     style={{ ...S.input, flex: 3 }}
                     value={li.description}
-                    onChange={(e) => updatePoLineItem(idx, "description", e.target.value)}
+                    list="po-descriptions"
+                    onChange={(e) => fillPoLineFromDescription(idx, e.target.value)}
                     placeholder="Description"
                   />
                   <input
