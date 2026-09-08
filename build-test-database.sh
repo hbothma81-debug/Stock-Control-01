@@ -40,6 +40,7 @@ ORDER=(
   setup-process-tracking-mode.sql
   setup-process-item-progress.sql
   setup-production-priority-shortage.sql
+  setup-made-on-tag.sql
 
   # --- modules that reference jobs
   setup-invoicing-delivery.sql
