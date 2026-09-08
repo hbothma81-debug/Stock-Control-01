@@ -9,6 +9,9 @@ export const TABS = [
   { key: "structural", label: "Structural Steel" },
   { key: "cncBar", label: "CNC Bar" },
   { key: "custom", label: "Customer Stock" },
+  // Bought in, marked up, resold. Stocked like any other division; what
+  // makes it different is that it carries two prices rather than one.
+  { key: "buyouts", label: "Buy-outs" },
   { key: "stores", label: "Stores" },
   { key: "fasteners", label: "Fasteners" },
   { key: "assets", label: "Assets" },
@@ -42,7 +45,7 @@ export const NAV_TABS = [
 // top-level buttons (Jobs and Production stay standalone since they're
 // used the most) with everything else folded into a few logical groups.
 export const TAB_GROUPS = [
-  { label: "Stock", keys: ["plate", "structural", "cncBar", "custom", "fasteners", "stores", "assets"] },
+  { label: "Stock", keys: ["plate", "structural", "cncBar", "custom", "buyouts", "fasteners", "stores", "assets"] },
   // Shortages used to be their own top-level button here. They now live
   // inside the Laser 4kw tab beside Nesting and Cutting, because that is
   // where one is dealt with: a re-cut goes on a program like any other

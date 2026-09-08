@@ -187,6 +187,8 @@ create table if not exists stock_items (
   serial_number text not null default '',
   purchase_date text not null default '',
   value numeric not null default 0,
+  -- What we charge for a buy-out. value stays what we pay.
+  sell_price numeric not null default 0,
   service_mode text not null default '',
   service_interval_months numeric not null default 0,
   service_interval_hours numeric not null default 0,

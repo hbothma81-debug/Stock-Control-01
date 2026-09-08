@@ -138,6 +138,10 @@ const ITEM_DB_FIELDS = [
   ["comment", "comment", "text"], ["unit", "unit", "text"], ["trackLength", "track_length", "bool"], ["length", "length", "num"],
   ["qty", "qty", "num"], ["diameter", "diameter", "text"], ["partNumber", "part_number", "text"], ["manufacturer", "manufacturer", "text"],
   ["serialNumber", "serial_number", "text"], ["purchaseDate", "purchase_date", "text"], ["value", "value", "num"],
+  // value is what we pay -- stock is valued at cost and a purchase order
+  // prices itself from it. sellPrice is what we charge. Needs
+  // setup-buyouts.sql on the database first.
+  ["sellPrice", "sell_price", "num"],
   ["serviceMode", "service_mode", "text"], ["serviceIntervalMonths", "service_interval_months", "num"],
   ["serviceIntervalHours", "service_interval_hours", "num"], ["serviceIntervalKm", "service_interval_km", "num"],
   ["lastServiceDate", "last_service_date", "text"], ["lastServiceReading", "last_service_reading", "num"],
@@ -695,6 +699,7 @@ const emptyForm = {
   partNumber: "",
   name: "",
   value: "",
+  sellPrice: "",
   attachmentType: "",
   attachmentName: "",
   supplier: "",
@@ -7638,7 +7643,8 @@ export default function StockControl() {
 
   const tabValueTotal = useMemo(() => {
     if (!master) return null;
-    if (tab === "custom" || tab === "stores" || tab === "fasteners") return tabItems.reduce((sum, it) => sum + Number(it.value || 0) * Number(it.qty || 0), 0);
+    if (tab === "custom" || tab === "stores" || tab === "fasteners" || tab === "buyouts")
+      return tabItems.reduce((sum, it) => sum + Number(it.value || 0) * Number(it.qty || 0), 0);
     if (tab === "plate") return tabItems.reduce((sum, it) => sum + (plateValue(it)?.total || 0), 0);
     if (tab === "structural") return tabItems.reduce((sum, it) => sum + (structuralValue(it)?.total || 0), 0);
     if (tab === "cncBar") return tabItems.reduce((sum, it) => sum + (cncBarValue(it)?.total || 0), 0);
@@ -7652,7 +7658,8 @@ export default function StockControl() {
       if (it.mainCat === "plate") return sum + (plateValue(it)?.total || 0);
       if (it.mainCat === "structural") return sum + (structuralValue(it)?.total || 0);
       if (it.mainCat === "cncBar") return sum + (cncBarValue(it)?.total || 0);
-      if (it.mainCat === "custom" || it.mainCat === "stores" || it.mainCat === "fasteners") return sum + Number(it.value || 0) * Number(it.qty || 0);
+      if (it.mainCat === "custom" || it.mainCat === "stores" || it.mainCat === "fasteners" || it.mainCat === "buyouts")
+        return sum + Number(it.value || 0) * Number(it.qty || 0);
       return sum;
     }, 0);
   }, [items, master]);
@@ -9512,6 +9519,27 @@ export default function StockControl() {
       if (isNewFastener) {
         setMaster((prev) => ({ ...prev, nextFastenerNumber: (prev.nextFastenerNumber || 1) + 1 }));
       }
+    } else if (form.mainCat === "buyouts") {
+      // A buy-out is identified by what the supplier calls it, so the part
+      // number is required. The same number may already exist in another
+      // division -- that is expected, and nothing is keyed on it globally.
+      if (!form.name.trim() || !form.partNumber.trim()) return;
+      payload = {
+        ...base,
+        mainCat: "buyouts",
+        grade: "",
+        partNumber: form.partNumber.trim(),
+        name: form.name.trim(),
+        supplier: effectiveSupplier || form.supplier || "",
+        manufacturer: form.manufacturer ? form.manufacturer.trim() : "",
+        value: Number(form.value) || 0,
+        sellPrice: Number(form.sellPrice) || 0,
+        comment: form.comment || "",
+        trackLength: false,
+        length: 0,
+        unit: "ea",
+        qty: Number(form.qty) || 0,
+      };
     } else {
       // Customer Stock requires a part number; Stores items don't have to.
       if (!effectiveCustomer || !form.name.trim() || (form.mainCat === "custom" && !form.partNumber.trim())) return;
@@ -9586,6 +9614,7 @@ export default function StockControl() {
       low: String(it.low || ""),
       qty: duplicate ? "" : String(it.qty || ""),
       comment: it.comment || "",
+      sellPrice: String(it.sellPrice || ""),
     };
     // Accept either the full name or short name as a valid match — older
     // items may have the full name stored from before short names existed.
@@ -9746,7 +9775,11 @@ export default function StockControl() {
     setShowLowStock(false);
     setTab(it.mainCat);
     setCustomerFilter(null);
-    setQuery(it.mainCat === "custom" || it.mainCat === "stores" || it.mainCat === "fasteners" ? (it.partNumber || it.name) : it.name);
+    setQuery(
+      it.mainCat === "custom" || it.mainCat === "stores" || it.mainCat === "fasteners" || it.mainCat === "buyouts"
+        ? it.partNumber || it.name
+        : it.name
+    );
   }
 
   const managerIsFactorTable = FACTOR_TABLES.includes(managerTab);
@@ -13648,6 +13681,23 @@ export default function StockControl() {
                             {(tab === "custom" || tab === "stores" || tab === "fasteners") && canSeeValue && (
                               <span>R{Number(it.value || 0).toFixed(2)} ea · R{(Number(it.value || 0) * Number(it.qty || 0)).toFixed(2)} total</span>
                             )}
+                            {/* Two prices, so the row says which is which rather
+                                than leaving somebody to guess whether R240 is what
+                                we paid or what we charge. */}
+                            {tab === "buyouts" && canSeeValue && (
+                              <>
+                                <span>Pay R{Number(it.value || 0).toFixed(2)} ea</span>
+                                <span>Charge R{Number(it.sellPrice || 0).toFixed(2)} ea</span>
+                                {Number(it.value || 0) > 0 && Number(it.sellPrice || 0) > 0 && (
+                                  <span>
+                                    {Math.round(((Number(it.sellPrice) - Number(it.value)) / Number(it.value)) * 100)}% markup
+                                  </span>
+                                )}
+                              </>
+                            )}
+                            {/* Whatever the supplier calls it -- the number somebody
+                                will actually be searching for. */}
+                            {tab === "buyouts" && it.partNumber && <span>{it.partNumber}</span>}
                             {tab === "assets" && canSeeValue && Number(it.value || 0) > 0 && <span>R{Number(it.value).toFixed(2)}</span>}
                             {tab === "plate" && canSeeValue && pw && (
                               <span>R{(plateValue(it)?.total || 0).toFixed(2)} value</span>
@@ -14089,17 +14139,22 @@ export default function StockControl() {
                   </>
                 )}
               </>
-            ) : form.mainCat === "custom" || form.mainCat === "stores" || form.mainCat === "fasteners" ? (
+            ) : form.mainCat === "custom" || form.mainCat === "stores" || form.mainCat === "fasteners" || form.mainCat === "buyouts" ? (
               <>
-                <LibraryField
-                  label={form.mainCat === "stores" ? "Category" : form.mainCat === "fasteners" ? "Category" : "Customer"}
-                  options={form.mainCat === "stores" ? master.storeCategories : form.mainCat === "fasteners" ? master.fastenerCategories : master.customers}
-                  value={form.customer}
-                  onChange={(v) => setForm({ ...form, customer: v })}
-                  customValue={form.customCustomer}
-                  onCustomChange={(v) => setForm({ ...form, customCustomer: v })}
-                  placeholder={form.mainCat === "stores" ? "e.g. Hand Tools" : form.mainCat === "fasteners" ? "e.g. Bolts" : "e.g. New Customer Pty Ltd"}
-                />
+                {/* A buy-out is filed under its supplier, and this form already
+                    has a Supplier further down that every division shares. So it
+                    gets no dropdown of its own here rather than two that fight. */}
+                {form.mainCat === "buyouts" ? null : (
+                  <LibraryField
+                    label={form.mainCat === "stores" ? "Category" : form.mainCat === "fasteners" ? "Category" : "Customer"}
+                    options={form.mainCat === "stores" ? master.storeCategories : form.mainCat === "fasteners" ? master.fastenerCategories : master.customers}
+                    value={form.customer}
+                    onChange={(v) => setForm({ ...form, customer: v })}
+                    customValue={form.customCustomer}
+                    onCustomChange={(v) => setForm({ ...form, customCustomer: v })}
+                    placeholder={form.mainCat === "stores" ? "e.g. Hand Tools" : form.mainCat === "fasteners" ? "e.g. Bolts" : "e.g. New Customer Pty Ltd"}
+                  />
+                )}
                 {form.mainCat === "stores" && (
                   <div style={{ marginTop: 10 }}>
                     <label style={S.label}>Type</label>
@@ -14627,7 +14682,45 @@ export default function StockControl() {
               </div>
             )}
 
-            {form.mainCat === "assets" ? null : form.mainCat === "custom" || form.mainCat === "stores" ? (
+            {form.mainCat === "assets" ? null : form.mainCat === "buyouts" ? (
+              <div style={S.formGrid}>
+                <div>
+                  <label style={S.label}>Quantity</label>
+                  <input
+                    style={S.input}
+                    type="number"
+                    min="0"
+                    value={form.qty}
+                    onChange={(e) => setForm({ ...form, qty: e.target.value })}
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label style={S.label}>What we pay (R)</label>
+                  <input
+                    style={S.input}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.value}
+                    onChange={(e) => setForm({ ...form, value: e.target.value })}
+                    placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <label style={S.label}>What we charge (R)</label>
+                  <input
+                    style={S.input}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.sellPrice}
+                    onChange={(e) => setForm({ ...form, sellPrice: e.target.value })}
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+            ) : form.mainCat === "custom" || form.mainCat === "stores" ? (
               <div style={S.formGrid}>
                 <div>
                   <label style={S.label}>Quantity</label>
