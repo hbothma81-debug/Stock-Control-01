@@ -56,6 +56,7 @@ ORDER=(
   setup-asset-service-and-repairs.sql
   setup-usage-log-table.sql
   setup-job-allocations.sql
+  setup-job-cut-items.sql
 
   # --- extra columns and permissions on profiles
   setup-production-access.sql
