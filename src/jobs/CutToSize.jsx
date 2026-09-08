@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Trash2, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, AlertTriangle, FileText } from "lucide-react";
 import { C, S } from "../theme.js";
 import {
   DEFAULT_STOCK_M,
@@ -8,6 +8,7 @@ import {
   MIN_OFFCUT_MM,
   planBars,
   barsOnShelf,
+  barsSetAside,
   lineMetres,
   offcutIsKeepable,
   fmtMm,
@@ -63,6 +64,8 @@ export default function CutToSize({
   onAdd,
   onUpdate,
   onRemove,
+  onPrint,
+  allocations,
   SavedCheck,
 }) {
   const [draft, setDraft] = useState(blankLine);
@@ -129,6 +132,7 @@ export default function CutToSize({
           <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
             {groups.map((g) => {
               const shelf = barsOnShelf(g, items);
+              const setAside = barsSetAside(g, allocations, items);
               const short = Math.max(0, g.bars.length - shelf);
               const keepable = g.bars.filter((b) => offcutIsKeepable(b.offcutMm)).length;
               return (
@@ -150,6 +154,11 @@ export default function CutToSize({
                   >
                     {short > 0 ? `${short} short` : `${shelf} on the shelf`}
                   </span>
+                  {setAside > 0 && (
+                    <span style={S.chip} title="Already set aside for this job">
+                      {setAside} set aside
+                    </span>
+                  )}
                   {g.bars.length > 0 && (
                     <span style={S.roleHint} title={`Offcuts of ${MIN_OFFCUT_MM.toLocaleString()} mm or more go back to stock`}>
                       offcuts: {g.bars.map((b) => fmtMm(b.offcutMm)).join(", ")}
@@ -174,7 +183,14 @@ export default function CutToSize({
           cutting list will carry. */}
       {groups.some((g) => g.bars.length > 0) && (
         <div style={{ marginBottom: 10 }}>
-          <label style={S.label}>Cutting order</label>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <label style={S.label}>Cutting order</label>
+            {onPrint && (
+              <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={onPrint} title="Print the cutting list for the saw operator">
+                <FileText size={13} /> Print cutting list
+              </button>
+            )}
+          </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
             {groups
               .filter((g) => g.bars.length > 0)

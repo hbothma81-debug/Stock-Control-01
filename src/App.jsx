@@ -60,6 +60,7 @@ import { TABS, NAV_TABS, TAB_GROUPS, LASER_MACHINE } from "./constants.js";
 import UserManagement from "./UserManagement.jsx";
 import CompanyDetails from "./manager/CompanyDetails.jsx";
 import CutToSize from "./jobs/CutToSize.jsx";
+import { planBars, barsOnShelf, barsSetAside, offcutIsKeepable, KERF_MM, TRIM_MM, MIN_OFFCUT_MM } from "./jobs/cutToSize.js";
 import EditableName from "./EditableName.jsx";
 import NestingView from "./laser/NestingView.jsx";
 import CutList from "./laser/CutList.jsx";
@@ -5725,6 +5726,159 @@ export default function StockControl() {
     }
   }
 
+  // The cutting list on paper: what the saw operator takes to the rack.
+  // Runs continuously, one heading per material, each bar with its pieces
+  // in cutting order and the offcut it leaves. No prices anywhere -- this
+  // goes to the floor.
+  //
+  // Filed under the job with the time in its name, so a reprint sits next
+  // to the earlier one rather than over it. A bar already cut off the old
+  // list is still there to check against.
+  async function printCuttingList(job, cutItems, allocations) {
+    const groups = planBars(cutItems);
+    if (!groups.some((g) => g.bars.length > 0 || g.tooLong.length > 0)) {
+      alert("Nothing on the cut list to print yet.");
+      return;
+    }
+    const { jsPDF, autoTable } = await getPdf();
+    const doc = new jsPDF();
+    const company = master.companyDetails || {};
+    const leftX = 14;
+    const pageBottom = doc.internal.pageSize.getHeight() - 20;
+    const { height: logoH } = addCompanyLogo(doc, company, leftX, 10, 26, 14);
+    let y = logoH ? 10 + logoH + 6 : 18;
+    doc.setFontSize(16);
+    doc.setFont(undefined, "bold");
+    doc.text(`Cutting list — Job ${job.job_number}`, leftX, y);
+    y += 7;
+    doc.setFontSize(10);
+    doc.setFont(undefined, "normal");
+    [
+      `Customer: ${job.customer || "—"}`,
+      job.description ? `Job: ${job.description}` : null,
+      job.due_date ? `Due date: ${new Date(job.due_date).toLocaleDateString()}` : null,
+      `Printed ${new Date().toLocaleString()} by ${roleLabel}`,
+    ]
+      .filter(Boolean)
+      .forEach((line) => {
+        doc.text(line, leftX, y);
+        y += 5;
+      });
+
+    const mm = (n) => `${Math.round(n).toLocaleString()} mm`;
+    for (const g of groups) {
+      if (y > pageBottom - 30) {
+        doc.addPage();
+        y = 18;
+      }
+      y += 4;
+      doc.setFontSize(12);
+      doc.setFont(undefined, "bold");
+      doc.text(
+        `${g.section}${g.grade ? ` ${g.grade}` : ""} — ${g.bars.length} bar${g.bars.length === 1 ? "" : "s"} × ${g.stockLengthM} m`,
+        leftX,
+        y
+      );
+      y += 5;
+      doc.setFontSize(9);
+      doc.setFont(undefined, "normal");
+      // Where the bars come from. Set aside is a promise made on this
+      // job; on the shelf is what is physically there; to order is what
+      // neither covers.
+      const shelf = barsOnShelf(g, items || []);
+      const setAside = barsSetAside(g, allocations || [], items || []);
+      const toOrder = Math.max(0, g.bars.length - shelf);
+      doc.text(
+        `${g.trimFront ? `${TRIM_MM} mm trim, ` : "no trim, "}${mm(g.usableMm)} usable per bar · ` +
+          `${setAside} set aside for this job · ${shelf} on the shelf · ${toOrder} to order`,
+        leftX,
+        y
+      );
+      y += 3;
+      if (g.bars.length > 0) {
+        autoTable(doc, {
+          startY: y,
+          head: [["Bar", "Cut in this order", "Used", "Offcut", ""]],
+          body: g.bars.map((bar, i) => [
+            `Bar ${i + 1}`,
+            bar.pieces.map((p) => `${Math.round(p.lengthMm).toLocaleString()}${p.drawingNo ? ` (${p.drawingNo})` : ""}`).join("  +  "),
+            mm(bar.usedMm),
+            mm(bar.offcutMm),
+            offcutIsKeepable(bar.offcutMm) ? "KEEP" : "scrap",
+          ]),
+          theme: "grid",
+          headStyles: { fillColor: [27, 29, 31] },
+          columnStyles: { 0: { cellWidth: 16 }, 2: { cellWidth: 22 }, 3: { cellWidth: 22 }, 4: { cellWidth: 16, fontStyle: "bold" } },
+          margin: { left: leftX },
+        });
+        y = doc.lastAutoTable.finalY + 4;
+      }
+      if (g.tooLong.length > 0) {
+        doc.setTextColor(180, 0, 0);
+        doc.text(
+          `Cannot be cut from a ${g.stockLengthM} m bar: ` +
+            g.tooLong.map((p) => `${Math.round(p.lengthMm).toLocaleString()} mm${p.drawingNo ? ` (${p.drawingNo})` : ""}`).join(", ") +
+            ". Needs longer stock.",
+          leftX,
+          y
+        );
+        doc.setTextColor(0, 0, 0);
+        y += 5;
+      }
+    }
+
+    // The parts themselves, with a box to tick as each line is finished.
+    if (y > pageBottom - 40) {
+      doc.addPage();
+      y = 18;
+    }
+    y += 4;
+    doc.setFontSize(12);
+    doc.setFont(undefined, "bold");
+    doc.text("Parts", leftX, y);
+    y += 3;
+    autoTable(doc, {
+      startY: y,
+      head: [["Drawing", "Section", "Grade", "Length", "Qty", "Cut", "Note"]],
+      body: cutItems.map((it) => [
+        it.drawing_no || "",
+        it.section || "",
+        it.grade || "",
+        mm(Number(it.cut_length_mm) || 0),
+        String(it.qty ?? ""),
+        "",
+        it.note || "",
+      ]),
+      theme: "grid",
+      headStyles: { fillColor: [27, 29, 31] },
+      columnStyles: { 5: { cellWidth: 14 } },
+      margin: { left: leftX },
+    });
+    y = doc.lastAutoTable.finalY + 6;
+    doc.setFontSize(8);
+    doc.setFont(undefined, "normal");
+    doc.text(
+      `Allowances: ${KERF_MM} mm to the blade on every cut; ${TRIM_MM} mm trimmed off the front of each bar marked trim. ` +
+        `Offcuts of ${MIN_OFFCUT_MM.toLocaleString()} mm or more go back to stock.`,
+      leftX,
+      Math.min(y, pageBottom + 10)
+    );
+
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const stored = await generateAndStoreDocument({
+      doc,
+      documentType: "cutting_list",
+      bucket: "job-documents",
+      path: `${job.id}/cutting-list-${stamp}.pdf`,
+      fileName: `${job.job_number} cutting list.pdf`,
+      jobId: job.id,
+    });
+    if (stored) {
+      await logJobEvent(job.id, "cutting list printed", `${cutItems.length} line${cutItems.length === 1 ? "" : "s"}`);
+      openJobDetail(job);
+    }
+  }
+
   // Called from the Jobs list, where a job's quote items aren't already
   // loaded (only Job Detail fetches those) — pulls them fresh first.
   async function invoiceNowFromList(job) {
@@ -7453,6 +7607,7 @@ export default function StockControl() {
   // is usually the one being looked for.
   const GENERATED_LABELS = {
     process_sheet: "Process sheet",
+    cutting_list: "Cutting list",
     delivery_note: "Delivery note",
     purchase_order: "Purchase order",
     job_card: "Job card",
@@ -17962,6 +18117,8 @@ export default function StockControl() {
               onAdd={(line) => addJobCutItem(jobDetail.job, line)}
               onUpdate={(item, field, value) => updateJobCutItem(jobDetail.job, item, field, value)}
               onRemove={(item) => removeJobCutItem(jobDetail.job, item)}
+              onPrint={() => printCuttingList(jobDetail.job, jobDetail.cutItems || [], jobDetail.allocations || [])}
+              allocations={jobDetail.allocations || []}
               SavedCheck={SavedCheck}
             />
           )}

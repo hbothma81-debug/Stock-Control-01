@@ -158,6 +158,21 @@ export function barsOnShelf(group, items) {
     .reduce((sum, it) => sum + num(it.qty), 0);
 }
 
+// Bars already set aside for this job that could serve this group: open
+// allocations whose stock item is the same section and grade at the stock
+// length or longer. Counts what is still unused on each allocation.
+export function barsSetAside(group, allocations, items) {
+  return (allocations || [])
+    .filter((a) => a.status !== "released")
+    .reduce((sum, a) => {
+      const it = (items || []).find((i) => i.id === a.item_id);
+      if (!it || it.mainCat !== "structural") return sum;
+      if (!sameText(it.name, group.section) || !sameText(it.grade, group.grade)) return sum;
+      if (num(it.length) < group.stockLengthM) return sum;
+      return sum + Math.max(0, num(a.qty_allocated) - num(a.qty_used));
+    }, 0);
+}
+
 // Rounded the way the shop reads them: whole millimetres, metres to two
 // places, kilograms to one.
 export const fmtMm = (mm) => `${Math.round(mm).toLocaleString()} mm`;
