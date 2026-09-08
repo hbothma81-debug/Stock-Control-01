@@ -67,7 +67,12 @@ export default function CutList({
     );
   }, [programs, query]);
 
-  const toCut = filtered.filter((p) => !p.is_complete);
+  // A stopped program is back with whoever nests, not the operator's to
+  // cut, so it comes off his list. It is kept in its own shut section
+  // rather than vanishing: he stopped it, and he can still see it there,
+  // and mark it cut if the material turns up after all.
+  const toCut = filtered.filter((p) => !p.is_complete && !p.reported_at);
+  const stopped = filtered.filter((p) => !p.is_complete && p.reported_at);
   const cut = filtered.filter((p) => p.is_complete);
 
   // Grouped by material, in the shop's own thickness order. A material
@@ -126,6 +131,29 @@ export default function CutList({
             </div>
           </Section>
         ))
+      )}
+
+      {stopped.length > 0 && (
+        <Section title="Stopped — back with nesting" count={stopped.length} collapsible defaultOpen={false}>
+          <div style={grid}>
+            {stopped.map((p) => (
+              <ProgramRow
+                key={p.id}
+                program={p}
+                notes={(events || []).filter(
+                  (e) => e.program_id === p.id && (e.action === "note" || e.action === "stopped")
+                )}
+                canCut={canCut}
+                onToggleCut={onToggleCut}
+                onSetCutCount={onSetCutCount}
+                onAskTime={(pr) => setAskTimeFor(pr.id)}
+                onReport={onReport}
+                onAddNote={onAddNote}
+                busy={busyId === p.id}
+              />
+            ))}
+          </div>
+        </Section>
       )}
 
       {cut.length > 0 && (
@@ -212,7 +240,8 @@ function ShiftCounter({ programs, shifts, myShiftId }) {
     // shift can see whether there is enough nested to fill it. A program
     // with no time given cannot be added up, so say how many are missing
     // rather than let the total read as the whole picture.
-    const open = (programs || []).filter((p) => !p.is_complete);
+    // A stopped program is back with nesting, so it is not on the list.
+    const open = (programs || []).filter((p) => !p.is_complete && !p.reported_at);
     const untimed = open.filter((p) => outstandingMinutes(p) == null).length;
 
     return {
@@ -535,7 +564,7 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onAskT
               </button>
             </div>
             <div style={S.roleHint}>
-              This stays on your cut list. Whoever nests gets told straight away.
+              It comes off your cut list and goes back to nesting. Whoever nests gets told straight away.
             </div>
 
             <label style={{ ...S.label, marginTop: 10, display: "block" }}>What is stopping you?</label>

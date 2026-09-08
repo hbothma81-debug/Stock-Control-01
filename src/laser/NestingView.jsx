@@ -370,7 +370,14 @@ export default function NestingView({
               </div>
             )}
             {shownRows.map((r) => r.kind === "stopped" ? (
-              <StoppedRow key={r.key} row={r} canManage={canManage} onClearReport={onClearReport} />
+              <StoppedRow
+                key={r.key}
+                row={r}
+                canManage={canManage}
+                onClearReport={onClearReport}
+                onUpdateProgram={onUpdateProgram}
+                SavedCheck={SavedCheck}
+              />
             ) : (
               <NestRow
                 key={r.key}
@@ -1286,13 +1293,42 @@ function ProgramList({
 
 // A program the operator has stopped at the machine. It sits at the top
 // of To nest, outlined like anything else that needs nesting now, and
-// says what stopped it and what he suggests instead. Whoever nests fixes
-// the program under "Programs waiting to be cut" -- a different sheet,
-// a different plate, or a fresh nest -- and presses Sorted here, which
-// puts it back on the operator's cut list without the stop.
-function StoppedRow({ row: r, canManage, onClearReport }) {
+// says what stopped it and what he suggests instead. It opens to the
+// program itself -- number, material, sheet, minutes -- because putting
+// it right usually means re-nesting on the offcut he named and giving
+// the new nest its own number. Sorted takes the stop off and puts the
+// program back on his cut list.
+function StoppedRow({ row: r, canManage, onClearReport, onUpdateProgram, SavedCheck }) {
   const p = r.program;
+  const [open, setOpen] = useState(false);
   const jobs = (p.jobs || []).map((l) => l.job_number || "unknown job");
+
+  // Each box saves on its own when you leave it, the way the program
+  // list below does. Blank minutes means not given, not zero.
+  const field = (label, key, extra = {}) => (
+    <div style={{ flex: extra.flex || "1 1 150px" }}>
+      <label style={S.label}>{label}</label>
+      <input
+        style={S.input}
+        type={extra.type || "text"}
+        min={extra.type === "number" ? "0" : undefined}
+        step={extra.type === "number" ? "0.1" : undefined}
+        inputMode={extra.type === "number" ? "decimal" : undefined}
+        list={extra.list}
+        placeholder={extra.placeholder}
+        defaultValue={p[key] ?? ""}
+        onBlur={(e) => {
+          const v = e.target.value.trim();
+          const was = p[key] == null ? "" : String(p[key]);
+          if (v === was) return;
+          if (extra.type === "number") onUpdateProgram(p, { [key]: v === "" ? null : Number(v) });
+          else if (extra.required && !v) e.target.value = was;
+          else onUpdateProgram(p, { [key]: v || null });
+        }}
+      />
+    </div>
+  );
+
   return (
     <div
       style={{
@@ -1302,15 +1338,36 @@ function StoppedRow({ row: r, canManage, onClearReport }) {
         background: C.dangerTint,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <button
+        type="button"
+        className="stk-btn"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          width: "100%",
+          background: "transparent",
+          border: "none",
+          color: C.text,
+          cursor: "pointer",
+          padding: 0,
+          textAlign: "left",
+          flexWrap: "wrap",
+        }}
+      >
         <span style={{ ...S.chip, borderColor: C.danger, color: C.danger, fontWeight: 700, flexShrink: 0 }}>
           Stopped at the machine
         </span>
         <span style={{ fontWeight: 700, fontSize: 15 }}>{p.program_number}</span>
         <span style={{ color: C.muted, fontSize: 14 }}>{p.material}</span>
         {p.sheet_name && <span style={{ color: C.muted, fontSize: 14 }}>{p.sheet_name}</span>}
-        <span style={{ color: C.muted, fontSize: 14 }}>{jobs.length ? jobs.join(", ") : "no jobs on it"}</span>
-      </div>
+        <span style={{ flex: 1, minWidth: 0, color: C.muted, fontSize: 14 }}>
+          {jobs.length ? jobs.join(", ") : "no jobs on it"}
+        </span>
+        <ChevronDown size={16} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform .15s", flexShrink: 0 }} />
+      </button>
+
       <div style={{ marginTop: 6, color: C.danger, fontSize: 14 }}>
         <b>{p.reported_reason}</b>
         {p.reported_offcut_length && p.reported_offcut_width ? (
@@ -1322,21 +1379,37 @@ function StoppedRow({ row: r, canManage, onClearReport }) {
         {p.reported_by}
         {p.reported_at ? ` — ${new Date(p.reported_at).toLocaleString()}` : ""}
       </div>
-      {canManage && (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className="stk-btn"
-            style={S.reqActionBtn}
-            onClick={() => onClearReport && onClearReport(p)}
-            title="Take the stop off and put it back on the cut list"
-          >
-            Sorted
-          </button>
-          <span style={S.roleHint}>
-            Change the sheet or material on the program under "Programs waiting to be cut", or nest it
-            again, then press Sorted.
-          </span>
+
+      {open && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.danger}44`, display: "flex", flexDirection: "column", gap: 10 }}>
+          {canManage ? (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+              {field("Program number", "program_number", { required: true })}
+              {field("Material", "material", { required: true })}
+              {field("Sheet name", "sheet_name", { list: "stk-sheet-names", placeholder: "Which sheet" })}
+              {field("Minutes per sheet", "cut_minutes", { type: "number", flex: "0 0 130px", placeholder: "From SigmaNest" })}
+              {SavedCheck && <SavedCheck fieldKey={`program-${p.id}`} />}
+            </div>
+          ) : (
+            <div style={S.roleHint}>Only whoever nests can change the program.</div>
+          )}
+          {canManage && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="stk-btn"
+                style={S.reqActionBtn}
+                onClick={() => onClearReport && onClearReport(p)}
+                title="Take the stop off and put it back on the cut list"
+              >
+                Sorted
+              </button>
+              <span style={S.roleHint}>
+                Change what needs changing above — it saves as you leave each box — then press Sorted and it
+                goes back on the cut list.
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>
