@@ -4722,13 +4722,17 @@ export default function StockControl() {
         setProductionLoading(false);
         return;
       }
-      const [{ data: allProcesses, error: procError }, { data: allQuoteItems, error: qiError }, { data: allDocs, error: docError }, shortageResult] = await Promise.all([
+      const [{ data: allProcesses, error: procError }, { data: allQuoteItems, error: qiError }, { data: allDocs, error: docError }, shortageResult, cutResult, cuttingListResult] = await Promise.all([
         supabase.from("job_processes").select("*").in("job_id", jobIds).order("sort_order"),
         supabase.from("job_quote_items").select("*").in("job_id", jobIds),
         supabase.from("job_documents").select("*").in("job_id", jobIds).not("process_name", "is", null),
         // Fetched here rather than read from shortagesList so the queue
         // never depends on that having loaded first.
         supabase.from("shortages").select("*").in("job_id", jobIds),
+        // The saw operator's work: the cut list on each job, and the
+        // cutting lists already printed for it. Both non-fatal.
+        supabase.from("job_cut_items").select("*").in("job_id", jobIds).order("sort_order"),
+        supabase.from("generated_documents").select("*").in("job_id", jobIds).eq("document_type", "cutting_list").order("generated_at", { ascending: false }),
       ]);
       if (procError) throw procError;
       if (qiError) throw qiError;
@@ -4737,6 +4741,10 @@ export default function StockControl() {
       // shortage label, which is far better than no queue at all.
       if (shortageResult.error) console.error("Failed to load shortages for the queue:", shortageResult.error);
       const queueShortages = shortageResult.data || [];
+      if (cutResult.error) console.error("Failed to load cut lists for the queue:", cutResult.error);
+      if (cuttingListResult.error) console.error("Failed to load printed cutting lists for the queue:", cuttingListResult.error);
+      const allCutItems = cutResult.data || [];
+      const allCuttingLists = cuttingListResult.data || [];
 
       // Each-mode progress is tracked per item, not lumped into one
       // combined count — needs the process ids from the fetch above
@@ -4790,6 +4798,8 @@ export default function StockControl() {
             quoteItems: jobQuoteItems,
             documents: (allDocs || []).filter((d) => d.job_id === job.id && d.process_name === p.process_name),
             itemProgress: allItemProgress.filter((ip) => ip.job_process_id === p.id),
+            cutItems: allCutItems.filter((c) => c.job_id === job.id),
+            cuttingLists: allCuttingLists.filter((d) => d.job_id === job.id),
             // The whole job's stages and per-item progress, so each item's
             // row can work out how far that one item has already got.
             jobProcesses,
@@ -5960,6 +5970,23 @@ export default function StockControl() {
     openRequisition(target);
     setRequisitionQty(String(Math.floor(Number(count)) || ""));
     setRequisitionNotes(`For job ${job.job_number} cut list — ${group.stockLengthM} m lengths`);
+  }
+
+  // The saw operator's count: how many of a line are cut so far. Clamped
+  // to the line's quantity. Saved straight away, since it is pressed
+  // between cuts with dirty hands.
+  async function countCutItem(job, item, value) {
+    const next = Math.max(0, Math.min(Number(item.qty) || 0, Math.floor(Number(value) || 0)));
+    if (next === Number(item.qty_cut || 0)) return;
+    try {
+      const { error } = await supabase.from("job_cut_items").update({ qty_cut: next }).eq("id", item.id);
+      if (error) throw error;
+      if (productionQueue !== null) fetchProductionQueue();
+      if (jobDetail?.job.id === job.id) openJobDetail(job);
+    } catch (err) {
+      console.error("Failed to save the cut count:", err);
+      alert("That count didn't save — check your signal and try again.");
+    }
   }
 
   // The cutting list on paper: what the saw operator takes to the rack.
@@ -12694,6 +12721,42 @@ export default function StockControl() {
                                 </div>
                               );
                             })()}
+                            {/* The saw stage works from the cut list, not
+                                the quoted items: bar by bar, with a count
+                                per line. The printed list is a button away
+                                for the operator who wants it on paper. */}
+                            {sameText(process.process_name, "Cut To Size") && (selected.cutItems || []).length > 0 && (
+                              <div style={{ marginTop: 8 }}>
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                                  <div style={{ ...S.label, color: C.accentRaw }}>Cut list</div>
+                                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                    {(selected.cuttingLists || []).slice(0, 1).map((d) => (
+                                      <button key={d.id} type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => viewGeneratedDocument(d)} title={`Printed ${new Date(d.generated_at).toLocaleString()} by ${d.generated_by || ""}`}>
+                                        <FileText size={12} /> Open cutting list
+                                      </button>
+                                    ))}
+                                    <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => printCuttingList(job, selected.cutItems || [], (allocationsList || []).filter((a) => a.job_id === job.id))}>
+                                      <FileText size={12} /> Print cutting list
+                                    </button>
+                                  </div>
+                                </div>
+                                <CutToSize
+                                  lines={selected.cutItems || []}
+                                  canEdit={false}
+                                  canSeeValue={false}
+                                  sections={master.sections || []}
+                                  customerItems={[]}
+                                  items={items || []}
+                                  findSectionFactor={findSectionFactor}
+                                  findSectionPrice={findSectionPrice}
+                                  findSectionType={findSectionType}
+                                  allocations={(allocationsList || []).filter((a) => a.job_id === job.id)}
+                                  requisitions={requisitions || []}
+                                  onCount={(item, value) => countCutItem(job, item, value)}
+                                  SavedCheck={SavedCheck}
+                                />
+                              </div>
+                            )}
                             <button
                               type="button"
                               className="stk-btn"

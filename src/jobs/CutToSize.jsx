@@ -72,6 +72,7 @@ export default function CutToSize({
   findSectionType,
   onSetAside,
   onRequisition,
+  onCount,
   SavedCheck,
 }) {
   const [draft, setDraft] = useState(blankLine);
@@ -383,9 +384,30 @@ export default function CutToSize({
                   <span style={S.roleHint}>= {fmtM(lineMetres(it))}</span>
                   {kg != null && <span style={S.roleHint}>· {fmtKg(kg)}</span>}
                   {canSeeValue && cost != null && <span style={S.roleHint}>· R {cost.toFixed(2)}</span>}
-                  {Number(it.qty) > 0 && (
+                  {Number(it.qty) > 0 && !onCount && (
                     <span style={{ ...S.roleHint, ...(cut >= Number(it.qty) ? { color: C.accentFinished, fontWeight: 600 } : {}) }}>
                       · {cut} of {it.qty} cut
+                    </span>
+                  )}
+                  {/* The operator's counter. Big enough for a thumb, one
+                      press per piece, and a Done for when the line is
+                      finished in one go. */}
+                  {Number(it.qty) > 0 && onCount && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, marginLeft: 4 }}>
+                      <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, padding: "4px 10px" }} onClick={() => onCount(it, cut - 1)} disabled={cut <= 0} title="One fewer">
+                        −
+                      </button>
+                      <span style={{ fontWeight: 700, color: cut >= Number(it.qty) ? C.accentFinished : C.text, minWidth: 64, textAlign: "center" }}>
+                        {cut} of {it.qty} cut
+                      </span>
+                      <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, padding: "4px 10px" }} onClick={() => onCount(it, cut + 1)} disabled={cut >= Number(it.qty)} title="One more cut">
+                        +
+                      </button>
+                      {cut < Number(it.qty) && (
+                        <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, padding: "4px 10px" }} onClick={() => onCount(it, Number(it.qty))} title="All of this line is cut">
+                          Done
+                        </button>
+                      )}
                     </span>
                   )}
                 </div>
