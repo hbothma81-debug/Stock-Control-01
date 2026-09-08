@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { Plus, X, Ban, AlertTriangle, PackagePlus, FileText, Upload, ChevronDown, Check, Undo2 } from "lucide-react";
 import { C, S } from "../theme.js";
+import { plannedMinutes, fmtMinutes } from "../lib/cuttingTime.js";
 import Section from "../Section.jsx";
 
 // Prince's screen, and very nearly the only one he uses.
@@ -71,6 +72,9 @@ export default function NestingView({
   // How many times this same nest gets run off the material. One unless
   // Prince says otherwise.
   const [newRepeats, setNewRepeats] = useState("1");
+  // Planned cutting time for one sheet, off SigmaNest. Blank means not
+  // given, which the cutting screen and shift report both say out loud.
+  const [newMinutes, setNewMinutes] = useState("");
   const [search, setSearch] = useState("");
   const [addingTo, setAddingTo] = useState(null);
   const [addQuery, setAddQuery] = useState("");
@@ -96,6 +100,7 @@ export default function NestingView({
     setNewNumber("");
     setNewThickness("");
     setNewGrade("");
+    setNewMinutes("");
     setPicked([]);
     setJobQuery("");
   }
@@ -111,6 +116,7 @@ export default function NestingView({
         material: `${newThickness} ${newGrade}`,
         sheet_name: newSheet.trim(),
         sheets_required: newRepeats,
+        cut_minutes: newMinutes,
         machine,
         jobs: picked.map((c) => ({
           job_id: c.job_id,
@@ -252,6 +258,20 @@ export default function NestingView({
                   value={newRepeats}
                   onChange={(e) => setNewRepeats(e.target.value)}
                   title="How many times this same nest is run off the material"
+                />
+              </div>
+              <div style={{ flex: "0 0 130px" }}>
+                <label style={S.label}>Minutes per sheet</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  inputMode="decimal"
+                  style={S.input}
+                  value={newMinutes}
+                  onChange={(e) => setNewMinutes(e.target.value)}
+                  placeholder="From SigmaNest"
+                  title="Planned cutting time for one sheet, in minutes"
                 />
               </div>
             </div>
@@ -481,6 +501,7 @@ function NestRow({
   const [alsoQuery, setAlsoQuery] = useState("");
   const [sheet, setSheet] = useState("");
   const [repeats, setRepeats] = useState("1");
+  const [minutes, setMinutes] = useState("");
   const [saving, setSaving] = useState(false);
 
   const sigmanest = r.job?.laser_job_reference || r.shortage?.board_number || "";
@@ -517,6 +538,7 @@ function NestRow({
         program_number: programNumber.trim(),
         sheet_name: sheet.trim(),
         sheets_required: repeats,
+        cut_minutes: minutes,
         // Stored as one line the way the machine reads it, built from the
         // two lists so nobody types "1.2mm MS" three different ways.
         material: `${thickness} ${grade}`,
@@ -532,6 +554,7 @@ function NestRow({
         setThickness("");
         setGrade("");
         setSheet("");
+        setMinutes("");
         setAlsoOn([]);
         setAlsoQuery("");
       }
@@ -629,6 +652,11 @@ function NestRow({
                     </span>
                     {pg.material && <span style={S.partTag}>{pg.material}</span>}
                     {pg.sheet_name && <span style={S.partTag}>{pg.sheet_name}</span>}
+                    {plannedMinutes(pg) != null && (
+                      <span style={S.partTag} title="Planned cutting time, all sheets">
+                        {fmtMinutes(plannedMinutes(pg))}
+                      </span>
+                    )}
                     {pg.link?.shortage_id && (
                       <span style={{ ...S.chip, borderColor: C.danger, color: C.danger }}>re-cut</span>
                     )}
@@ -743,6 +771,20 @@ function NestRow({
                     value={repeats}
                     onChange={(e) => setRepeats(e.target.value)}
                     title="How many times this same nest is run off the material"
+                  />
+                </div>
+                <div style={{ flex: "0 0 130px" }}>
+                  <label style={S.label}>Minutes per sheet</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    inputMode="decimal"
+                    style={S.input}
+                    value={minutes}
+                    onChange={(e) => setMinutes(e.target.value)}
+                    placeholder="From SigmaNest"
+                    title="Planned cutting time for one sheet, in minutes"
                   />
                 </div>
               </div>
@@ -1118,6 +1160,23 @@ function ProgramList({
                             onBlur={(e) => {
                               const v = e.target.value.trim();
                               if (v && v !== p.material) onUpdateProgram(p, { material: v });
+                            }}
+                          />
+                        </div>
+                        <div style={{ flex: "0 0 130px" }}>
+                          <label style={S.label}>Minutes per sheet</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            inputMode="decimal"
+                            style={S.input}
+                            defaultValue={p.cut_minutes ?? ""}
+                            placeholder="From SigmaNest"
+                            onBlur={(e) => {
+                              const v = e.target.value.trim();
+                              const was = p.cut_minutes == null ? "" : String(p.cut_minutes);
+                              if (v !== was) onUpdateProgram(p, { cut_minutes: v === "" ? null : Number(v) });
                             }}
                           />
                         </div>

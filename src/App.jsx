@@ -62,6 +62,7 @@ import CompanyDetails from "./manager/CompanyDetails.jsx";
 import EditableName from "./EditableName.jsx";
 import NestingView from "./laser/NestingView.jsx";
 import CutList from "./laser/CutList.jsx";
+import ShiftReport from "./laser/ShiftReport.jsx";
 import LaserStatus from "./laser/LaserStatus.jsx";
 import Section from "./Section.jsx";
 import RecordRow from "./RecordRow.jsx";
@@ -4026,7 +4027,7 @@ export default function StockControl() {
     }
   }
 
-  async function createLaserProgram({ program_number, material, machine, sheet_name, sheets_required, jobs }) {
+  async function createLaserProgram({ program_number, material, machine, sheet_name, sheets_required, cut_minutes, jobs }) {
     if (!supabase) return false;
     try {
       const { data, error } = await supabase
@@ -4040,6 +4041,9 @@ export default function StockControl() {
           // unless somebody says otherwise, so nothing changes for the
           // programs that are cut once and done.
           sheets_required: Math.max(1, Math.round(Number(sheets_required) || 1)),
+          // Planned cutting time per sheet, off SigmaNest. Blank stays
+          // null: "not given" must not read as "takes no time".
+          cut_minutes: minutesOrNull(cut_minutes),
           created_by: roleLabel,
         })
         .select("id")
@@ -4363,7 +4367,10 @@ export default function StockControl() {
   // told to cut more, and the second of those is Prince changing the
   // number rather than the count quietly disagreeing with it.
   async function setProgramCutCount(program, nextCount) {
-    if (!supabase || programBusyId) return;
+    if (!supabase || programBusyId) return false;
+    // Told to the cutting screen, which asks for the actual time once the
+    // last sheet is marked cut and must not ask if the save failed.
+    let ok = false;
     const required = Math.max(1, Number(program.sheets_required) || 1);
     const before = Math.max(0, Number(program.sheets_cut) || 0);
     const cut = Math.min(Math.max(0, Math.round(Number(nextCount) || 0)), required);
@@ -4398,6 +4405,7 @@ export default function StockControl() {
       setLaserData(await loadLaserRaw());
       if (productionQueue !== null) fetchProductionQueue();
       void changed;
+      ok = true;
     } catch (err) {
       console.error("Failed to mark program cut:", err);
       alert("That didn't save — check your connection and try again.");
@@ -4405,6 +4413,7 @@ export default function StockControl() {
     } finally {
       setProgramBusyId(null);
     }
+    return ok;
   }
 
   // Cut, or not cut, in one press -- what the button did before there was
@@ -4412,6 +4421,37 @@ export default function StockControl() {
   function toggleProgramCut(program) {
     const required = Math.max(1, Number(program.sheets_required) || 1);
     return setProgramCutCount(program, program.is_complete ? 0 : required);
+  }
+
+  // A number of minutes typed into a box, or null for anything that is
+  // not one. Blank is null on purpose: "not given" is not "no time".
+  function minutesOrNull(v) {
+    if (v === null || v === undefined || String(v).trim() === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? Math.round(n * 10) / 10 : null;
+  }
+
+  // What the operator says the program really took. Information only:
+  // the planned figure whoever nested typed in is never touched by this,
+  // and nothing is worked out from it yet.
+  async function setProgramActualMinutes(program, minutes) {
+    if (!supabase) return false;
+    const actual = minutesOrNull(minutes);
+    try {
+      const { error } = await supabase.from("laser_programs").update({ actual_minutes: actual }).eq("id", program.id);
+      if (error) throw error;
+      await logProgramEvent(
+        program.id,
+        "time",
+        actual === null ? `${program.program_number} — time cleared` : `${program.program_number} — ${actual} min`
+      );
+      await fetchLaserData();
+      return true;
+    } catch (err) {
+      console.error("Failed to save cutting time:", err);
+      alert("That didn't save — check your connection and try again.");
+      return false;
+    }
   }
 
   // Pressed when there are no more programs coming for that job. Without
@@ -11300,8 +11340,8 @@ export default function StockControl() {
             // screen; Shortages is there for everyone, so the switch always
             // has at least two things on it now.
             const view =
-              laserView === "shortages"
-                ? "shortages"
+              laserView === "shortages" || laserView === "shifts"
+                ? laserView
                 : !canNest
                 ? laserView === "nesting"
                   ? "cutting"
@@ -11319,6 +11359,7 @@ export default function StockControl() {
                       { key: "nesting", label: "Nesting" },
                       ...(canCut ? [{ key: "cutting", label: "Cutting" }] : []),
                       { key: "shortages", label: "Shortages" },
+                      { key: "shifts", label: "Shifts" },
                     ].map((v) => (
                       <button
                         key={v.key}
@@ -11379,10 +11420,13 @@ export default function StockControl() {
                     canCut={canCut}
                     onToggleCut={toggleProgramCut}
                     onSetCutCount={setProgramCutCount}
+                    onSetActualMinutes={setProgramActualMinutes}
                     onReport={reportProgram}
                     onAddNote={addProgramNote}
                     busyId={programBusyId}
                   />
+                ) : view === "shifts" ? (
+                  <ShiftReport programs={programs} shifts={laserData ? laserData.shifts : []} />
                 ) : (
                   <ShortageCentre
                     shortages={

@@ -1,8 +1,9 @@
 import { useState, useMemo, useEffect } from "react";
-import { Check, Undo2, OctagonAlert, MessageSquare, X } from "lucide-react";
+import { Check, Undo2, OctagonAlert, MessageSquare, X, Clock } from "lucide-react";
 import { C, S } from "../theme.js";
 import Section from "../Section.jsx";
 import { pickShift, currentAndPreviousWindow, fmtTime } from "../lib/shiftWindow.js";
+import { plannedMinutes, outstandingMinutes, fmtMinutes } from "../lib/cuttingTime.js";
 
 // The laser operator's screen. A to-do list of programs to cut.
 //
@@ -36,6 +37,7 @@ export default function CutList({
   canCut,
   onToggleCut,
   onSetCutCount,
+  onSetActualMinutes,
   onReport,
   onAddNote,
   busyId,
@@ -108,6 +110,7 @@ export default function CutList({
                   canCut={canCut}
                   onToggleCut={onToggleCut}
                   onSetCutCount={onSetCutCount}
+                  onSetActualMinutes={onSetActualMinutes}
                   onReport={onReport}
                   onAddNote={onAddNote}
                   busy={busyId === p.id}
@@ -131,6 +134,7 @@ export default function CutList({
                 canCut={canCut}
                 onToggleCut={onToggleCut}
                 onSetCutCount={onSetCutCount}
+                onSetActualMinutes={onSetActualMinutes}
                 onReport={onReport}
                 onAddNote={onAddNote}
                 busy={busyId === p.id}
@@ -181,30 +185,75 @@ function ShiftCounter({ programs, shifts, myShiftId }) {
       const t = new Date(p.completed_at);
       return t >= w.start && t < w.end;
     };
+    const sum = (list, f) => list.reduce((acc, p) => acc + (f(p) || 0), 0);
+    const cutNow = (programs || []).filter(within(current));
+
+    // What is still on the list, in minutes, so whoever plans the night
+    // shift can see whether there is enough nested to fill it. A program
+    // with no time given cannot be added up, so say how many are missing
+    // rather than let the total read as the whole picture.
+    const open = (programs || []).filter((p) => !p.is_complete);
+    const untimed = open.filter((p) => outstandingMinutes(p) == null).length;
+
     return {
       label,
-      count: (programs || []).filter(within(current)).length,
+      count: cutNow.length,
+      minutes: sum(cutNow, plannedMinutes),
       previous: win.previous ? (programs || []).filter(within(win.previous)).length : null,
+      openCount: open.length,
+      openMinutes: sum(open, outstandingMinutes),
+      untimed,
     };
   }, [programs, shifts, myShiftId, now]);
 
+  const line = { display: "flex", flexWrap: "wrap", gap: "4px 18px", justifyContent: "center" };
   return (
-    <div style={{ ...S.summaryBanner, marginBottom: 0, display: "flex", flexWrap: "wrap", gap: "4px 18px", justifyContent: "center" }}>
-      <span>
-        <b style={{ fontSize: 18 }}>{view.count}</b> {view.count === 1 ? "program" : "programs"} cut this shift
-      </span>
-      <span style={{ color: C.muted }}>{view.label}</span>
-      {view.previous != null && <span style={{ color: C.muted }}>last shift {view.previous}</span>}
+    <div style={{ ...S.summaryBanner, marginBottom: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={line}>
+        <span>
+          <b style={{ fontSize: 18 }}>{view.count}</b> {view.count === 1 ? "program" : "programs"} cut this shift
+          {view.minutes > 0 ? ` · ${fmtMinutes(view.minutes)} planned` : ""}
+        </span>
+        <span style={{ color: C.muted }}>{view.label}</span>
+        {view.previous != null && <span style={{ color: C.muted }}>last shift {view.previous}</span>}
+      </div>
+      <div style={{ ...line, color: C.muted }}>
+        <span>
+          Still on the list: <b style={{ color: C.text }}>{view.openCount}</b>{" "}
+          {view.openCount === 1 ? "program" : "programs"}
+          {view.openCount > 0 ? (
+            <>
+              {" "}
+              · <b style={{ color: C.text }}>{fmtMinutes(view.openMinutes)}</b> of cutting
+            </>
+          ) : null}
+        </span>
+        {view.untimed > 0 && (
+          <span style={{ color: C.danger }}>
+            {view.untimed} with no time given — not in that total
+          </span>
+        )}
+      </div>
     </div>
   );
 }
 
-function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onReport, onAddNote, busy }) {
+function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onSetActualMinutes, onReport, onAddNote, busy }) {
   const p = program;
   const repeats = Math.max(1, Number(p.sheets_required) || 1);
   const done = Math.min(Math.max(0, Number(p.sheets_cut) || 0), repeats);
   const [countDraft, setCountDraft] = useState(String(done));
   useEffect(() => setCountDraft(String(done)), [done]);
+  // Asked once the last sheet is marked cut: how long did it really take.
+  // He can skip it for now. Whether it becomes compulsory is a later
+  // decision, so the skip is one plain button rather than buried.
+  const [askTime, setAskTime] = useState(false);
+  const [timeDraft, setTimeDraft] = useState("");
+  const planned = plannedMinutes(p);
+  function openTime() {
+    setTimeDraft(p.actual_minutes == null ? "" : String(p.actual_minutes));
+    setAskTime(true);
+  }
   const [showReport, setShowReport] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [reason, setReason] = useState("");
@@ -221,6 +270,12 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onRepo
           <span style={S.partTag}>{p.material}</span>
           {p.sheet_name && <span style={S.partTag}>{p.sheet_name}</span>}
           {p.machine && <span style={S.partTag}>{p.machine}</span>}
+          {planned != null && (
+            <span style={S.partTag} title="Planned cutting time, all sheets">
+              {fmtMinutes(planned)}
+              {repeats > 1 ? ` (${fmtMinutes(p.cut_minutes)} × ${repeats})` : ""}
+            </span>
+          )}
         </div>
         <div style={{ ...S.chipRow, marginTop: 4 }}>
           {(p.jobs || []).length === 0 ? (
@@ -305,6 +360,7 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onRepo
           <div style={S.roleHint}>
             Cut by {p.completed_by}
             {p.completed_at ? ` — ${new Date(p.completed_at).toLocaleString()}` : ""}
+            {p.actual_minutes != null ? ` · took ${fmtMinutes(p.actual_minutes)}` : " · time not given"}
           </div>
         )}
       </div>
@@ -353,7 +409,9 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onRepo
                   className="stk-btn"
                   style={{ ...S.reqActionBtn, background: C.accentRaw }}
                   disabled={busy}
-                  onClick={() => onSetCutCount(p, done + 1)}
+                  onClick={async () => {
+                    if ((await onSetCutCount(p, done + 1)) && done + 1 >= repeats) openTime();
+                  }}
                   title="One more sheet of this program is cut"
                 >
                   <Check size={14} strokeWidth={2.5} /> {busy ? "Saving…" : "Cut one"}
@@ -371,10 +429,11 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onRepo
                 value={countDraft}
                 onChange={(e) => setCountDraft(e.target.value)}
                 onFocus={(e) => e.target.select()}
-                onBlur={() => {
+                onBlur={async () => {
                   const n = Math.round(Number(countDraft));
-                  if (Number.isFinite(n) && n !== done) onSetCutCount(p, n);
-                  else setCountDraft(String(done));
+                  if (Number.isFinite(n) && n !== done) {
+                    if ((await onSetCutCount(p, n)) && n >= repeats) openTime();
+                  } else setCountDraft(String(done));
                 }}
                 title={`How many of the ${repeats} are cut`}
               />
@@ -409,7 +468,9 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onRepo
               className="stk-btn"
               style={{ ...S.reqActionBtn, background: C.accentRaw }}
               disabled={busy}
-              onClick={() => onToggleCut(p)}
+              onClick={async () => {
+                if (await onToggleCut(p)) openTime();
+              }}
             >
               <Check size={14} strokeWidth={2.5} /> {busy ? "Saving…" : "Mark cut"}
             </button>
@@ -438,6 +499,66 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onRepo
           >
             <MessageSquare size={13} /> Notes{(notes || []).length ? ` (${notes.length})` : ""}
           </button>
+
+          {/* Skipped at the time, or got wrong: the time can be put in
+              or changed afterwards from the card. */}
+          {p.is_complete && (
+            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={openTime}>
+              <Clock size={13} /> {p.actual_minutes != null ? "Change time" : "Add time"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {askTime && (
+        <div style={{ ...S.modalOverlay, zIndex: 30 }}>
+          <div style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>How long did {p.program_number} take?</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setAskTime(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={S.roleHint}>
+              Minutes the machine actually ran, for the record. The planned time stays as it was nested
+              {planned != null ? `: ${fmtMinutes(planned)}` : ""}.
+            </div>
+
+            <label style={{ ...S.label, marginTop: 10, display: "block" }}>Minutes</label>
+            <input
+              style={S.input}
+              type="number"
+              min="0"
+              step="1"
+              inputMode="numeric"
+              value={timeDraft}
+              onChange={(e) => setTimeDraft(e.target.value)}
+              placeholder={planned != null ? `Planned ${Math.round(planned)}` : "e.g. 45"}
+              autoFocus
+            />
+
+            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="stk-btn"
+                style={{ ...S.submitBtn, flex: 1, marginTop: 0 }}
+                disabled={timeDraft.trim() === "" || busy}
+                onClick={async () => {
+                  if (await onSetActualMinutes(p, timeDraft)) setAskTime(false);
+                }}
+              >
+                Save time
+              </button>
+              <button
+                type="button"
+                className="stk-btn"
+                style={{ ...S.reqActionBtnMuted, flex: 1 }}
+                onClick={() => setAskTime(false)}
+              >
+                Skip for now
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
