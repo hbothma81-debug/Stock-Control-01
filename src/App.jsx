@@ -204,6 +204,26 @@ const isLaserProcess = (name) => /laser/i.test(name || "");
 const isProgramLaserProcess = (name) =>
   /laser/i.test(name || "") && !/tube/i.test(name || "") && !/external/i.test(name || "");
 
+// Two machines, two lanes. The plate laser (Nesting, Laser) and the tube
+// laser (Tube Laser Nesting, Tube Laser) are different machines running
+// different processes, and neither waits for the other: tube work does
+// not queue behind plate nesting, and plate work does not queue behind
+// the tube nester. Everything after them -- bending, welding, and so on
+// -- still waits for both, because it needs the parts from both.
+//
+// Before this, a tube job that also carried the plate stages sat on the
+// Production tab saying "Waiting on Nesting" however much the tube nester
+// had done, because the flow is one straight line and the plate stages
+// happened to be earlier in it. "Laser - External" is neither machine
+// and stays in the main line.
+const isTubeLaserProcess = (name) => /tube/i.test(name || "") && /laser|nest/i.test(name || "");
+const isPlateLaserProcess = (name) => isPlateNestingProcess(name) || isProgramLaserProcess(name);
+// True when a stage should not wait for another: one is in the tube lane
+// and the other in the plate lane.
+const inOtherLaserLane = (mine, other) =>
+  (isTubeLaserProcess(mine) && isPlateLaserProcess(other)) ||
+  (isPlateLaserProcess(mine) && isTubeLaserProcess(other));
+
 // Laser Status is not a process type, so it needs a key that no process
 // type could ever collide with.
 const LASER_STATUS_DEPT = "__laser_status__";
@@ -4519,6 +4539,8 @@ export default function StockControl() {
     return jobProcesses
       .filter(sameRun)
       .filter((p) => flowRank(p.process_name) < mine)
+      // The other laser is a separate lane, not an earlier stage.
+      .filter((p) => !inOtherLaserLane(process.process_name, p.process_name))
       .every((p) => p.is_complete || (releasesOnStart(p.process_name) && !!p.started_at));
   }
 
@@ -4544,6 +4566,8 @@ export default function StockControl() {
     for (const p of jobProcesses || []) {
       if (!sameRun(p) || p.is_complete) continue;
       if (flowRank(p.process_name) >= mine) continue;
+      // The other laser is a separate lane, not an earlier stage.
+      if (inOtherLaserLane(process.process_name, p.process_name)) continue;
       if ((p.tracking_mode || "batch") !== "each") {
         return { allowed: 0, waitingOn: p.process_name };
       }
