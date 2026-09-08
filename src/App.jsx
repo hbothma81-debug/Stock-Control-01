@@ -210,6 +210,11 @@ const LASER_STATUS_DEPT = "__laser_status__";
 // One place, so changing it changes it everywhere it is mentioned.
 const JOB_AGE_WARNING_DAYS = 15;
 
+// How long before the end of a shift somebody gets told. Long enough to
+// finish the line they are typing and save it, short enough that it is not
+// nagging for the last half hour.
+const SHIFT_WARNING_MINUTES = 10;
+
 // A shortage can cover several missing parts. Older ones, and any saved
 // before the app could hold more than one, carry a single description and
 // quantity instead — so read items where they exist and fall back to the
@@ -1251,6 +1256,15 @@ export default function StockControl() {
   const [shiftsList, setShiftsList] = useState([]);
   const [newShiftName, setNewShiftName] = useState("");
   const [closuresList, setClosuresList] = useState([]);
+  // Whether this person is inside their shift right now. It starts as yes,
+  // and only ever becomes no on a clear answer from the database. A check
+  // that cannot run must never be the reason somebody cannot work.
+  const [shiftAccess, setShiftAccess] = useState({
+    allowed: true,
+    ends_at: null,
+    next_start: null,
+    reason: "not checked yet",
+  });
   const [newClosureDate, setNewClosureDate] = useState("");
   const [newClosureNote, setNewClosureNote] = useState("");
   const [sectionGradeFilterInManager, setSectionGradeFilterInManager] = useState("");
@@ -6637,12 +6651,65 @@ export default function StockControl() {
     setDrawingUploadCustomer("");
   }
 
+  // Is this person inside their shift right now? The whole answer comes
+  // from the database -- one rule, in one place, and the same one the
+  // security rules will use later. The screen only reports it.
+  //
+  // While the master switch is off the answer is always yes, so all of this
+  // runs and changes nothing.
+  async function checkShiftAccess() {
+    if (!supabase || !session) return;
+    try {
+      const { data, error } = await supabase.rpc("shift_access");
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row) throw new Error("shift_access answered with nothing");
+      setShiftAccess(row);
+    } catch (err) {
+      // Fail open, deliberately. A dropped connection, or this being run
+      // before the database is set up, must not lock the shop out.
+      console.error("Could not check the shift hours:", err);
+      setShiftAccess({
+        allowed: true,
+        ends_at: null,
+        next_start: null,
+        reason: "the check could not run",
+      });
+    }
+  }
+
+  // Asked on sign-in and every minute after, so somebody working through
+  // the end of their shift is told on screen rather than finding out when
+  // a save fails.
+  useEffect(() => {
+    if (!session) return undefined;
+    checkShiftAccess();
+    const timer = setInterval(checkShiftAccess, 60000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
+
   // The shop's shifts. A shift is a fact about the shop rather than about
   // a person -- nights are 18:00 to 06:00 whoever is on them -- so it is
   // set once here and people are put on it.
   //
   // Nothing enforces any of this yet. This is the settings, and they do
   // nothing until the rule that reads them is built.
+  // "tomorrow at 06:00" beats "2026-09-09T04:00:00Z" when somebody is being
+  // told to go home.
+  function whenInWords(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const now = new Date();
+    const midnight = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+    const days = Math.round((midnight(d) - midnight(now)) / 86400000);
+    const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    if (days === 0) return `today at ${time}`;
+    if (days === 1) return `tomorrow at ${time}`;
+    const day = d.toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "short" });
+    return `${day} at ${time}`;
+  }
+
   async function loadShifts() {
     if (!supabase) return;
     try {
@@ -10050,6 +10117,12 @@ export default function StockControl() {
     e.target.value = "";
   }
 
+  // The header and the Stock Manager panel sit outside the screen the
+  // lockout replaces, so without this a person who is outside their hours
+  // still saw the stock value and could open Stock Manager. A lockout that
+  // only covers the middle of the page is not a lockout.
+  const lockedOut = !!profile && !shiftAccess.allowed;
+
   if (loadRetriesExhausted) {
     return (
       <div style={{ ...S.page, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -10108,6 +10181,8 @@ export default function StockControl() {
           <h1 style={S.h1}>Stock Control</h1>
         </div>
         <div style={S.headerRight}>
+          {!lockedOut && (
+            <>
           <SavedCheck fieldKey="core" />
           <button
             className="stk-btn"
@@ -10149,6 +10224,8 @@ export default function StockControl() {
               )}
             </button>
           )}
+            </>
+          )}
           {profile && (
             <select
               className="stk-btn"
@@ -10162,7 +10239,7 @@ export default function StockControl() {
               <option value="light">Light theme</option>
             </select>
           )}
-          {canAccessStockManager && (
+          {canAccessStockManager && !lockedOut && (
             <button className="stk-btn" style={S.roleChip} onClick={() => setShowManager(true)}>
               <Database size={13} strokeWidth={2.5} />
               Stock Manager
@@ -10277,8 +10354,70 @@ export default function StockControl() {
             Sign out
           </button>
         </div>
+      ) : !shiftAccess.allowed ? (
+        // Outside their hours. They stay signed in on purpose -- when the
+        // shift comes round the screen lets them back in on its own, rather
+        // than making somebody type a password at six in the morning.
+        <div style={S.loginPrompt}>
+          <div style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
+            <div style={S.loginPromptText}>
+              You're outside your hours, {roleLabel}.
+            </div>
+            <div style={{ ...S.loginPromptText, marginTop: 10 }}>
+              {shiftAccess.next_start
+                ? `The app opens up again ${whenInWords(shiftAccess.next_start)}.`
+                : "Your shift has no hours set, so ask whoever runs the shifts to have a look."}
+            </div>
+            <div style={{ ...S.roleHint, marginTop: 10 }}>{shiftAccess.reason}</div>
+            <div style={{ ...S.roleHint, marginTop: 10 }}>
+              Leave this open and it will let you in by itself when the time comes.
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 16 }}>
+              <button className="stk-btn" style={S.roleChip} onClick={checkShiftAccess}>
+                Check again
+              </button>
+              <button className="stk-btn" style={S.roleChip} onClick={signOutUser}>
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
       ) : (
         <>
+          {/* The end of a shift takes the screen away, so it says so first.
+              Ten minutes is enough to finish the line you are on and save it.
+              Without this the app would simply vanish mid-sentence. */}
+          {(() => {
+            if (!shiftAccess.ends_at) return null;
+            const minutes = Math.round((new Date(shiftAccess.ends_at) - Date.now()) / 60000);
+            if (minutes < 0 || minutes > SHIFT_WARNING_MINUTES) return null;
+            const at = whenInWords(shiftAccess.ends_at).replace(/^today at /, "");
+            const howLong =
+              minutes <= 0
+                ? " — any moment now"
+                : `, in about ${minutes} minute${minutes === 1 ? "" : "s"}`;
+            return (
+              <div
+                style={{
+                  ...S.summaryBanner,
+                  color: C.accentRaw,
+                  background: C.accentTint,
+                  border: `1px solid ${C.accentRaw}`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span>
+                  <AlertTriangle size={13} style={{ verticalAlign: "-2px" }} /> Your shift ends at {at}
+                  {howLong}. Save what you&apos;re busy with.
+                </span>
+              </div>
+            );
+          })()}
+
           {/* The app already recorded when one of the core loads failed,
               but nothing ever showed it. So a dropped connection looked
               exactly like an empty list -- somebody reads "no stock" and
@@ -14305,7 +14444,7 @@ export default function StockControl() {
         </div>
       )}
 
-      {showManager && canAccessStockManager && (
+      {showManager && canAccessStockManager && !lockedOut && (
         <div style={S.managerFullPage} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>Stock Manager</span>
