@@ -83,6 +83,7 @@ const MANAGER_TABS = [
   { key: "laserThicknesses", label: "Laser Thicknesses", singular: "laser thickness" },
   { key: "customers", label: "Customers" },
   { key: "stockCodes", label: "Stock Codes" },
+  { key: "buyoutCodes", label: "Buy-out Codes" },
   { key: "storeCategories", label: "Store Categories" },
   { key: "fastenerCategories", label: "Fastener Types" },
   { key: "fastenerGrades", label: "Fastener Grades" },
@@ -1317,6 +1318,15 @@ export default function StockControl() {
   const [managerPrice, setManagerPrice] = useState("");
   const [stockCodeQuery, setStockCodeQuery] = useState("");
   const [stockCodeCustomerFilter, setStockCodeCustomerFilter] = useState("");
+  const [buyoutQuery, setBuyoutQuery] = useState("");
+  const [buyoutSupplierFilter, setBuyoutSupplierFilter] = useState("");
+  const [boForm, setBoForm] = useState({
+    partNumber: "",
+    name: "",
+    value: "",
+    sellPrice: "",
+    supplier: "",
+  });
   const [storesCatalogCategoryFilter, setStoresCatalogCategoryFilter] = useState("");
   const [managerSearchQuery, setManagerSearchQuery] = useState("");
   const [sectionTypeFilterInManager, setSectionTypeFilterInManager] = useState("");
@@ -8080,8 +8090,43 @@ export default function StockControl() {
   // items shown on the main tab, just including zero-qty ones too, so the
   // full catalog (imported but not yet actually stocked) stays manageable.
   function updateCustomerStockField(id, field, value) {
-    const numericFields = ["value", "low", "qty"];
+    const numericFields = ["value", "low", "qty", "sellPrice"];
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, [field]: numericFields.includes(field) ? parseFloat(value) || 0 : value } : it)));
+  }
+
+  // Which buy-outs the catalogue screen is showing. Read in three places
+  // on that screen -- the list, the count and the empty message -- so it is
+  // worked out once rather than three times going slowly out of step.
+  const buyoutCatalogue = useMemo(() => {
+    const q = buyoutQuery.trim().toLowerCase();
+    return (items || [])
+      .filter((it) => it.mainCat === "buyouts")
+      .filter((it) => !q || `${it.partNumber || ""} ${it.name || ""}`.toLowerCase().includes(q))
+      .filter((it) => !buyoutSupplierFilter || it.supplier === buyoutSupplierFilter);
+  }, [items, buyoutQuery, buyoutSupplierFilter]);
+
+  function addBuyoutRow() {
+    const partNumber = boForm.partNumber.trim();
+    const name = boForm.name.trim();
+    if (!partNumber || !name) return;
+    setItems((prev) => [
+      ...prev,
+      {
+        id: uid(),
+        mainCat: "buyouts",
+        partNumber,
+        name,
+        supplier: boForm.supplier,
+        value: parseFloat(boForm.value) || 0,
+        sellPrice: parseFloat(boForm.sellPrice) || 0,
+        qty: 0,
+        low: 0,
+        unit: "ea",
+        trackLength: false,
+        length: 0,
+      },
+    ]);
+    setBoForm({ partNumber: "", name: "", value: "", sellPrice: "", supplier: boForm.supplier });
   }
 
   function openRequisition(it) {
@@ -14913,7 +14958,180 @@ export default function StockControl() {
                   <ChevronLeft size={18} strokeWidth={2.5} /> Back to Stock Manager
                 </button>
 
-                {managerTab === "stockCodes" ? (
+                {managerTab === "buyoutCodes" ? (
+                  <>
+                    <div style={S.roleHint}>
+                      The buy-out catalogue — what we buy in, mark up and resell. Same list as the Buy-outs stock tab,
+                      laid out for editing many at once rather than one at a time.
+                    </div>
+
+                    <div style={{ ...S.managerAddRow, marginBottom: 4 }}>
+                      <input
+                        style={{ ...S.input, flex: 2 }}
+                        value={buyoutQuery}
+                        onChange={(e) => setBuyoutQuery(e.target.value)}
+                        placeholder="Search part number or description…"
+                      />
+                      <select
+                        style={{ ...S.input, flex: 1 }}
+                        value={buyoutSupplierFilter}
+                        onChange={(e) => setBuyoutSupplierFilter(e.target.value)}
+                      >
+                        <option value="">All suppliers</option>
+                        {master.suppliers.map((sup) => (
+                          <option key={sup.id || sup.name || sup} value={sup.name || sup}>{sup.name || sup}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Adding one is a row rather than a pop-up, because the
+                        reason to be on this screen is to put several in at once. */}
+                    <div style={{ ...S.managerAddRow, marginBottom: 10, flexWrap: "wrap" }}>
+                      <input
+                        style={{ ...S.input, flex: "1 1 120px" }}
+                        value={boForm.partNumber}
+                        onChange={(e) => setBoForm({ ...boForm, partNumber: e.target.value })}
+                        placeholder="Part number"
+                      />
+                      <input
+                        style={{ ...S.input, flex: "2 1 180px" }}
+                        value={boForm.name}
+                        onChange={(e) => setBoForm({ ...boForm, name: e.target.value })}
+                        placeholder="Description"
+                      />
+                      <input
+                        style={{ ...S.input, flex: "0 1 110px" }}
+                        type="number"
+                        step="0.01"
+                        value={boForm.value}
+                        onChange={(e) => setBoForm({ ...boForm, value: e.target.value })}
+                        placeholder="We pay"
+                      />
+                      <input
+                        style={{ ...S.input, flex: "0 1 110px" }}
+                        type="number"
+                        step="0.01"
+                        value={boForm.sellPrice}
+                        onChange={(e) => setBoForm({ ...boForm, sellPrice: e.target.value })}
+                        placeholder="We charge"
+                      />
+                      <select
+                        style={{ ...S.input, flex: "1 1 140px" }}
+                        value={boForm.supplier}
+                        onChange={(e) => setBoForm({ ...boForm, supplier: e.target.value })}
+                      >
+                        <option value="">No supplier</option>
+                        {master.suppliers.map((sup) => (
+                          <option key={sup.id || sup.name || sup} value={sup.name || sup}>{sup.name || sup}</option>
+                        ))}
+                      </select>
+                      <button type="button" className="stk-btn" style={S.addBtn} onClick={addBuyoutRow}>
+                        <Plus size={15} strokeWidth={2.5} /> Add
+                      </button>
+                    </div>
+
+                    <div style={S.managerListFullPage}>
+                      {buyoutCatalogue.map((it) => {
+                        const pay = Number(it.value || 0);
+                        const charge = Number(it.sellPrice || 0);
+                        return (
+                          <div key={it.id} style={{ ...S.managerRow, flexDirection: "column", alignItems: "stretch" }}>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                              <EditableName
+                                value={it.partNumber || ""}
+                                onCommit={(v) => updateCustomerStockField(it.id, "partNumber", v)}
+                                style={{ maxWidth: 130 }}
+                              />
+                              <EditableName
+                                value={it.name || ""}
+                                onCommit={(v) => updateCustomerStockField(it.id, "name", v)}
+                                style={{ flex: 1, minWidth: 140 }}
+                              />
+                              {/* The number the markup actually is, rather than the
+                                  one somebody meant to type. */}
+                              {pay > 0 && charge > 0 && (
+                                <span style={S.chip}>{Math.round(((charge - pay) / pay) * 100)}% markup</span>
+                              )}
+                              {isAdmin && (
+                                <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeItem(it.id)}>
+                                  <Trash2 size={13} />
+                                </button>
+                              )}
+                            </div>
+                            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
+                              <div>
+                                <label style={S.label}>Qty</label>
+                                <input
+                                  type="number"
+                                  value={it.qty === 0 ? "" : it.qty}
+                                  placeholder="0"
+                                  onChange={(e) => updateCustomerStockField(it.id, "qty", e.target.value)}
+                                  style={{ ...S.managerFactorInput, width: 55, display: "block" }}
+                                  title="Actual quantity on hand"
+                                />
+                              </div>
+                              <div>
+                                <label style={S.label}>We pay (R)</label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={it.value === 0 ? "" : it.value}
+                                  placeholder="0"
+                                  onChange={(e) => updateCustomerStockField(it.id, "value", e.target.value)}
+                                  style={{ ...S.managerFactorInput, display: "block" }}
+                                  title="What the supplier charges us — stock is valued on this"
+                                />
+                              </div>
+                              <div>
+                                <label style={S.label}>We charge (R)</label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={it.sellPrice === 0 || it.sellPrice == null ? "" : it.sellPrice}
+                                  placeholder="0"
+                                  onChange={(e) => updateCustomerStockField(it.id, "sellPrice", e.target.value)}
+                                  style={{ ...S.managerFactorInput, display: "block" }}
+                                  title="What we resell it for"
+                                />
+                              </div>
+                              <div>
+                                <label style={S.label}>Low at</label>
+                                <input
+                                  type="number"
+                                  value={it.low === 0 ? "" : it.low}
+                                  placeholder="0"
+                                  onChange={(e) => updateCustomerStockField(it.id, "low", e.target.value)}
+                                  style={{ ...S.managerFactorInput, display: "block" }}
+                                  title="Left at 0 it is never flagged as low"
+                                />
+                              </div>
+                              <div>
+                                <label style={S.label}>Supplier</label>
+                                <select
+                                  value={it.supplier || ""}
+                                  onChange={(e) => updateCustomerStockField(it.id, "supplier", e.target.value)}
+                                  style={{ ...S.managerFactorInput, width: 130, display: "block" }}
+                                >
+                                  <option value="">No supplier</option>
+                                  {master.suppliers.map((sup) => (
+                                    <option key={sup.id || sup.name || sup} value={sup.name || sup}>{sup.name || sup}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {buyoutCatalogue.length === 0 && (
+                        <div style={S.empty}>
+                          {(items || []).filter((it) => it.mainCat === "buyouts").length === 0
+                            ? "Nothing here yet — add one above."
+                            : "Nothing matches that."}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : managerTab === "stockCodes" ? (
                   <>
                 <div style={{ ...S.managerAddRow, marginBottom: 4 }}>
                   <input
