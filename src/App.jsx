@@ -59,6 +59,7 @@ async function getPdf() {
 import { TABS, NAV_TABS, TAB_GROUPS, LASER_MACHINE } from "./constants.js";
 import UserManagement from "./UserManagement.jsx";
 import CompanyDetails from "./manager/CompanyDetails.jsx";
+import CutToSize from "./jobs/CutToSize.jsx";
 import EditableName from "./EditableName.jsx";
 import NestingView from "./laser/NestingView.jsx";
 import CutList from "./laser/CutList.jsx";
@@ -3310,7 +3311,7 @@ export default function StockControl() {
     if (sameJob) {
       setJobDetail((d) => (d ? { ...d, job } : d));
     } else {
-      setJobDetail({ job, processes: [], documents: [], quoteItems: [], deliveryNotes: [], allocations: [], events: [] });
+      setJobDetail({ job, processes: [], documents: [], quoteItems: [], deliveryNotes: [], allocations: [], events: [], cutItems: [] });
       setJobDetailTab("overview");
     }
     setJobDetailLoading(true);
@@ -3320,7 +3321,7 @@ export default function StockControl() {
       // the nesting side does not reach it, so opening the job showed an
       // empty box for a number that was already on the job -- and typing it
       // again was the obvious thing to do. Read the row itself.
-      const [jobResult, { data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }, allocResult, eventsResult, generatedResult] = await Promise.all([
+      const [jobResult, { data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }, allocResult, eventsResult, generatedResult, cutResult] = await Promise.all([
         supabase.from("jobs").select("*").eq("id", job.id).single(),
         supabase.from("job_processes").select("*").eq("job_id", job.id).order("sort_order"),
         supabase.from("job_documents").select("*").eq("job_id", job.id).order("created_at", { ascending: false }),
@@ -3334,6 +3335,9 @@ export default function StockControl() {
         // place to see every sheet ever printed. It is the wrong place to
         // be standing at a machine wanting this job's.
         supabase.from("generated_documents").select("*").eq("job_id", job.id).order("generated_at", { ascending: false }),
+        // The cut-to-size list. Not fatal either: a job must still open
+        // before setup-job-cut-items.sql has been run.
+        supabase.from("job_cut_items").select("*").eq("job_id", job.id).order("sort_order"),
       ]);
       if (procError) throw procError;
       if (docError) throw docError;
@@ -3357,7 +3361,9 @@ export default function StockControl() {
         // Not fatal, same as allocations: a job must still open if this
         // table is unreadable.
         generated: generatedResult.data || [],
+        cutItems: cutResult.data || [],
       });
+      if (cutResult.error) console.error("Failed to load the cut list (job detail still shown):", cutResult.error);
     } catch (err) {
       console.error("Failed to load job detail:", err);
       // Without this the modal simply never opens. Somebody taps a job,
@@ -5573,6 +5579,96 @@ export default function StockControl() {
       fetchJobs();
     } catch (err) {
       console.error("Failed to remove the item:", err);
+      alert("That didn't save — check your signal and try again.");
+    }
+  }
+
+  // ---- Cut to size ----
+  // The parts to be cut from structural stock. Same shape of function as
+  // the quoted items above; the screen itself is src/jobs/CutToSize.jsx.
+
+  // A job with a cut list needs the saw stage, or the operator never sees
+  // it on the Production tab. Added once, quietly, the first time a line
+  // goes on. Skipped if the stage is not in the process list at all.
+  async function ensureCutToSizeStage(job) {
+    const stageName = (master?.jobProcessTypes || []).find((n) => sameText(n, "Cut To Size"));
+    if (!stageName) return;
+    if ((jobDetail?.processes || []).some((p) => sameText(p.process_name, stageName))) return;
+    const maxSort = (jobDetail?.processes || []).reduce((max, p) => Math.max(max, p.sort_order ?? 0), -1);
+    const { error } = await supabase.from("job_processes").insert({
+      job_id: job.id,
+      process_name: stageName,
+      operator: "",
+      tracking_mode: "batch",
+      sort_order: maxSort + 1,
+    });
+    if (error) throw error;
+    if (productionQueue !== null) fetchProductionQueue();
+  }
+
+  async function addJobCutItem(job, line) {
+    if (!supabase) return false;
+    try {
+      const nextOrder = (jobDetail?.cutItems || []).reduce((m, i) => Math.max(m, Number(i.sort_order) || 0), -1) + 1;
+      const { error } = await supabase.from("job_cut_items").insert({ ...line, job_id: job.id, sort_order: nextOrder });
+      if (error) throw error;
+      await ensureCutToSizeStage(job);
+      await logJobEvent(job.id, "cut list added", `${line.qty} × ${line.cut_length_mm}mm ${line.section}${line.grade ? ` ${line.grade}` : ""}`);
+      await openJobDetail(job);
+      return true;
+    } catch (err) {
+      console.error("Failed to add the cut line:", err);
+      alert(
+        `That line didn't save: ${err.message || "unknown error"}.` +
+          (String(err.message || "").includes("job_cut_items") ? " Has setup-job-cut-items.sql been run in Supabase?" : " Check your signal and try again.")
+      );
+      return false;
+    }
+  }
+
+  async function updateJobCutItem(job, item, field, rawValue) {
+    if (!supabase) return;
+    const textFields = ["drawing_no", "section", "grade", "note"];
+    let value;
+    if (field === "trim_front") value = !!rawValue;
+    else if (textFields.includes(field)) value = String(rawValue).trim();
+    else value = Number(rawValue);
+    if (field === "section" && !value) return;
+    if (!textFields.includes(field) && field !== "trim_front" && !(value >= 0)) return;
+    if (String(item[field] ?? "") === String(value)) return;
+    // The operator's count is real work done; the quantity cannot drop
+    // below it, the same rule invoicing puts on quoted items.
+    if (field === "qty" && value < Number(item.qty_cut || 0)) {
+      alert(`${item.qty_cut} of these have already been cut, so the quantity cannot go below ${item.qty_cut}.`);
+      await openJobDetail(job);
+      return;
+    }
+    try {
+      const { error } = await supabase.from("job_cut_items").update({ [field]: value }).eq("id", item.id);
+      if (error) throw error;
+      flashSaved(`cutitem-${item.id}`);
+      await logJobEvent(job.id, "cut list changed", `${item.section} ${item.cut_length_mm}mm — ${field.replace(/_/g, " ")} ${item[field]} to ${value}`);
+      await openJobDetail(job);
+    } catch (err) {
+      console.error("Failed to change the cut line:", err);
+      alert("That change didn't save — check your signal and try again.");
+    }
+  }
+
+  async function removeJobCutItem(job, item) {
+    if (!supabase) return;
+    if (Number(item.qty_cut || 0) > 0) {
+      alert("Some of these have already been cut, so the line cannot be removed. Change the quantity instead.");
+      return;
+    }
+    if (!window.confirm(`Remove ${item.qty} × ${item.cut_length_mm}mm ${item.section} from the cut list?`)) return;
+    try {
+      const { error } = await supabase.from("job_cut_items").delete().eq("id", item.id);
+      if (error) throw error;
+      await logJobEvent(job.id, "cut list removed", `${item.qty} × ${item.cut_length_mm}mm ${item.section}`);
+      await openJobDetail(job);
+    } catch (err) {
+      console.error("Failed to remove the cut line:", err);
       alert("That didn't save — check your signal and try again.");
     }
   }
@@ -16961,6 +17057,10 @@ export default function StockControl() {
               { key: "overview", label: "Overview" },
               { key: "items", label: "Items" },
               {
+                key: "cut",
+                label: `Cut to size${jobDetail.cutItems?.length ? ` (${jobDetail.cutItems.length})` : ""}`,
+              },
+              {
                 key: "files",
                 label: `Files${visibleJobFiles.length ? ` (${visibleJobFiles.length})` : ""}`,
               },
@@ -17652,6 +17752,23 @@ export default function StockControl() {
               </div>
             )}
             </>
+          )}
+
+          {jobDetailTab === "cut" && (
+            <CutToSize
+              lines={jobDetail.cutItems || []}
+              canEdit={canEditThisJob}
+              canSeeValue={canSeeValue}
+              sections={master.sections || []}
+              customerItems={(items || []).filter((i) => i.mainCat === "custom" && i.customer === jobDetail.job.customer)}
+              items={items || []}
+              findSectionFactor={findSectionFactor}
+              findSectionPrice={findSectionPrice}
+              onAdd={(line) => addJobCutItem(jobDetail.job, line)}
+              onUpdate={(item, field, value) => updateJobCutItem(jobDetail.job, item, field, value)}
+              onRemove={(item) => removeJobCutItem(jobDetail.job, item)}
+              SavedCheck={SavedCheck}
+            />
           )}
 
           {jobDetailTab === "invoice" && (
