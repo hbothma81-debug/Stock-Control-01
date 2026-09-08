@@ -156,7 +156,8 @@ export default function NestingView({
     (r.job?.customer || "").toLowerCase().includes(q) ||
     (r.job?.laser_job_reference || "").toLowerCase().includes(q) ||
     (r.shortage?.board_number || "").toLowerCase().includes(q) ||
-    (r.onPrograms || []).some((pg) => (pg.program_number || "").toLowerCase().includes(q));
+    (r.onPrograms || []).some((pg) => (pg.program_number || "").toLowerCase().includes(q)) ||
+    (r.program?.jobs || []).some((l) => (l.job_number || "").toLowerCase().includes(q));
   const programMatches = (pg) =>
     !q ||
     (pg.program_number || "").toLowerCase().includes(q) ||
@@ -368,7 +369,9 @@ export default function NestingView({
                 {nestNowCount} {nestNowCount === 1 ? "needs" : "need"} nesting now.
               </div>
             )}
-            {shownRows.map((r) => (
+            {shownRows.map((r) => r.kind === "stopped" ? (
+              <StoppedRow key={r.key} row={r} canManage={canManage} onClearReport={onClearReport} />
+            ) : (
               <NestRow
                 key={r.key}
                 row={r}
@@ -1278,5 +1281,64 @@ function ProgramList({
         )}
       </>
     </Section>
+  );
+}
+
+// A program the operator has stopped at the machine. It sits at the top
+// of To nest, outlined like anything else that needs nesting now, and
+// says what stopped it and what he suggests instead. Whoever nests fixes
+// the program under "Programs waiting to be cut" -- a different sheet,
+// a different plate, or a fresh nest -- and presses Sorted here, which
+// puts it back on the operator's cut list without the stop.
+function StoppedRow({ row: r, canManage, onClearReport }) {
+  const p = r.program;
+  const jobs = (p.jobs || []).map((l) => l.job_number || "unknown job");
+  return (
+    <div
+      style={{
+        padding: "8px 10px",
+        borderRadius: 6,
+        border: `2px solid ${C.danger}`,
+        background: C.dangerTint,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ ...S.chip, borderColor: C.danger, color: C.danger, fontWeight: 700, flexShrink: 0 }}>
+          Stopped at the machine
+        </span>
+        <span style={{ fontWeight: 700, fontSize: 15 }}>{p.program_number}</span>
+        <span style={{ color: C.muted, fontSize: 14 }}>{p.material}</span>
+        {p.sheet_name && <span style={{ color: C.muted, fontSize: 14 }}>{p.sheet_name}</span>}
+        <span style={{ color: C.muted, fontSize: 14 }}>{jobs.length ? jobs.join(", ") : "no jobs on it"}</span>
+      </div>
+      <div style={{ marginTop: 6, color: C.danger, fontSize: 14 }}>
+        <b>{p.reported_reason}</b>
+        {p.reported_offcut_length && p.reported_offcut_width ? (
+          <> · nest on offcut {p.reported_offcut_length} × {p.reported_offcut_width}</>
+        ) : null}
+        {p.reported_plate ? <> · use plate {p.reported_plate}</> : null}
+      </div>
+      <div style={{ ...S.roleHint, color: C.danger }}>
+        {p.reported_by}
+        {p.reported_at ? ` — ${new Date(p.reported_at).toLocaleString()}` : ""}
+      </div>
+      {canManage && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="stk-btn"
+            style={S.reqActionBtn}
+            onClick={() => onClearReport && onClearReport(p)}
+            title="Take the stop off and put it back on the cut list"
+          >
+            Sorted
+          </button>
+          <span style={S.roleHint}>
+            Change the sheet or material on the program under "Programs waiting to be cut", or nest it
+            again, then press Sorted.
+          </span>
+        </div>
+      )}
+    </div>
   );
 }

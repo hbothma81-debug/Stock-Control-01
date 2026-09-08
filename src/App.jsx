@@ -4015,9 +4015,31 @@ export default function StockControl() {
       });
     }
 
-    // Anything nest-now first, then by when it is due.
+    // A program the operator has stopped at the machine comes back here,
+    // to the top of the list, as the thing to deal with. It used to show
+    // only as a chip on the programs list further down, which is not
+    // where whoever nests is looking, so a stopped program sat unseen
+    // until the operator came to ask.
+    for (const p of programs) {
+      if (p.is_complete || !p.reported_at) continue;
+      const firstJob = p.jobs[0] ? jobById.get(p.jobs[0].job_id) : null;
+      rows.push({
+        key: "stopped:" + p.id,
+        kind: "stopped",
+        nestNow: true,
+        nestNowReason: "Stopped at the machine",
+        job: firstJob || null,
+        process: null,
+        program: p,
+        onPrograms: [p],
+      });
+    }
+
+    // Stopped programs first, then anything nest-now, then by when it is
+    // due.
+    const urgency = (r) => (r.kind === "stopped" ? 0 : r.nestNow ? 1 : 2);
     rows.sort((a, b) => {
-      if (a.nestNow !== b.nestNow) return a.nestNow ? -1 : 1;
+      if (urgency(a) !== urgency(b)) return urgency(a) - urgency(b);
       return new Date(a.job?.due_date || "2999-01-01") - new Date(b.job?.due_date || "2999-01-01");
     });
 
