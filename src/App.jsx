@@ -139,9 +139,13 @@ const ITEM_DB_FIELDS = [
   ["comment", "comment", "text"], ["unit", "unit", "text"], ["trackLength", "track_length", "bool"], ["length", "length", "num"],
   ["qty", "qty", "num"], ["diameter", "diameter", "text"], ["partNumber", "part_number", "text"], ["manufacturer", "manufacturer", "text"],
   ["serialNumber", "serial_number", "text"], ["purchaseDate", "purchase_date", "text"], ["value", "value", "num"],
-  // value is what we pay -- stock is valued at cost and a purchase order
-  // prices itself from it. sellPrice is what we charge. Needs
-  // setup-buyouts.sql on the database first.
+  // value is what a buy-out costs us. Stock is valued on it and a purchase
+  // order prices itself from it.
+  //
+  // sell_price is still on the table and still mapped, but nothing on any
+  // screen writes it: the selling price is being done separately. Kept so
+  // that work starts from a screen rather than from a migration, and so
+  // anything already stored is not thrown away.
   ["sellPrice", "sell_price", "num"],
   ["serviceMode", "service_mode", "text"], ["serviceIntervalMonths", "service_interval_months", "num"],
   ["serviceIntervalHours", "service_interval_hours", "num"], ["serviceIntervalKm", "service_interval_km", "num"],
@@ -1324,7 +1328,6 @@ export default function StockControl() {
     partNumber: "",
     name: "",
     value: "",
-    sellPrice: "",
     supplier: "",
   });
   const [storesCatalogCategoryFilter, setStoresCatalogCategoryFilter] = useState("");
@@ -8118,7 +8121,7 @@ export default function StockControl() {
         name,
         supplier: boForm.supplier,
         value: parseFloat(boForm.value) || 0,
-        sellPrice: parseFloat(boForm.sellPrice) || 0,
+
         qty: 0,
         low: 0,
         unit: "ea",
@@ -8126,7 +8129,7 @@ export default function StockControl() {
         length: 0,
       },
     ]);
-    setBoForm({ partNumber: "", name: "", value: "", sellPrice: "", supplier: boForm.supplier });
+    setBoForm({ partNumber: "", name: "", value: "", supplier: boForm.supplier });
   }
 
   function openRequisition(it) {
@@ -9578,7 +9581,6 @@ export default function StockControl() {
         supplier: effectiveSupplier || form.supplier || "",
         manufacturer: form.manufacturer ? form.manufacturer.trim() : "",
         value: Number(form.value) || 0,
-        sellPrice: Number(form.sellPrice) || 0,
         comment: form.comment || "",
         trackLength: false,
         length: 0,
@@ -13726,19 +13728,13 @@ export default function StockControl() {
                             {(tab === "custom" || tab === "stores" || tab === "fasteners") && canSeeValue && (
                               <span>R{Number(it.value || 0).toFixed(2)} ea · R{(Number(it.value || 0) * Number(it.qty || 0)).toFixed(2)} total</span>
                             )}
-                            {/* Two prices, so the row says which is which rather
-                                than leaving somebody to guess whether R240 is what
-                                we paid or what we charge. */}
+                            {/* Cost only. The selling price is being done
+                                separately, so nothing here pretends to know it. */}
                             {tab === "buyouts" && canSeeValue && (
-                              <>
-                                <span>Pay R{Number(it.value || 0).toFixed(2)} ea</span>
-                                <span>Charge R{Number(it.sellPrice || 0).toFixed(2)} ea</span>
-                                {Number(it.value || 0) > 0 && Number(it.sellPrice || 0) > 0 && (
-                                  <span>
-                                    {Math.round(((Number(it.sellPrice) - Number(it.value)) / Number(it.value)) * 100)}% markup
-                                  </span>
-                                )}
-                              </>
+                              <span>
+                                R{Number(it.value || 0).toFixed(2)} ea · R
+                                {(Number(it.value || 0) * Number(it.qty || 0)).toFixed(2)} total
+                              </span>
                             )}
                             {/* Whatever the supplier calls it -- the number somebody
                                 will actually be searching for. */}
@@ -14741,7 +14737,7 @@ export default function StockControl() {
                   />
                 </div>
                 <div>
-                  <label style={S.label}>What we pay (R)</label>
+                  <label style={S.label}>Cost per unit (R)</label>
                   <input
                     style={S.input}
                     type="number"
@@ -14749,18 +14745,6 @@ export default function StockControl() {
                     step="0.01"
                     value={form.value}
                     onChange={(e) => setForm({ ...form, value: e.target.value })}
-                    placeholder="0.00"
-                  />
-                </div>
-                <div>
-                  <label style={S.label}>What we charge (R)</label>
-                  <input
-                    style={S.input}
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={form.sellPrice}
-                    onChange={(e) => setForm({ ...form, sellPrice: e.target.value })}
                     placeholder="0.00"
                   />
                 </div>
@@ -14961,8 +14945,9 @@ export default function StockControl() {
                 {managerTab === "buyoutCodes" ? (
                   <>
                     <div style={S.roleHint}>
-                      The buy-out catalogue — what we buy in, mark up and resell. Same list as the Buy-outs stock tab,
-                      laid out for editing many at once rather than one at a time.
+                      The buy-out catalogue — what we buy in and resell. Same list as the Buy-outs stock tab, laid out
+                      for editing many at once rather than one at a time. Cost only for now; the selling price is
+                      being done separately.
                     </div>
 
                     <div style={{ ...S.managerAddRow, marginBottom: 4 }}>
@@ -15005,15 +14990,7 @@ export default function StockControl() {
                         step="0.01"
                         value={boForm.value}
                         onChange={(e) => setBoForm({ ...boForm, value: e.target.value })}
-                        placeholder="We pay"
-                      />
-                      <input
-                        style={{ ...S.input, flex: "0 1 110px" }}
-                        type="number"
-                        step="0.01"
-                        value={boForm.sellPrice}
-                        onChange={(e) => setBoForm({ ...boForm, sellPrice: e.target.value })}
-                        placeholder="We charge"
+                        placeholder="Cost"
                       />
                       <select
                         style={{ ...S.input, flex: "1 1 140px" }}
@@ -15032,8 +15009,6 @@ export default function StockControl() {
 
                     <div style={S.managerListFullPage}>
                       {buyoutCatalogue.map((it) => {
-                        const pay = Number(it.value || 0);
-                        const charge = Number(it.sellPrice || 0);
                         return (
                           <div key={it.id} style={{ ...S.managerRow, flexDirection: "column", alignItems: "stretch" }}>
                             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -15047,11 +15022,7 @@ export default function StockControl() {
                                 onCommit={(v) => updateCustomerStockField(it.id, "name", v)}
                                 style={{ flex: 1, minWidth: 140 }}
                               />
-                              {/* The number the markup actually is, rather than the
-                                  one somebody meant to type. */}
-                              {pay > 0 && charge > 0 && (
-                                <span style={S.chip}>{Math.round(((charge - pay) / pay) * 100)}% markup</span>
-                              )}
+
                               {isAdmin && (
                                 <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeItem(it.id)}>
                                   <Trash2 size={13} />
@@ -15071,7 +15042,7 @@ export default function StockControl() {
                                 />
                               </div>
                               <div>
-                                <label style={S.label}>We pay (R)</label>
+                                <label style={S.label}>Cost (R)</label>
                                 <input
                                   type="number"
                                   step="0.01"
@@ -15082,18 +15053,7 @@ export default function StockControl() {
                                   title="What the supplier charges us — stock is valued on this"
                                 />
                               </div>
-                              <div>
-                                <label style={S.label}>We charge (R)</label>
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  value={it.sellPrice === 0 || it.sellPrice == null ? "" : it.sellPrice}
-                                  placeholder="0"
-                                  onChange={(e) => updateCustomerStockField(it.id, "sellPrice", e.target.value)}
-                                  style={{ ...S.managerFactorInput, display: "block" }}
-                                  title="What we resell it for"
-                                />
-                              </div>
+
                               <div>
                                 <label style={S.label}>Low at</label>
                                 <input
