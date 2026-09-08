@@ -3,7 +3,7 @@ import { Check, Undo2, OctagonAlert, MessageSquare, X, Clock } from "lucide-reac
 import { C, S } from "../theme.js";
 import Section from "../Section.jsx";
 import { pickShift, currentAndPreviousWindow, fmtTime } from "../lib/shiftWindow.js";
-import { plannedMinutes, outstandingMinutes, fmtMinutes } from "../lib/cuttingTime.js";
+import { plannedMinutes, outstandingMinutes, fmtMinutes, laserShifts } from "../lib/cuttingTime.js";
 
 // The laser operator's screen. A to-do list of programs to cut.
 //
@@ -183,17 +183,22 @@ function ShiftCounter({ programs, shifts, myShiftId }) {
   }, []);
 
   const view = useMemo(() => {
-    const shift = pickShift(shifts, myShiftId, now);
+    // Only the shifts ticked "the laser cuts on this shift" under Time
+    // Manager, so a factory shift with overlapping hours is not the one
+    // the count lands on.
+    const { shifts: mine, fallback } = laserShifts(shifts);
+    const shift = pickShift(mine, myShiftId, now);
     const win = shift ? currentAndPreviousWindow(shift, now) : { current: null, previous: null };
     let current = win.current;
     let label;
     if (current) {
       label = `${shift.name} · ${fmtTime(current.start)}–${fmtTime(current.end)}`;
+      if (fallback) label += " · no shift is ticked for the laser yet";
     } else {
       const start = new Date(now);
       start.setHours(0, 0, 0, 0);
       current = { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
-      label = (shifts || []).length ? "no shift on the clock · today" : "today";
+      label = mine.length ? "no shift on the clock · today" : "today";
     }
     const within = (w) => (p) => {
       if (!p.is_complete || !p.completed_at) return false;

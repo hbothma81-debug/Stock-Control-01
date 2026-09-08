@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { C, S } from "../theme.js";
 import Section from "../Section.jsx";
 import { shiftDayWindow, fmtTime } from "../lib/shiftWindow.js";
-import { plannedMinutes, fmtMinutes } from "../lib/cuttingTime.js";
+import { plannedMinutes, fmtMinutes, laserShifts } from "../lib/cuttingTime.js";
 
 // What each shift cut, shift by shift, going back two weeks.
 //
@@ -21,7 +21,11 @@ import { plannedMinutes, fmtMinutes } from "../lib/cuttingTime.js";
 const DAYS_BACK = 14;
 
 export default function ShiftReport({ programs, shifts }) {
-  const days = useMemo(() => buildDays(programs || [], shifts || []), [programs, shifts]);
+  // Only the shifts ticked "the laser cuts on this shift" under Time
+  // Manager. The factory keeps other hours, and a factory shift that
+  // overlaps the laser's would otherwise list the same programs again.
+  const { shifts: mine, fallback } = useMemo(() => laserShifts(shifts), [shifts]);
+  const days = useMemo(() => buildDays(programs || [], mine), [programs, mine]);
 
   if (!(shifts || []).length) {
     return (
@@ -37,6 +41,13 @@ export default function ShiftReport({ programs, shifts }) {
         A program counts for the shift its last sheet was marked cut in. Efficiency is the planned cutting
         time, as nested, against the length of the shift. The operator's own time is for the record only.
       </div>
+      {fallback && (
+        <div style={{ ...S.roleHint, color: C.danger }}>
+          No shift is ticked "the laser cuts on this shift" under Time Manager yet, so every shift is
+          shown — and two shifts with overlapping hours will both list the same programs. Tick the laser's
+          shifts and only those will show.
+        </div>
+      )}
       {days.length === 0 ? (
         <div style={S.empty}>Nothing cut in the last {DAYS_BACK} days.</div>
       ) : (

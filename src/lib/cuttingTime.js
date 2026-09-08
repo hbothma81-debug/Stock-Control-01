@@ -24,6 +24,17 @@ export function outstandingMinutes(p) {
   return per * (required - done);
 }
 
+// The shifts the laser cuts on: those ticked under Time Manager. The
+// factory keeps other hours, and a factory shift overlapping the laser's
+// would otherwise claim the laser's programs too. With nothing ticked
+// yet, every shift is used, as before, and `fallback` says so, so the
+// screen can tell the reader why two day shifts are showing.
+export function laserShifts(shifts) {
+  const all = shifts || [];
+  const ticked = all.filter((s) => s.cuts_laser);
+  return ticked.length ? { shifts: ticked, fallback: false } : { shifts: all, fallback: all.length > 0 };
+}
+
 // "45 min" up to an hour, "3h 20m" past it. Read across a workshop, so
 // no decimals once it is in hours.
 export function fmtMinutes(n) {

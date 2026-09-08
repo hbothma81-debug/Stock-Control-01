@@ -7041,6 +7041,24 @@ export default function StockControl() {
     }
   }
 
+  // Whether the laser cuts on this shift. The laser screens -- the
+  // counter on Cutting and the Shifts report -- read only ticked shifts,
+  // so a factory shift that overlaps the laser's hours does not get the
+  // laser's programs counted under it too. The lockout ignores this.
+  async function toggleShiftLaser(shift, on) {
+    if (!supabase) return;
+    setShiftsList((prev) => prev.map((sh) => (sh.id === shift.id ? { ...sh, cuts_laser: on } : sh)));
+    try {
+      const { error } = await supabase.from("shifts").update({ cuts_laser: on }).eq("id", shift.id);
+      if (error) throw error;
+      flashSaved(`shift-${shift.id}`);
+    } catch (err) {
+      console.error("Failed to set the laser tick:", err);
+      alert("That didn't save — check your connection and try again.");
+      await loadShifts();
+    }
+  }
+
   async function updateShiftTimes(shift, dayKey, which, value) {
     if (!supabase) return;
     const startCol = `${dayKey}_start`;
@@ -15573,6 +15591,21 @@ export default function StockControl() {
                             <span style={S.gradeCount}>
                               {on} {on === 1 ? "person" : "people"}
                             </span>
+                            {/* Which shifts the laser screens count against.
+                                The laser keeps different hours from the
+                                factory, and two shifts that overlap would
+                                otherwise both claim the same programs. */}
+                            <label
+                              style={{ ...S.roleHint, display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+                              title="The Cutting counter and the Shifts report count programs against ticked shifts only"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={!!sh.cuts_laser}
+                                onChange={(e) => toggleShiftLaser(sh, e.target.checked)}
+                              />
+                              the laser cuts on this shift
+                            </label>
                             {!hasHours && (
                               <span style={{ ...S.chip, color: C.danger, borderColor: C.danger }}>
                                 no hours set — nobody on this shift would get in
