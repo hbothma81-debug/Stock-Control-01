@@ -5,9 +5,17 @@
 // "this shift" without a round trip. Keep the two in step.
 //
 // A shift row carries a pair of times per day group: Mon-Thu, Friday,
-// Saturday, Sunday. A null start means that day is off. An end earlier
-// than its start means the shift runs into the next morning -- 18:00 to
-// 06:00 is a night shift, not a mistake.
+// Saturday, Sunday. A null start means that day is off, and so does the
+// day's name appearing in days_off -- the tick box on the Time Manager
+// screen, which switches a day off while leaving its times alone. An end
+// earlier than its start means the shift runs into the next morning --
+// 18:00 to 06:00 is a night shift, not a mistake.
+//
+// NOT mirrored yet: days the whole shop is shut (public holidays, in
+// public.shop_closures). The database rule skips them; this does not, so
+// a counter using it will still show a window on a booked holiday. Fixing
+// it means handing the closure dates to whichever screen calls this,
+// which the cutting screen does not load today.
 //
 // Times are the phone's local time. The shop is in one place and so are
 // the phones, so that is the shop's time.
@@ -32,6 +40,11 @@ export function shiftDayWindow(shift, day) {
       ? [shift.sunday_start, shift.sunday_end]
       : [shift.weekday_start, shift.weekday_end];
   if (!start || !end) return null;
+
+  const name =
+    dow === 5 ? "friday" : dow === 6 ? "saturday" : dow === 0 ? "sunday" : "weekday";
+  if ((shift.days_off || []).includes(name)) return null;
+
   const on = timeOn(day, start);
   let off = timeOn(day, end);
   if (off <= on) off = new Date(off.getTime() + 24 * 60 * 60 * 1000);
