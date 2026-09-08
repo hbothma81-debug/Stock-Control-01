@@ -142,10 +142,11 @@ function betterOf(a, b) {
   return biggest(b) > biggest(a) ? b : a;
 }
 
-// Structural stock that could be one of this group's bars: the same
-// section and grade, at least the stock length, and not an offcut.
-// Counts pieces, not rows -- a row of four 6m lengths is four bars.
-export function barsOnShelf(group, items) {
+// The stock lines that could be one of this group's bars: the same
+// section and grade, at least the stock length, and not an offcut. The
+// exact length first, then the next longest -- a 6m job should not eat
+// the 13m bars while 6m ones sit there.
+export function matchingStock(group, items) {
   return (items || [])
     .filter(
       (it) =>
@@ -155,7 +156,12 @@ export function barsOnShelf(group, items) {
         num(it.length) >= group.stockLengthM &&
         it.stockType !== "offcut"
     )
-    .reduce((sum, it) => sum + num(it.qty), 0);
+    .sort((a, b) => num(a.length) - num(b.length));
+}
+
+// Counts pieces, not rows -- a row of four 6m lengths is four bars.
+export function barsOnShelf(group, items) {
+  return matchingStock(group, items).reduce((sum, it) => sum + num(it.qty), 0);
 }
 
 // Bars already set aside for this job that could serve this group: open

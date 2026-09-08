@@ -70,6 +70,8 @@ export default function CutToSize({
   allocations,
   requisitions,
   findSectionType,
+  onSetAside,
+  onRequisition,
   SavedCheck,
 }) {
   const [draft, setDraft] = useState(blankLine);
@@ -170,6 +172,36 @@ export default function CutToSize({
                     <span style={S.chip} title="Already set aside for this job">
                       {setAside} set aside
                     </span>
+                  )}
+                  {/* The two things a sales person does with this row:
+                      claim what is on the floor, and ask for the rest. */}
+                  {canEdit &&
+                    onSetAside &&
+                    (() => {
+                      const canClaim = Math.min(g.bars.length - setAside, shelf - setAside);
+                      if (!(canClaim > 0)) return null;
+                      return (
+                        <button
+                          type="button"
+                          className="stk-btn"
+                          style={S.reqActionBtnMuted}
+                          onClick={() => onSetAside(g, canClaim)}
+                          title="Reserve these bars for this job, against the Cut To Size stage"
+                        >
+                          Set aside {canClaim}
+                        </button>
+                      );
+                    })()}
+                  {canEdit && onRequisition && short > 0 && (
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={S.reqActionBtnMuted}
+                      onClick={() => onRequisition(g, short)}
+                      title="Raise a requisition for the bars not on the floor or on order"
+                    >
+                      Requisition {short}
+                    </button>
                   )}
                   {g.bars.length > 0 && (
                     <span style={S.roleHint} title={`Offcuts of ${MIN_OFFCUT_MM.toLocaleString()} mm or more go back to stock`}>

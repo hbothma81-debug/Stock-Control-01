@@ -60,7 +60,7 @@ import { TABS, NAV_TABS, TAB_GROUPS, LASER_MACHINE } from "./constants.js";
 import UserManagement from "./UserManagement.jsx";
 import CompanyDetails from "./manager/CompanyDetails.jsx";
 import CutToSize from "./jobs/CutToSize.jsx";
-import { planBars, barsOnShelf, barsSetAside, barsOnOrder, materialName, offcutIsKeepable, KERF_MM, TRIM_MM, MIN_OFFCUT_MM } from "./jobs/cutToSize.js";
+import { planBars, barsOnShelf, barsSetAside, barsOnOrder, matchingStock, materialName, offcutIsKeepable, KERF_MM, TRIM_MM, MIN_OFFCUT_MM } from "./jobs/cutToSize.js";
 import EditableName from "./EditableName.jsx";
 import NestingView from "./laser/NestingView.jsx";
 import CutList from "./laser/CutList.jsx";
@@ -5724,6 +5724,80 @@ export default function StockControl() {
       console.error("Failed to remove the cut line:", err);
       alert("That didn't save — check your signal and try again.");
     }
+  }
+
+  // Sets bars aside from the floor for one material on the cut list.
+  // Takes them from the exact stock length first, then the next longest,
+  // and only what nobody else has reserved. Reserved against the Cut To
+  // Size stage, the same way a hand-made allocation would be, so the
+  // operator books them out through the same route.
+  async function setAsideBarsForCutList(job, group, count) {
+    const wanted = Math.floor(Number(count));
+    if (!(wanted > 0)) return;
+    try {
+      await ensureCutToSizeStage(job);
+      // Read the stages fresh: the stage may have been added a moment ago.
+      const { data: processes, error: procError } = await supabase.from("job_processes").select("*").eq("job_id", job.id);
+      if (procError) throw procError;
+      const stage = (processes || []).find((p) => sameText(p.process_name, "Cut To Size")) || null;
+
+      const rows = [];
+      let left = wanted;
+      for (const it of matchingStock(group, items || [])) {
+        if (left <= 0) break;
+        const free = availableQtyForItem(it);
+        if (free <= 0) continue;
+        const take = Math.min(free, left);
+        rows.push({
+          id: uid(),
+          job_id: job.id,
+          job_number: job.job_number || "",
+          process_id: stage?.id || null,
+          process_name: stage?.process_name || "",
+          item_id: it.id,
+          item_name: it.name || "",
+          main_cat: it.mainCat || "",
+          qty_allocated: take,
+          qty_used: 0,
+          allocated_by: roleLabel,
+          allocated_by_id: currentUser?.id || null,
+          note: `For the cut list: ${wanted} × ${group.stockLengthM} m ${materialName(group, findSectionType)}`,
+          status: "open",
+        });
+        left -= take;
+      }
+      if (rows.length === 0) {
+        alert(`Nothing free to set aside — every ${materialName(group, findSectionType)} bar on the floor is already reserved for another job.`);
+        return;
+      }
+      const { error } = await supabase.from("job_allocations").insert(rows);
+      if (error) throw error;
+      const got = wanted - left;
+      await logJobEvent(job.id, "material set aside", `${got} × ${group.stockLengthM} m ${materialName(group, findSectionType)} for the cut list`);
+      if (left > 0) alert(`Set ${got} aside. The other ${left} are reserved for other jobs — those still need ordering.`);
+      fetchAllocations();
+      openJobDetail(job);
+    } catch (err) {
+      console.error("Failed to set bars aside:", err);
+      alert(`Couldn't set that aside: ${err.message || "unknown error"}.`);
+    }
+  }
+
+  // Opens the ordinary requisition form for the stock line this material
+  // would come from, with the count and the job filled in. Same form,
+  // same approvals, same Requisitions tab as any other request.
+  function requisitionBarsForCutList(job, group, count) {
+    const candidates = matchingStock(group, items || []);
+    const target = candidates.find((it) => Number(it.length) === Number(group.stockLengthM)) || candidates[0];
+    if (!target) {
+      alert(
+        `There is no ${materialName(group, findSectionType)} line in structural stock at ${group.stockLengthM} m, so there is nothing to requisition against. Add it under Structural first, even at zero.`
+      );
+      return;
+    }
+    openRequisition(target);
+    setRequisitionQty(String(Math.floor(Number(count)) || ""));
+    setRequisitionNotes(`For job ${job.job_number} cut list — ${group.stockLengthM} m lengths`);
   }
 
   // The cutting list on paper: what the saw operator takes to the rack.
@@ -18148,6 +18222,8 @@ export default function StockControl() {
               allocations={jobDetail.allocations || []}
               requisitions={requisitions || []}
               findSectionType={findSectionType}
+              onSetAside={(group, count) => setAsideBarsForCutList(jobDetail.job, group, count)}
+              onRequisition={canRequisition ? (group, count) => requisitionBarsForCutList(jobDetail.job, group, count) : null}
               SavedCheck={SavedCheck}
             />
           )}
