@@ -8927,12 +8927,53 @@ export default function StockControl() {
     }));
   }
 
+  // Everything a purchase order can be raised against: anything with a part
+  // number, except Customer Stock -- those are the customer's own parts, not
+  // things we buy. Same rule the Request stock picker already uses, so the
+  // two cannot drift apart on what is orderable.
+  const poPartLookup = useMemo(() => {
+    return (items || [])
+      .filter((it) => it.mainCat !== "custom")
+      .filter((it) => (it.partNumber || "").trim());
+  }, [items]);
+
+  // Typing a part number fills the rest of the line in. If nothing matches,
+  // the other fields are left alone -- somebody ordering something we have
+  // never stocked still types it by hand, as before.
+  function fillPoLineFromPartNumber(idx, value) {
+    const typed = value.trim().toLowerCase();
+    const hit = typed
+      ? poPartLookup.find((it) => (it.partNumber || "").toLowerCase() === typed)
+      : null;
+    setPoBuilder((b) => ({
+      ...b,
+      lineItems: b.lineItems.map((li, i) =>
+        i === idx
+          ? {
+              ...li,
+              partNumber: value,
+              ...(hit
+                ? {
+                    description: li.description.trim() ? li.description : hit.name || "",
+                    unitPrice: li.unitPrice ? li.unitPrice : String(Number(hit.value) || ""),
+                  }
+                : {}),
+            }
+          : li
+      ),
+    }));
+  }
+
   function updatePoLineItem(idx, field, value) {
     setPoBuilder((b) => ({
       ...b,
       lineItems: b.lineItems.map((li, i) => (i === idx ? { ...li, [field]: value } : li)),
     }));
   }
+
+  const poSupplierName = poBuilder
+    ? (master.suppliers.find((sup) => sup.id === poBuilder.supplierId) || {}).name || ""
+    : "";
 
   function removePoLineItem(idx) {
     setPoBuilder((b) => ({ ...b, lineItems: b.lineItems.filter((_, i) => i !== idx) }));
@@ -19642,12 +19683,30 @@ export default function StockControl() {
 
             <div style={{ marginTop: 12 }}>
               <label style={S.label}>Line items</label>
-              {poBuilder.lineItems.map((li, idx) => (
-                <div key={idx} style={S.poLineRow}>
+              {/* Typing a part number here fills the rest of the line from
+                  stock, so a purchase order does not get retyped from a
+                  screen somebody already filled in. Customer Stock is left
+                  out on purpose -- those are the customer's parts, not
+                  things we buy. Same rule the Request stock picker uses. */}
+              <datalist id="po-part-numbers">
+                {poPartLookup.map((it) => (
+                  <option key={it.id} value={it.partNumber}>
+                    {it.name}
+                  </option>
+                ))}
+              </datalist>
+              {poBuilder.lineItems.map((li, idx) => {
+                const typed = (li.partNumber || "").trim().toLowerCase();
+                const hits = typed
+                  ? poPartLookup.filter((it) => (it.partNumber || "").toLowerCase() === typed)
+                  : [];
+                return (
+                <div key={idx} style={{ ...S.poLineRow, flexWrap: "wrap" }}>
                   <input
                     style={{ ...S.input, flex: 1, minWidth: 90 }}
                     value={li.partNumber || ""}
-                    onChange={(e) => updatePoLineItem(idx, "partNumber", e.target.value)}
+                    list="po-part-numbers"
+                    onChange={(e) => fillPoLineFromPartNumber(idx, e.target.value)}
                     placeholder="Part no"
                   />
                   <input
@@ -19676,8 +19735,24 @@ export default function StockControl() {
                   <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removePoLineItem(idx)}>
                     <Trash2 size={13} />
                   </button>
+                  {/* The same part number can sit in more than one division --
+                      something we make and something we buy in. Say so rather
+                      than filling in one of them and hoping it was the right
+                      one. */}
+                  {hits.length > 1 && (
+                    <div style={{ ...S.roleHint, color: C.accentRaw, flexBasis: "100%" }}>
+                      {hits.length} items share that part number ({hits.map((h) => h.mainCat).join(", ")}) — filled from
+                      the first, so check the price.
+                    </div>
+                  )}
+                  {hits.length === 1 && hits[0].supplier && hits[0].supplier !== poSupplierName && (
+                    <div style={{ ...S.roleHint, flexBasis: "100%" }}>
+                      Normally bought from {hits[0].supplier}.
+                    </div>
+                  )}
                 </div>
-              ))}
+                );
+              })}
               <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 6 }} onClick={addPoLineItem}>
                 <Plus size={13} /> Add line
               </button>
