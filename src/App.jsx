@@ -6672,6 +6672,17 @@ export default function StockControl() {
   // half-typed day is held on screen and only written once both ends are
   // there. Clearing either end means "this day is off", and writes both
   // away together.
+  // Friday only ever differs for the day shift. So rather than a tick box
+  // to remember, Friday follows Mon-Thu for as long as the two match, and
+  // stops the moment somebody types something different into it. Nothing
+  // to set up for a shift like nights, and one change for the day shift.
+  function fridayFollows(sh) {
+    return (
+      (sh.weekday_start || null) === (sh.friday_start || null) &&
+      (sh.weekday_end || null) === (sh.friday_end || null)
+    );
+  }
+
   async function updateShiftTimes(shift, dayKey, which, value) {
     if (!supabase) return;
     const startCol = `${dayKey}_start`;
@@ -6685,6 +6696,12 @@ export default function StockControl() {
     if (!value) {
       next[startCol] = null;
       next[endCol] = null;
+    }
+
+    // Friday came along for the ride, so it keeps coming.
+    if (dayKey === "weekday" && fridayFollows(shift)) {
+      next.friday_start = next[startCol];
+      next.friday_end = next[endCol];
     }
 
     setShiftsList((prev) => prev.map((sh) => (sh.id === shift.id ? { ...sh, ...next } : sh)));
@@ -14939,6 +14956,11 @@ export default function StockControl() {
                                   onChange={(e) => updateShiftTimes(sh, day.key, "end", e.target.value)}
                                 />
                                 {!start && !end && <span style={S.roleHint}>off</span>}
+                                {/* Otherwise changing Mon-Thu and seeing Friday
+                                    change with it looks like a bug. */}
+                                {day.key === "friday" && start && fridayFollows(sh) && (
+                                  <span style={S.chip}>following Mon – Thu</span>
+                                )}
                                 {/* A day is saved as a pair. Say so, rather
                                     than let a half-typed day look finished. */}
                                 {!!start !== !!end && (
