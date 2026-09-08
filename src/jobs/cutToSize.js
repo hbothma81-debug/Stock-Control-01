@@ -173,6 +173,30 @@ export function barsSetAside(group, allocations, items) {
     }, 0);
 }
 
+// Bars asked for or on a purchase order but not yet on the floor: open
+// requisitions whose stock item is the same section and grade at the
+// stock length or longer. "pending" is asked for, "ordered" is on a PO;
+// "received" is already counted on the shelf, so it is left out.
+export function barsOnOrder(group, requisitions, items) {
+  return (requisitions || [])
+    .filter((r) => r.status === "pending" || r.status === "ordered")
+    .reduce((sum, r) => {
+      const it = (items || []).find((i) => i.id === r.itemId);
+      if (!it || it.mainCat !== "structural") return sum;
+      if (!sameText(it.name, group.section) || !sameText(it.grade, group.grade)) return sum;
+      if (num(it.length) < group.stockLengthM) return sum;
+      return sum + num(r.qty);
+    }, 0);
+}
+
+// The heading a material gets everywhere: its type from the Sections list
+// when it has one, then the size and grade. "Angle 50x50x5 S355", not
+// just "50x50x5".
+export function materialName(group, findSectionType) {
+  const type = findSectionType ? findSectionType(group.section) : "";
+  return [type, group.section, group.grade].filter(Boolean).join(" ");
+}
+
 // Rounded the way the shop reads them: whole millimetres, metres to two
 // places, kilograms to one.
 export const fmtMm = (mm) => `${Math.round(mm).toLocaleString()} mm`;

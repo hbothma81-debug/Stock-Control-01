@@ -9,6 +9,8 @@ import {
   planBars,
   barsOnShelf,
   barsSetAside,
+  barsOnOrder,
+  materialName,
   lineMetres,
   offcutIsKeepable,
   fmtMm,
@@ -66,6 +68,8 @@ export default function CutToSize({
   onRemove,
   onPrint,
   allocations,
+  requisitions,
+  findSectionType,
   SavedCheck,
 }) {
   const [draft, setDraft] = useState(blankLine);
@@ -133,27 +137,35 @@ export default function CutToSize({
             {groups.map((g) => {
               const shelf = barsOnShelf(g, items);
               const setAside = barsSetAside(g, allocations, items);
-              const short = Math.max(0, g.bars.length - shelf);
+              const onOrder = barsOnOrder(g, requisitions, items);
+              // On the floor covers it, or on order covers the rest, or
+              // somebody still has to order some.
+              const short = Math.max(0, g.bars.length - shelf - onOrder);
               const keepable = g.bars.filter((b) => offcutIsKeepable(b.offcutMm)).length;
               return (
                 <div key={g.key} style={{ ...S.managerRow, flexWrap: "wrap", gap: 8 }}>
                   <span style={{ fontSize: 14, fontWeight: 600 }}>
-                    {g.bars.length} × {fmtM(g.stockLengthM)} {g.section}
-                    {g.grade ? ` ${g.grade}` : ""}
+                    {g.bars.length} × {fmtM(g.stockLengthM)} {materialName(g, findSectionType)}
                   </span>
                   <span style={S.roleHint}>
                     {g.pieceCount} piece{g.pieceCount === 1 ? "" : "s"}, {fmtM(g.metres)}
                   </span>
                   <span
                     style={{ ...S.chip, ...(short > 0 ? { color: C.danger, borderColor: C.danger, fontWeight: 700 } : {}) }}
-                    title={
-                      short > 0
-                        ? `${shelf} on the shelf at ${fmtM(g.stockLengthM)} or longer — ${short} still to order`
-                        : `${shelf} on the shelf at ${fmtM(g.stockLengthM)} or longer`
-                    }
+                    title={`${shelf} on the floor at ${fmtM(g.stockLengthM)} or longer${short > 0 ? ` — ${short} still to order` : ""}`}
                   >
-                    {short > 0 ? `${short} short` : `${shelf} on the shelf`}
+                    {short > 0 ? `${short} to order` : `${shelf} on the floor`}
                   </span>
+                  {short > 0 && shelf > 0 && (
+                    <span style={S.chip} title="Physically on the floor now">
+                      {shelf} on the floor
+                    </span>
+                  )}
+                  {onOrder > 0 && (
+                    <span style={S.chip} title="Requisitioned or on a purchase order, not on the floor yet">
+                      {onOrder} on order
+                    </span>
+                  )}
                   {setAside > 0 && (
                     <span style={S.chip} title="Already set aside for this job">
                       {setAside} set aside
@@ -197,8 +209,7 @@ export default function CutToSize({
               .map((g) => (
                 <div key={g.key}>
                   <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>
-                    {g.section}
-                    {g.grade ? ` ${g.grade}` : ""} — {g.bars.length} × {fmtM(g.stockLengthM)}
+                    {materialName(g, findSectionType)} — {g.bars.length} × {fmtM(g.stockLengthM)}
                     <span style={{ ...S.roleHint, fontWeight: 400 }}>
                       {" "}
                       ({g.trimFront ? `${TRIM_MM} mm trim, ` : ""}

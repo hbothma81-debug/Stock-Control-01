@@ -60,7 +60,7 @@ import { TABS, NAV_TABS, TAB_GROUPS, LASER_MACHINE } from "./constants.js";
 import UserManagement from "./UserManagement.jsx";
 import CompanyDetails from "./manager/CompanyDetails.jsx";
 import CutToSize from "./jobs/CutToSize.jsx";
-import { planBars, barsOnShelf, barsSetAside, offcutIsKeepable, KERF_MM, TRIM_MM, MIN_OFFCUT_MM } from "./jobs/cutToSize.js";
+import { planBars, barsOnShelf, barsSetAside, barsOnOrder, materialName, offcutIsKeepable, KERF_MM, TRIM_MM, MIN_OFFCUT_MM } from "./jobs/cutToSize.js";
 import EditableName from "./EditableName.jsx";
 import NestingView from "./laser/NestingView.jsx";
 import CutList from "./laser/CutList.jsx";
@@ -5766,7 +5766,44 @@ export default function StockControl() {
       });
 
     const mm = (n) => `${Math.round(n).toLocaleString()} mm`;
-    for (const g of groups) {
+
+    // Where every bar comes from, before any cutting. On the floor is what
+    // is physically there; set aside is what this job has already claimed
+    // of it; on order is asked for or on a purchase order and not here
+    // yet; to order is what none of that covers.
+    const supply = groups.map((g) => {
+      const floor = barsOnShelf(g, items || []);
+      const setAside = barsSetAside(g, allocations || [], items || []);
+      const onOrder = barsOnOrder(g, requisitions || [], items || []);
+      const toOrder = Math.max(0, g.bars.length - floor - onOrder);
+      return { g, floor, setAside, onOrder, toOrder };
+    });
+    y += 4;
+    doc.setFontSize(12);
+    doc.setFont(undefined, "bold");
+    doc.text("Materials used", leftX, y);
+    y += 3;
+    autoTable(doc, {
+      startY: y,
+      head: [["Material", "Bars", "Length", "On the floor", "Set aside", "On order", "To order", "Status"]],
+      body: supply.map(({ g, floor, setAside, onOrder, toOrder }) => [
+        materialName(g, findSectionType),
+        String(g.bars.length),
+        `${g.stockLengthM} m`,
+        String(floor),
+        String(setAside),
+        String(onOrder),
+        String(toOrder),
+        toOrder > 0 ? "SHORT — order" : floor >= g.bars.length ? "On the floor" : "Waiting on order",
+      ]),
+      theme: "grid",
+      headStyles: { fillColor: [27, 29, 31] },
+      columnStyles: { 7: { fontStyle: "bold" } },
+      margin: { left: leftX },
+    });
+    y = doc.lastAutoTable.finalY + 4;
+
+    for (const { g, floor, setAside, onOrder, toOrder } of supply) {
       if (y > pageBottom - 30) {
         doc.addPage();
         y = 18;
@@ -5774,23 +5811,13 @@ export default function StockControl() {
       y += 4;
       doc.setFontSize(12);
       doc.setFont(undefined, "bold");
-      doc.text(
-        `${g.section}${g.grade ? ` ${g.grade}` : ""} — ${g.bars.length} bar${g.bars.length === 1 ? "" : "s"} × ${g.stockLengthM} m`,
-        leftX,
-        y
-      );
+      doc.text(`${materialName(g, findSectionType)} — ${g.bars.length} bar${g.bars.length === 1 ? "" : "s"} × ${g.stockLengthM} m`, leftX, y);
       y += 5;
       doc.setFontSize(9);
       doc.setFont(undefined, "normal");
-      // Where the bars come from. Set aside is a promise made on this
-      // job; on the shelf is what is physically there; to order is what
-      // neither covers.
-      const shelf = barsOnShelf(g, items || []);
-      const setAside = barsSetAside(g, allocations || [], items || []);
-      const toOrder = Math.max(0, g.bars.length - shelf);
       doc.text(
         `${g.trimFront ? `${TRIM_MM} mm trim, ` : "no trim, "}${mm(g.usableMm)} usable per bar · ` +
-          `${setAside} set aside for this job · ${shelf} on the shelf · ${toOrder} to order`,
+          `${floor} on the floor · ${setAside} set aside for this job · ${onOrder} on order · ${toOrder} to order`,
         leftX,
         y
       );
@@ -18119,6 +18146,8 @@ export default function StockControl() {
               onRemove={(item) => removeJobCutItem(jobDetail.job, item)}
               onPrint={() => printCuttingList(jobDetail.job, jobDetail.cutItems || [], jobDetail.allocations || [])}
               allocations={jobDetail.allocations || []}
+              requisitions={requisitions || []}
+              findSectionType={findSectionType}
               SavedCheck={SavedCheck}
             />
           )}
