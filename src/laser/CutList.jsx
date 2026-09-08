@@ -43,6 +43,13 @@ export default function CutList({
   busyId,
 }) {
   const [query, setQuery] = useState("");
+  // Which program the "how long did it take" popup is open for. Held
+  // here, not on the card: marking the last sheet cut moves the card
+  // from the to-cut list into Already cut, and a card that moves is torn
+  // down and rebuilt, taking anything it was holding with it. The list
+  // stays put, so the popup lives on the list.
+  const [askTimeFor, setAskTimeFor] = useState(null);
+  const askProgram = askTimeFor ? (programs || []).find((p) => p.id === askTimeFor) : null;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -110,7 +117,7 @@ export default function CutList({
                   canCut={canCut}
                   onToggleCut={onToggleCut}
                   onSetCutCount={onSetCutCount}
-                  onSetActualMinutes={onSetActualMinutes}
+                  onAskTime={(pr) => setAskTimeFor(pr.id)}
                   onReport={onReport}
                   onAddNote={onAddNote}
                   busy={busyId === p.id}
@@ -134,7 +141,7 @@ export default function CutList({
                 canCut={canCut}
                 onToggleCut={onToggleCut}
                 onSetCutCount={onSetCutCount}
-                onSetActualMinutes={onSetActualMinutes}
+                onAskTime={(pr) => setAskTimeFor(pr.id)}
                 onReport={onReport}
                 onAddNote={onAddNote}
                 busy={busyId === p.id}
@@ -142,6 +149,14 @@ export default function CutList({
             ))}
           </div>
         </Section>
+      )}
+
+      {askProgram && (
+        <TimeModal
+          program={askProgram}
+          onSave={onSetActualMinutes}
+          onClose={() => setAskTimeFor(null)}
+        />
       )}
     </div>
   );
@@ -238,22 +253,17 @@ function ShiftCounter({ programs, shifts, myShiftId }) {
   );
 }
 
-function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onSetActualMinutes, onReport, onAddNote, busy }) {
+function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onAskTime, onReport, onAddNote, busy }) {
   const p = program;
   const repeats = Math.max(1, Number(p.sheets_required) || 1);
   const done = Math.min(Math.max(0, Number(p.sheets_cut) || 0), repeats);
   const [countDraft, setCountDraft] = useState(String(done));
   useEffect(() => setCountDraft(String(done)), [done]);
   // Asked once the last sheet is marked cut: how long did it really take.
-  // He can skip it for now. Whether it becomes compulsory is a later
-  // decision, so the skip is one plain button rather than buried.
-  const [askTime, setAskTime] = useState(false);
-  const [timeDraft, setTimeDraft] = useState("");
+  // The popup itself belongs to the list (see CutList), because this card
+  // moves into Already cut at that very moment and is rebuilt on the way.
   const planned = plannedMinutes(p);
-  function openTime() {
-    setTimeDraft(p.actual_minutes == null ? "" : String(p.actual_minutes));
-    setAskTime(true);
-  }
+  const openTime = () => onAskTime(p);
   const [showReport, setShowReport] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [reason, setReason] = useState("");
@@ -510,58 +520,6 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onSetA
         </div>
       )}
 
-      {askTime && (
-        <div style={{ ...S.modalOverlay, zIndex: 30 }}>
-          <div style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
-            <div style={S.modalHead}>
-              <span style={S.modalTitle}>How long did {p.program_number} take?</span>
-              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setAskTime(false)}>
-                <X size={18} />
-              </button>
-            </div>
-            <div style={S.roleHint}>
-              Minutes the machine actually ran, for the record. The planned time stays as it was nested
-              {planned != null ? `: ${fmtMinutes(planned)}` : ""}.
-            </div>
-
-            <label style={{ ...S.label, marginTop: 10, display: "block" }}>Minutes</label>
-            <input
-              style={S.input}
-              type="number"
-              min="0"
-              step="1"
-              inputMode="numeric"
-              value={timeDraft}
-              onChange={(e) => setTimeDraft(e.target.value)}
-              placeholder={planned != null ? `Planned ${Math.round(planned)}` : "e.g. 45"}
-              autoFocus
-            />
-
-            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className="stk-btn"
-                style={{ ...S.submitBtn, flex: 1, marginTop: 0 }}
-                disabled={timeDraft.trim() === "" || busy}
-                onClick={async () => {
-                  if (await onSetActualMinutes(p, timeDraft)) setAskTime(false);
-                }}
-              >
-                Save time
-              </button>
-              <button
-                type="button"
-                className="stk-btn"
-                style={{ ...S.reqActionBtnMuted, flex: 1 }}
-                onClick={() => setAskTime(false)}
-              >
-                Skip for now
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {showReport && (
         <div style={{ ...S.modalOverlay, zIndex: 30 }}>
           <div style={{ ...S.modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
@@ -641,6 +599,69 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onSetA
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// "How long did it take?" -- asked once the last sheet of a program is
+// marked cut, and again from the card's Add time button for anything
+// skipped. He can skip it for now; whether it becomes compulsory is a
+// later decision, so the skip is one plain button rather than buried.
+//
+// The answer is for the record. The planned time stays as it was nested.
+function TimeModal({ program: p, onSave, onClose }) {
+  const planned = plannedMinutes(p);
+  const [draft, setDraft] = useState(p.actual_minutes == null ? "" : String(p.actual_minutes));
+  const [saving, setSaving] = useState(false);
+  return (
+    <div style={{ ...S.modalOverlay, zIndex: 30 }}>
+      <div style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+        <div style={S.modalHead}>
+          <span style={S.modalTitle}>How long did {p.program_number} take?</span>
+          <button type="button" className="stk-btn" style={S.iconBtn} onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+        <div style={S.roleHint}>
+          Minutes the machine actually ran, for the record. The planned time stays as it was nested
+          {planned != null ? `: ${fmtMinutes(planned)}` : ""}.
+        </div>
+
+        <label style={{ ...S.label, marginTop: 10, display: "block" }}>Minutes</label>
+        <input
+          style={S.input}
+          type="number"
+          min="0"
+          step="1"
+          inputMode="numeric"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={planned != null ? `Planned ${Math.round(planned)}` : "e.g. 45"}
+          autoFocus
+        />
+
+        <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="stk-btn"
+            style={{ ...S.submitBtn, flex: 1, marginTop: 0 }}
+            disabled={draft.trim() === "" || saving}
+            onClick={async () => {
+              setSaving(true);
+              try {
+                if (await onSave(p, draft)) onClose();
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            {saving ? "Saving…" : "Save time"}
+          </button>
+          <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={onClose}>
+            Skip for now
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
