@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Plus, X, Ban, AlertTriangle, PackagePlus, FileText, Upload, ChevronDown, Check, Undo2 } from "lucide-react";
+import { Plus, X, AlertTriangle, PackagePlus, FileText, Upload, ChevronDown, Check, Undo2, Trash2 } from "lucide-react";
 import { C, S } from "../theme.js";
 import { plannedMinutes, fmtMinutes } from "../lib/cuttingTime.js";
 import Section from "../Section.jsx";
@@ -78,6 +78,10 @@ export default function NestingView({
   const [search, setSearch] = useState("");
   const [addingTo, setAddingTo] = useState(null);
   const [addQuery, setAddQuery] = useState("");
+  // The program a Delete button was pressed on. The reason is asked for
+  // in one popup here rather than on each card, and the card may be
+  // inside a shut section by the time the answer comes back.
+  const [cancelling, setCancelling] = useState(null);
 
   // The other way in: start from the sheet rather than from a job. Prince
   // uses this when he has an offcut to fill and goes looking for what
@@ -187,6 +191,14 @@ export default function NestingView({
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Search job, SigmaNest number, customer, or program…"
       />
+
+      {cancelling && (
+        <DeleteProgramModal
+          program={cancelling}
+          onConfirm={onCancelProgram}
+          onClose={() => setCancelling(null)}
+        />
+      )}
 
       {canManage && !building && (
         <button type="button" className="stk-btn" style={{ ...S.addBtn, width: "100%" }} onClick={() => setBuilding(true)}>
@@ -376,6 +388,7 @@ export default function NestingView({
                 canManage={canManage}
                 onClearReport={onClearReport}
                 onUpdateProgram={onUpdateProgram}
+                onDelete={(p) => setCancelling(p)}
                 SavedCheck={SavedCheck}
               />
             ) : (
@@ -429,7 +442,7 @@ export default function NestingView({
         addSuggestions={addSuggestions}
         onAddJobToProgram={onAddJobToProgram}
         onRemoveJobFromProgram={onRemoveJobFromProgram}
-        onCancelProgram={onCancelProgram}
+        onCancelProgram={(p) => setCancelling(p)}
         onUpdateProgram={onUpdateProgram}
         SavedCheck={SavedCheck}
       />
@@ -456,7 +469,7 @@ export default function NestingView({
           addSuggestions={addSuggestions}
           onAddJobToProgram={onAddJobToProgram}
           onRemoveJobFromProgram={onRemoveJobFromProgram}
-          onCancelProgram={onCancelProgram}
+          onCancelProgram={(p) => setCancelling(p)}
           onUpdateProgram={onUpdateProgram}
           SavedCheck={SavedCheck}
         />
@@ -1275,8 +1288,8 @@ function ProgramList({
                         >
                           {isAdding ? "Cancel" : "Add job"}
                         </button>
-                        <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => onCancelProgram(p)} title="Cancel this program">
-                          <Ban size={13} /> Cancel program
+                        <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => onCancelProgram(p)} title="Delete this program — it asks why">
+                          <Trash2 size={13} /> Delete program
                         </button>
                       </div>
                     )}
@@ -1298,7 +1311,7 @@ function ProgramList({
 // it right usually means re-nesting on the offcut he named and giving
 // the new nest its own number. Sorted takes the stop off and puts the
 // program back on his cut list.
-function StoppedRow({ row: r, canManage, onClearReport, onUpdateProgram, SavedCheck }) {
+function StoppedRow({ row: r, canManage, onClearReport, onUpdateProgram, onDelete, SavedCheck }) {
   const p = r.program;
   const [open, setOpen] = useState(false);
   const jobs = (p.jobs || []).map((l) => l.job_number || "unknown job");
@@ -1404,14 +1417,88 @@ function StoppedRow({ row: r, canManage, onClearReport, onUpdateProgram, SavedCh
               >
                 Sorted
               </button>
+              <button
+                type="button"
+                className="stk-btn"
+                style={S.managerDelete}
+                onClick={() => onDelete && onDelete(p)}
+                title="Delete this program — it asks why"
+              >
+                <Trash2 size={13} /> Delete program
+              </button>
               <span style={S.roleHint}>
                 Change what needs changing above — it saves as you leave each box — then press Sorted and it
-                goes back on the cut list.
+                goes back on the cut list. Or delete it and nest the jobs afresh.
               </span>
             </div>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Delete a program, with a reason. Prince's and an admin's button.
+//
+// "Delete" is the word on the screen; underneath the program is
+// cancelled and kept, with who, when, and the reason typed here in its
+// history, so "what happened to 8821" stays answerable. It comes off the
+// cut list and off this screen. The jobs on it go back to To nest if
+// their nesting stage is still open.
+function DeleteProgramModal({ program: p, onConfirm, onClose }) {
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const jobs = (p.jobs || []).map((l) => l.job_number || "unknown job");
+  return (
+    <div style={{ ...S.modalOverlay, zIndex: 30 }} onClick={onClose}>
+      <div style={{ ...S.modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+        <div style={S.modalHead}>
+          <span style={S.modalTitle}>Delete {p.program_number}?</span>
+          <button type="button" className="stk-btn" style={S.iconBtn} onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+        <div style={S.roleHint}>
+          {p.material}
+          {p.sheet_name ? ` · ${p.sheet_name}` : ""}
+          {jobs.length ? ` · ${jobs.join(", ")}` : " · no jobs on it"}
+        </div>
+        <div style={{ ...S.roleHint, marginTop: 6 }}>
+          It comes off the cut list and off this screen. It stays on record with its history and the
+          reason, so it can always be looked up.
+        </div>
+
+        <label style={{ ...S.label, marginTop: 10, display: "block" }}>Why?</label>
+        <input
+          style={S.input}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Short and plain — e.g. nested twice, wrong material"
+          autoFocus
+        />
+
+        <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="stk-btn"
+            style={{ ...S.submitBtn, flex: 1, marginTop: 0, background: C.danger, color: "#fff" }}
+            disabled={!reason.trim() || saving}
+            onClick={async () => {
+              setSaving(true);
+              try {
+                if (await onConfirm(p, reason)) onClose();
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            {saving ? "Deleting…" : "Delete program"}
+          </button>
+          <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={onClose}>
+            Keep it
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

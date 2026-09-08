@@ -4252,22 +4252,24 @@ export default function StockControl() {
     }
   }
 
-  async function cancelLaserProgram(program) {
-    const ok = window.confirm(
-      "Cancel program " + program.program_number + "? It stays on record with its history, but comes off the cut list."
-    );
-    if (!ok) return;
+  // "Delete" on the screen, cancelled underneath: the program stays on
+  // record with its history and the reason given, so "who deleted 8821
+  // and why" stays answerable. The nesting screen asks for the reason.
+  async function cancelLaserProgram(program, reason) {
+    if (!supabase || !(reason || "").trim()) return false;
     try {
       const { error } = await supabase
         .from("laser_programs")
         .update({ is_cancelled: true, cancelled_by: roleLabel, cancelled_at: new Date().toISOString() })
         .eq("id", program.id);
       if (error) throw error;
-      await logProgramEvent(program.id, "cancelled", program.program_number);
+      await logProgramEvent(program.id, "cancelled", `${program.program_number} — ${reason.trim()}`);
       await fetchLaserData();
+      return true;
     } catch (err) {
       console.error("Failed to cancel laser program:", err);
       alert("That didn't save — check your connection and try again.");
+      return false;
     }
   }
 
