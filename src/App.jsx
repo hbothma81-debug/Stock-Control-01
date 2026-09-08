@@ -1627,6 +1627,7 @@ export default function StockControl() {
                 canViewUsageLog: !!data.can_view_usage_log,
                 canManageInvoicing: !!data.can_manage_invoicing,
                 canManageShifts: !!data.can_manage_shifts,
+                shiftId: data.shift_id || null,
                 allowedProcessTypes: data.allowed_process_types || [],
                 isSalesPerson: !!data.is_sales_person,
                 isShortageHandler: !!data.is_shortage_handler,
@@ -3580,7 +3581,7 @@ export default function StockControl() {
   // can work out which job stages to change from fresh data before any of
   // it reaches the screen.
   async function loadLaserRaw() {
-    const [programs, links, processes, shortages, documents, allocations, quoteItems, events] = await Promise.all([
+    const [programs, links, processes, shortages, documents, allocations, quoteItems, events, shifts] = await Promise.all([
       fetchAllRows("laser_programs", { orderBy: "created_at", ascending: false }),
       fetchAllRows("laser_program_jobs", { orderBy: "created_at" }),
       fetchAllRows("job_processes", {
@@ -3594,6 +3595,9 @@ export default function StockControl() {
       // Notes and stop reports live in the event log, and both screens
       // show them, so it has to come back with everything else.
       fetchAllRows("laser_program_events", { orderBy: "acted_at" }),
+      // The shift cut counter on the Cutting screen needs to know when
+      // the shift started. Every signed-in person may read these.
+      fetchAllRows("shifts", { orderBy: "name" }),
     ]);
     return {
       programs: programs || [],
@@ -3604,6 +3608,7 @@ export default function StockControl() {
       allocations: allocations || [],
       quoteItems: quoteItems || [],
       events: events || [],
+      shifts: shifts || [],
     };
   }
 
@@ -3738,6 +3743,7 @@ export default function StockControl() {
         allocations: [],
         quoteItems: [],
         events: [],
+        shifts: [],
       });
     }
   }
@@ -11160,6 +11166,8 @@ export default function StockControl() {
                     programs={programs}
                     thicknesses={master.laserThicknesses || []}
                     events={laserData ? laserData.events : []}
+                    shifts={laserData ? laserData.shifts : []}
+                    myShiftId={profile?.shiftId || null}
                     canCut={canCut}
                     onToggleCut={toggleProgramCut}
                     onSetCutCount={setProgramCutCount}

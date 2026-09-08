@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { Check, Undo2, OctagonAlert, MessageSquare, X } from "lucide-react";
 import { C, S } from "../theme.js";
 import Section from "../Section.jsx";
+import { pickShift, currentAndPreviousWindow, fmtTime } from "../lib/shiftWindow.js";
 
 // The laser operator's screen. A to-do list of programs to cut.
 //
@@ -16,7 +17,29 @@ import Section from "../Section.jsx";
 //
 // No database calls in here. The parent owns those.
 
-export default function CutList({ programs, thicknesses, events, canCut, onToggleCut, onSetCutCount, onReport, onAddNote, busyId }) {
+// Cards sit side by side on a wide screen rather than one under the
+// other. Each one is short, and a full-width card left most of a monitor
+// empty while the operator scrolled past it to reach the next one.
+const grid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+  gap: 8,
+  alignItems: "start",
+};
+
+export default function CutList({
+  programs,
+  thicknesses,
+  events,
+  shifts,
+  myShiftId,
+  canCut,
+  onToggleCut,
+  onSetCutCount,
+  onReport,
+  onAddNote,
+  busyId,
+}) {
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => {
@@ -65,6 +88,8 @@ export default function CutList({ programs, thicknesses, events, canCut, onToggl
         placeholder="Search program, job number, or SigmaNest number…"
       />
 
+      <ShiftCounter programs={programs} shifts={shifts} myShiftId={myShiftId} />
+
       {toCut.length === 0 ? (
         <div style={S.empty}>
           {query.trim() ? "Nothing waiting matches that." : "Nothing waiting to be cut."}
@@ -72,40 +97,104 @@ export default function CutList({ programs, thicknesses, events, canCut, onToggl
       ) : (
         groups.map((g) => (
           <Section key={g.material} title={g.material} count={g.items.length}>
-            {g.items.map((p) => (
-              <ProgramRow
-              key={p.id}
-              program={p}
-              notes={(events || []).filter((e) => e.program_id === p.id && (e.action === "note" || e.action === "stopped"))}
-              canCut={canCut}
-              onToggleCut={onToggleCut}
-              onSetCutCount={onSetCutCount}
-              onReport={onReport}
-              onAddNote={onAddNote}
-              busy={busyId === p.id}
-            />
-            ))}
+            <div style={grid}>
+              {g.items.map((p) => (
+                <ProgramRow
+                  key={p.id}
+                  program={p}
+                  notes={(events || []).filter(
+                    (e) => e.program_id === p.id && (e.action === "note" || e.action === "stopped")
+                  )}
+                  canCut={canCut}
+                  onToggleCut={onToggleCut}
+                  onSetCutCount={onSetCutCount}
+                  onReport={onReport}
+                  onAddNote={onAddNote}
+                  busy={busyId === p.id}
+                />
+              ))}
+            </div>
           </Section>
         ))
       )}
 
       {cut.length > 0 && (
         <Section title="Already cut" count={cut.length} collapsible defaultOpen={false}>
-          {cut.map((p) => (
-            <ProgramRow
-              key={p.id}
-              program={p}
-              notes={(events || []).filter((e) => e.program_id === p.id && (e.action === "note" || e.action === "stopped"))}
-              canCut={canCut}
-              onToggleCut={onToggleCut}
-              onSetCutCount={onSetCutCount}
-              onReport={onReport}
-              onAddNote={onAddNote}
-              busy={busyId === p.id}
-            />
-          ))}
+          <div style={grid}>
+            {cut.map((p) => (
+              <ProgramRow
+                key={p.id}
+                program={p}
+                notes={(events || []).filter(
+                  (e) => e.program_id === p.id && (e.action === "note" || e.action === "stopped")
+                )}
+                canCut={canCut}
+                onToggleCut={onToggleCut}
+                onSetCutCount={onSetCutCount}
+                onReport={onReport}
+                onAddNote={onAddNote}
+                busy={busyId === p.id}
+              />
+            ))}
+          </div>
         </Section>
       )}
+    </div>
+  );
+}
+
+// How many programs this shift has cut so far, and what the shift before
+// managed. The figure the operator is asked for at the end of every
+// shift, so it sits where he can read it off rather than count cards.
+//
+// A program counts for the shift it was finished in: the moment its last
+// sheet was marked cut. One taken back to "not cut" drops off again,
+// because it no longer has a finished time.
+//
+// Which shift: whichever is on the clock right now, as set up under Time
+// Manager. Nothing on the clock -- a Sunday, or no shifts set up yet --
+// counts today since midnight instead, and says so.
+function ShiftCounter({ programs, shifts, myShiftId }) {
+  // The clock has to move while the screen sits open on the machine all
+  // day, or the count would never roll over when the shift changes.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const view = useMemo(() => {
+    const shift = pickShift(shifts, myShiftId, now);
+    const win = shift ? currentAndPreviousWindow(shift, now) : { current: null, previous: null };
+    let current = win.current;
+    let label;
+    if (current) {
+      label = `${shift.name} · ${fmtTime(current.start)}–${fmtTime(current.end)}`;
+    } else {
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      current = { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
+      label = (shifts || []).length ? "no shift on the clock · today" : "today";
+    }
+    const within = (w) => (p) => {
+      if (!p.is_complete || !p.completed_at) return false;
+      const t = new Date(p.completed_at);
+      return t >= w.start && t < w.end;
+    };
+    return {
+      label,
+      count: (programs || []).filter(within(current)).length,
+      previous: win.previous ? (programs || []).filter(within(win.previous)).length : null,
+    };
+  }, [programs, shifts, myShiftId, now]);
+
+  return (
+    <div style={{ ...S.summaryBanner, marginBottom: 0, display: "flex", flexWrap: "wrap", gap: "4px 18px", justifyContent: "center" }}>
+      <span>
+        <b style={{ fontSize: 18 }}>{view.count}</b> {view.count === 1 ? "program" : "programs"} cut this shift
+      </span>
+      <span style={{ color: C.muted }}>{view.label}</span>
+      {view.previous != null && <span style={{ color: C.muted }}>last shift {view.previous}</span>}
     </div>
   );
 }
