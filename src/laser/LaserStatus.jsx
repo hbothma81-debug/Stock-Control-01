@@ -45,6 +45,12 @@ export default function LaserStatus({
   onTakeJob,
   onFinishPacking,
   onFlagShortage,
+  // A packing stage set to Each on the job: the packer logs items one at
+  // a time instead of ticking the whole job. ItemProgress is the same
+  // per-item control a Production card uses, handed in by the parent so
+  // this screen and that card can never count differently.
+  onLogItem,
+  ItemProgress,
   busyId,
 }) {
   const [query, setQuery] = useState("");
@@ -91,6 +97,8 @@ export default function LaserStatus({
             onTakeJob={onTakeJob}
             onFinishPacking={onFinishPacking}
             onFlagShortage={onFlagShortage}
+            onLogItem={onLogItem}
+            ItemProgress={ItemProgress}
           />
         ))
       )}
@@ -103,12 +111,15 @@ export default function LaserStatus({
   );
 }
 
-function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onFinishPacking, onFlagShortage }) {
+function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onFinishPacking, onFlagShortage, onLogItem, ItemProgress }) {
   const laser = laserState(r.programs);
   // A job can reach here with no packing stage at all, when nobody ticked
   // Packer as the job was built.
   const taken = !!r.process?.started_at;
   const busy = !!r.process && busyId === r.process.id;
+  // Packed item by item rather than as one tick. A re-cut is never: its
+  // parts are the shortage's, not lines on the job.
+  const perItem = !r.isRecut && r.process?.tracking_mode === "each" && !!ItemProgress;
 
   const packLabel = !r.process
     ? "No packing stage"
@@ -245,7 +256,7 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
                   {busy ? "Saving…" : taken ? (r.isMine ? "You have it" : "Take it over") : "Take job"}
                 </button>
 
-                {taken && (
+                {taken && !perItem && (
                   <button
                     type="button"
                     className="stk-btn"
@@ -272,6 +283,31 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
                   </button>
                 )}
               </div>
+            )}
+
+            {/* Each mode: one line per item, a running count against its
+                quantity. The stage finishes itself once every item is
+                packed in full, so there is no whole-job tick here. Not
+                capped by the laser stage the way a Production card would
+                be: this screen exists so packing starts while cutting is
+                still going. */}
+            {perItem && taken && canPack && (
+              <div style={{ marginTop: 10 }}>
+                <div style={S.label}>Packed so far</div>
+                <div style={{ marginTop: 4 }}>
+                  <ItemProgress
+                    process={r.process}
+                    job={r.job}
+                    quoteItems={r.quoteItems || []}
+                    itemProgress={r.itemProgress || []}
+                    onSubmit={(process, job, item, qty, progress) => onLogItem(r, item, qty, progress)}
+                  />
+                </div>
+                <div style={S.roleHint}>This job leaves the screen on its own once every item is packed in full.</div>
+              </div>
+            )}
+            {perItem && !taken && canPack && (
+              <div style={S.roleHint}>Packed item by item on this job. Take it to start logging.</div>
             )}
 
             {!canPack && !taken && r.process && <div style={S.roleHint}>Only packers can take a job.</div>}

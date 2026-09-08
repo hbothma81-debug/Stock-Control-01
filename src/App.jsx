@@ -3631,23 +3631,29 @@ export default function StockControl() {
   // can work out which job stages to change from fresh data before any of
   // it reaches the screen.
   async function loadLaserRaw() {
-    const [programs, links, processes, shortages, documents, allocations, quoteItems, events, shifts] = await Promise.all([
+    const [programs, links, processes, shortages, documents, allocations, quoteItems, events, shifts, itemProgress] = await Promise.all([
       fetchAllRows("laser_programs", { orderBy: "created_at", ascending: false }),
       fetchAllRows("laser_program_jobs", { orderBy: "created_at" }),
       fetchAllRows("job_processes", {
+        // tracking_mode: Laser Status packs per item when the stage is set
+        // to Each, the same as a Production card does.
         select:
-          "id, job_id, process_name, is_complete, shortage_id, started_at, started_by, operator, assigned_to, completed_at, is_urgent, notes",
+          "id, job_id, process_name, is_complete, shortage_id, started_at, started_by, operator, assigned_to, completed_at, is_urgent, notes, tracking_mode",
       }),
       fetchAllRows("shortages", { orderBy: "created_at", ascending: false }),
       fetchAllRows("job_documents", { orderBy: "created_at", ascending: false }),
       fetchAllRows("job_allocations", { orderBy: "created_at" }),
-      fetchAllRows("job_quote_items", { select: "id, job_id, description, linked_item_id" }),
+      // qty: the packer's per-item count runs against it.
+      fetchAllRows("job_quote_items", { select: "id, job_id, description, qty, linked_item_id" }),
       // Notes and stop reports live in the event log, and both screens
       // show them, so it has to come back with everything else.
       fetchAllRows("laser_program_events", { orderBy: "acted_at" }),
       // The shift cut counter on the Cutting screen needs to know when
       // the shift started. Every signed-in person may read these.
       fetchAllRows("shifts", { orderBy: "name" }),
+      // How many of each item a stage has already done. Laser Status
+      // needs it for a packing stage set to Each.
+      fetchAllRows("job_process_item_progress", { select: "id, job_process_id, job_quote_item_id, qty_complete" }),
     ]);
     return {
       programs: programs || [],
@@ -3659,6 +3665,7 @@ export default function StockControl() {
       quoteItems: quoteItems || [],
       events: events || [],
       shifts: shifts || [],
+      itemProgress: itemProgress || [],
     };
   }
 
@@ -4215,6 +4222,10 @@ export default function StockControl() {
         programs,
         packerName: packing?.operator || packing?.started_by || "",
         isMine: !!currentUser?.id && !!packing && packing.assigned_to === currentUser.id,
+        // For a packing stage set to Each: the job's items, and how many
+        // of each this stage has already packed.
+        quoteItems: (d.quoteItems || []).filter((it) => it.job_id === job.id),
+        itemProgress: packing ? (d.itemProgress || []).filter((ip) => ip.job_process_id === packing.id) : [],
       });
     }
 
@@ -4297,6 +4308,16 @@ export default function StockControl() {
     } finally {
       setProgramBusyId(null);
     }
+  }
+
+  // A packing stage set to Each: the packer logs items as they are packed,
+  // and the stage finishes itself once every item reaches its quantity --
+  // the same path a Production card uses. Laser Status reads laserData
+  // rather than the production queue, so it has to be refreshed here or
+  // the count on screen stays where it was.
+  async function logPackingItem(row, item, qty, progress) {
+    await submitProcessItemProgress(row.process, row.job, item, qty, progress, row.quoteItems || [], row.itemProgress || []);
+    await fetchLaserData();
   }
 
   // Marks a program cut, then brings every job on it into line.
@@ -5269,6 +5290,11 @@ export default function StockControl() {
       // work, so the queue has to hear about it too.
       refreshJobDetail();
       if (productionQueue !== null) fetchProductionQueue();
+      // Laser Status reads the laser data, not the queue, and it packs
+      // per item or as one tick depending on this very setting. Without
+      // this, switching a job's packing to Each on the Jobs page left
+      // Laser Status packing it as a batch until somebody pressed Refresh.
+      if (field === "tracking_mode" && laserData !== null) fetchLaserData();
     } catch (err) {
       console.error("Failed to update process field:", err);
       alert("That didn't save — check your connection and try again.");
@@ -11906,6 +11932,8 @@ export default function StockControl() {
                 onTakeJob={takePackingJob}
                 onFinishPacking={finishPacking}
                 onFlagShortage={(row) => openShortageFlagModal(row.job, row.process)}
+                onLogItem={logPackingItem}
+                ItemProgress={QtyProgressControl}
                 busyId={programBusyId}
               />
             )}
