@@ -104,8 +104,9 @@ export default function LaserStatus({
       )}
 
       <div style={S.roleHint}>
-        A job leaves this screen once it is marked packed and checked. Taking a job is what opens the stages after
-        packing — the job does not have to be finished first.
+        A job leaves this screen once its laser parts are marked packed and checked; tube parts are packed under
+        Tube Laser. Taking a job is what opens the stages after packing — the job does not have to be finished
+        first.
       </div>
     </div>
   );
@@ -269,7 +270,10 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
                     disabled={busy}
                     onClick={() => onFinishPacking(r)}
                   >
-                    <Check size={14} strokeWidth={2.5} /> {busy ? "Saving…" : "Packed & checked"}
+                    {/* "Laser parts", not "the job": tube lines are packed
+                        by the tube operator under the Tube Laser stage,
+                        so on a mixed job this tick is the plate half. */}
+                    <Check size={14} strokeWidth={2.5} /> {busy ? "Saving…" : "Laser parts packed & checked"}
                   </button>
                 )}
 
@@ -308,7 +312,10 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
                     onSubmit={(process, job, item, qty, progress) => onLogItem(r, item, qty, progress)}
                   />
                 </div>
-                <div style={S.roleHint}>This job leaves the screen on its own once every item is packed in full.</div>
+                <div style={S.roleHint}>
+                  Laser parts only — tube lines are packed under Tube Laser. This job leaves the screen on its own once
+                  every laser line is packed in full.
+                </div>
               </div>
             )}
             {perItem && !taken && canPack && (
