@@ -1185,6 +1185,7 @@ export default function StockControl() {
   const [poReportTo, setPoReportTo] = useState("");
   const [poReportSupplier, setPoReportSupplier] = useState("");
   const [poReportStatus, setPoReportStatus] = useState("");
+  const [poReportMonths, setPoReportMonths] = useState([]);
   const [selectedReqIds, setSelectedReqIds] = useState([]);
   const [requisitionTarget, setRequisitionTarget] = useState(null);
   // Set when the requisition form is editing an existing request rather
@@ -9289,19 +9290,59 @@ export default function StockControl() {
     });
   }
 
+  // What a purchase order actually cost, before VAT. The VAT comes back, so
+  // this is the figure to watch against a budget rather than the inclusive
+  // one. Older orders were saved without the exclusive column, so it falls
+  // back to adding the lines up -- same fallback the single-PO document uses.
+  function poExclusive(po) {
+    if (po.exclusiveTotal != null) return Number(po.exclusiveTotal) || 0;
+    return (po.lineItems || []).reduce(
+      (sum, li) => sum + Number(li.qty || 0) * Number(li.unitPrice || 0),
+      0
+    );
+  }
+
+  // A purchase order belongs to the month it was raised in, not the month
+  // the goods turned up. That way the month stops changing once it is over:
+  // September's spend is what September committed to, whenever it arrives.
+  function poMonthKey(po) {
+    return (po.dateCreated || "").slice(0, 7);
+  }
+
+  function poMonthLabel(key) {
+    if (!key) return "No date";
+    return new Date(`${key}-01T00:00:00`).toLocaleDateString("en-ZA", {
+      month: "long",
+      year: "numeric",
+    });
+  }
+
   // A summary-table report across many POs at once — for spend review, not
   // for sending to a supplier, so this is a plain table, not a letterhead.
+  //
+  // Grouped by month with its own subtotal per month, because one flat list
+  // of two hundred orders answers "what did we spend" only after somebody
+  // adds it up by hand.
   async function generatePoReport() {
     const { jsPDF, autoTable } = await getPdf();
+
+    // Months win if any are ticked; the dates are the fallback for a range
+    // that is not whole months.
+    const byMonths = poReportMonths.length > 0;
     const matches = purchaseOrders
       .filter((po) => !poReportSupplier || po.supplierId === poReportSupplier)
       .filter((po) => !poReportStatus || (poReportStatus === "received" ? po.status === "received" : po.status !== "received"))
-      .filter((po) => !poReportFrom || new Date(po.dateCreated) >= new Date(poReportFrom))
-      .filter((po) => !poReportTo || new Date(po.dateCreated) <= new Date(poReportTo + "T23:59:59"))
+      .filter((po) => (byMonths ? poReportMonths.includes(poMonthKey(po)) : true))
+      .filter((po) => byMonths || !poReportFrom || new Date(po.dateCreated) >= new Date(poReportFrom))
+      .filter((po) => byMonths || !poReportTo || new Date(po.dateCreated) <= new Date(poReportTo + "T23:59:59"))
       .sort((a, b) => new Date(a.dateCreated) - new Date(b.dateCreated));
 
     if (matches.length === 0) {
-      alert("No Purchase Orders match that date range/supplier.");
+      alert(
+        byMonths
+          ? "No Purchase Orders in the months you picked."
+          : "No Purchase Orders match that date range/supplier."
+      );
       return;
     }
 
@@ -9315,33 +9356,110 @@ export default function StockControl() {
     doc.setFontSize(10);
     doc.setFont(undefined, "normal");
     const supplierLabel = poReportSupplier ? master.suppliers.find((s) => s.id === poReportSupplier)?.name || "" : "All suppliers";
-    const rangeLabel = `${poReportFrom || "earliest"} to ${poReportTo || "latest"}`;
+    const rangeLabel = byMonths
+      ? [...poReportMonths].sort().map(poMonthLabel).join(", ")
+      : `${poReportFrom || "earliest"} to ${poReportTo || "latest"}`;
     doc.text(`${supplierLabel} · ${rangeLabel}`, textX, 25);
 
-    const total = matches.reduce((sum, po) => sum + po.totalValue, 0);
+    const months = new Map();
+    for (const po of matches) {
+      const key = poMonthKey(po);
+      if (!months.has(key)) months.set(key, []);
+      months.get(key).push(po);
+    }
 
+    // Same formatting as the figures on the screen. R 1234567.00 is a
+    // number you have to count the digits of; R 1 234 567.00 is one you
+    // can read.
+    const money = (n) =>
+      `R ${Number(n || 0).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`;
+    let y = 32;
+    let allEx = 0;
+    let allInc = 0;
+    let stillOnOrderEx = 0;
+
+    for (const key of [...months.keys()].sort()) {
+      const list = months.get(key);
+      const ex = list.reduce((s, po) => s + poExclusive(po), 0);
+      const inc = list.reduce((s, po) => s + Number(po.totalValue || 0), 0);
+      const open = list.filter((po) => po.status !== "received");
+      const openEx = open.reduce((s, po) => s + poExclusive(po), 0);
+      allEx += ex;
+      allInc += inc;
+      stillOnOrderEx += openEx;
+
+      // autoTable breaks its own pages, but this heading is drawn by hand
+      // and would land off the bottom without asking.
+      if (y > 250) {
+        doc.addPage();
+        y = 20;
+      }
+      doc.setFontSize(11);
+      doc.setFont(undefined, "bold");
+      doc.text(poMonthLabel(key), 14, y);
+      doc.setFont(undefined, "normal");
+
+      autoTable(doc, {
+        startY: y + 3,
+        head: [["PO Number", "Date", "Supplier", "Status", "Excl VAT", "VAT", "Incl VAT"]],
+        body: list.map((po) => {
+          const poEx = poExclusive(po);
+          const poInc = Number(po.totalValue || 0);
+          return [
+            po.poNumber,
+            new Date(po.dateCreated).toLocaleDateString(),
+            po.supplierName || "—",
+            po.status === "received" ? "Received" : "Outstanding",
+            money(poEx),
+            money(poInc - poEx),
+            money(poInc),
+          ];
+        }),
+        foot: [[
+          `${list.length} ${list.length === 1 ? "order" : "orders"}`,
+          "",
+          "",
+          // Whether anything is still out, not whether it is worth
+          // anything. An order for nothing is still an order not received.
+          open.length
+            ? `${open.length} still on order · ${money(openEx)}`
+            : "all received",
+          money(ex),
+          money(inc - ex),
+          money(inc),
+        ]],
+        theme: "grid",
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [27, 29, 31] },
+        footStyles: { fillColor: [242, 169, 0], textColor: [27, 29, 31], fontStyle: "bold" },
+      });
+      y = doc.lastAutoTable.finalY + 10;
+    }
+
+    if (y > 250) {
+      doc.addPage();
+      y = 20;
+    }
     autoTable(doc, {
-      startY: 32,
-      head: [["PO Number", "Date", "Supplier", "Status", "Received By", "Lines", "Total"]],
-      body: matches.map((po) => [
-        po.poNumber,
-        new Date(po.dateCreated).toLocaleDateString(),
-        po.supplierName || "—",
-        po.status === "received" ? "Received" : "Outstanding",
-        po.status === "received" ? `${po.receivedBy || "—"} (${po.receivedDate ? new Date(po.receivedDate).toLocaleDateString() : "—"})` : "—",
-        String(po.lineItems.length),
-        `R ${po.totalValue.toFixed(2)}`,
-      ]),
-      foot: [["", "", "", "", "", "Grand total", `R ${total.toFixed(2)}`]],
+      startY: y,
+      head: [[months.size > 1 ? `All ${months.size} months` : "Total", "Excl VAT", "VAT", "Incl VAT"]],
+      body: [
+        ["Ordered", money(allEx), money(allInc - allEx), money(allInc)],
+        ["Of that, still on order", money(stillOnOrderEx), "", ""],
+      ],
       theme: "grid",
       headStyles: { fillColor: [27, 29, 31] },
-      footStyles: { fillColor: [242, 169, 0], textColor: [27, 29, 31], fontStyle: "bold" },
+      bodyStyles: { fontStyle: "bold" },
     });
 
     // Not tied to one job or PO — each run is its own dated snapshot for
     // whatever filter was used, so it gets its own timestamped path rather
     // than overwriting a previous report.
     const fileName = `PO-Report-${new Date().toISOString().slice(0, 10)}-${Date.now()}.pdf`;
+
     await generateAndStoreDocument({
       doc,
       documentType: "po_report",
@@ -11586,6 +11704,50 @@ export default function StockControl() {
               </button>
             )}
           </div>
+
+          {/* The two numbers somebody actually comes to this screen for.
+              Both exclude VAT, because that is what the month costs the
+              business -- the VAT comes back. Both say so, so nobody has to
+              guess which basis they are looking at. */}
+          {purchaseOrders.length > 0 && canManageRequisitions && (() => {
+            const thisMonth = new Date().toISOString().slice(0, 7);
+            const open = purchaseOrders.filter((po) => po.status !== "received");
+            const raisedThisMonth = purchaseOrders.filter((po) => poMonthKey(po) === thisMonth);
+            const openTotal = open.reduce((s, po) => s + poExclusive(po), 0);
+            const monthTotal = raisedThisMonth.reduce((s, po) => s + poExclusive(po), 0);
+            const money = (n) => `R ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+            const figure = (label, value, count, noun) => (
+              <div
+                style={{
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 6,
+                  padding: "10px 14px",
+                  flex: "1 1 220px",
+                }}
+              >
+                <div style={S.label}>{label}</div>
+                <div style={{ fontSize: 20, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                  {money(value)}
+                </div>
+                <div style={S.roleHint}>
+                  {count} {count === 1 ? noun : `${noun}s`} · excluding VAT
+                </div>
+              </div>
+            );
+
+            return (
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                {figure("Still on order", openTotal, open.length, "order")}
+                {figure(
+                  `Ordered in ${poMonthLabel(thisMonth)}`,
+                  monthTotal,
+                  raisedThisMonth.length,
+                  "order"
+                )}
+              </div>
+            );
+          })()}
 
           {purchaseOrders.length > 0 && (
             <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
@@ -19724,6 +19886,41 @@ export default function StockControl() {
               </button>
             </div>
             <div style={S.roleHint}>A summary table of Purchase Orders for the range and supplier you choose — one PDF, ready to download.</div>
+            {/* Months first, because a month is what somebody is nearly
+                always after and typing two dates to mean "September" is
+                three chances to get it wrong. The dates below still work,
+                for a range that is not whole months. */}
+            {(() => {
+              const monthKeys = [...new Set(purchaseOrders.map(poMonthKey).filter(Boolean))].sort().reverse();
+              if (monthKeys.length === 0) return null;
+              const toggle = (key) =>
+                setPoReportMonths((prev) =>
+                  prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+                );
+              return (
+                <div style={{ marginTop: 10 }}>
+                  <label style={S.label}>Months</label>
+                  <div style={{ maxHeight: 160, overflowY: "auto", border: `1px solid ${C.border}`, borderRadius: 6, padding: 8 }}>
+                    {monthKeys.map((key) => (
+                      <label key={key} style={{ ...S.checkRow, marginBottom: 2 }}>
+                        <input
+                          type="checkbox"
+                          checked={poReportMonths.includes(key)}
+                          onChange={() => toggle(key)}
+                        />
+                        {poMonthLabel(key)}
+                      </label>
+                    ))}
+                  </div>
+                  <div style={S.roleHint}>
+                    {poReportMonths.length > 0
+                      ? `${poReportMonths.length} ${poReportMonths.length === 1 ? "month" : "months"} picked — the dates below are ignored. Each month gets its own subtotal.`
+                      : "Tick one or more, or leave them all unticked and use the dates below."}
+                  </div>
+                </div>
+              );
+            })()}
+
             <div style={S.formGrid}>
               <div>
                 <label style={S.label}>From</label>
