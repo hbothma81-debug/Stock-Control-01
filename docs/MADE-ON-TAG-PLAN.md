@@ -1,6 +1,14 @@
 # "Made on" tag per item — plan
 
-Written 8 September 2026. Planning only; nothing has been built.
+Written 8 September 2026. Built the same day, steps one to seven, each
+its own commit. Step five was folded into four (same rule) and step
+eight into three (a line added against a part comes in tagged). What is
+left is section 6, assemblies, which was never part of this build.
+
+To switch it on for live, in this order: run setup-made-on-tag.sql on
+the live database, push, set the dropdown on each stage under Stock
+Manager → Job Process Types, then open each live tube job, Items tab,
+Guess the rest, and correct what it could not tell.
 
 Read this alongside the two rules already live on the Production tab:
 the tube laser and the plate laser are separate lanes (neither waits for

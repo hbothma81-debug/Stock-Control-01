@@ -10792,27 +10792,45 @@ export default function StockControl() {
             // replaced wholesale.
             const keptRealStock = prev.filter((it) => it.mainCat === "custom" && it.customer === importCustomer && Number(it.qty) > 0);
             const keptKeys = new Set(keptRealStock.map((it) => (it.partNumber || "").toLowerCase()));
+            // A part that was already in the catalogue keeps its row: the
+            // same id, so every job line linked to it stays linked, and
+            // the remembered "made on" tag, so the shop does not tag the
+            // same part again after every import. Before this, every
+            // zero-stock part was deleted and recreated under a new id on
+            // each replace, which broke the links and forgot the tags.
+            // Only what the file carries -- description, price,
+            // recommended stock, revision -- is taken from the file.
+            const previousByPart = new Map(
+              prev
+                .filter((it) => it.mainCat === "custom" && it.customer === importCustomer)
+                .map((it) => [(it.partNumber || "").toLowerCase(), it])
+            );
             const newItems = newRows
               .filter((row) => !keptKeys.has(row.stockCode.toLowerCase()))
-              .map((row) => ({
-                id: uid(),
-                mainCat: "custom",
-                customer: row.customer,
-                partNumber: row.stockCode,
-                name: row.description || row.stockCode,
-                grade: "",
-                qty: 0,
-                value: row.price,
-                low: row.recommendedStock,
-                loc: "",
-                comment: "",
-                salesPerson: "",
-                customerRevision: row.revision,
-              }));
+              .map((row) => {
+                const before = previousByPart.get(row.stockCode.toLowerCase());
+                return {
+                  id: before ? before.id : uid(),
+                  mainCat: "custom",
+                  customer: row.customer,
+                  partNumber: row.stockCode,
+                  name: row.description || row.stockCode,
+                  grade: "",
+                  qty: 0,
+                  value: row.price,
+                  low: row.recommendedStock,
+                  loc: before?.loc || "",
+                  comment: before?.comment || "",
+                  salesPerson: before?.salesPerson || "",
+                  customerRevision: row.revision,
+                  madeOn: before?.madeOn || "",
+                };
+              });
             return [...otherItems, ...keptRealStock, ...newItems];
           });
           alert(
-            `Replaced the catalog with ${newRows.length} rows${importCustomer ? ` for ${importCustomer}` : ""} — any item with real stock on hand was kept regardless.\n\n${diagnosticSummary}`
+            `Replaced the catalog with ${newRows.length} rows${importCustomer ? ` for ${importCustomer}` : ""} — any item with real stock on hand was kept regardless. ` +
+              `Parts already in the catalogue kept their links to jobs and their "made on" tags.\n\n${diagnosticSummary}`
           );
         } else {
           // Merge by part number — update anything that already exists
