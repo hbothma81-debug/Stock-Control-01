@@ -1270,6 +1270,8 @@ export default function StockControl() {
   const [myAccessRequest, setMyAccessRequest] = useState(null);
   const [waitingAccessRequests, setWaitingAccessRequests] = useState([]);
   const [accessReason, setAccessReason] = useState("");
+  const [lockoutOn, setLockoutOn] = useState(false);
+  const [savingLockout, setSavingLockout] = useState(false);
   const [askingForAccess, setAskingForAccess] = useState(false);
   const [newClosureDate, setNewClosureDate] = useState("");
   const [newClosureNote, setNewClosureNote] = useState("");
@@ -6791,6 +6793,47 @@ export default function StockControl() {
     setDrawingUploadCustomer("");
   }
 
+  // The master switch. It is the way out of a bad lockout, so it has to be
+  // reachable from a screen rather than from a SQL editor -- at seven on a
+  // Monday with half the floor unable to sign in, nobody should be hunting
+  // for a database.
+  async function loadLockoutSwitch() {
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase
+        .from("app_settings")
+        .select("shift_lockout_on")
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      setLockoutOn(!!data?.shift_lockout_on);
+    } catch (err) {
+      console.error("Failed to read the lockout switch:", err);
+    }
+  }
+
+  async function setLockoutSwitch(on) {
+    if (!supabase) return;
+    setSavingLockout(true);
+    try {
+      const { error } = await supabase
+        .from("app_settings")
+        .update({ shift_lockout_on: on, updated_by: roleLabel, updated_at: new Date().toISOString() })
+        .eq("id", true);
+      if (error) throw error;
+      setLockoutOn(on);
+      // Whoever pressed it should see their own answer change straight away,
+      // not a minute later.
+      await checkShiftAccess();
+    } catch (err) {
+      console.error("Failed to move the lockout switch:", err);
+      alert("That didn't save — check your connection and try again.");
+      await loadLockoutSwitch();
+    } finally {
+      setSavingLockout(false);
+    }
+  }
+
   // A Friday that runs late, a machine that has to be finished tonight.
   // Without this every one of those means editing shift times and
   // remembering to put them back, which is the step that gets forgotten.
@@ -7117,6 +7160,7 @@ export default function StockControl() {
     if (!supabase) return;
     loadShifts();
     loadClosures();
+    loadLockoutSwitch();
     const { data } = await supabase.from("profiles").select("*").order("created_at");
     setPeople(
       (data || []).map((d) => ({
@@ -15335,10 +15379,76 @@ export default function StockControl() {
                     The hours each shift works. Set once here, and people are put on a shift under User
                     Management — so changing a shift changes it for everyone on it.
                   </div>
-                  <div style={{ ...S.roleHint, color: C.accentRaw }}>
-                    Nothing is enforced yet. Whatever you set in here, everybody carries on exactly as they do
-                    today until the lockout itself is built.
-                  </div>
+                  {/* The old notice said "nothing is enforced yet", which
+                      stops being true the moment this is pressed. So the
+                      notice and the switch are one thing: it says what is
+                      actually happening, and carries the way to change it. */}
+                  {(() => {
+                    const held = (people || []).filter((pp) => pp.shiftId && !pp.isAdmin);
+                    const adminsOnShifts = (people || []).filter((pp) => pp.shiftId && pp.isAdmin);
+                    const names = held.map((pp) => pp.name || pp.email).join(", ");
+
+                    async function flip() {
+                      if (!lockoutOn) {
+                        const ok = window.confirm(
+                          `Turn the lockout on?\n\n` +
+                            (held.length
+                              ? `${held.length} ${held.length === 1 ? "person" : "people"} will be held to their shift hours:\n${names}\n\n`
+                              : `Nobody is on a shift yet, so this will hold nobody to anything.\n\n`) +
+                            `Anyone outside their hours right now goes to the locked-out screen within a minute. They can ask to be let in, and you can turn this off again from this same screen.`
+                        );
+                        if (!ok) return;
+                      }
+                      await setLockoutSwitch(!lockoutOn);
+                    }
+
+                    return (
+                      <div
+                        style={{
+                          border: `1px solid ${lockoutOn ? C.danger : C.accentRaw}`,
+                          background: lockoutOn ? C.dangerTint : C.accentTint,
+                          borderRadius: 6,
+                          padding: "12px 14px",
+                          marginBottom: 14,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 240 }}>
+                          <div style={{ ...S.label, color: lockoutOn ? C.danger : C.accentRaw, marginBottom: 4 }}>
+                            {lockoutOn ? "The lockout is ON" : "The lockout is off"}
+                          </div>
+                          <div style={S.roleHint}>
+                            {lockoutOn
+                              ? held.length
+                                ? `${held.length} ${held.length === 1 ? "person is" : "people are"} held to their shift hours. Outside them they see a screen saying when they are back in, and can ask to be let in.`
+                                : "Nobody is on a shift, so nobody is being held to anything."
+                              : held.length
+                              ? `Everybody carries on as they do today. Switched on, it would apply to ${held.length} ${held.length === 1 ? "person" : "people"} — the ones on a shift.`
+                              : "Everybody carries on as they do today. Nobody is on a shift yet, so it would apply to nobody."}
+                            {adminsOnShifts.length > 0 &&
+                              ` ${adminsOnShifts.length} ${adminsOnShifts.length === 1 ? "admin is" : "admins are"} on a shift and will never be locked out.`}
+                          </div>
+                        </div>
+                        {isAdmin ? (
+                          <button
+                            type="button"
+                            className="stk-btn"
+                            style={{ ...S.addBtn, background: lockoutOn ? C.danger : undefined }}
+                            onClick={flip}
+                            disabled={savingLockout}
+                          >
+                            {savingLockout ? "Saving…" : lockoutOn ? "Turn it off" : "Turn the lockout on"}
+                          </button>
+                        ) : (
+                          <span style={S.roleHint}>Only an admin can move this.</span>
+                        )}
+                      </div>
+                    );
+                  })()}
+
 
                   {/* Somebody standing at a machine, waiting. It goes at the
                       top, above the shift times, because it is the only part
