@@ -5289,6 +5289,49 @@ export default function StockControl() {
     setRequisitionNotes(`For job ${job.job_number} cut list — ${group.stockLengthM} m lengths`);
   }
 
+  // Books one bar off the shelf for a bar on the cutting order. Goes
+  // through the same Use stock form as any set-aside material, so the
+  // shelf, the allocation and the usage log all move together -- only
+  // the numbers arrive filled in: one bar, and the offcut the cutting
+  // order says that bar leaves, if it is long enough to keep. The
+  // operator can still change either before pressing Use.
+  function bookOutBarFromCutList(job, group, bar, barNumber) {
+    const open = (allocationsList || []).filter(
+      (a) => a.job_id === job.id && a.status !== "released" && Number(a.qty_allocated) - Number(a.qty_used) > 0
+    );
+    // The allocation whose stock line is this material at this length or
+    // longer. Exact length first, so a 6m bar is used before a 13m one.
+    const candidates = open
+      .map((a) => ({ a, it: (items || []).find((i) => i.id === a.item_id) }))
+      .filter(
+        ({ it }) =>
+          it &&
+          it.mainCat === "structural" &&
+          sameText(it.name, group.section) &&
+          sameText(it.grade, group.grade) &&
+          Number(it.length) >= Number(group.stockLengthM) &&
+          it.stockType !== "offcut"
+      )
+      .sort((x, y) => Number(x.it.length) - Number(y.it.length));
+    if (candidates.length === 0) {
+      alert(
+        `No ${materialName(group, findSectionType)} at ${group.stockLengthM} m or longer is set aside for ${job.job_number}. ` +
+          "Set some aside on the job's Cut to size tab, or use Pull from stock below."
+      );
+      return;
+    }
+    const { a, it } = candidates[0];
+    const keep = offcutIsKeepable(bar.offcutMm);
+    setUseAllocationModal({
+      allocation: a,
+      item: it,
+      qty: "1",
+      // Metres, to three places: that is the unit the stock line keeps.
+      offcuts: keep ? [{ length: String(Math.round(bar.offcutMm) / 1000), qty: "1" }] : [],
+      note: `Bar ${barNumber} of the cutting order${keep ? "" : ` — the ${Math.round(bar.offcutMm)} mm left over is scrap`}`,
+    });
+  }
+
   // The saw operator's count: how many of a line are cut so far. Clamped
   // to the line's quantity. Saved straight away, since it is pressed
   // between cuts with dirty hands.
@@ -12133,6 +12176,7 @@ export default function StockControl() {
                                   allocations={(allocationsList || []).filter((a) => a.job_id === job.id)}
                                   requisitions={requisitions || []}
                                   onCount={(item, value) => countCutItem(job, item, value)}
+                                  onBookOut={(group, bar, barNumber) => bookOutBarFromCutList(job, group, bar, barNumber)}
                                   SavedCheck={SavedCheck}
                                 />
                               </div>
@@ -16605,6 +16649,11 @@ export default function StockControl() {
               {useAllocationModal.allocation.item_name} — set aside for {useAllocationModal.allocation.process_name} on{" "}
               {useAllocationModal.allocation.job_number}
             </div>
+            {/* Where the numbers below came from, when the cutting order
+                filled them in rather than the operator. */}
+            {useAllocationModal.note && (
+              <div style={{ ...S.roleHint, color: C.accentRaw, fontWeight: 600, marginTop: 4 }}>{useAllocationModal.note}</div>
+            )}
 
             <div style={{ marginTop: 10 }}>
               <label style={S.label}>How much did you use</label>

@@ -73,6 +73,7 @@ export default function CutToSize({
   onSetAside,
   onRequisition,
   onCount,
+  onBookOut,
   SavedCheck,
 }) {
   const [draft, setDraft] = useState(blankLine);
@@ -273,6 +274,23 @@ export default function CutToSize({
                         >
                           {fmtMm(bar.offcutMm)} {offcutIsKeepable(bar.offcutMm) ? "keep" : "scrap"}
                         </span>
+                        {/* The operator's way off the shelf: one bar, its
+                            offcut already filled in on the Use stock form. */}
+                        {onBookOut && (
+                          <button
+                            type="button"
+                            className="stk-btn"
+                            style={S.reqActionBtnMuted}
+                            onClick={() => onBookOut(g, bar, i + 1)}
+                            title={
+                              offcutIsKeepable(bar.offcutMm)
+                                ? `Book one ${fmtM(g.stockLengthM)} bar out for this job, with the ${fmtMm(bar.offcutMm)} offcut going back to stock`
+                                : `Book one ${fmtM(g.stockLengthM)} bar out for this job — the ${fmtMm(bar.offcutMm)} left over is scrap`
+                            }
+                          >
+                            Book out
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
