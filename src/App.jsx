@@ -2976,6 +2976,7 @@ export default function StockControl() {
     setNewStockItemModal({
       quoteItemIdx: idx,
       forJob: true,
+      customer: newJobForm.customer,
       partNumber: "",
       name: line.description.trim(),
       value: line.unitPrice || "",
@@ -2992,7 +2993,7 @@ export default function StockControl() {
     const newItem = {
       id: uid(),
       mainCat: "custom",
-      customer: newJobForm.customer,
+      customer: m.customer || newJobForm?.customer || "",
       partNumber: m.partNumber.trim(),
       name: m.name.trim(),
       grade: "",
@@ -3004,10 +3005,17 @@ export default function StockControl() {
       salesPerson: "",
     };
     setItems((prev) => [...prev, newItem]);
-    setNewJobForm((f) => ({
-      ...f,
-      quoteItems: f.quoteItems.map((it, i) => (i === m.quoteItemIdx ? { ...it, linkedItemId: newItem.id, unitPrice: String(newItem.value) } : it)),
-    }));
+    // The same small form serves two places: a line on the New Job form,
+    // or the "Add an item" box inside a job that already exists. Either
+    // way the line ends up linked to the item just made.
+    if (m.forJobDetail) {
+      setNewItemForm((f) => ({ ...f, description: newItem.name, linkedItemId: newItem.id, unitPrice: String(newItem.value) }));
+    } else {
+      setNewJobForm((f) => ({
+        ...f,
+        quoteItems: f.quoteItems.map((it, i) => (i === m.quoteItemIdx ? { ...it, linkedItemId: newItem.id, unitPrice: String(newItem.value) } : it)),
+      }));
+    }
     setNewStockItemModal(null);
   }
 
@@ -18672,10 +18680,29 @@ export default function StockControl() {
                               <>
                                 Linked to Customer Stock{linked.partNumber ? ` — ${linked.partNumber}` : ""} — Available: {linked.qty}
                               </>
-                            ) : q && customerStock.length === 0 ? (
-                              <>{jobDetail.job.customer || "This customer"} has nothing in Customer Stock yet — this will be a free line.</>
+                            ) : q && jobDetail.job.customer ? (
+                              // Same small form the New Job line uses: a
+                              // part number is required there too, so the
+                              // drawing system can find it later.
+                              <button
+                                type="button"
+                                className="stk-btn"
+                                style={S.reqActionBtnMuted}
+                                onClick={() =>
+                                  setNewStockItemModal({
+                                    forJobDetail: true,
+                                    customer: jobDetail.job.customer,
+                                    partNumber: "",
+                                    name: newItemForm.description.trim(),
+                                    value: newItemForm.unitPrice || "",
+                                    loc: "",
+                                  })
+                                }
+                              >
+                                <Plus size={11} /> Not in Customer Stock — add it
+                              </button>
                             ) : q ? (
-                              <>Not matched to Customer Stock — pick from the list, or leave it as a free line.</>
+                              <>This job has no customer, so there is no Customer Stock to add this to.</>
                             ) : null}
                           </div>
                         </>
