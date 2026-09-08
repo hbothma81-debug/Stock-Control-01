@@ -1149,7 +1149,10 @@ export default function StockControl() {
   const [newStockItemModal, setNewStockItemModal] = useState(null);
   const [markInvoicedModal, setMarkInvoicedModal] = useState(null);
   const [invoiceQtyInputs, setInvoiceQtyInputs] = useState({});
-  const [newItemForm, setNewItemForm] = useState({ description: "", qty: "", unitPrice: "" });
+  const [newItemForm, setNewItemForm] = useState({ description: "", qty: "", unitPrice: "", linkedItemId: null });
+  // Whether the Customer Stock suggestions are open under the "Add an
+  // item" box inside a job. The New Job form keeps its own, per row.
+  const [jobItemSuggestOpen, setJobItemSuggestOpen] = useState(false);
   const [jobHistoryOpen, setJobHistoryOpen] = useState(false); // { [quoteItemId]: "3" }
   const [deliveryNoteBatchModal, setDeliveryNoteBatchModal] = useState(null);
   const [copyJobModal, setCopyJobModal] = useState(null);
@@ -18567,44 +18570,117 @@ export default function StockControl() {
                 {canEditThisJob && (
                   <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
                     <label style={S.label}>Add an item</label>
-                    <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        style={{ ...S.input, width: 68 }}
-                        value={newItemForm.qty}
-                        onChange={(e) => setNewItemForm((f) => ({ ...f, qty: e.target.value }))}
-                        placeholder="Qty"
-                      />
-                      <input
-                        style={{ ...S.input, flex: "1 1 160px" }}
-                        value={newItemForm.description}
-                        onChange={(e) => setNewItemForm((f) => ({ ...f, description: e.target.value }))}
-                        placeholder="What it is"
-                      />
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        style={{ ...S.input, width: 96 }}
-                        value={newItemForm.unitPrice}
-                        onChange={(e) => setNewItemForm((f) => ({ ...f, unitPrice: e.target.value }))}
-                        placeholder="R each"
-                      />
-                      <button
-                        type="button"
-                        className="stk-btn"
-                        style={S.reqActionBtn}
-                        disabled={!newItemForm.description.trim() || !(Number(newItemForm.qty) > 0)}
-                        onClick={async () => {
-                          const ok = await addJobQuoteItem(jobDetail.job, newItemForm);
-                          if (ok) setNewItemForm({ description: "", qty: "", unitPrice: "" });
-                        }}
-                      >
-                        <Plus size={13} /> Add
-                      </button>
-                    </div>
+                    {/* Same type-to-find as the New Job form: start typing
+                        a part number or name and this customer's stock
+                        items offer themselves. Picking one links the line
+                        to the stock record and brings its price, so a job
+                        opened later behaves the same as one being booked
+                        in. Typing something else keeps it a free line. */}
+                    {(() => {
+                      const q = newItemForm.description.trim().toLowerCase();
+                      const customerStock = (items || []).filter((si) => si.mainCat === "custom" && si.customer === jobDetail.job.customer);
+                      const suggestions =
+                        jobItemSuggestOpen && q && !newItemForm.linkedItemId
+                          ? customerStock
+                              .filter((si) => (si.partNumber || "").toLowerCase().includes(q) || si.name.toLowerCase().includes(q))
+                              .slice(0, 8)
+                          : [];
+                      const linked = newItemForm.linkedItemId ? customerStock.find((si) => si.id === newItemForm.linkedItemId) : null;
+                      const pick = (si) => {
+                        setNewItemForm((f) => ({ ...f, description: si.name, linkedItemId: si.id, unitPrice: String(si.value ?? "") }));
+                        setJobItemSuggestOpen(false);
+                      };
+                      return (
+                        <>
+                          <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              style={{ ...S.input, width: 68 }}
+                              value={newItemForm.qty}
+                              onChange={(e) => setNewItemForm((f) => ({ ...f, qty: e.target.value }))}
+                              placeholder="Qty"
+                            />
+                            <div style={{ position: "relative", flex: "1 1 160px" }}>
+                              <input
+                                style={S.input}
+                                value={newItemForm.description}
+                                onChange={(e) => {
+                                  // Typing again un-links: the line no longer
+                                  // says what the stock record says.
+                                  setNewItemForm((f) => ({ ...f, description: e.target.value, linkedItemId: null }));
+                                  setJobItemSuggestOpen(true);
+                                }}
+                                onFocus={() => setJobItemSuggestOpen(true)}
+                                onBlur={() => {
+                                  // An exact name typed in full links on its
+                                  // own, without needing the tap.
+                                  const exact = customerStock.find((si) => si.name.trim().toLowerCase() === q);
+                                  if (exact && !newItemForm.linkedItemId) pick(exact);
+                                  setTimeout(() => setJobItemSuggestOpen(false), 150);
+                                }}
+                                placeholder="Part number or description — start typing to match Customer Stock…"
+                              />
+                              {suggestions.length > 0 && (
+                                <div style={S.suggestDropdown}>
+                                  {suggestions.map((si) => (
+                                    <button
+                                      key={si.id}
+                                      type="button"
+                                      className="stk-btn"
+                                      style={S.suggestItem}
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        pick(si);
+                                      }}
+                                    >
+                                      <span style={{ fontWeight: 600 }}>{si.partNumber || "—"}</span>
+                                      <span style={{ color: C.muted }}> — {si.name}</span>
+                                      {canSeeValue && si.value != null && si.value !== "" && (
+                                        <span style={{ color: C.muted }}> · R{Number(si.value).toFixed(2)}</span>
+                                      )}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              style={{ ...S.input, width: 96 }}
+                              value={newItemForm.unitPrice}
+                              onChange={(e) => setNewItemForm((f) => ({ ...f, unitPrice: e.target.value }))}
+                              placeholder="R each"
+                            />
+                            <button
+                              type="button"
+                              className="stk-btn"
+                              style={S.reqActionBtn}
+                              disabled={!newItemForm.description.trim() || !(Number(newItemForm.qty) > 0)}
+                              onClick={async () => {
+                                const ok = await addJobQuoteItem(jobDetail.job, newItemForm);
+                                if (ok) setNewItemForm({ description: "", qty: "", unitPrice: "", linkedItemId: null });
+                              }}
+                            >
+                              <Plus size={13} /> Add
+                            </button>
+                          </div>
+                          <div style={{ ...S.roleHint, marginTop: 2 }}>
+                            {linked ? (
+                              <>
+                                Linked to Customer Stock{linked.partNumber ? ` — ${linked.partNumber}` : ""} — Available: {linked.qty}
+                              </>
+                            ) : q && customerStock.length === 0 ? (
+                              <>{jobDetail.job.customer || "This customer"} has nothing in Customer Stock yet — this will be a free line.</>
+                            ) : q ? (
+                              <>Not matched to Customer Stock — pick from the list, or leave it as a free line.</>
+                            ) : null}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
 
