@@ -18889,11 +18889,32 @@ export default function StockControl() {
                     {name}
                     {duplicated && ` ×${jobStages.length}`}
                     {orphaned && " (not in list)"}
+                    {checked && stageHasNothingToCut(name, jobDetail?.quoteItems || []) && " ⚠"}
                     {locked && " 🔒"}
                   </button>
                 );
               })}
             </div>
+            {/* A cutting stage with nothing to cut on this job. Said here,
+                where the stage can be unticked, and not only on the floor
+                where nobody can do anything about it. JOB-0014 carried
+                plate Nesting and Laser for a week with only tube on it. */}
+            {(() => {
+              const idle = [...editProcessesModal.selected].filter((name) =>
+                stageHasNothingToCut(name, jobDetail?.quoteItems || [])
+              );
+              if (idle.length === 0) return null;
+              return (
+                <div style={{ ...S.roleHint, color: C.accentRaw, fontWeight: 600, marginTop: 10 }}>
+                  {idle.map((name) => (
+                    <div key={name}>
+                      {name}: no items on this job are tagged for the {madeOnLabel(cutsMadeOn(name))} machine. Untick it, or
+                      tag the items on the Items tab.
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
             <button type="button" className="stk-btn" style={{ ...S.submitBtn, marginTop: 14 }} onClick={saveEditProcesses}>
               Save
             </button>
