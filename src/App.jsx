@@ -4166,7 +4166,10 @@ export default function StockControl() {
     }
   }
 
-  function isProcessActionable(process, jobProcesses) {
+  // The earlier stages still holding this one back, in flow order. Empty
+  // means the stage may start. One rule for both the yes/no answer and the
+  // "Waiting: Bending" label on the queue, so the two cannot drift.
+  function blockingStages(process, jobProcesses) {
     // A shortage's catch-up stages are their own sequence, running
     // alongside the job rather than inside it. Comparing the two would
     // hold the re-cut behind stages the original job has already passed,
@@ -4185,7 +4188,12 @@ export default function StockControl() {
       .filter((p) => flowRank(p.process_name) < mine)
       // The other laser is a separate lane, not an earlier stage.
       .filter((p) => !inOtherLaserLane(process.process_name, p.process_name))
-      .every((p) => p.is_complete || (releasesOnStart(p.process_name) && !!p.started_at));
+      .filter((p) => !(p.is_complete || (releasesOnStart(p.process_name) && !!p.started_at)))
+      .sort((a, b) => flowRank(a.process_name) - flowRank(b.process_name));
+  }
+
+  function isProcessActionable(process, jobProcesses) {
+    return blockingStages(process, jobProcesses).length === 0;
   }
 
   // How much of ONE item may pass through this stage right now.
@@ -4328,12 +4336,36 @@ export default function StockControl() {
       for (const job of activeJobs) {
         const jobProcesses = (allProcesses || []).filter((p) => p.job_id === job.id);
         const jobQuoteItems = (allQuoteItems || []).filter((it) => it.job_id === job.id);
+        const jobItemProgress = allItemProgress.filter((ip) => jobProcesses.some((jp) => jp.id === ip.job_process_id));
         for (const p of jobProcesses) {
           if (p.is_complete || !byProcessType[p.process_name]) continue;
+          const blockers = blockingStages(p, jobProcesses);
+          const isReady = blockers.length === 0;
+          // Partly ready: a per-item stage whose earlier stages have let
+          // some pieces through already. Those pieces are real work now,
+          // even though the stage as a whole is still waiting, so the
+          // queue counts them as ready and says how many.
+          let readyQty = 0;
+          let totalQty = 0;
+          if (!isReady && (p.tracking_mode || "batch") === "each") {
+            for (const it of jobQuoteItems) {
+              if (!stageTakesItem(p.process_name, it)) continue;
+              totalQty += Number(it.qty) || 0;
+              const { allowed } = itemFlowLimit(p, jobProcesses, jobItemProgress, it);
+              const doneHere = Number(
+                jobItemProgress.find((ip) => ip.job_process_id === p.id && ip.job_quote_item_id === it.id)?.qty_complete
+              ) || 0;
+              readyQty += Math.max(0, allowed - doneHere);
+            }
+          }
           byProcessType[p.process_name].push({
             job,
             process: p,
-            isReady: isProcessActionable(p, jobProcesses),
+            isReady,
+            partlyReady: !isReady && readyQty > 0,
+            readyQty,
+            totalQty,
+            waitingOn: blockers[0]?.process_name || null,
             quoteItems: jobQuoteItems,
             documents: (allDocs || []).filter((d) => d.job_id === job.id && d.process_name === p.process_name),
             itemProgress: allItemProgress.filter((ip) => ip.job_process_id === p.id),
@@ -4342,9 +4374,7 @@ export default function StockControl() {
             // The whole job's stages and per-item progress, so each item's
             // row can work out how far that one item has already got.
             jobProcesses,
-            jobItemProgress: allItemProgress.filter((ip) =>
-              jobProcesses.some((jp) => jp.id === ip.job_process_id)
-            ),
+            jobItemProgress,
             // Set only on catch-up stages, so the queue can say this is a
             // replacement for something missing rather than new work.
             shortage: p.shortage_id ? queueShortages.find((s) => s.id === p.shortage_id) || null : null,
@@ -4361,7 +4391,9 @@ export default function StockControl() {
           const aShort = a.shortage && a.shortage.is_priority !== false ? 1 : 0;
           const bShort = b.shortage && b.shortage.is_priority !== false ? 1 : 0;
           if (aShort !== bShort) return bShort - aShort;
-          if (a.isReady !== b.isReady) return a.isReady ? -1 : 1;
+          const aReady = a.isReady || a.partlyReady;
+          const bReady = b.isReady || b.partlyReady;
+          if (aReady !== bReady) return aReady ? -1 : 1;
           return new Date(a.job.due_date || "2999-01-01") - new Date(b.job.due_date || "2999-01-01");
         });
       }
@@ -12588,16 +12620,19 @@ export default function StockControl() {
               const visibleDepts = Object.entries(productionQueue || {})
                 .map(([procType, allEntries]) => {
                   // Counts what the department can actually see now that
-                  // nothing is hidden, so the number on the pill and the
-                  // length of the list agree.
-                  const readyCount = q ? allEntries.filter(matchesJob).length : allEntries.length;
+                  // nothing is hidden, so the numbers on the card and the
+                  // two pills behind it agree. Ready is what can start;
+                  // waiting is the workload on its way.
+                  const shown = q ? allEntries.filter(matchesJob) : allEntries;
+                  const readyCount = shown.filter((e) => e.isReady || e.partlyReady).length;
+                  const waitingCount = shown.length - readyCount;
                   // Only nesting gets the marker now. A shortage past that
                   // point is carried by its own run, which shows up in the
                   // department's normal list like any other work — a second
                   // marker would be pointing at something already there.
                   const hasPendingShortage =
                     !q && isNestingProcess(procType) && (shortagesList || []).some((s) => s.status === "flagged");
-                  return { procType, readyCount, hasPendingShortage };
+                  return { procType, readyCount, waitingCount, hasPendingShortage };
                 })
                 // A department with nothing ready and no shortage needing
                 // attention has nothing to actually do right now — hide it
@@ -12610,7 +12645,7 @@ export default function StockControl() {
                 // Only departments with work in them. A station with
                 // nothing at it is noise on a screen someone is using to
                 // decide what to do next.
-                .filter(({ readyCount, hasPendingShortage }) => readyCount > 0 || hasPendingShortage)
+                .filter(({ readyCount, waitingCount, hasPendingShortage }) => readyCount > 0 || waitingCount > 0 || hasPendingShortage)
                 // In factory-flow order, the order set in Stock Manager,
                 // so the list reads the way work moves through the shop.
                 // Anything no longer in that list sorts last rather than
@@ -12652,13 +12687,17 @@ export default function StockControl() {
                         <ChevronRight size={20} />
                       </button>
                     )}
-                    {visibleDepts.map(({ procType, readyCount, hasPendingShortage }) => {
+                    {visibleDepts.map(({ procType, readyCount, waitingCount, hasPendingShortage }) => {
+                // A department with work on the way but nothing that can
+                // start stays on the list, dimmed: it should know what is
+                // coming, but nobody should walk over to it.
+                const idle = readyCount === 0 && !hasPendingShortage;
                 return (
                   <button
                     key={procType}
                     type="button"
                     className="stk-btn"
-                    style={S.productionDeptCard}
+                    style={{ ...S.productionDeptCard, ...(idle ? { opacity: 0.6 } : {}) }}
                     onClick={() => {
                       setProductionSelectedDept(procType);
                       setProductionSelectedProcessId(null);
@@ -12668,7 +12707,10 @@ export default function StockControl() {
                       <span style={{ width: 10, height: 10, borderRadius: "50%", background: C.danger, flexShrink: 0 }} title="Shortage needs attention" />
                     )}
                     <span style={{ flex: 1 }}>{procType}</span>
-                    <span style={S.gradeCount}>{readyCount}</span>
+                    {waitingCount > 0 && (
+                      <span style={{ fontSize: 13, fontWeight: 500, color: C.muted, whiteSpace: "nowrap" }}>{waitingCount} waiting</span>
+                    )}
+                    <span style={S.gradeCount} title="Ready to start">{readyCount}</span>
                     <ChevronRight size={20} />
                   </button>
                 );
@@ -12733,12 +12775,26 @@ export default function StockControl() {
               // the assignment was protecting (two people not starting the
               // same job) without losing the work.
               //
-              // Yours first, then unassigned, then other people's.
-              entries = entries.slice().sort((a, b) => {
+              // Two pills: what can start now, and what is still waiting
+              // on an earlier stage. Sorting the whole list by owner used
+              // to put your own waiting jobs above everyone's ready ones,
+              // and other people's ready work under all the waiting work,
+              // so the answer to "what is next" was a scroll away. Owner
+              // still decides the order, but only among work that can
+              // actually start: urgent, then priority re-cuts, then yours,
+              // then unassigned, then other people's, then due date.
+              const orderWithinGroup = (a, b) => {
+                if (a.process.is_urgent !== b.process.is_urgent) return a.process.is_urgent ? -1 : 1;
+                const aShort = a.shortage && a.shortage.is_priority !== false ? 1 : 0;
+                const bShort = b.shortage && b.shortage.is_priority !== false ? 1 : 0;
+                if (aShort !== bShort) return bShort - aShort;
                 const rank = (e) =>
                   e.process.assigned_to === currentUser?.id ? 0 : !e.process.assigned_to ? 1 : 2;
-                return rank(a) - rank(b);
-              });
+                if (rank(a) !== rank(b)) return rank(a) - rank(b);
+                return new Date(a.job.due_date || "2999-01-01") - new Date(b.job.due_date || "2999-01-01");
+              };
+              const readyEntries = entries.filter((e) => e.isReady || e.partlyReady).sort(orderWithinGroup);
+              const waitingEntries = entries.filter((e) => !(e.isReady || e.partlyReady)).sort(orderWithinGroup);
               return (
                 <div style={{ ...S.gradeItems, marginTop: 8 }}>
                   {/* Only the not-yet-nested ones. Once nesting has set a
@@ -13177,7 +13233,8 @@ export default function StockControl() {
                       );
                     })()
                   ) : (
-                    entries.map(({ job, process, isReady, quoteItems, shortage }) => {
+                    (() => {
+                    const renderCard = ({ job, process, isReady, partlyReady, readyQty, totalQty: partTotal, waitingOn, quoteItems, shortage }) => {
                       const totalQty = quoteItems.reduce((sum, it) => sum + Number(it.qty || 0), 0);
                       return (
                         <button
@@ -13199,8 +13256,18 @@ export default function StockControl() {
                         >
                           <div style={S.reqCardTop}>
                             <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
-                            <span style={{ ...S.reqStatusTag, ...(isReady ? S.reqStatus_received : S.reqStatus_ordered) }}>
-                              {isReady ? "Ready" : "Waiting"}
+                            {/* Waiting rows say what they wait for, so the
+                                next question is answered without opening
+                                the job. Partly ready ones say how much can
+                                go now. */}
+                            <span style={{ ...S.reqStatusTag, ...(isReady || partlyReady ? S.reqStatus_received : S.reqStatus_ordered) }}>
+                              {isReady
+                                ? "Ready"
+                                : partlyReady
+                                  ? `Partly ready: ${readyQty} of ${partTotal}`
+                                  : waitingOn
+                                    ? `Waiting: ${waitingOn}`
+                                    : "Waiting"}
                             </span>
                           </div>
                           {shortage && (
@@ -13231,7 +13298,28 @@ export default function StockControl() {
                           </div>
                         </button>
                       );
-                    })
+                    };
+                    return (
+                      <>
+                        {entries.length > 0 && (
+                          <Section title="Ready now" count={readyEntries.length}>
+                            {readyEntries.length === 0 ? (
+                              <div style={S.empty}>Nothing can start yet — everything here is waiting on an earlier stage.</div>
+                            ) : (
+                              readyEntries.map(renderCard)
+                            )}
+                          </Section>
+                        )}
+                        {/* Shut by default: the upcoming workload is there
+                            to look at, not in the way of what is next. */}
+                        {waitingEntries.length > 0 && (
+                          <Section title="Waiting on earlier stages" count={waitingEntries.length} defaultOpen={false} quiet>
+                            {waitingEntries.map(renderCard)}
+                          </Section>
+                        )}
+                      </>
+                    );
+                    })()
                   )}
                 </div>
               );
