@@ -11780,24 +11780,42 @@ export default function StockControl() {
                       const done = stages.filter((p) => p.is_complete).length;
                       const current = stages.find((p) => !p.is_complete) || null;
                       return (
-                        <div style={{ flexBasis: "100%", display: "flex", alignItems: "center", gap: 10, marginTop: 2 }}>
-                          <div style={{ display: "flex", gap: 3, flex: "0 1 360px" }}>
+                        <div style={{ flexBasis: "100%", display: "flex", alignItems: "center", gap: 8, marginTop: 2, flexWrap: "wrap" }}>
+                          <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+                            {/* Each stage carries its name. The sales
+                                desk works on a desktop, where a row of
+                                small labelled blocks reads better than a
+                                bare bar that needs hovering. */}
                             {stages.map((p) => {
                               const isCurrent = current && p.id === current.id;
                               const trouble = p.is_urgent && !p.is_complete;
-                              const fill = p.is_complete ? C.accentFinished : isCurrent ? C.accentRaw : "transparent";
+                              const fill = p.is_complete ? C.accentFinished : isCurrent ? C.accentTint : "transparent";
                               const edge = trouble ? C.danger : p.is_complete ? C.accentFinished : isCurrent ? C.accentRaw : C.border;
+                              const ink = p.is_complete ? "#fff" : isCurrent ? C.accentRaw : trouble ? C.danger : C.muted;
                               return (
                                 <span
                                   key={p.id}
                                   title={`${p.process_name}${p.is_complete ? " — done" : isCurrent ? " — now" : " — to come"}${trouble ? " — urgent" : ""}`}
-                                  style={{ flex: 1, height: 8, borderRadius: 2, background: fill, border: `${trouble ? 2 : 1}px solid ${edge}`, boxSizing: "border-box" }}
-                                />
+                                  style={{
+                                    fontSize: 11,
+                                    lineHeight: "14px",
+                                    padding: "1px 6px",
+                                    borderRadius: 3,
+                                    background: fill,
+                                    color: ink,
+                                    border: `${trouble ? 2 : 1}px solid ${edge}`,
+                                    fontWeight: isCurrent || trouble ? 700 : 500,
+                                    whiteSpace: "nowrap",
+                                    boxSizing: "border-box",
+                                  }}
+                                >
+                                  {p.process_name}
+                                </span>
                               );
                             })}
                           </div>
-                          <span style={{ ...S.roleHint, whiteSpace: "nowrap", ...(current?.is_urgent ? { color: C.danger, fontWeight: 600 } : {}) }}>
-                            {current ? `${current.process_name} · ${done} of ${stages.length}` : `All ${stages.length} stages done`}
+                          <span style={{ ...S.roleHint, whiteSpace: "nowrap" }}>
+                            {current ? `${done} of ${stages.length} done` : `All ${stages.length} stages done`}
                           </span>
                         </div>
                       );
