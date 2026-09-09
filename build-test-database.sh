@@ -41,6 +41,7 @@ ORDER=(
   setup-process-item-progress.sql
   setup-production-priority-shortage.sql
   setup-made-on-tag.sql
+  setup-job-documents-move.sql
 
   # --- modules that reference jobs
   setup-invoicing-delivery.sql

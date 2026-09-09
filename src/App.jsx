@@ -6052,8 +6052,20 @@ export default function StockControl() {
   async function moveJobDocument(doc, processName) {
     if (!supabase || (doc.process_name || null) === (processName || null)) return;
     try {
-      const { error } = await supabase.from("job_documents").update({ process_name: processName || null }).eq("id", doc.id);
+      // .select() so a move the database quietly refuses (no rule allowing
+      // the change -- setup-job-documents-move.sql adds it) comes back as
+      // zero rows and is said out loud, rather than looking like nothing
+      // happened.
+      const { data, error } = await supabase
+        .from("job_documents")
+        .update({ process_name: processName || null })
+        .eq("id", doc.id)
+        .select("id");
       if (error) throw error;
+      if (!data || data.length === 0) {
+        alert("The database refused to move that file. Run setup-job-documents-move.sql on the database, then try again.");
+        return;
+      }
       setMovingJobFileId(null);
       flashSaved(`jobdoc-${doc.id}`);
       refreshJobDetail();
