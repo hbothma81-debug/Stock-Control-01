@@ -1317,10 +1317,10 @@ export default function StockControl() {
   const [expandedDrawingHistory, setExpandedDrawingHistory] = useState({});
   const [showDrawingUpload, setShowDrawingUpload] = useState(false);
   const [drawingUploadCustomer, setDrawingUploadCustomer] = useState("");
-  // Which stage a file uploaded on the job's Files tab belongs to. Blank
-  // is "the whole job". A file filed against a stage shows on that
-  // stage's Production card and nowhere else on the floor.
-  const [jobFileUploadStage, setJobFileUploadStage] = useState("");
+  // The file on the job's Files tab whose "Move to" strip is open. Files
+  // are grouped by the stage they are filed against; moving one changes
+  // which stage's Production card shows it.
+  const [movingJobFileId, setMovingJobFileId] = useState(null);
   const [drawingUploadFiles, setDrawingUploadFiles] = useState([]); // [{file, partNumber, skip}]
   const [drawingUploadBusy, setDrawingUploadBusy] = useState(false);
   const [drawingUploadResult, setDrawingUploadResult] = useState(null);
@@ -6025,6 +6025,25 @@ export default function StockControl() {
     }
   }
 
+  // Re-files an uploaded document against a stage, or back onto the whole
+  // job. This is how every file that was on a job before stages existed
+  // gets to the right Production card: nothing was migrated, they all
+  // sit on the whole job until somebody moves them.
+  async function moveJobDocument(doc, processName) {
+    if (!supabase || (doc.process_name || null) === (processName || null)) return;
+    try {
+      const { error } = await supabase.from("job_documents").update({ process_name: processName || null }).eq("id", doc.id);
+      if (error) throw error;
+      setMovingJobFileId(null);
+      flashSaved(`jobdoc-${doc.id}`);
+      refreshJobDetail();
+      if (productionQueue !== null) fetchProductionQueue();
+    } catch (err) {
+      console.error("Failed to move the document:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
   function openBatchDeliveryNoteModal(job, quoteItems) {
     const itemsWithQty = submitInvoiceForEnteredQuantities(job, quoteItems);
     if (!itemsWithQty) return;
@@ -7671,7 +7690,11 @@ export default function StockControl() {
         key: "up:" + doc.id,
         name: doc.file_name,
         at: doc.created_at,
-        from: doc.process_name ? `Uploaded against ${doc.process_name}` : "Uploaded to the job",
+        from: `${doc.uploaded_by ? `${doc.uploaded_by} — ` : ""}${doc.process_name ? `filed against ${doc.process_name}` : "on the whole job"}`,
+        // Which group on the Files tab it sits in: a stage, or the whole
+        // job. Uploads can be moved between them; generated papers cannot.
+        stage: doc.process_name || "",
+        doc,
         open: () => viewJobDocument(doc),
         remove: isAdmin ? () => deleteJobDocument(doc) : null,
       })),
@@ -7679,6 +7702,7 @@ export default function StockControl() {
       key: "gen:" + g.id,
       name: g.file_name,
       at: g.generated_at,
+      stage: "__generated__",
       from: `${GENERATED_LABELS[g.document_type] || g.document_type}${g.generated_by ? ` — ${g.generated_by}` : ""}`,
       open: () => viewGeneratedDocument(g),
       remove: null, // a record of what was printed is not ours to tidy away
@@ -18543,78 +18567,126 @@ export default function StockControl() {
               It used to sit at the bottom of Overview, below the process
               checklist and the reserved stock, where a welder was never
               going to scroll to find it. */}
-          {jobDetailTab === "files" && (
-            <div style={{ marginTop: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          {jobDetailTab === "files" && (() => {
+            // Files grouped by where they are filed: the whole job, then
+            // each stage on the job in flow order, then the papers the
+            // app made. Each group is a pill with its own Upload, so you
+            // can see where files will land before you pick them, and
+            // every uploaded file has a Move strip to re-file it. A file
+            // filed against a stage shows on that stage's Production card
+            // and nowhere else on the floor.
+            const stageNames = inFlowOrder((jobDetail.processes || []).filter((p) => !p.shortage_id), jobDetail.job)
+              .map((p) => p.process_name)
+              .filter((name, i, all) => all.indexOf(name) === i);
+            // A file filed against a stage the job no longer has still
+            // needs somewhere to be seen and moved from.
+            const strays = [...new Set(visibleJobFiles.map((f) => f.stage).filter((s) => s && s !== "__generated__" && !stageNames.includes(s)))];
+            const groups = [
+              { key: "", title: "Whole job", upload: true },
+              ...stageNames.map((name) => ({ key: name, title: name, upload: true })),
+              ...strays.map((name) => ({ key: name, title: `${name} (no longer on this job)`, upload: false })),
+              { key: "__generated__", title: "Made by the app", upload: false },
+            ];
+            const uploadFor = (group) =>
+              canEditThisJob && group.upload ? (
+                <label className="stk-btn" style={{ ...S.reqActionBtnMuted, cursor: "pointer" }}>
+                  <Upload size={12} /> Upload
+                  <input
+                    type="file"
+                    multiple
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      uploadJobDocuments(jobDetail.job.id, e.target.files, group.key || null);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              ) : null;
+            return (
+              <div style={{ marginTop: 8 }}>
                 <label style={S.label}>Files on this job</label>
-                {canEditThisJob && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                    {/* Which stage these files are for. A bending drawing
-                        filed against Bending shows on the bender's card
-                        and nowhere else on the floor; "the whole job" is
-                        for anything that is not a stage's own paper. */}
-                    <select
-                      style={{ ...S.input, width: "auto", fontSize: 13, padding: "4px 6px" }}
-                      value={jobFileUploadStage}
-                      onChange={(e) => setJobFileUploadStage(e.target.value)}
-                      title="Which stage these files belong to. They show on that stage's Production card."
+                {groups.map((group) => {
+                  const files = visibleJobFiles.filter((f) => f.stage === group.key);
+                  // The app's own papers are a record, shut until wanted.
+                  // A stage with files starts open; an empty one shut,
+                  // with Upload still on the pill.
+                  const defaultOpen = group.key !== "__generated__" && files.length > 0;
+                  return (
+                    <Section
+                      key={group.key}
+                      title={group.title}
+                      count={files.length}
+                      defaultOpen={defaultOpen}
+                      right={uploadFor(group)}
                     >
-                      <option value="">For: the whole job</option>
-                      {inFlowOrder((jobDetail.processes || []).filter((p) => !p.shortage_id), jobDetail.job)
-                        .map((p) => p.process_name)
-                        .filter((name, i, all) => all.indexOf(name) === i)
-                        .map((name) => (
-                          <option key={name} value={name}>
-                            For: {name}
-                          </option>
-                        ))}
-                    </select>
-                    <label className="stk-btn" style={{ ...S.reqActionBtnMuted, cursor: "pointer" }}>
-                      <Upload size={12} /> Upload
-                      <input
-                        type="file"
-                        multiple
-                        style={{ display: "none" }}
-                        onChange={(e) => {
-                          uploadJobDocuments(jobDetail.job.id, e.target.files, jobFileUploadStage || null);
-                          e.target.value = "";
-                        }}
-                      />
-                    </label>
-                  </div>
-                )}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-                {visibleJobFiles.length === 0 ? (
-                  <div style={S.empty}>Nothing uploaded to this job yet.</div>
-                ) : (
-                  visibleJobFiles.map((f) => (
-                    <div key={f.key} style={S.managerRow}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <button
-                          type="button"
-                          className="stk-btn"
-                          style={{ ...S.reqActionBtnMuted, width: "100%", justifyContent: "flex-start" }}
-                          onClick={f.open}
-                        >
-                          <Paperclip size={13} /> {f.name}
-                        </button>
-                        <div style={S.roleHint}>
-                          {f.from}
-                          {f.at ? ` — ${new Date(f.at).toLocaleString()}` : ""}
-                        </div>
-                      </div>
-                      {f.remove && (
-                        <button type="button" className="stk-btn" style={S.managerDelete} onClick={f.remove}>
-                          <Trash2 size={13} />
-                        </button>
+                      {files.length === 0 ? (
+                        <div style={S.roleHint}>Nothing here yet.</div>
+                      ) : (
+                        files.map((f) => {
+                          const moving = f.doc && movingJobFileId === f.doc.id;
+                          return (
+                            <div key={f.key} style={{ ...S.managerRow, flexDirection: "column", alignItems: "stretch", gap: 4 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <button
+                                  type="button"
+                                  className="stk-btn"
+                                  style={{ ...S.reqActionBtnMuted, flex: 1, minWidth: 0, justifyContent: "flex-start" }}
+                                  onClick={f.open}
+                                >
+                                  <Paperclip size={13} /> {f.name}
+                                </button>
+                                {f.doc && canEditThisJob && (
+                                  <button
+                                    type="button"
+                                    className="stk-btn"
+                                    style={{
+                                      ...S.reqActionBtnMuted,
+                                      ...(moving ? { border: `1px solid ${C.accentRaw}`, color: C.accentRaw } : {}),
+                                    }}
+                                    onClick={() => setMovingJobFileId(moving ? null : f.doc.id)}
+                                    title="File this against a stage, so it shows on that stage's Production card"
+                                  >
+                                    Move to…
+                                  </button>
+                                )}
+                                <SavedCheck fieldKey={`jobdoc-${f.doc?.id}`} />
+                                {f.remove && (
+                                  <button type="button" className="stk-btn" style={S.managerDelete} onClick={f.remove}>
+                                    <Trash2 size={13} />
+                                  </button>
+                                )}
+                              </div>
+                              <div style={S.roleHint}>
+                                {f.from}
+                                {f.at ? ` — ${new Date(f.at).toLocaleString()}` : ""}
+                              </div>
+                              {moving && (
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+                                  {[{ key: "", title: "Whole job" }, ...stageNames.map((n) => ({ key: n, title: n }))]
+                                    .filter((g) => g.key !== group.key)
+                                    .map((g) => (
+                                      <button
+                                        key={g.key}
+                                        type="button"
+                                        className="stk-btn"
+                                        style={S.segBtn}
+                                        onClick={() => moveJobDocument(f.doc, g.key || null)}
+                                      >
+                                        {g.title}
+                                      </button>
+                                    ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
                       )}
-                    </div>
-                  ))
-                )}
+                    </Section>
+                  );
+                })}
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {jobDetailTab === "items" && (
             <>
