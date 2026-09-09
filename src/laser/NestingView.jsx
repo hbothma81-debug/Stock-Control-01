@@ -3,6 +3,7 @@ import { Plus, X, AlertTriangle, PackagePlus, FileText, Upload, ChevronDown, Che
 import { C, S } from "../theme.js";
 import { plannedMinutes, fmtMinutes } from "../lib/cuttingTime.js";
 import Section from "../Section.jsx";
+import TypeToFind from "../TypeToFind.jsx";
 
 // Prince's screen, and very nearly the only one he uses.
 //
@@ -230,25 +231,11 @@ export default function NestingView({
               </div>
               <div style={{ flex: "1 1 120px" }}>
                 <label style={S.label}>Thickness</label>
-                <select style={S.input} value={newThickness} onChange={(e) => setNewThickness(e.target.value)}>
-                  <option value="">Pick…</option>
-                  {thicknesses.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
+                <TypeToFind options={thicknesses} value={newThickness} onChange={setNewThickness} emptyLabel="Pick…" />
               </div>
               <div style={{ flex: "1 1 120px" }}>
                 <label style={S.label}>Grade</label>
-                <select style={S.input} value={newGrade} onChange={(e) => setNewGrade(e.target.value)}>
-                  <option value="">Pick…</option>
-                  {grades.map((g) => (
-                    <option key={g} value={g}>
-                      {g}
-                    </option>
-                  ))}
-                </select>
+                <TypeToFind options={grades} value={newGrade} onChange={setNewGrade} emptyLabel="Pick…" />
               </div>
               <div style={{ flex: "1 1 150px" }}>
                 <label style={S.label}>Sheet name</label>
@@ -753,25 +740,11 @@ function NestRow({
                 </div>
                 <div style={{ flex: "1 1 120px" }}>
                   <label style={S.label}>Thickness</label>
-                  <select style={S.input} value={thickness} onChange={(e) => setThickness(e.target.value)}>
-                    <option value="">Pick…</option>
-                    {thicknesses.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
+                  <TypeToFind options={thicknesses} value={thickness} onChange={setThickness} emptyLabel="Pick…" />
                 </div>
                 <div style={{ flex: "1 1 120px" }}>
                   <label style={S.label}>Grade</label>
-                  <select style={S.input} value={grade} onChange={(e) => setGrade(e.target.value)}>
-                    <option value="">Pick…</option>
-                    {grades.map((g) => (
-                      <option key={g} value={g}>
-                        {g}
-                      </option>
-                    ))}
-                  </select>
+                  <TypeToFind options={grades} value={grade} onChange={setGrade} emptyLabel="Pick…" />
                 </div>
                 <div style={{ flex: "1 1 150px" }}>
                   <label style={S.label}>Sheet name</label>

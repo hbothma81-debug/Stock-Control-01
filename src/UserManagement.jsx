@@ -2,6 +2,7 @@ import { useState, Fragment } from "react";
 import { ChevronDown, RefreshCw, Trash2 } from "lucide-react";
 import { F, C, S } from "./theme.js";
 import { NAV_TABS, EXTRA_SECTIONS, SECTIONS } from "./constants.js";
+import TypeToFind from "./TypeToFind.jsx";
 
 // The User Management screen — who can see and do what.
 //
@@ -224,16 +225,12 @@ export default function UserManagement({
                 look instead of twelve. */}
             <div style={{ marginTop: 8 }}>
               <label style={S.label}>Shift</label>
-              <select
-                style={S.input}
+              <TypeToFind
+                options={(shifts || []).map((sh) => ({ value: sh.id, label: sh.name }))}
                 value={p.shiftId || ""}
-                onChange={(e) => updatePersonField(p.id, "shiftId", e.target.value || null)}
-              >
-                <option value="">Not restricted</option>
-                {(shifts || []).map((sh) => (
-                  <option key={sh.id} value={sh.id}>{sh.name}</option>
-                ))}
-              </select>
+                onChange={(v) => updatePersonField(p.id, "shiftId", v || null)}
+                emptyLabel="Not restricted"
+              />
               {(shifts || []).length === 0 && (
                 <div style={S.roleHint}>
                   No shifts set up yet — add them under Stock Manager → Time Manager.
@@ -252,16 +249,12 @@ export default function UserManagement({
 
             <div style={{ marginTop: 8 }}>
               <label style={S.label}>Department</label>
-              <select
-                style={S.input}
+              <TypeToFind
+                options={master.staffDepartments}
                 value={p.department || ""}
-                onChange={(e) => updatePersonField(p.id, "department", e.target.value)}
-              >
-                <option value="">Not set</option>
-                {master.staffDepartments.map((d) => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
+                onChange={(v) => updatePersonField(p.id, "department", v)}
+                emptyLabel="Not set"
+              />
             </div>
             <div style={{ marginTop: 8 }}>
               <label style={S.label}>

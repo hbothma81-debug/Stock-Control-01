@@ -1242,26 +1242,20 @@ export default function StockControl() {
           onChange={(e) => setProductionSearchQuery(e.target.value)}
           placeholder="Search job number, SigmaNest number, customer, or sales rep…"
         />
-        <select
-          style={{ ...S.input, flex: 1, minWidth: 130 }}
+        <TypeToFind
+          style={{ flex: 1, minWidth: 130 }}
+          options={customers}
           value={productionCustomerFilter}
-          onChange={(e) => setProductionCustomerFilter(e.target.value)}
-        >
-          <option value="">All customers</option>
-          {customers.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
-        <select
-          style={{ ...S.input, flex: 1, minWidth: 130 }}
+          onChange={setProductionCustomerFilter}
+          emptyLabel="All customers"
+        />
+        <TypeToFind
+          style={{ flex: 1, minWidth: 130 }}
+          options={reps}
           value={productionSalesRepFilter}
-          onChange={(e) => setProductionSalesRepFilter(e.target.value)}
-        >
-          <option value="">All sales reps</option>
-          {reps.map((r) => (
-            <option key={r} value={r}>{r}</option>
-          ))}
-        </select>
+          onChange={setProductionSalesRepFilter}
+          emptyLabel="All sales reps"
+        />
       </div>
     );
   };
@@ -12349,18 +12343,20 @@ export default function StockControl() {
                       onChange={(e) => setJobsSearchQuery(e.target.value)}
                       placeholder="Search job number, customer, or sales rep…"
                     />
-                    <select style={{ ...S.input, flex: 1, minWidth: 130 }} value={jobsCustomerFilter} onChange={(e) => setJobsCustomerFilter(e.target.value)}>
-                      <option value="">All customers</option>
-                      {customers.map((c) => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
-                    <select style={{ ...S.input, flex: 1, minWidth: 130 }} value={jobsSalesRepFilter} onChange={(e) => setJobsSalesRepFilter(e.target.value)}>
-                      <option value="">All sales reps</option>
-                      {salesReps.map((r) => (
-                        <option key={r} value={r}>{r}</option>
-                      ))}
-                    </select>
+                    <TypeToFind
+                      style={{ flex: 1, minWidth: 130 }}
+                      options={customers}
+                      value={jobsCustomerFilter}
+                      onChange={setJobsCustomerFilter}
+                      emptyLabel="All customers"
+                    />
+                    <TypeToFind
+                      style={{ flex: 1, minWidth: 130 }}
+                      options={salesReps}
+                      value={jobsSalesRepFilter}
+                      onChange={setJobsSalesRepFilter}
+                      emptyLabel="All sales reps"
+                    />
                   </div>
 
                   {/* What is on the floor, in money. Same reading as the
@@ -17982,11 +17978,12 @@ export default function StockControl() {
               <>
                 <div style={{ marginTop: 10 }}>
                   <label style={S.label}>Job (optional)</label>
-                  <select
-                    style={S.input}
-                    value={usageModal.jobNumber}
-                    onChange={(e) => {
-                      const selectedJobNumber = e.target.value;
+                  <TypeToFind
+                    options={(jobsList || [])
+                      .filter((j) => j.status === "in_progress" || j.status === "complete")
+                      .map((j) => ({ value: j.job_number, label: `${j.job_number} — ${j.customer || "No customer"}` }))}
+                    value={usageModal.jobNumber || ""}
+                    onChange={(selectedJobNumber) => {
                       const matchedJob = (jobsList || []).find((j) => j.job_number === selectedJobNumber);
                       setUsageModal((m) => ({
                         ...m,
@@ -17998,31 +17995,18 @@ export default function StockControl() {
                         customer: matchedJob ? matchedJob.customer || "" : m.customer,
                       }));
                     }}
-                  >
-                    <option value="">No specific job</option>
-                    {(jobsList || [])
-                      .filter((j) => j.status === "in_progress" || j.status === "complete")
-                      .map((j) => (
-                        <option key={j.id} value={j.job_number}>
-                          {j.job_number} — {j.customer || "No customer"}
-                        </option>
-                      ))}
-                  </select>
+                    emptyLabel="No specific job"
+                  />
                 </div>
                 <div style={{ marginTop: 10 }}>
                   <label style={S.label}>Customer</label>
-                  <input
-                    style={S.input}
-                    list="usage-modal-customer-list"
-                    value={usageModal.customer}
-                    onChange={(e) => setUsageModal((m) => ({ ...m, customer: e.target.value }))}
-                    placeholder="e.g. HPE"
+                  <TypeToFind
+                    options={master.customers}
+                    value={usageModal.customer || ""}
+                    onChange={(v) => setUsageModal((m) => ({ ...m, customer: v }))}
+                    allowNew
+                    emptyLabel="e.g. HPE"
                   />
-                  <datalist id="usage-modal-customer-list">
-                    {master.customers.map((c) => (
-                      <option key={c} value={c} />
-                    ))}
-                  </datalist>
                 </div>
                 <div style={{ ...S.roleHint, marginTop: 6 }}>Job number or customer — at least one is required.</div>
                 <div style={{ marginTop: 10 }}>
@@ -18415,16 +18399,14 @@ export default function StockControl() {
                         )}
                         {canEditThisJob && (
                           <div style={{ display: "flex", gap: 6, marginTop: 4, marginLeft: 22, flexWrap: "wrap" }}>
-                            <select
-                              style={{ ...S.input, fontSize: 14, padding: "5px 8px", flex: "1 1 140px" }}
+                            <TypeToFind
+                              style={{ flex: "1 1 140px" }}
+                              inputStyle={{ fontSize: 14, padding: "5px 26px 5px 8px" }}
+                              options={(people || []).map((person) => ({ value: person.id, label: person.name }))}
                               value={p.assigned_to || ""}
-                              onChange={(e) => updateJobProcessAssignee(p, jobDetail.job, e.target.value)}
-                            >
-                              <option value="">Not assigned yet</option>
-                              {(people || []).map((person) => (
-                                <option key={person.id} value={person.id}>{person.name}</option>
-                              ))}
-                            </select>
+                              onChange={(v) => updateJobProcessAssignee(p, jobDetail.job, v)}
+                              emptyLabel="Not assigned yet"
+                            />
                             <input
                               style={{ ...S.input, fontSize: 14, padding: "5px 8px", flex: "1 1 140px" }}
                               defaultValue={p.notes || ""}
@@ -18527,21 +18509,16 @@ export default function StockControl() {
                               {a.note ? <span style={S.roleHint}> · {a.note}</span> : null}
                             </span>
                             {canEditThisJob && stages.length > 0 && (
-                              <select
-                                style={{ ...S.input, width: 200 }}
+                              <TypeToFind
+                                style={{ width: 200 }}
+                                options={stages.map((pr) => ({ value: pr.id, label: pr.process_name }))}
                                 value=""
-                                onChange={(e) => {
-                                  const stage = stages.find((pr) => pr.id === e.target.value);
+                                onChange={(v) => {
+                                  const stage = stages.find((pr) => pr.id === v);
                                   if (stage) assignAllocationToProcess(a, stage);
                                 }}
-                              >
-                                <option value="">Put against a stage…</option>
-                                {stages.map((pr) => (
-                                  <option key={pr.id} value={pr.id}>
-                                    {pr.process_name}
-                                  </option>
-                                ))}
-                              </select>
+                                emptyLabel="Put against a stage…"
+                              />
                             )}
                           </div>
                         );
@@ -19723,12 +19700,12 @@ export default function StockControl() {
             </div>
             <div style={{ marginTop: 10 }}>
               <label style={S.label}>Customer</label>
-              <select style={S.input} value={importCustomer} onChange={(e) => setImportCustomer(e.target.value)}>
-                <option value="">Select a customer — required to import</option>
-                {master.customers.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
+              <TypeToFind
+                options={master.customers}
+                value={importCustomer}
+                onChange={setImportCustomer}
+                emptyLabel="Select a customer — required to import"
+              />
             </div>
             <div style={{ ...S.managerAddRow, marginTop: 10 }}>
               <label
@@ -19841,17 +19818,19 @@ export default function StockControl() {
 
             <div style={{ marginTop: 10 }}>
               <label style={S.label}>Customer</label>
-              <select
-                style={S.input}
-                value={newJobForm.customer === CUSTOM ? CUSTOM : newJobForm.customer}
-                onChange={(e) => setNewJobForm((f) => ({ ...f, customer: e.target.value }))}
-              >
-                <option value="">Select a customer…</option>
-                {master.customers.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-                <option value={CUSTOM}>+ Add new customer…</option>
-              </select>
+              {/* A name not on the list becomes a new customer: the form
+                  flips to CUSTOM and the typed name lands in the new-customer
+                  box below, where the contact details go too. */}
+              <TypeToFind
+                options={master.customers}
+                value={newJobForm.customer === CUSTOM ? newJobForm.newCustomerName || "" : newJobForm.customer || ""}
+                allowNew
+                onChange={(v) => {
+                  if (!v || master.customers.includes(v)) setNewJobForm((f) => ({ ...f, customer: v }));
+                  else setNewJobForm((f) => ({ ...f, customer: CUSTOM, newCustomerName: v }));
+                }}
+                emptyLabel="Select a customer, or type a new one…"
+              />
               {newJobForm.customer === CUSTOM && (
                 <div style={{ marginTop: 8, padding: 10, background: C.bg, borderRadius: 6, border: `1px solid ${C.border}` }}>
                   <input
@@ -20241,16 +20220,13 @@ export default function StockControl() {
                         <span style={{ fontSize: 14, fontWeight: 600, flex: 1 }}>{sp.name}</span>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
-                        <select
-                          style={{ ...S.input, flex: "1 1 180px" }}
+                        <TypeToFind
+                          style={{ flex: "1 1 180px" }}
+                          options={(people || []).map((person) => ({ value: person.id, label: person.name }))}
                           value={sp.assignedToId || ""}
-                          onChange={(e) => updateNewJobProcessAssignee(sp.name, e.target.value)}
-                        >
-                          <option value="">Not assigned yet</option>
-                          {(people || []).map((person) => (
-                            <option key={person.id} value={person.id}>{person.name}</option>
-                          ))}
-                        </select>
+                          onChange={(v) => updateNewJobProcessAssignee(sp.name, v)}
+                          emptyLabel="Not assigned yet"
+                        />
                         <select
                           style={{ ...S.input, width: 110, flexShrink: 0 }}
                           value={sp.trackingMode}
