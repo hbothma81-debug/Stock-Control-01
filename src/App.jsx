@@ -4842,7 +4842,17 @@ export default function StockControl() {
         invoiced_by: roleLabel,
       });
       if (logError) throw logError;
-      lines.push({ description: it.description, qty, unitPrice: Number(it.unit_price) });
+      // A quoted line has no part number of its own -- it comes from the
+      // stock item the line was linked to. A line typed straight in with no
+      // link has none, which the document shows as a dash rather than
+      // leaving the column looking broken.
+      const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
+      lines.push({
+        partNumber: linkedItem?.partNumber || "",
+        description: it.description,
+        qty,
+        unitPrice: Number(it.unit_price),
+      });
     }
     if (job.sales_rep) {
       await sendNotifications({
@@ -6174,9 +6184,18 @@ export default function StockControl() {
     const grandTotal = lines.reduce((sum, li) => sum + li.qty * li.unitPrice, 0);
     autoTable(doc, {
       startY: y,
-      head: [["Description", "Qty", "Unit Price", "Total"]],
-      body: lines.map((li) => [li.description, String(li.qty), `R ${li.unitPrice.toFixed(2)}`, `R ${(li.qty * li.unitPrice).toFixed(2)}`]),
-      foot: [["", "", "Total", `R ${grandTotal.toFixed(2)}`]],
+      head: [["Part no", "Description", "Qty", "Unit Price", "Total"]],
+      body: lines.map((li) => [
+        li.partNumber || "—",
+        li.description,
+        String(li.qty),
+        `R ${li.unitPrice.toFixed(2)}`,
+        `R ${(li.qty * li.unitPrice).toFixed(2)}`,
+      ]),
+      foot: [["", "", "", "Total", `R ${grandTotal.toFixed(2)}`]],
+      // The part number is a code, not prose -- it should not wrap or
+      // steal width from the description it sits next to.
+      columnStyles: { 0: { cellWidth: 30 } },
       theme: "grid",
       headStyles: { fillColor: [27, 29, 31] },
       footStyles: { fillColor: [242, 169, 0], textColor: [27, 29, 31], fontStyle: "bold" },
