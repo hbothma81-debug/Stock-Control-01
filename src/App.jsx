@@ -9652,16 +9652,13 @@ export default function StockControl() {
             )}
             {canManageRequisitions && r.status === "pending" && (
               <div style={S.reqActions}>
-                <select
-                  style={{ ...S.input, flex: 1 }}
-                  value={r.supplier}
-                  onChange={(e) => updateRequisition(r.id, { supplier: e.target.value })}
-                >
-                  <option value="">Supplier (optional)</option>
-                  {master.suppliers.map((s) => (
-                    <option key={s.id} value={s.name}>{s.name}</option>
-                  ))}
-                </select>
+                <TypeToFind
+                  style={{ flex: 1 }}
+                  options={master.suppliers.map((s) => s.name)}
+                  value={r.supplier || ""}
+                  onChange={(v) => updateRequisition(r.id, { supplier: v })}
+                  emptyLabel="Supplier (optional)"
+                />
                 <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => markOrdered(r.id)}>
                   <ShoppingCart size={13} /> Mark ordered
                 </button>
@@ -11523,16 +11520,13 @@ export default function StockControl() {
                 onChange={(e) => setRequisitionsSearchQuery(e.target.value)}
                 placeholder="Search item, supplier, or who requested it…"
               />
-              <select
-                style={{ ...S.input, flex: 1, minWidth: 130 }}
+              <TypeToFind
+                style={{ flex: 1, minWidth: 130 }}
+                options={master.suppliers.map((s) => s.name)}
                 value={requisitionsSupplierFilter}
-                onChange={(e) => setRequisitionsSupplierFilter(e.target.value)}
-              >
-                <option value="">All suppliers</option>
-                {master.suppliers.map((s) => (
-                  <option key={s.id} value={s.name}>{s.name}</option>
-                ))}
-              </select>
+                onChange={setRequisitionsSupplierFilter}
+                emptyLabel="All suppliers"
+              />
             </div>
           )}
           {["pending", "ordered"].map((status) => {
@@ -11778,12 +11772,13 @@ export default function StockControl() {
                 onChange={(e) => setPoSearchQuery(e.target.value)}
                 placeholder="Search PO number, supplier, or reference…"
               />
-              <select style={{ ...S.input, flex: 1, minWidth: 130 }} value={poSupplierFilter} onChange={(e) => setPoSupplierFilter(e.target.value)}>
-                <option value="">All suppliers</option>
-                {master.suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
+              <TypeToFind
+                style={{ flex: 1, minWidth: 130 }}
+                options={master.suppliers.map((s) => ({ value: s.id, label: s.name }))}
+                value={poSupplierFilter}
+                onChange={setPoSupplierFilter}
+                emptyLabel="All suppliers"
+              />
             </div>
           )}
 
@@ -15713,16 +15708,13 @@ export default function StockControl() {
                         onChange={(e) => setBuyoutQuery(e.target.value)}
                         placeholder="Search part number or description…"
                       />
-                      <select
-                        style={{ ...S.input, flex: 1 }}
+                      <TypeToFind
+                        style={{ flex: 1 }}
+                        options={master.suppliers.map((sup) => sup.name || sup)}
                         value={buyoutSupplierFilter}
-                        onChange={(e) => setBuyoutSupplierFilter(e.target.value)}
-                      >
-                        <option value="">All suppliers</option>
-                        {master.suppliers.map((sup) => (
-                          <option key={sup.id || sup.name || sup} value={sup.name || sup}>{sup.name || sup}</option>
-                        ))}
-                      </select>
+                        onChange={setBuyoutSupplierFilter}
+                        emptyLabel="All suppliers"
+                      />
                     </div>
 
                     {/* Adding one is a row rather than a pop-up, because the
@@ -15748,16 +15740,13 @@ export default function StockControl() {
                         onChange={(e) => setBoForm({ ...boForm, value: e.target.value })}
                         placeholder="Cost"
                       />
-                      <select
-                        style={{ ...S.input, flex: "1 1 140px" }}
-                        value={boForm.supplier}
-                        onChange={(e) => setBoForm({ ...boForm, supplier: e.target.value })}
-                      >
-                        <option value="">No supplier</option>
-                        {master.suppliers.map((sup) => (
-                          <option key={sup.id || sup.name || sup} value={sup.name || sup}>{sup.name || sup}</option>
-                        ))}
-                      </select>
+                      <TypeToFind
+                        style={{ flex: "1 1 140px" }}
+                        options={master.suppliers.map((sup) => sup.name || sup)}
+                        value={boForm.supplier || ""}
+                        onChange={(v) => setBoForm((f) => ({ ...f, supplier: v }))}
+                        emptyLabel="No supplier"
+                      />
                       <button type="button" className="stk-btn" style={S.addBtn} onClick={addBuyoutRow}>
                         <Plus size={15} strokeWidth={2.5} /> Add
                       </button>
@@ -15997,28 +15986,22 @@ export default function StockControl() {
                     onChange={(e) => setScCatalogForm({ ...scCatalogForm, name: e.target.value })}
                     placeholder="Item name, e.g. M10 Hex Bolt"
                   />
-                  <select
-                    style={{ ...S.input, flex: 1 }}
-                    value={scCatalogForm.category}
-                    onChange={(e) => setScCatalogForm({ ...scCatalogForm, category: e.target.value })}
-                  >
-                    <option value="">Category…</option>
-                    {master.storeCategories.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
+                  <TypeToFind
+                    style={{ flex: 1 }}
+                    options={master.storeCategories}
+                    value={scCatalogForm.category || ""}
+                    onChange={(v) => setScCatalogForm((f) => ({ ...f, category: v }))}
+                    emptyLabel="Category…"
+                  />
                 </div>
                 <div style={{ ...S.managerAddRow, marginTop: 6 }}>
-                  <select
-                    style={{ ...S.input, flex: 1 }}
-                    value={scCatalogForm.supplier}
-                    onChange={(e) => setScCatalogForm({ ...scCatalogForm, supplier: e.target.value })}
-                  >
-                    <option value="">Supplier…</option>
-                    {master.suppliers.map((s) => (
-                      <option key={s.id} value={s.name}>{s.name}</option>
-                    ))}
-                  </select>
+                  <TypeToFind
+                    style={{ flex: 1 }}
+                    options={master.suppliers.map((s) => s.name)}
+                    value={scCatalogForm.supplier || ""}
+                    onChange={(v) => setScCatalogForm((f) => ({ ...f, supplier: v }))}
+                    emptyLabel="Supplier…"
+                  />
                   <input
                     style={{ ...S.input, flex: 1 }}
                     type="number"
@@ -16040,16 +16023,13 @@ export default function StockControl() {
                     onChange={(e) => setStoresCatalogQuery(e.target.value)}
                     placeholder="Search catalog item…"
                   />
-                  <select
-                    style={{ ...S.input, flex: 1 }}
+                  <TypeToFind
+                    style={{ flex: 1 }}
+                    options={master.storeCategories}
                     value={storesCatalogCategoryFilter}
-                    onChange={(e) => setStoresCatalogCategoryFilter(e.target.value)}
-                  >
-                    <option value="">All categories</option>
-                    {master.storeCategories.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
+                    onChange={setStoresCatalogCategoryFilter}
+                    emptyLabel="All categories"
+                  />
                 </div>
 
                 <div style={S.managerListFullPage}>
@@ -16101,25 +16081,22 @@ export default function StockControl() {
                           <div key={r.id} style={S.managerRow}>
                             <EditableName value={r.code || ""} onCommit={(v) => updateStoresCatalogRow(r.id, "code", v)} style={{ maxWidth: 90 }} />
                             <EditableName value={r.name} onCommit={(v) => updateStoresCatalogRow(r.id, "name", v)} />
-                            <select
+                            <TypeToFind
+                              style={{ width: 130 }}
+                              inputStyle={{ ...S.managerFactorInput, width: "100%", padding: "5px 24px 5px 7px" }}
+                              options={master.storeCategories}
                               value={r.category || ""}
-                              onChange={(e) => updateStoresCatalogRow(r.id, "category", e.target.value)}
-                              style={{ ...S.managerFactorInput, width: 130 }}
-                            >
-                              {master.storeCategories.map((c) => (
-                                <option key={c} value={c}>{c}</option>
-                              ))}
-                            </select>
-                            <select
+                              onChange={(v) => { if (v) updateStoresCatalogRow(r.id, "category", v); }}
+                              emptyLabel="Category"
+                            />
+                            <TypeToFind
+                              style={{ width: 130 }}
+                              inputStyle={{ ...S.managerFactorInput, width: "100%", padding: "5px 24px 5px 7px" }}
+                              options={master.suppliers.map((s) => s.name)}
                               value={r.supplier || ""}
-                              onChange={(e) => updateStoresCatalogRow(r.id, "supplier", e.target.value)}
-                              style={{ ...S.managerFactorInput, width: 130 }}
-                            >
-                              <option value="">No supplier</option>
-                              {master.suppliers.map((s) => (
-                                <option key={s.id} value={s.name}>{s.name}</option>
-                              ))}
-                            </select>
+                              onChange={(v) => updateStoresCatalogRow(r.id, "supplier", v)}
+                              emptyLabel="No supplier"
+                            />
                             <input
                               type="number"
                               step="0.01"
@@ -19727,16 +19704,12 @@ export default function StockControl() {
             <div style={{ marginTop: 10 }}>
               <label style={S.label}>{deliveryNoteBatchModal.direction === "to_supplier" ? "Supplier" : "Recipient name"}</label>
               {deliveryNoteBatchModal.direction === "to_supplier" ? (
-                <select
-                  style={S.input}
-                  value={deliveryNoteBatchModal.recipientName}
-                  onChange={(e) => setDeliveryNoteBatchModal((m) => ({ ...m, recipientName: e.target.value }))}
-                >
-                  <option value="">Select a supplier…</option>
-                  {master.suppliers.map((s) => (
-                    <option key={s.id} value={s.name}>{s.name}</option>
-                  ))}
-                </select>
+                <TypeToFind
+                  options={master.suppliers.map((s) => s.name)}
+                  value={deliveryNoteBatchModal.recipientName || ""}
+                  onChange={(v) => setDeliveryNoteBatchModal((m) => ({ ...m, recipientName: v }))}
+                  emptyLabel="Select a supplier…"
+                />
               ) : (
                 <input
                   style={S.input}
@@ -20513,12 +20486,12 @@ export default function StockControl() {
             </div>
             <div style={{ marginTop: 10 }}>
               <label style={S.label}>Supplier</label>
-              <select style={S.input} value={poReportSupplier} onChange={(e) => setPoReportSupplier(e.target.value)}>
-                <option value="">All suppliers</option>
-                {master.suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
+              <TypeToFind
+                options={master.suppliers.map((s) => ({ value: s.id, label: s.name }))}
+                value={poReportSupplier}
+                onChange={setPoReportSupplier}
+                emptyLabel="All suppliers"
+              />
             </div>
             <div style={{ marginTop: 10 }}>
               <label style={S.label}>Status</label>
@@ -20547,17 +20520,12 @@ export default function StockControl() {
             </div>
 
             <label style={S.label}>Supplier</label>
-            <select
-              style={S.input}
-              value={poBuilder.supplierId}
-              onChange={(e) => setPoBuilder((b) => ({ ...b, supplierId: e.target.value }))}
-              required
-            >
-              <option value="">Select a supplier…</option>
-              {master.suppliers.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
+            <TypeToFind
+              options={master.suppliers.map((s) => ({ value: s.id, label: s.name }))}
+              value={poBuilder.supplierId || ""}
+              onChange={(v) => setPoBuilder((b) => ({ ...b, supplierId: v }))}
+              emptyLabel="Select a supplier…"
+            />
             {master.suppliers.length === 0 && (
               <div style={{ ...S.roleHint, marginTop: 6 }}>
                 No suppliers set up yet — add one in Stock Manager → Suppliers first.
@@ -20948,12 +20916,12 @@ export default function StockControl() {
             </div>
             <div style={{ marginTop: 10 }}>
               <label style={S.label}>Supplier (optional)</label>
-              <select style={S.input} value={requisitionSupplier} onChange={(e) => setRequisitionSupplier(e.target.value)}>
-                <option value="">No supplier chosen yet</option>
-                {master.suppliers.map((s) => (
-                  <option key={s.id} value={s.name}>{s.name}</option>
-                ))}
-              </select>
+              <TypeToFind
+                options={master.suppliers.map((s) => s.name)}
+                value={requisitionSupplier}
+                onChange={setRequisitionSupplier}
+                emptyLabel="No supplier chosen yet"
+              />
             </div>
             <div style={{ marginTop: 10 }}>
               <label style={S.label}>Notes (optional)</label>
