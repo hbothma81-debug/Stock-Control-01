@@ -13747,20 +13747,15 @@ export default function StockControl() {
             </div>
             <div>
               <label style={S.label}>Customer</label>
-              <select
-                style={S.input}
+              <TypeToFind
+                options={[{ value: "__internal__", label: "Internal (no customer)" }, ...master.customers]}
                 value={drawingCustomerFilter}
-                onChange={(e) => {
-                  setDrawingCustomerFilter(e.target.value);
-                  refreshDrawings(drawingSearchQuery, e.target.value);
+                onChange={(v) => {
+                  setDrawingCustomerFilter(v);
+                  refreshDrawings(drawingSearchQuery, v);
                 }}
-              >
-                <option value="">All customers</option>
-                <option value="__internal__">Internal (no customer)</option>
-                {master.customers.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
+                emptyLabel="All customers"
+              />
             </div>
           </div>
 
@@ -13910,12 +13905,12 @@ export default function StockControl() {
         <div className="stk-filter-bar" style={S.filterBar}>
           <div>
             <label style={S.label}>Material</label>
-            <select style={S.input} value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)}>
-              <option value="">All materials</option>
-              {(tab === "cncBar" ? master.cncGrades : master.grades).map((g) => (
-                <option key={g.name} value={g.shortName || g.name}>{g.shortName || g.name}</option>
-              ))}
-            </select>
+            <TypeToFind
+              options={(tab === "cncBar" ? master.cncGrades : master.grades).map((g) => g.shortName || g.name)}
+              value={filterGrade}
+              onChange={setFilterGrade}
+              emptyLabel="All materials"
+            />
           </div>
           {tab === "plate" && (
             <>
@@ -13983,12 +13978,7 @@ export default function StockControl() {
             <>
               <div>
                 <label style={S.label}>Type</label>
-                <select style={S.input} value={filterFastenerType} onChange={(e) => setFilterFastenerType(e.target.value)}>
-                  <option value="">Any</option>
-                  {master.fastenerCategories.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
+                <TypeToFind options={master.fastenerCategories} value={filterFastenerType} onChange={setFilterFastenerType} emptyLabel="Any" />
               </div>
               <div>
                 <label style={S.label}>Diameter</label>
@@ -14003,21 +13993,11 @@ export default function StockControl() {
               </div>
               <div>
                 <label style={S.label}>Grade</label>
-                <select style={S.input} value={filterFastenerGrade} onChange={(e) => setFilterFastenerGrade(e.target.value)}>
-                  <option value="">Any</option>
-                  {master.fastenerGrades.map((g) => (
-                    <option key={g} value={g}>{g}</option>
-                  ))}
-                </select>
+                <TypeToFind options={master.fastenerGrades} value={filterFastenerGrade} onChange={setFilterFastenerGrade} emptyLabel="Any" />
               </div>
               <div>
                 <label style={S.label}>Finish</label>
-                <select style={S.input} value={filterFastenerFinish} onChange={(e) => setFilterFastenerFinish(e.target.value)}>
-                  <option value="">Any</option>
-                  {master.fastenerFinishes.map((f) => (
-                    <option key={f} value={f}>{f}</option>
-                  ))}
-                </select>
+                <TypeToFind options={master.fastenerFinishes} value={filterFastenerFinish} onChange={setFilterFastenerFinish} emptyLabel="Any" />
               </div>
             </>
           )}
@@ -14714,21 +14694,21 @@ export default function StockControl() {
                 <div style={S.formGrid}>
                   <div>
                     <label style={S.label}>Grade</label>
-                    <select style={S.input} value={form.fastenerGrade} onChange={(e) => setForm({ ...form, fastenerGrade: e.target.value })}>
-                      <option value="">Not set</option>
-                      {master.fastenerGrades.map((g) => (
-                        <option key={g} value={g}>{g}</option>
-                      ))}
-                    </select>
+                    <TypeToFind
+                      options={master.fastenerGrades}
+                      value={form.fastenerGrade}
+                      onChange={(v) => setForm((f) => ({ ...f, fastenerGrade: v }))}
+                      emptyLabel="Not set"
+                    />
                   </div>
                   <div>
                     <label style={S.label}>Finish</label>
-                    <select style={S.input} value={form.fastenerFinish} onChange={(e) => setForm({ ...form, fastenerFinish: e.target.value })}>
-                      <option value="">Not set</option>
-                      {master.fastenerFinishes.map((f) => (
-                        <option key={f} value={f}>{f}</option>
-                      ))}
-                    </select>
+                    <TypeToFind
+                      options={master.fastenerFinishes}
+                      value={form.fastenerFinish}
+                      onChange={(v) => setForm((f) => ({ ...f, fastenerFinish: v }))}
+                      emptyLabel="Not set"
+                    />
                   </div>
                 </div>
                 <div style={{ marginTop: 10 }}>
