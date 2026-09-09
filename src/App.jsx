@@ -312,6 +312,58 @@ async function fetchAllRows(table, { select = "*", orderBy = "id", ascending = t
   return allRows;
 }
 
+// The one ordering rule for every name list in the app. Case does not
+// matter ("acme" sits next to "Acme"), and numbers inside the text sort
+// as numbers ("M8" before "M10", "2500 x 1250" before "3000 x 1500"), so
+// the same rule serves customers, suppliers, sheet sizes and part numbers
+// alike.
+function byText(a, b) {
+  return String(a ?? "").localeCompare(String(b ?? ""), undefined, { numeric: true, sensitivity: "base" });
+}
+function byName(a, b) {
+  return byText(a?.name, b?.name);
+}
+
+// Every dropdown and type-to-find box reads its options from master, so
+// master is kept alphabetical in memory and no dropdown has to sort for
+// itself. Applied on load and on every update, so a customer added a
+// moment ago sits in its place straight away rather than at the bottom
+// until the next reload.
+//
+// Two lists are left exactly as stored: Job Process Types is the factory
+// flow and Laser Thicknesses is the shop's cut-list order (see
+// ORDERED_STRING_LISTS above). Both have their own reorder controls in
+// the Manager, and alphabetising either would put stages or thicknesses
+// in the wrong sequence on the floor.
+function sortMaster(m) {
+  if (!m) return m;
+  const out = { ...m };
+  for (const listName of MASTER_STRING_LISTS) {
+    if (ORDERED_STRING_LISTS.includes(listName)) continue;
+    if (Array.isArray(out[listName])) out[listName] = [...out[listName]].sort(byText);
+  }
+  for (const listName of MASTER_FACTOR_LISTS) {
+    if (!Array.isArray(out[listName])) continue;
+    // Sections that share a size but differ by material stay together,
+    // ordered by material within the size.
+    out[listName] = [...out[listName]].sort((a, b) => byName(a, b) || byText(a?.grade, b?.grade));
+  }
+  if (Array.isArray(out.suppliers)) {
+    out.suppliers = [...out.suppliers]
+      .sort(byName)
+      .map((s) => (Array.isArray(s.contacts) ? { ...s, contacts: [...s.contacts].sort(byName) } : s));
+  }
+  if (Array.isArray(out.storesCatalog)) out.storesCatalog = [...out.storesCatalog].sort(byName);
+  if (out.customerContacts && typeof out.customerContacts === "object") {
+    const sorted = {};
+    for (const [customer, list] of Object.entries(out.customerContacts)) {
+      sorted[customer] = Array.isArray(list) ? [...list].sort(byName) : list;
+    }
+    out.customerContacts = sorted;
+  }
+  return out;
+}
+
 // master lives across 8 real tables now, grouped by shape rather than one
 // table per field — this is the only place that needs to know that. Once
 // assembled, the rest of the app sees the exact same master shape it
@@ -392,7 +444,7 @@ async function loadMasterFromTables() {
 
   result.stockCodes = []; // retired — anything left over was migrated straight into stock_items by the SQL migration
 
-  return { master: result };
+  return { master: sortMaster(result) };
 }
 
 // requisitions is a real table now (snake_case columns) — same
@@ -947,7 +999,8 @@ function StockPicker({ items, allowedDepts, onPick, emptyMessage }) {
   const q = search.trim().toLowerCase();
   const matches = (items || [])
     .filter((it) => it.mainCat === dept)
-    .filter((it) => !q || (it.name || "").toLowerCase().includes(q) || (it.loc || "").toLowerCase().includes(q));
+    .filter((it) => !q || (it.name || "").toLowerCase().includes(q) || (it.loc || "").toLowerCase().includes(q))
+    .sort(byName);
   // Capped rather than paged: this is a "find the thing in front of you"
   // list, so if it is still hundreds long the answer is to type more.
   const shown = matches.slice(0, 60);
@@ -997,7 +1050,11 @@ export default function StockControl() {
   const [items, setItems] = useState(null);
   const [loadError, setLoadError] = useState({});
   const [loadRetriesExhausted, setLoadRetriesExhausted] = useState(false);
-  const [master, setMaster] = useState(null);
+  // master is always held sorted (see sortMaster). Every update goes
+  // through this wrapper so the ~30 places that add, rename or remove an
+  // entry need not each remember to sort.
+  const [master, setMasterUnsorted] = useState(null);
+  const setMaster = (next) => setMasterUnsorted((prev) => sortMaster(typeof next === "function" ? next(prev) : next));
   const [requisitions, setRequisitions] = useState(null);
   const [purchaseOrders, setPurchaseOrders] = useState(null);
   const [usageLog, setUsageLog] = useState(null);
@@ -1340,7 +1397,14 @@ export default function StockControl() {
   // function that closes over them regardless of where it's defined.
   const currentUser = session?.user || null;
   const roleLabel = profile?.name || currentUser?.email || "Someone";
-  const [people, setPeople] = useState(null);
+  // People are held alphabetical the same way master is: the assignee,
+  // salesperson and user-management lists all read from here.
+  const [people, setPeopleUnsorted] = useState(null);
+  const setPeople = (next) =>
+    setPeopleUnsorted((prev) => {
+      const list = typeof next === "function" ? next(prev) : next;
+      return Array.isArray(list) ? [...list].sort(byName) : list;
+    });
 
   // Everything the Laser 4kw tab knows and does. See src/laser/useLaserPrograms.js.
   const laser = useLaserPrograms({
@@ -1919,8 +1983,11 @@ export default function StockControl() {
       const removed = prevList.filter((v) => !nextList.includes(v));
       if (added.length) {
         // sort_order comes from where the value actually sits in the list.
-        // For unordered lists additions always land at the end, so this is
-        // the same append behaviour as before — it just records it.
+        // For unordered lists that is now its alphabetical position (master
+        // is kept sorted in memory, see sortMaster), which is only a
+        // record: the app sorts those lists itself on every load, so the
+        // stored number never decides what anyone sees. Only the two
+        // ORDERED_STRING_LISTS are read back in stored order.
         ops.push(
           supabase.from("master_string_lists").insert(
             added.map((v) => ({ id: uid(), list_name: listName, value: v, sort_order: nextList.indexOf(v) }))
@@ -9254,7 +9321,8 @@ export default function StockControl() {
   const poPartLookup = useMemo(() => {
     return (items || [])
       .filter((it) => it.mainCat !== "custom")
-      .filter((it) => (it.partNumber || "").trim());
+      .filter((it) => (it.partNumber || "").trim())
+      .sort((a, b) => byText(a.partNumber, b.partNumber));
   }, [items]);
 
   // The same items again, by description, because half the time the code is
@@ -9262,12 +9330,14 @@ export default function StockControl() {
   // the same wording would otherwise show as two identical suggestions.
   const poDescriptionLookup = useMemo(() => {
     const seen = new Set();
-    return poPartLookup.filter((it) => {
-      const name = (it.name || "").trim();
-      if (!name || seen.has(name.toLowerCase())) return false;
-      seen.add(name.toLowerCase());
-      return true;
-    });
+    return poPartLookup
+      .filter((it) => {
+        const name = (it.name || "").trim();
+        if (!name || seen.has(name.toLowerCase())) return false;
+        seen.add(name.toLowerCase());
+        return true;
+      })
+      .sort(byName);
   }, [poPartLookup]);
 
   // Typing a part number fills the rest of the line in. If nothing matches,
