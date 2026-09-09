@@ -18404,15 +18404,23 @@ export default function StockControl() {
                                   onBlur={(e) => updateJobQuoteItem(jobDetail.job, it, "description", e.target.value)}
                                   style={{ ...S.input, flex: 1, minWidth: 90, fontSize: 14, padding: "4px 6px" }}
                                 />
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  defaultValue={it.unit_price}
-                                  onBlur={(e) => updateJobQuoteItem(jobDetail.job, it, "unit_price", e.target.value)}
-                                  style={{ ...S.input, width: 84, fontSize: 14, padding: "4px 6px" }}
-                                  title="Price each"
-                                />
+                                {/* Prices on a job sit behind the same tick
+                                    as every other Rand figure in the app,
+                                    "Can see Rand values" in User Manager.
+                                    Without it the line is still editable --
+                                    the description and quantity -- and the
+                                    price stays whatever it was. */}
+                                {canSeeValue && (
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    defaultValue={it.unit_price}
+                                    onBlur={(e) => updateJobQuoteItem(jobDetail.job, it, "unit_price", e.target.value)}
+                                    style={{ ...S.input, width: 84, fontSize: 14, padding: "4px 6px" }}
+                                    title="Price each"
+                                  />
+                                )}
                               </>
                             ) : (
                               <>
@@ -18427,8 +18435,8 @@ export default function StockControl() {
                             )}
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
-                            <span style={S.roleHint}>R{Number(it.unit_price).toFixed(2)} each</span>
-                            <span style={S.roleHint}>— Invoiced {it.qty_invoiced} / {it.qty}</span>
+                            {canSeeValue && <span style={S.roleHint}>R{Number(it.unit_price).toFixed(2)} each</span>}
+                            <span style={S.roleHint}>{canSeeValue ? "— " : ""}Invoiced {it.qty_invoiced} / {it.qty}</span>
                             {/* Where this line is made. Blank shows on
                                 every stage, as before. */}
                             {canEditThisJob ? (
@@ -18643,15 +18651,17 @@ export default function StockControl() {
                                 </div>
                               )}
                             </div>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              style={{ ...S.input, width: 96 }}
-                              value={newItemForm.unitPrice}
-                              onChange={(e) => setNewItemForm((f) => ({ ...f, unitPrice: e.target.value }))}
-                              placeholder="R each"
-                            />
+                            {canSeeValue && (
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                style={{ ...S.input, width: 96 }}
+                                value={newItemForm.unitPrice}
+                                onChange={(e) => setNewItemForm((f) => ({ ...f, unitPrice: e.target.value }))}
+                                placeholder="R each"
+                              />
+                            )}
                             <button
                               type="button"
                               className="stk-btn"
@@ -18746,7 +18756,7 @@ export default function StockControl() {
                     </button>
                   </div>
                 )}
-                {jobDetail.job.quoted_value != null && (
+                {canSeeValue && jobDetail.job.quoted_value != null && (
                   <div style={{ ...S.roleHint, marginTop: 6 }}>Quoted value: R {Number(jobDetail.job.quoted_value).toFixed(2)}</div>
                 )}
               </div>
