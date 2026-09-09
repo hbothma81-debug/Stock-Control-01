@@ -12665,7 +12665,13 @@ export default function StockControl() {
                     ) : (
                       <span style={S.roleHint}>No invoice request submitted yet</span>
                     )}
-                    {isAdmin || !!profile?.canManageInvoicing && (
+                    {/* Bracketed, and it matters: && binds tighter than ||, so
+                        without these this read as "isAdmin, OR (has the tick and
+                        the button)". For an admin the whole thing came out as
+                        true, and React draws true as nothing -- so the one person
+                        who should always have been able to mark a job invoiced was
+                        the only one who could not. */}
+                    {(isAdmin || !!profile?.canManageInvoicing) && (
                       <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => openMarkInvoicedModal(job)}>
                         <Check size={13} /> Mark as Invoiced
                       </button>
