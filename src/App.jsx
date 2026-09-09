@@ -15591,14 +15591,12 @@ export default function StockControl() {
 
                 <div style={{ marginTop: 10 }}>
                   <label style={S.label}>Sales person</label>
-                  <select style={S.input} value={form.salesPerson} onChange={(e) => setForm({ ...form, salesPerson: e.target.value })}>
-                    <option value="">Not set</option>
-                    {(people || [])
-                      .filter((p) => p.isSalesPerson)
-                      .map((p) => (
-                        <option key={p.id} value={p.name}>{p.name}</option>
-                      ))}
-                  </select>
+                  <TypeToFind
+                    options={(people || []).filter((p) => p.isSalesPerson).map((p) => p.name)}
+                    value={form.salesPerson || ""}
+                    onChange={(v) => setForm((f) => ({ ...f, salesPerson: v }))}
+                    emptyLabel="Not set"
+                  />
                 </div>
 
                 <div style={{ marginTop: 10 }}>
@@ -15812,16 +15810,14 @@ export default function StockControl() {
                               </div>
                               <div>
                                 <label style={S.label}>Supplier</label>
-                                <select
+                                <TypeToFind
+                                  style={{ width: 130 }}
+                                  inputStyle={{ ...S.managerFactorInput, width: "100%", padding: "5px 24px 5px 7px" }}
+                                  options={master.suppliers.map((sup) => sup.name || sup)}
                                   value={it.supplier || ""}
-                                  onChange={(e) => updateCustomerStockField(it.id, "supplier", e.target.value)}
-                                  style={{ ...S.managerFactorInput, width: 130, display: "block" }}
-                                >
-                                  <option value="">No supplier</option>
-                                  {master.suppliers.map((sup) => (
-                                    <option key={sup.id || sup.name || sup} value={sup.name || sup}>{sup.name || sup}</option>
-                                  ))}
-                                </select>
+                                  onChange={(v) => updateCustomerStockField(it.id, "supplier", v)}
+                                  emptyLabel="No supplier"
+                                />
                               </div>
                             </div>
                           </div>
@@ -15845,16 +15841,13 @@ export default function StockControl() {
                     onChange={(e) => setStockCodeQuery(e.target.value)}
                     placeholder="Search part number or description…"
                   />
-                  <select
-                    style={{ ...S.input, flex: 1 }}
+                  <TypeToFind
+                    style={{ flex: 1 }}
+                    options={master.customers}
                     value={stockCodeCustomerFilter}
-                    onChange={(e) => setStockCodeCustomerFilter(e.target.value)}
-                  >
-                    <option value="">All customers</option>
-                    {master.customers.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
+                    onChange={setStockCodeCustomerFilter}
+                    emptyLabel="All customers"
+                  />
                   <button type="button" className="stk-btn" style={S.addBtn} onClick={() => setShowAddStockItemModal(true)}>
                     <Plus size={15} />
                     Add Item
@@ -15940,16 +15933,14 @@ export default function StockControl() {
                           </div>
                           <div>
                             <label style={S.label}>Customer</label>
-                            <select
+                            <TypeToFind
+                              style={{ width: 130 }}
+                              inputStyle={{ ...S.managerFactorInput, width: "100%", padding: "5px 24px 5px 7px" }}
+                              options={master.customers}
                               value={it.customer || ""}
-                              onChange={(e) => updateCustomerStockField(it.id, "customer", e.target.value)}
-                              style={{ ...S.managerFactorInput, width: 110, display: "block" }}
-                            >
-                              <option value="">No customer</option>
-                              {master.customers.map((c) => (
-                                <option key={c} value={c}>{c}</option>
-                              ))}
-                            </select>
+                              onChange={(v) => updateCustomerStockField(it.id, "customer", v)}
+                              emptyLabel="No customer"
+                            />
                           </div>
                         </div>
                       </div>
@@ -16868,16 +16859,13 @@ export default function StockControl() {
                     />
                     {/* The same size in two grades is two rows with two
                         prices, so the grade has to be chosen here. */}
-                    <select
-                      style={{ ...S.input, flex: 1 }}
+                    <TypeToFind
+                      style={{ flex: 1 }}
+                      options={(master.grades || []).map((g) => g.name)}
                       value={managerSectionGrade}
-                      onChange={(e) => setManagerSectionGrade(e.target.value)}
-                    >
-                      <option value="">No grade</option>
-                      {(master.grades || []).map((g) => (
-                        <option key={g.name} value={g.name}>{g.name}</option>
-                      ))}
-                    </select>
+                      onChange={setManagerSectionGrade}
+                      emptyLabel="No grade"
+                    />
                     <button type="button" className="stk-btn" style={S.addBtn} onClick={addMasterEntry}>
                       <Plus size={15} strokeWidth={2.5} />
                       Add
@@ -16897,13 +16885,9 @@ export default function StockControl() {
                       will want them and how the yard is actually racked. */}
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
                     <label style={{ ...S.label, marginBottom: 0 }}>Material</label>
-                    <select
-                      style={{ ...S.input, flex: 1 }}
-                      value={sectionGradeFilterInManager}
-                      onChange={(e) => setSectionGradeFilterInManager(e.target.value)}
-                    >
-                      <option value="">All materials</option>
-                      {[
+                    <TypeToFind
+                      style={{ flex: 1 }}
+                      options={[
                         ...new Set(
                           master.sections
                             .filter((sec) => (sec.type || "Ungrouped") === sectionTypeFilterInManager)
@@ -16911,12 +16895,11 @@ export default function StockControl() {
                         ),
                       ]
                         .sort((a, b) => a.localeCompare(b))
-                        .map((g) => (
-                          <option key={g || "__none__"} value={g || "__none__"}>
-                            {g || "No grade set"}
-                          </option>
-                        ))}
-                    </select>
+                        .map((g) => ({ value: g || "__none__", label: g || "No grade set" }))}
+                      value={sectionGradeFilterInManager}
+                      onChange={setSectionGradeFilterInManager}
+                      emptyLabel="All materials"
+                    />
                   </div>
 
                   <div style={S.managerListFullPage}>
@@ -16960,27 +16943,23 @@ export default function StockControl() {
                             style={S.managerFactorInput}
                             title="R/m"
                           />
-                          <select
+                          <TypeToFind
+                            style={{ width: 110 }}
+                            inputStyle={{ ...S.managerFactorInput, width: "100%", padding: "5px 24px 5px 7px" }}
+                            options={(master.grades || []).map((g) => g.name)}
                             value={entry.grade || ""}
-                            onChange={(e) => updateSectionGrade(entry.name, entry.grade, e.target.value)}
-                            style={{ ...S.managerFactorInput, width: 110 }}
+                            onChange={(v) => updateSectionGrade(entry.name, entry.grade, v)}
+                            emptyLabel="No grade"
                             title="Material"
-                          >
-                            <option value="">No grade</option>
-                            {(master.grades || []).map((g) => (
-                              <option key={g.name} value={g.name}>{g.name}</option>
-                            ))}
-                          </select>
-                          <select
+                          />
+                          <TypeToFind
+                            style={{ width: 130 }}
+                            inputStyle={{ ...S.managerFactorInput, width: "100%", padding: "5px 24px 5px 7px" }}
+                            options={master.sectionTypes}
                             value={entry.type || ""}
-                            onChange={(e) => updateSectionType(entry.name, e.target.value, entry.grade)}
-                            style={{ ...S.managerFactorInput, width: 130 }}
-                          >
-                            <option value="">No type</option>
-                            {master.sectionTypes.map((t) => (
-                              <option key={t} value={t}>{t}</option>
-                            ))}
-                          </select>
+                            onChange={(v) => updateSectionType(entry.name, v, entry.grade)}
+                            emptyLabel="No type"
+                          />
                           <button
                             type="button"
                             className="stk-btn"
@@ -18107,12 +18086,12 @@ export default function StockControl() {
               <>
                 <div style={{ marginTop: 10 }}>
                   <label style={S.label}>Customer (optional — leave blank for your own design drawings)</label>
-                  <select style={S.input} value={drawingUploadCustomer} onChange={(e) => setDrawingUploadCustomer(e.target.value)}>
-                    <option value="">No customer — internal drawing</option>
-                    {master.customers.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
+                  <TypeToFind
+                    options={master.customers}
+                    value={drawingUploadCustomer}
+                    onChange={setDrawingUploadCustomer}
+                    emptyLabel="No customer — internal drawing"
+                  />
                 </div>
 
                 <div style={{ marginTop: 12 }}>
@@ -19320,12 +19299,12 @@ export default function StockControl() {
               </div>
               <div>
                 <label style={S.label}>Customer</label>
-                <select style={S.input} value={scForm.customer} onChange={(e) => setScForm({ ...scForm, customer: e.target.value })}>
-                  <option value="">None</option>
-                  {master.customers.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
+                <TypeToFind
+                  options={master.customers}
+                  value={scForm.customer || ""}
+                  onChange={(v) => setScForm((f) => ({ ...f, customer: v }))}
+                  emptyLabel="None"
+                />
               </div>
             </div>
             <div style={S.roleHint}>
