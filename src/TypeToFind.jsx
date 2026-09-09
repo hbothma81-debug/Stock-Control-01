@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { X } from "lucide-react";
 import { C, S } from "./theme.js";
 
@@ -57,6 +57,47 @@ export default function TypeToFind({
   // the re-render and would still see the old value.
   const doneEditing = useRef(false);
   const editing = text !== null;
+
+  // Where the box sits on screen, so the list can be pinned to the
+  // viewport rather than to the box's parent. A list positioned inside
+  // its parent is cut off by any scrolling container around it -- the
+  // Add Item pop-up scrolls, so a box at its bottom opened a list that
+  // was hidden below the pop-up's edge and looked like nothing happened.
+  // Pinned to the viewport nothing can clip it, and it flips upward when
+  // there is more room above than below.
+  const [rect, setRect] = useState(null);
+  useEffect(() => {
+    if (!editing) return;
+    const measure = () => {
+      const el = inputRef.current;
+      if (el) setRect(el.getBoundingClientRect());
+    };
+    measure();
+    window.addEventListener("scroll", measure, true);
+    window.addEventListener("resize", measure);
+    return () => {
+      window.removeEventListener("scroll", measure, true);
+      window.removeEventListener("resize", measure);
+    };
+  }, [editing]);
+  const listStyle = (() => {
+    if (!rect) return { ...S.suggestDropdown, zIndex: 60 };
+    const roomBelow = window.innerHeight - rect.bottom;
+    const flipUp = roomBelow < 240 && rect.top > roomBelow;
+    return {
+      ...S.suggestDropdown,
+      position: "fixed",
+      left: rect.left,
+      width: rect.width,
+      right: "auto",
+      zIndex: 60,
+      marginTop: 0,
+      // Never shorter than a few rows, whatever the measurement says.
+      ...(flipUp
+        ? { top: "auto", bottom: window.innerHeight - rect.top + 2, maxHeight: Math.max(120, Math.min(220, rect.top - 8)) }
+        : { top: rect.bottom + 2, maxHeight: Math.max(120, Math.min(220, roomBelow - 8)) }),
+    };
+  })();
   const shownText = editing ? text : currentLabel;
 
   const q = editing ? text.trim().toLowerCase() : "";
@@ -180,7 +221,7 @@ export default function TypeToFind({
         </button>
       )}
       {editing && (matches.length > 0 || canAddTyped || q) && (
-        <div style={S.suggestDropdown}>
+        <div style={listStyle}>
           {matches.map((o, i) => (
             <button
               key={o.value}
