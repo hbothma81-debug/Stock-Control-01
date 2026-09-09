@@ -1118,6 +1118,76 @@ export default function StockControl() {
   // forward too, not just here.
   const [productionSelectedProcessId, setProductionSelectedProcessId] = useState(null);
   const [productionSearchQuery, setProductionSearchQuery] = useState("");
+  // The same two narrowing dropdowns the Jobs page has. A sales rep on
+  // the floor wants to see their customer's work, not everyone's.
+  const [productionCustomerFilter, setProductionCustomerFilter] = useState("");
+  const [productionSalesRepFilter, setProductionSalesRepFilter] = useState("");
+  const productionFiltering = !!(productionSearchQuery.trim() || productionCustomerFilter || productionSalesRepFilter);
+  // One place for what the Production tab's search and dropdowns mean,
+  // read by the department list and by the department itself, so the
+  // count on the pill and the length of the list can never disagree.
+  const productionJobMatches = (job) => {
+    const q = productionSearchQuery.trim().toLowerCase();
+    if (productionCustomerFilter && job.customer !== productionCustomerFilter) return false;
+    if (productionSalesRepFilter && job.sales_rep !== productionSalesRepFilter) return false;
+    if (!q) return true;
+    return (
+      (job.job_number || "").toLowerCase().includes(q) ||
+      (job.laser_job_reference || "").toLowerCase().includes(q) ||
+      (job.customer || "").toLowerCase().includes(q) ||
+      (job.sales_rep || "").toLowerCase().includes(q)
+    );
+  };
+  // The dropdowns offer only what is on the floor: the customers and
+  // sales reps of the jobs in the queue, not every name the app knows.
+  const productionQueueJobs = () => {
+    const seen = new Set();
+    const jobs = [];
+    for (const entries of Object.values(productionQueue || {})) {
+      for (const e of entries) {
+        if (!seen.has(e.job.id)) {
+          seen.add(e.job.id);
+          jobs.push(e.job);
+        }
+      }
+    }
+    return jobs;
+  };
+  const productionFilterRow = (style) => {
+    const jobs = productionQueueJobs();
+    const customers = [...new Set(jobs.map((j) => j.customer).filter(Boolean))].sort();
+    const reps = [...new Set(jobs.map((j) => j.sales_rep).filter(Boolean))].sort();
+    return (
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", ...(style || {}) }}>
+        <input
+          style={{ ...S.input, flex: 2, minWidth: 160 }}
+          value={productionSearchQuery}
+          onChange={(e) => setProductionSearchQuery(e.target.value)}
+          placeholder="Search job number, SigmaNest number, customer, or sales rep…"
+        />
+        <select
+          style={{ ...S.input, flex: 1, minWidth: 130 }}
+          value={productionCustomerFilter}
+          onChange={(e) => setProductionCustomerFilter(e.target.value)}
+        >
+          <option value="">All customers</option>
+          {customers.map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+        <select
+          style={{ ...S.input, flex: 1, minWidth: 130 }}
+          value={productionSalesRepFilter}
+          onChange={(e) => setProductionSalesRepFilter(e.target.value)}
+        >
+          <option value="">All sales reps</option>
+          {reps.map((r) => (
+            <option key={r} value={r}>{r}</option>
+          ))}
+        </select>
+      </div>
+    );
+  };
   const [shortageModal, setShortageModal] = useState(null);
   const [productionLoading, setProductionLoading] = useState(false);
   const [jobInvoiceRequests, setJobInvoiceRequests] = useState([]);
@@ -12117,20 +12187,10 @@ export default function StockControl() {
               </div>
             )}
             {productionLoading && <div style={S.empty}>Loading…</div>}
-            {Object.keys(productionQueue || {}).length > 0 && (
-              <input
-                style={{ ...S.input, marginBottom: 10 }}
-                value={productionSearchQuery}
-                onChange={(e) => setProductionSearchQuery(e.target.value)}
-                placeholder="Search job number, SigmaNest number, or customer…"
-              />
-            )}
+            {Object.keys(productionQueue || {}).length > 0 && productionFilterRow({ marginBottom: 10 })}
             {(() => {
-              const q = productionSearchQuery.trim().toLowerCase();
-              const matchesJob = ({ job }) =>
-                (job.job_number || "").toLowerCase().includes(q) ||
-                (job.laser_job_reference || "").toLowerCase().includes(q) ||
-                (job.customer || "").toLowerCase().includes(q);
+              const q = productionFiltering;
+              const matchesJob = ({ job }) => productionJobMatches(job);
               const visibleDepts = Object.entries(productionQueue || {})
                 .map(([procType, allEntries]) => {
                   // Counts what the department can actually see now that
@@ -12190,7 +12250,11 @@ export default function StockControl() {
                         }}
                       >
                         <span style={{ flex: 1 }}>Laser Status</span>
-                        <span style={S.gradeCount}>{laserData === null ? "…" : laserStatusRows().length}</span>
+                        <span style={S.gradeCount}>
+                          {laserData === null
+                            ? "…"
+                            : laserStatusRows().filter((r) => !productionFiltering || productionJobMatches(r.job)).length}
+                        </span>
                         <ChevronRight size={20} />
                       </button>
                     )}
@@ -12235,7 +12299,7 @@ export default function StockControl() {
               <div style={S.empty}>Loading…</div>
             ) : (
               <LaserStatus
-                rows={laserStatusRows()}
+                rows={laserStatusRows().filter((r) => !productionFiltering || productionJobMatches(r.job))}
                 canPack={isAdmin || !!profile?.allowedProcessTypes?.some(workedInLaserStatus)}
                 meName={roleLabel}
                 onTakeJob={takePackingJob}
@@ -12261,24 +12325,12 @@ export default function StockControl() {
               <ChevronLeft size={18} strokeWidth={2.5} /> All departments
             </button>
             <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 10 }}>{productionSelectedDept}</div>
-            <input
-              style={S.input}
-              value={productionSearchQuery}
-              onChange={(e) => setProductionSearchQuery(e.target.value)}
-              placeholder="Search job number, SigmaNest number, or customer…"
-            />
+            {productionFilterRow()}
             {(() => {
               const procType = productionSelectedDept;
               const allEntries = productionQueue?.[procType] || [];
-              const q = productionSearchQuery.trim().toLowerCase();
-              let entries = q
-                ? allEntries.filter(
-                    ({ job }) =>
-                      (job.job_number || "").toLowerCase().includes(q) ||
-                      (job.laser_job_reference || "").toLowerCase().includes(q) ||
-                      (job.customer || "").toLowerCase().includes(q)
-                  )
-                : allEntries;
+              const q = productionFiltering;
+              let entries = q ? allEntries.filter(({ job }) => productionJobMatches(job)) : allEntries;
               // Everything at this stage is shown, and each card says
               // whose it is. Unassigned work used to be hidden from the
               // whole department, so a job nobody had been given was
@@ -12308,8 +12360,15 @@ export default function StockControl() {
                       // useful if the order on screen is the order to work
                       // in, so the operator never has to read all of them
                       // to find what matters.
+                      // The search and the two dropdowns narrow these too,
+                      // by the job the shortage belongs to, so a sales rep
+                      // looking at one customer is not shown another's
+                      // re-cuts.
+                      const shortageJob = (s) =>
+                        (jobsList || []).find((j) => j.id === s.job_id) || { job_number: s.job_number, customer: s.customer };
                       const relevant = (shortagesList || [])
                         .filter((s) => s.status === relevantStatus)
+                        .filter((s) => !productionFiltering || productionJobMatches(shortageJob(s)))
                         .slice()
                         .sort((a, b) => {
                           const ap = a.is_priority === false ? 1 : 0;
