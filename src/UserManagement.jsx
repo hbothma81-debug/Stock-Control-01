@@ -144,6 +144,17 @@ export default function UserManagement({
                     />
                     Can see Rand values
                   </label>
+                  {/* Separate from the one above on purpose: pricing a
+                      purchase order and knowing what the shop has spent this
+                      month are two different things to be trusted with. */}
+                  <label style={S.deptToggleItem}>
+                    <input
+                      type="checkbox"
+                      checked={!!p.canSeeSpendTotals}
+                      onChange={(e) => updatePersonField(p.id, "canSeeSpendTotals", e.target.checked)}
+                    />
+                    Can see spend totals (Purchase Orders)
+                  </label>
                   <label style={S.deptToggleItem}>
                     <input
                       type="checkbox"

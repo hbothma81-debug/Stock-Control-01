@@ -1893,6 +1893,7 @@ export default function StockControl() {
                 canRequisition: !!data.can_requisition,
                 canMarkReceived: !!data.can_mark_received,
                 canSeeValue: !!data.can_see_value,
+                canSeeSpendTotals: !!data.can_see_spend_totals,
                 canAccessStockManager: !!data.can_access_stock_manager,
                 canManageRequisitions: !!data.can_manage_requisitions,
                 canRaisePO: !!data.can_raise_po,
@@ -7485,6 +7486,7 @@ export default function StockControl() {
         canRequisition: !!d.can_requisition,
         canMarkReceived: !!d.can_mark_received,
         canSeeValue: !!d.can_see_value,
+        canSeeSpendTotals: !!d.can_see_spend_totals,
         canAccessStockManager: !!d.can_access_stock_manager,
         canManageRequisitions: !!d.can_manage_requisitions,
         canRaisePO: !!d.can_raise_po,
@@ -7507,6 +7509,7 @@ export default function StockControl() {
     canRequisition: "can_requisition",
     canMarkReceived: "can_mark_received",
     canSeeValue: "can_see_value",
+    canSeeSpendTotals: "can_see_spend_totals",
     canAccessStockManager: "can_access_stock_manager",
     canManageRequisitions: "can_manage_requisitions",
     canRaisePO: "can_raise_po",
@@ -7589,6 +7592,7 @@ export default function StockControl() {
               canRequisition: false,
               canMarkReceived: false,
               canSeeValue: false,
+              canSeeSpendTotals: false,
               canAccessStockManager: false,
               canManageRequisitions: false,
               canRaisePO: false,
@@ -7733,6 +7737,10 @@ export default function StockControl() {
   const canEditItems = isAdmin || !!profile?.canEditItems;
   const canDelete = isAdmin;
   const canSeeValue = isAdmin || !!profile?.canSeeValue;
+  // Deliberately not canSeeValue. That one is about stock prices, and
+  // somebody can need to price a purchase order without being shown what
+  // the shop has spent this month.
+  const canSeeSpendTotals = isAdmin || !!profile?.canSeeSpendTotals;
   const canRequisition = isAdmin || !!profile?.canRequisition;
   const canMarkReceivedPerm = isAdmin || !!profile?.canMarkReceived;
   const canManageRequisitions = isAdmin || !!profile?.canManageRequisitions;
@@ -11689,16 +11697,27 @@ export default function StockControl() {
             )}
           </div>
 
-          {/* The two numbers somebody actually comes to this screen for.
-              Both exclude VAT, because that is what the month costs the
-              business -- the VAT comes back. Both say so, so nobody has to
-              guess which basis they are looking at. */}
-          {purchaseOrders.length > 0 && canManageRequisitions && (() => {
+          {/* What the shop is spending. All three exclude VAT, because that
+              is what it actually costs the business -- the VAT comes back --
+              and each says so rather than leaving anyone to guess.
+
+              Ordered and Received will not tie up, and should not: an order
+              raised in August and delivered in September belongs to August's
+              Ordered and September's Received. They answer two different
+              questions, so each counts off its own date. */}
+          {purchaseOrders.length > 0 && canSeeSpendTotals && (() => {
             const thisMonth = new Date().toISOString().slice(0, 7);
             const open = purchaseOrders.filter(poIsOpen);
             const raisedThisMonth = purchaseOrders.filter((po) => poMonthKey(po) === thisMonth);
+            // By the day the goods landed, not the day the order went out.
+            // An order received with no date recorded cannot be counted into
+            // any month, so it falls out rather than being guessed at.
+            const receivedThisMonth = purchaseOrders.filter(
+              (po) => po.status === "received" && (po.receivedDate || "").slice(0, 7) === thisMonth
+            );
             const openTotal = open.reduce((s, po) => s + poExclusive(po), 0);
             const monthTotal = raisedThisMonth.reduce((s, po) => s + poExclusive(po), 0);
+            const receivedTotal = receivedThisMonth.reduce((s, po) => s + poExclusive(po), 0);
             const money = (n) => `R ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
             const figure = (label, value, count, noun) => (
@@ -11727,6 +11746,12 @@ export default function StockControl() {
                   `Ordered in ${poMonthLabel(thisMonth)}`,
                   monthTotal,
                   raisedThisMonth.length,
+                  "order"
+                )}
+                {figure(
+                  `Received in ${poMonthLabel(thisMonth)}`,
+                  receivedTotal,
+                  receivedThisMonth.length,
                   "order"
                 )}
               </div>
