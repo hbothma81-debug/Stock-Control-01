@@ -1,4 +1,4 @@
--- Which of the laser and shift setup files have been run on THIS database.
+-- Which of the laser, shift, buy-out, invoicing and job-file setup files have been run on THIS database.
 --
 -- Each setup file adds a table, a column or a function. This looks for
 -- one thing each file adds and says whether it is there. It changes
@@ -52,7 +52,13 @@ with checks (setup_file, looks_for, found) as (
     ('setup-shift-lockout-3-requests.sql', 'table shift_access_requests',
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'shift_access_requests')),
     ('setup-shift-lockout-3-requests.sql', 'function shift_access',
-      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'shift_access'))
+      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'shift_access')),
+    ('setup-buyouts.sql',               'column stock_items.sell_price',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'stock_items' and column_name = 'sell_price')),
+    ('setup-invoice-notes.sql',         'table job_invoice_notes',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'job_invoice_notes')),
+    ('setup-job-documents-move.sql',    'rule: job_documents rows can be changed (Move to...)',
+      exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'job_documents' and cmd = 'UPDATE'))
 )
 select
   setup_file,

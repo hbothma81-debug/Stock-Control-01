@@ -46,6 +46,7 @@ ORDER=(
   # --- modules that reference jobs
   setup-invoicing-delivery.sql
   setup-job-invoice-requests.sql
+  setup-invoice-notes.sql
   setup-generated-documents.sql
   setup-shortages-table.sql
   setup-shortage-priority.sql
