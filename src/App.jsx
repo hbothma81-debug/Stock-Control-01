@@ -5,6 +5,7 @@ import {
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, User, UserCheck, ShieldCheck, Lock, Database, Truck,
   Download, Pencil, Copy, Filter as FilterIcon, Paperclip, FileText, Image as ImageIcon,
   Wrench, Users, Eye, EyeOff, ShoppingCart, ClipboardList, Check, Package, Upload, RefreshCw,
+  MessageSquare,
 } from "lucide-react";
 import { F, C, S, THEME_CSS } from "./theme.js";
 
@@ -1267,6 +1268,12 @@ export default function StockControl() {
   // so it also turns up on the job's Files tab where anyone looking at the
   // job would expect to find it.
   const [invoiceDocs, setInvoiceDocs] = useState([]);
+  // Accounts asking what is missing, and the answers. A thread per job,
+  // read by everyone, added to by anyone, edited by nobody.
+  const [invoiceNotes, setInvoiceNotes] = useState([]);
+  const [invoiceNoteDrafts, setInvoiceNoteDrafts] = useState({});
+  const [savingInvoiceNoteFor, setSavingInvoiceNoteFor] = useState(null);
+  const [openInvoiceNotesFor, setOpenInvoiceNotesFor] = useState(null);
   const [uploadingInvoiceFor, setUploadingInvoiceFor] = useState(null);
   // What each job's quoted lines add up to, by job. Only ever read for
   // the total above the Jobs list.
@@ -3056,6 +3063,7 @@ export default function StockControl() {
       setJobsList([]);
     }
     loadInvoiceDocs();
+    loadInvoiceNotes();
     if (invReqResult.status === "fulfilled") {
       setJobInvoiceRequests(invReqResult.value || []);
     } else {
@@ -5904,6 +5912,122 @@ export default function StockControl() {
       console.error("Couldn't open invoice request:", err);
       alert("Couldn't open that document — check your connection and try again.");
     }
+  }
+
+  async function loadInvoiceNotes() {
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase
+        .from("job_invoice_notes")
+        .select("*")
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      setInvoiceNotes(data || []);
+    } catch (err) {
+      console.error("Failed to load the invoice notes:", err);
+      setInvoiceNotes([]);
+    }
+  }
+
+  // The note stays with the job so anyone can read it later. The person
+  // who has to do something about it gets told as well -- a question
+  // nobody sees is not a question.
+  async function addInvoiceNote(job, text) {
+    const note = (text || "").trim();
+    if (!supabase || !note) return;
+    setSavingInvoiceNoteFor(job.id);
+    try {
+      const { error } = await supabase.from("job_invoice_notes").insert({
+        job_id: job.id,
+        note,
+        written_by: roleLabel,
+      });
+      if (error) throw error;
+      setInvoiceNoteDrafts((prev) => ({ ...prev, [job.id]: "" }));
+      await loadInvoiceNotes();
+      if (job.sales_rep) {
+        await sendNotifications({
+          job_id: job.id,
+          job_number: job.job_number,
+          sales_rep: job.sales_rep,
+          message: `Invoicing query on ${job.job_number} (${job.customer || "no customer"}) from ${roleLabel}: ${note}`,
+        });
+      }
+    } catch (err) {
+      console.error("Failed to add that note:", err);
+      alert("That didn't save — check your connection and try again.");
+    } finally {
+      setSavingInvoiceNoteFor(null);
+    }
+  }
+
+  // Dates on the invoicing cards. Short, and the same shape on every one
+  // of them -- "9 Sep 2026", not the browser's idea of a date, which
+  // differs from one machine to the next.
+  function invoiceDateLabel(when) {
+    if (!when) return "—";
+    const d = new Date(when);
+    if (Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" });
+  }
+
+  function invoiceNotesForJob(jobId) {
+    return (invoiceNotes || []).filter((n) => n.job_id === jobId);
+  }
+
+  function renderInvoiceNotes(job) {
+    const notes = invoiceNotesForJob(job.id);
+    const open = openInvoiceNotesFor === job.id;
+    const draft = invoiceNoteDrafts[job.id] || "";
+    const saving = savingInvoiceNoteFor === job.id;
+    return (
+      <>
+        <button
+          type="button"
+          className="stk-btn"
+          style={notes.length ? S.reqActionBtn : S.reqActionBtnMuted}
+          onClick={() => setOpenInvoiceNotesFor(open ? null : job.id)}
+        >
+          <MessageSquare size={13} />
+          {notes.length ? `Notes (${notes.length})` : "Add a note"}
+        </button>
+        {open && (
+          <div style={{ ...S.noteThread, width: "100%" }}>
+            {notes.length === 0 && (
+              <div style={S.roleHint}>
+                Nothing asked yet. Anything missing off this one — an order number, a
+                quantity, a customer name — put it here and the sales rep is told.
+              </div>
+            )}
+            {notes.map((n) => (
+              <div key={n.id} style={S.noteLine}>
+                <span style={S.noteWho}>
+                  {n.written_by || "Someone"} · {new Date(n.created_at).toLocaleString("en-ZA", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                </span>
+                <span style={S.noteText}>{n.note}</span>
+              </div>
+            ))}
+            <div style={S.noteAddRow}>
+              <textarea
+                style={{ ...S.input, flex: 1, minWidth: 200, minHeight: 56, resize: "vertical", fontFamily: "inherit" }}
+                placeholder="What is missing, or the answer to it"
+                value={draft}
+                onChange={(e) => setInvoiceNoteDrafts((prev) => ({ ...prev, [job.id]: e.target.value }))}
+              />
+              <button
+                type="button"
+                className="stk-btn"
+                style={{ ...S.reqActionBtn, ...(draft.trim() && !saving ? {} : S.submitBtnDisabled) }}
+                disabled={!draft.trim() || saving}
+                onClick={() => addInvoiceNote(job, draft)}
+              >
+                {saving ? "Adding…" : "Add note"}
+              </button>
+            </div>
+          </div>
+        )}
+      </>
+    );
   }
 
   async function loadInvoiceDocs() {
@@ -13179,6 +13303,21 @@ export default function StockControl() {
                   <div className="stk-meta-row" style={S.rowMeta}>
                     <span>Sales rep: {job.sales_rep}</span>
                     {job.quoted_value != null && <span>Quoted: R {Number(job.quoted_value).toFixed(2)}</span>}
+                    {/* How long accounts has been sitting on it. The list is
+                        newest first, so the last entry is the first time this
+                        job was sent over -- that is the date that matters when
+                        somebody asks why it has not been invoiced. */}
+                    {(() => {
+                      const forJob = jobInvoiceRequests.filter((r) => r.job_id === job.id);
+                      if (forJob.length === 0) return null;
+                      const first = forJob[forJob.length - 1];
+                      return (
+                        <span>
+                          Submitted: {invoiceDateLabel(first.submitted_at)}
+                          {forJob.length > 1 ? ` (${forJob.length} requests)` : ""}
+                        </span>
+                      );
+                    })()}
                   </div>
                   <div style={S.reqActions}>
                     {jobInvoiceRequests.find((r) => r.job_id === job.id) ? (
@@ -13246,6 +13385,7 @@ export default function StockControl() {
                         <Check size={13} /> Mark as Invoiced
                       </button>
                     )}
+                    {renderInvoiceNotes(job)}
                   </div>
                 </div>
               ))}
@@ -13266,7 +13406,14 @@ export default function StockControl() {
                       <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
                     </div>
                     <div className="stk-meta-row" style={S.rowMeta}>
-                      <span>Invoiced by {job.invoiced_by} on {new Date(job.invoiced_at).toLocaleDateString()}</span>
+                      {(() => {
+                        const forJob = jobInvoiceRequests.filter((r) => r.job_id === job.id);
+                        if (forJob.length === 0) return null;
+                        return <span>Submitted: {invoiceDateLabel(forJob[forJob.length - 1].submitted_at)}</span>;
+                      })()}
+                      <span>Invoiced: {invoiceDateLabel(job.invoiced_at)}</span>
+                      {job.invoice_number && <span>Invoice #{job.invoice_number}</span>}
+                      <span>By {job.invoiced_by}</span>
                     </div>
                     <div style={S.reqActions}>
                       {jobInvoiceRequests.find((r) => r.job_id === job.id) ? (
@@ -13323,6 +13470,7 @@ export default function StockControl() {
                           </>
                         );
                       })()}
+                      {renderInvoiceNotes(job)}
                     </div>
                   </div>
                 ))}

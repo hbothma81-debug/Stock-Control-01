@@ -1074,6 +1074,45 @@ export const S = {
     fontSize: 14,
     cursor: "pointer",
   },
+
+  // The invoicing thread: accounts asking what is missing, and the
+  // answer coming back. Set apart from the card's own meta lines so a
+  // question does not read as just another field on the job.
+  noteThread: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTop: `1px dashed ${C.border}`,
+  },
+  noteLine: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    background: C.bg,
+    border: `1px solid ${C.border}`,
+    borderRadius: 6,
+    padding: "6px 9px",
+  },
+  noteWho: {
+    fontFamily: F.mono,
+    fontSize: 11.5,
+    color: C.muted,
+  },
+  noteText: {
+    fontSize: 14,
+    color: C.text,
+    lineHeight: 1.45,
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+  },
+  noteAddRow: {
+    display: "flex",
+    gap: 6,
+    alignItems: "flex-start",
+    flexWrap: "wrap",
+  },
   // Deliberately louder than reqActionBtnMuted — a plain, low-contrast
   // back control was easy to miss, especially on a phone screen. Solid
   // border, bold text, larger touch target.
