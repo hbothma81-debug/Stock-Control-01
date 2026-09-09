@@ -40,6 +40,7 @@ export default function BuyOuts({
   onRaisePo,
   onAddSupplier,
   onViewPo,
+  legacyNote,
   SavedCheck,
 }) {
   // What each line's order has come to. The PO is the record of whether
@@ -111,6 +112,14 @@ export default function BuyOuts({
 
   return (
     <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+      {/* The free-text Buy-out notes box that came before this tab. It
+          is gone from the New Job form, but a job written before it went
+          keeps what was typed, shown here so nothing is lost. */}
+      {legacyNote && (
+        <div style={{ ...S.roleHint, marginBottom: 8 }}>
+          <b>Buy-out notes (from before this tab):</b> {legacyNote}
+        </div>
+      )}
       <label style={S.label}>To buy in</label>
       {(lines || []).length === 0 && <div style={S.empty}>Nothing to buy in for this job yet.</div>}
 

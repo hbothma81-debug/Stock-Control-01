@@ -3140,7 +3140,6 @@ export default function StockControl() {
       laserJobReference: "",
       sigmaNestFile: null,
       materialLocation: "",
-      buyOutNotes: "",
       selectedProcesses: [],
       quoteItems: [],
       cutItems: [],
@@ -3533,7 +3532,6 @@ export default function StockControl() {
             customer_po: newJobForm.customerPo,
             laser_job_reference: newJobForm.laserJobReference,
             material_location: newJobForm.materialLocation,
-            buy_out_notes: newJobForm.buyOutNotes,
             created_by: roleLabel,
           })
           .select()
@@ -5173,7 +5171,6 @@ export default function StockControl() {
             material_3_grade: source.material_3_grade,
             material_3_qty: source.material_3_qty,
             material_location: source.material_location,
-            buy_out_notes: source.buy_out_notes,
             created_by: roleLabel,
           })
           .select()
@@ -19983,6 +19980,7 @@ export default function StockControl() {
               allocations={jobDetail.allocations || []}
               items={items || []}
               onViewPo={viewPoPdf}
+              legacyNote={jobDetail.job.buy_out_notes || ""}
               onAdd={(line) => addJobBuyoutItem(jobDetail.job, line)}
               onUpdate={(item, field, value) => updateJobBuyoutItem(jobDetail.job, item, field, value)}
               onRemove={(item) => removeJobBuyoutItem(jobDetail.job, item)}
@@ -20921,15 +20919,6 @@ export default function StockControl() {
                   placeholder="SigmaNest reference"
                 />
               </div>
-            </div>
-
-            <div style={{ marginTop: 10 }}>
-              <label style={S.label}>Buy-out notes (optional)</label>
-              <input
-                style={S.input}
-                value={newJobForm.buyOutNotes}
-                onChange={(e) => setNewJobForm((f) => ({ ...f, buyOutNotes: e.target.value }))}
-              />
             </div>
 
             <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
