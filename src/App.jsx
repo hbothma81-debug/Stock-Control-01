@@ -1121,6 +1121,12 @@ export default function StockControl() {
   const [shortageModal, setShortageModal] = useState(null);
   const [productionLoading, setProductionLoading] = useState(false);
   const [jobInvoiceRequests, setJobInvoiceRequests] = useState([]);
+  // The real invoice, the one out of Sage, filed against the job. It is an
+  // ordinary job document tagged Invoicing rather than a table of its own,
+  // so it also turns up on the job's Files tab where anyone looking at the
+  // job would expect to find it.
+  const [invoiceDocs, setInvoiceDocs] = useState([]);
+  const [uploadingInvoiceFor, setUploadingInvoiceFor] = useState(null);
   // What each job's quoted lines add up to, by job. Only ever read for
   // the total above the Jobs list.
   const [jobLineTotals, setJobLineTotals] = useState({});
@@ -2892,6 +2898,7 @@ export default function StockControl() {
       console.error("Failed to load jobs:", jobsResult.reason);
       setJobsList([]);
     }
+    loadInvoiceDocs();
     if (invReqResult.status === "fulfilled") {
       setJobInvoiceRequests(invReqResult.value || []);
     } else {
@@ -5625,6 +5632,49 @@ export default function StockControl() {
     } catch (err) {
       console.error("Couldn't open invoice request:", err);
       alert("Couldn't open that document — check your connection and try again.");
+    }
+  }
+
+  async function loadInvoiceDocs() {
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase
+        .from("job_documents")
+        .select("*")
+        .eq("process_name", "Invoicing")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      setInvoiceDocs(data || []);
+    } catch (err) {
+      console.error("Failed to load the invoices on file:", err);
+      setInvoiceDocs([]);
+    }
+  }
+
+  // Accounts uploading the finished invoice. Same path every other job
+  // document takes, tagged so the Invoicing screen can find it again.
+  async function uploadInvoiceForJob(job, file) {
+    if (!supabase || !file) return;
+    setUploadingInvoiceFor(job.id);
+    try {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `${job.id}/${Date.now()}-${safeName}`;
+      const { error: upError } = await supabase.storage.from("job-documents").upload(path, file);
+      if (upError) throw upError;
+      const { error } = await supabase.from("job_documents").insert({
+        job_id: job.id,
+        file_name: file.name,
+        storage_path: path,
+        uploaded_by: roleLabel,
+        process_name: "Invoicing",
+      });
+      if (error) throw error;
+      await loadInvoiceDocs();
+    } catch (err) {
+      console.error("Failed to upload the invoice:", err);
+      alert("Couldn't upload that file — check your connection and try again.");
+    } finally {
+      setUploadingInvoiceFor(null);
     }
   }
 
@@ -12683,6 +12733,48 @@ export default function StockControl() {
                     ) : (
                       <span style={S.roleHint}>No invoice request submitted yet</span>
                     )}
+                    {/* The invoice itself, once accounts has raised it in Sage.
+                        Separate from Open Invoice above, which is the floor's
+                        request to bill -- two different documents that are easy
+                        to confuse if they are not named apart. */}
+                    {(() => {
+                      const onFile = invoiceDocs.find((d) => d.job_id === job.id);
+                      const busy = uploadingInvoiceFor === job.id;
+                      return (
+                        <>
+                          {onFile && (
+                            <button
+                              type="button"
+                              className="stk-btn"
+                              style={S.reqActionBtnMuted}
+                              onClick={() => viewJobDocument(onFile)}
+                            >
+                              <FileText size={13} /> Open the invoice
+                            </button>
+                          )}
+                          {(isAdmin || !!profile?.canManageInvoicing) && (
+                            <label
+                              style={{ ...S.reqActionBtnMuted, cursor: busy ? "default" : "pointer" }}
+                              title={onFile ? "Replace the invoice on file" : "Attach the invoice from Sage"}
+                            >
+                              <Upload size={13} />
+                              {busy ? "Uploading…" : onFile ? "Replace invoice" : "Upload invoice"}
+                              <input
+                                type="file"
+                                accept=".pdf,image/*"
+                                style={{ display: "none" }}
+                                disabled={busy}
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  e.target.value = "";
+                                  if (file) uploadInvoiceForJob(job, file);
+                                }}
+                              />
+                            </label>
+                          )}
+                        </>
+                      );
+                    })()}
                     {/* Bracketed, and it matters: && binds tighter than ||, so
                         without these this read as "isAdmin, OR (has the tick and
                         the button)". For an admin the whole thing came out as
@@ -12729,6 +12821,48 @@ export default function StockControl() {
                       ) : (
                         <span style={S.roleHint}>No invoice request on file</span>
                       )}
+                      {/* The invoice itself, once accounts has raised it in Sage.
+                          Separate from Open Invoice above, which is the floor's
+                          request to bill -- two different documents that are easy
+                          to confuse if they are not named apart. */}
+                      {(() => {
+                        const onFile = invoiceDocs.find((d) => d.job_id === job.id);
+                        const busy = uploadingInvoiceFor === job.id;
+                        return (
+                          <>
+                            {onFile && (
+                              <button
+                                type="button"
+                                className="stk-btn"
+                                style={S.reqActionBtnMuted}
+                                onClick={() => viewJobDocument(onFile)}
+                              >
+                                <FileText size={13} /> Open the invoice
+                              </button>
+                            )}
+                            {(isAdmin || !!profile?.canManageInvoicing) && (
+                              <label
+                                style={{ ...S.reqActionBtnMuted, cursor: busy ? "default" : "pointer" }}
+                                title={onFile ? "Replace the invoice on file" : "Attach the invoice from Sage"}
+                              >
+                                <Upload size={13} />
+                                {busy ? "Uploading…" : onFile ? "Replace invoice" : "Upload invoice"}
+                                <input
+                                  type="file"
+                                  accept=".pdf,image/*"
+                                  style={{ display: "none" }}
+                                  disabled={busy}
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    e.target.value = "";
+                                    if (file) uploadInvoiceForJob(job, file);
+                                  }}
+                                />
+                              </label>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 ))}
