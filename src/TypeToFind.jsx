@@ -40,7 +40,14 @@ export default function TypeToFind({
 }) {
   const opts = (options || [])
     .filter((o) => o !== null && o !== undefined && o !== "")
-    .map((o) => (typeof o === "object" ? { value: String(o.value), label: String(o.label ?? o.value) } : { value: String(o), label: String(o) }));
+    // An option may carry a hint: shown muted beside the label in the list
+    // and searched with it, but never put in the box. A part number's
+    // description, say.
+    .map((o) =>
+      typeof o === "object"
+        ? { value: String(o.value), label: String(o.label ?? o.value), hint: o.hint ? String(o.hint) : "" }
+        : { value: String(o), label: String(o), hint: "" }
+    );
   const current = opts.find((o) => o.value === String(value ?? ""));
   const currentLabel = current ? current.label : allowNew ? String(value ?? "") : "";
 
@@ -105,7 +112,7 @@ export default function TypeToFind({
   // box still behaves like opening a dropdown.
   const untouched = editing && text === currentLabel;
   const matches = editing
-    ? (untouched || !q ? opts : opts.filter((o) => o.label.toLowerCase().includes(q))).slice(0, maxShown)
+    ? (untouched || !q ? opts : opts.filter((o) => `${o.label} ${o.hint}`.toLowerCase().includes(q))).slice(0, maxShown)
     : [];
   const exact = editing ? opts.find((o) => o.label.toLowerCase() === q) : null;
   const canAddTyped = allowNew && editing && q && !exact;
@@ -123,7 +130,7 @@ export default function TypeToFind({
     if (untouched) return commit(String(value ?? ""));
     if (!q) return commit("");
     if (exact) return commit(exact.value);
-    const partial = opts.filter((o) => o.label.toLowerCase().includes(q));
+    const partial = opts.filter((o) => `${o.label} ${o.hint}`.toLowerCase().includes(q));
     if (partial.length === 1 && !allowNew) return commit(partial[0].value);
     if (allowNew) return commit(text.trim());
     // Nothing usable: put the box back to what it was.
@@ -241,6 +248,7 @@ export default function TypeToFind({
               onMouseEnter={() => setHighlight(i)}
             >
               {o.label}
+              {o.hint && <span style={{ color: C.muted }}> — {o.hint}</span>}
             </button>
           ))}
           {canAddTyped && (

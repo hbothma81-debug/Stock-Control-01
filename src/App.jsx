@@ -15553,18 +15553,56 @@ export default function StockControl() {
                       ? "Supplier part code (optional)"
                       : `Part number ${form.mainCat === "stores" ? "(optional)" : ""}`}
                   </label>
-                  <input
-                    style={S.input}
-                    value={form.partNumber}
-                    onChange={(e) => setForm({ ...form, partNumber: e.target.value })}
-                    placeholder={
-                      form.mainCat === "stores" && form.storesKind === "toolConsumable"
-                        ? "e.g. CCMT09T304-M"
-                        : form.mainCat === "stores"
-                        ? "e.g. supplier SKU, if any"
-                        : "e.g. HPE-4471"
-                    }
-                  />
+                  {form.mainCat === "custom" ? (
+                    (() => {
+                      // Customer Stock part numbers are the customer's own,
+                      // and most of them already exist somewhere: on a
+                      // stock item for that customer, or on a drawing. Offer
+                      // those as you type, so the same part is not created
+                      // twice with two spellings. Picking one that is on
+                      // stock already fills the description in.
+                      const known = new Map();
+                      for (const it of items || []) {
+                        if (it.mainCat !== "custom" || !(it.partNumber || "").trim()) continue;
+                        if (editingId && it.id === editingId) continue;
+                        if (effectiveCustomer && it.customer && it.customer !== effectiveCustomer) continue;
+                        const pn = it.partNumber.trim();
+                        if (!known.has(pn)) known.set(pn, it.name || "");
+                      }
+                      for (const [pn, d] of Object.entries(drawingLookup || {})) {
+                        if (!known.has(pn)) known.set(pn, d?.description || "");
+                      }
+                      const options = [...known.entries()]
+                        .sort((a, b) => byText(a[0], b[0]))
+                        .map(([pn, desc]) => ({ value: pn, label: pn, hint: desc }));
+                      return (
+                        <TypeToFind
+                          options={options}
+                          value={form.partNumber}
+                          allowNew
+                          onChange={(v) =>
+                            setForm((f) => ({
+                              ...f,
+                              partNumber: v,
+                              name: f.name || known.get(v) || "",
+                            }))
+                          }
+                          emptyLabel="e.g. HPE-4471 — type to find an existing part"
+                        />
+                      );
+                    })()
+                  ) : (
+                    <input
+                      style={S.input}
+                      value={form.partNumber}
+                      onChange={(e) => setForm({ ...form, partNumber: e.target.value })}
+                      placeholder={
+                        form.mainCat === "stores" && form.storesKind === "toolConsumable"
+                          ? "e.g. CCMT09T304-M"
+                          : "e.g. supplier SKU, if any"
+                      }
+                    />
+                  )}
                   {form.partNumber.trim() && drawingLookup[form.partNumber.trim()] && (
                     <div style={{ ...S.roleHint, color: C.accentFinished, marginTop: 4, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                       <Check size={13} /> Drawing on file — {drawingLookup[form.partNumber.trim()].description || "no description"}.{" "}

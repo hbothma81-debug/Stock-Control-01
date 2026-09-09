@@ -14,7 +14,7 @@ import { FileText } from "lucide-react";
 
 const PREVIEW_CUSTOMERS = ["Acme Steel", "acme fabrication", "Bell Equipment", "Greenzone", "HPE", "Zulu Engineering"];
 const PREVIEW_SUPPLIERS = [
-  { value: "s1", label: "Macsteel" },
+  { value: "s1", label: "Macsteel", hint: "Germiston branch" },
   { value: "s2", label: "NDE" },
   { value: "s3", label: "Test Steel Supplies" },
 ];
