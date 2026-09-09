@@ -50,6 +50,12 @@ export default function TypeToFind({
   const [highlight, setHighlight] = useState(0);
   const inputRef = useRef(null);
   const swallowMouseUp = useRef(false);
+  // Set the moment a choice is made, so the blur that follows a tap or
+  // Enter does not settle the typed text a second time. Without this a
+  // tap on "Acme Steel" was overwritten by "acm" being taken as a new
+  // name on the way out. A ref, not state: the blur handler runs before
+  // the re-render and would still see the old value.
+  const doneEditing = useRef(false);
   const editing = text !== null;
   const shownText = editing ? text : currentLabel;
 
@@ -64,6 +70,7 @@ export default function TypeToFind({
   const canAddTyped = allowNew && editing && q && !exact;
 
   function commit(next) {
+    doneEditing.current = true;
     if (next !== String(value ?? "")) onChange(next);
     setText(null);
     setHighlight(0);
@@ -71,7 +78,7 @@ export default function TypeToFind({
 
   // Leaving the box: settle on the best reading of what was typed.
   function settle() {
-    if (!editing) return;
+    if (!editing || doneEditing.current) return;
     if (untouched) return commit(String(value ?? ""));
     if (!q) return commit("");
     if (exact) return commit(exact.value);
@@ -104,6 +111,7 @@ export default function TypeToFind({
       else settle();
       inputRef.current?.blur();
     } else if (e.key === "Escape") {
+      doneEditing.current = true;
       setText(null);
       setHighlight(0);
       inputRef.current?.blur();
@@ -130,6 +138,7 @@ export default function TypeToFind({
         // mouse-up that follows a click would normally collapse that
         // selection again, so the first one after focus is swallowed.
         onFocus={(e) => {
+          doneEditing.current = false;
           setText(currentLabel);
           setHighlight(0);
           e.target.select();
