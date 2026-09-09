@@ -12,7 +12,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { shiftDayWindow, currentAndPreviousWindow, pickShift, fmtTime } from "./shiftWindow.js";
+import { shiftDayWindow, currentAndPreviousWindow, pickShift, lastEndedShift, fmtTime } from "./shiftWindow.js";
 
 // 2026-09-08 is a Tuesday. Month is zero-based in the Date constructor.
 const at = (day, h, m = 0) => new Date(2026, 8, day, h, m, 0, 0);
@@ -140,4 +140,25 @@ test("a program finished at 05:30 belongs to the night shift that started the ev
 test("fmtTime is 24-hour with two digits", () => {
   assert.equal(fmtTime(at(8, 7, 5)), "07:05");
   assert.equal(fmtTime(at(8, 16, 30)), "16:30");
+});
+
+test("between shifts, the shift that just ended is the one to count against", () => {
+  // Tuesday 17:00: day shift over at 16:30, night not on until 17:50.
+  assert.equal(pickShift([dayShift, nightShift], null, at(8, 17)), null);
+  const last = lastEndedShift([dayShift, nightShift], at(8, 17));
+  assert.equal(last.shift.id, "day");
+  assert.equal(last.window.start.getDate(), 8);
+  assert.deepEqual([fmtTime(last.window.start), fmtTime(last.window.end)], ["07:20", "16:30"]);
+});
+
+test("early on Wednesday morning the shift that ended most recently is the night shift, not Tuesday's day", () => {
+  // Wednesday 06:00: night shift ended 05:40, day not on until 07:20.
+  const last = lastEndedShift([dayShift, nightShift], at(9, 6));
+  assert.equal(last.shift.id, "night");
+  assert.equal(fmtTime(last.window.end), "05:40");
+  assert.equal(last.window.end.getDate(), 9);
+});
+
+test("lastEndedShift is nothing when no shift has ever had a window", () => {
+  assert.equal(lastEndedShift([], at(8, 17)), null);
 });

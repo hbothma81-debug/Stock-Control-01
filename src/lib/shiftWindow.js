@@ -80,6 +80,20 @@ export function pickShift(shifts, myShiftId, now = new Date()) {
   return on.find((s) => s.id === myShiftId) || on[0] || null;
 }
 
+// The shift that finished most recently, and the window it finished.
+// For the gap between shifts -- the day shift ends 16:30, nights start
+// 17:50 -- when nothing is on the clock but the figure the operator wants
+// is what the shift that just ended managed. Null when no shift has ever
+// had a window.
+export function lastEndedShift(shifts, now = new Date()) {
+  let best = null;
+  for (const s of shifts || []) {
+    const { previous } = currentAndPreviousWindow(s, now);
+    if (previous && (!best || previous.end > best.window.end)) best = { shift: s, window: previous };
+  }
+  return best;
+}
+
 // 24-hour, the way the times are typed in under Time Manager.
 export function fmtTime(d) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;

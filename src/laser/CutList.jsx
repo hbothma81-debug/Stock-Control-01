@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { Check, Undo2, OctagonAlert, MessageSquare, X, Clock } from "lucide-react";
 import { C, S } from "../theme.js";
 import Section from "../Section.jsx";
-import { pickShift, currentAndPreviousWindow, fmtTime } from "../lib/shiftWindow.js";
+import { pickShift, currentAndPreviousWindow, lastEndedShift, fmtTime } from "../lib/shiftWindow.js";
 import { plannedMinutes, outstandingMinutes, fmtMinutes, laserShifts } from "../lib/cuttingTime.js";
 
 // The laser operator's screen. A to-do list of programs to cut.
@@ -215,12 +215,26 @@ function ShiftCounter({ programs, shifts, myShiftId }) {
     // Manager, so a factory shift with overlapping hours is not the one
     // the count lands on.
     const { shifts: mine, fallback } = laserShifts(shifts);
-    const shift = pickShift(mine, myShiftId, now);
-    const win = shift ? currentAndPreviousWindow(shift, now) : { current: null, previous: null };
+    let shift = pickShift(mine, myShiftId, now);
+    let win = shift ? currentAndPreviousWindow(shift, now) : { current: null, previous: null };
+    let ended = false;
+    // Between shifts -- the day shift ends 16:30, nights start 17:50 --
+    // nothing is on the clock, but the figure wanted right then is what
+    // the shift that just ended managed. Counting "today" instead swept
+    // in last night's programs and read 13 where the day shift cut 2.
+    if (!shift) {
+      const last = lastEndedShift(mine, now);
+      if (last) {
+        shift = last.shift;
+        win = currentAndPreviousWindow(shift, new Date(last.window.start.getTime() + 1));
+        ended = true;
+      }
+    }
     let current = win.current;
     let label;
     if (current) {
       label = `${shift.name} · ${fmtTime(current.start)}–${fmtTime(current.end)}`;
+      if (ended) label += " · ended, next shift not started";
       if (fallback) label += " · no shift is ticked for the laser yet";
     } else {
       const start = new Date(now);
