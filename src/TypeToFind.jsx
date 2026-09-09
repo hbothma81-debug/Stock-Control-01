@@ -49,6 +49,7 @@ export default function TypeToFind({
   const [text, setText] = useState(null);
   const [highlight, setHighlight] = useState(0);
   const inputRef = useRef(null);
+  const swallowMouseUp = useRef(false);
   const editing = text !== null;
   const shownText = editing ? text : currentLabel;
 
@@ -115,15 +116,30 @@ export default function TypeToFind({
     <div style={{ position: "relative", ...(style || {}) }}>
       <input
         ref={inputRef}
-        style={{ ...S.input, ...(hasValue && !editing ? { paddingRight: 30 } : {}), ...(inputStyle || {}) }}
+        // Room for the clear button on the right. The whole padding, not
+        // just the right side: S.input sets padding as one value and React
+        // refuses to mix the two.
+        style={{ ...S.input, ...(hasValue && !editing ? { padding: "8px 30px 8px 10px" } : {}), ...(inputStyle || {}) }}
         value={shownText}
         placeholder={emptyLabel || placeholder || "Type to find…"}
         title={title}
         autoFocus={autoFocus}
         autoComplete="off"
-        onFocus={() => {
+        // The current choice is selected on focus, so typing replaces it
+        // rather than tacking letters onto the end of "Acme Steel". The
+        // mouse-up that follows a click would normally collapse that
+        // selection again, so the first one after focus is swallowed.
+        onFocus={(e) => {
           setText(currentLabel);
           setHighlight(0);
+          e.target.select();
+          swallowMouseUp.current = true;
+        }}
+        onMouseUp={(e) => {
+          if (swallowMouseUp.current) {
+            e.preventDefault();
+            swallowMouseUp.current = false;
+          }
         }}
         onChange={(e) => {
           setText(e.target.value);

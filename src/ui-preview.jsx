@@ -9,7 +9,36 @@ import ReactDOM from "react-dom/client";
 import { C, S, THEME_CSS } from "./theme.js";
 import Section from "./Section.jsx";
 import RecordRow from "./RecordRow.jsx";
+import TypeToFind from "./TypeToFind.jsx";
 import { FileText } from "lucide-react";
+
+const PREVIEW_CUSTOMERS = ["Acme Steel", "acme fabrication", "Bell Equipment", "Greenzone", "HPE", "Zulu Engineering"];
+const PREVIEW_SUPPLIERS = [
+  { value: "s1", label: "Macsteel" },
+  { value: "s2", label: "NDE" },
+  { value: "s3", label: "Test Steel Supplies" },
+];
+
+function TypeToFindDemo() {
+  const [filter, setFilter] = React.useState("");
+  const [supplier, setSupplier] = React.useState("s2");
+  const [customer, setCustomer] = React.useState("");
+  return (
+    <Section title="Type to find" count={3}>
+      <div style={S.roleHint}>Filter: empty means all. Nothing unknown can be typed in.</div>
+      <TypeToFind options={PREVIEW_CUSTOMERS} value={filter} onChange={setFilter} emptyLabel="All customers" />
+      <div style={S.roleHint} data-testid="filter-value">filter = "{filter}"</div>
+
+      <div style={{ ...S.roleHint, marginTop: 10 }}>Value and label differ: stores the id, shows the name.</div>
+      <TypeToFind options={PREVIEW_SUPPLIERS} value={supplier} onChange={setSupplier} emptyLabel="Select a supplier…" />
+      <div style={S.roleHint} data-testid="supplier-value">supplier = "{supplier}"</div>
+
+      <div style={{ ...S.roleHint, marginTop: 10 }}>Form field: a new name can be added.</div>
+      <TypeToFind options={PREVIEW_CUSTOMERS} value={customer} onChange={setCustomer} allowNew emptyLabel="Type to find or add…" />
+      <div style={S.roleHint} data-testid="customer-value">customer = "{customer}"</div>
+    </Section>
+  );
+}
 
 function Preview() {
   // The colours live on a data-stk-theme attribute, same as the app.
@@ -26,6 +55,8 @@ function Preview() {
       <div style={{ maxWidth: 780, margin: "0 auto", padding: 20 }}>
         <h2 style={{ fontSize: 20, marginBottom: 4 }}>Shared pieces, on their own</h2>
         <div style={S.roleHint}>Made-up data. No database, no login.</div>
+
+        <TypeToFindDemo />
 
         <Section title="Open by default" count={3}>
           <RecordRow title="DN-0042" summary="JOB-0014 — Greenzone" right={<span style={S.roleHint}>To customer</span>}>
