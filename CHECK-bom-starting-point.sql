@@ -67,10 +67,10 @@ select '0. database',
 union all
 
 select '0. database',
-       'column stock_items.is_bom',
+       'column stock_items.recipe_kind',
        case when exists (select 1 from information_schema.columns
                          where table_schema = 'public' and table_name = 'stock_items'
-                           and column_name = 'is_bom')
+                           and column_name = 'recipe_kind')
             then 'ready' else 'not yet -- step 1 of the plan' end
 
 union all
