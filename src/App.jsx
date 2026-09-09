@@ -61,6 +61,7 @@ import { TABS, NAV_TABS, TAB_GROUPS, LASER_MACHINE } from "./constants.js";
 import UserManagement from "./UserManagement.jsx";
 import CompanyDetails from "./manager/CompanyDetails.jsx";
 import CutToSize from "./jobs/CutToSize.jsx";
+import BuyOuts from "./jobs/BuyOuts.jsx";
 import { planBars, barsOnShelf, barsSetAside, barsOnOrder, matchingStock, materialName, offcutIsKeepable, KERF_MM, TRIM_MM, MIN_OFFCUT_MM } from "./jobs/cutToSize.js";
 import EditableName from "./EditableName.jsx";
 import TypeToFind from "./TypeToFind.jsx";
@@ -3667,7 +3668,7 @@ export default function StockControl() {
     if (sameJob) {
       setJobDetail((d) => (d ? { ...d, job } : d));
     } else {
-      setJobDetail({ job, processes: [], documents: [], quoteItems: [], deliveryNotes: [], allocations: [], events: [], cutItems: [] });
+      setJobDetail({ job, processes: [], documents: [], quoteItems: [], deliveryNotes: [], allocations: [], events: [], cutItems: [], buyoutItems: [] });
       setJobDetailTab("overview");
     }
     setJobDetailLoading(true);
@@ -3677,7 +3678,7 @@ export default function StockControl() {
       // the nesting side does not reach it, so opening the job showed an
       // empty box for a number that was already on the job -- and typing it
       // again was the obvious thing to do. Read the row itself.
-      const [jobResult, { data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }, allocResult, eventsResult, generatedResult, cutResult] = await Promise.all([
+      const [jobResult, { data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }, allocResult, eventsResult, generatedResult, cutResult, buyoutResult] = await Promise.all([
         supabase.from("jobs").select("*").eq("id", job.id).single(),
         supabase.from("job_processes").select("*").eq("job_id", job.id).order("sort_order"),
         supabase.from("job_documents").select("*").eq("job_id", job.id).order("created_at", { ascending: false }),
@@ -3694,6 +3695,8 @@ export default function StockControl() {
         // The cut-to-size list. Not fatal either: a job must still open
         // before setup-job-cut-items.sql has been run.
         supabase.from("job_cut_items").select("*").eq("job_id", job.id).order("sort_order"),
+        // The buy-outs. Not fatal either.
+        supabase.from("job_buyout_items").select("*").eq("job_id", job.id).order("sort_order"),
       ]);
       if (procError) throw procError;
       if (docError) throw docError;
@@ -3718,8 +3721,10 @@ export default function StockControl() {
         // table is unreadable.
         generated: generatedResult.data || [],
         cutItems: cutResult.data || [],
+        buyoutItems: buyoutResult.data || [],
       });
       if (cutResult.error) console.error("Failed to load the cut list (job detail still shown):", cutResult.error);
+      if (buyoutResult.error) console.error("Failed to load the buy-outs (job detail still shown):", buyoutResult.error);
     } catch (err) {
       console.error("Failed to load job detail:", err);
       // Without this the modal simply never opens. Somebody taps a job,
@@ -5499,6 +5504,74 @@ export default function StockControl() {
     } catch (err) {
       console.error("Failed to import the quote into the job:", err);
       alert(typeof err === "string" ? err : `Couldn't import that file: ${err.message || "unknown error"}.`);
+    }
+  }
+
+  // ---- Buy-outs ----
+  // The bought-in parts a job needs. Same shape of function as the cut
+  // list; the screen is src/jobs/BuyOuts.jsx. Raising the PO comes next.
+
+  async function addJobBuyoutItem(job, line) {
+    if (!supabase) return false;
+    try {
+      const nextOrder = (jobDetail?.buyoutItems || []).reduce((m, i) => Math.max(m, Number(i.sort_order) || 0), -1) + 1;
+      const { error } = await supabase.from("job_buyout_items").insert({ ...line, job_id: job.id, sort_order: nextOrder });
+      if (error) throw error;
+      await logJobEvent(job.id, "buy-out added", `${line.qty} × ${line.description} from ${line.supplier}`);
+      await openJobDetail(job);
+      return true;
+    } catch (err) {
+      console.error("Failed to add the buy-out:", err);
+      alert(
+        `That line didn't save: ${err.message || "unknown error"}.` +
+          (String(err.message || "").includes("job_buyout_items") ? " Has setup-job-buyout-items.sql been run in Supabase?" : " Check your signal and try again.")
+      );
+      return false;
+    }
+  }
+
+  async function updateJobBuyoutItem(job, item, field, rawValue) {
+    if (!supabase) return;
+    const textFields = ["part_number", "description", "supplier", "note"];
+    const value = textFields.includes(field) ? String(rawValue).trim() : Number(rawValue);
+    if ((field === "description" || field === "supplier") && !value) return;
+    if (!textFields.includes(field) && !(value >= 0)) return;
+    if (String(item[field] ?? "") === String(value)) return;
+    // A line already on a purchase order is what the supplier was sent.
+    // Its quantity and cost cannot quietly change here; the PO is the
+    // record. Description and note may.
+    if (item.po_id && (field === "qty" || field === "unit_cost" || field === "supplier")) {
+      alert(`This line is already on ${item.po_number || "a purchase order"}, so its ${field === "qty" ? "quantity" : field === "supplier" ? "supplier" : "cost"} is fixed. Change the order instead.`);
+      await openJobDetail(job);
+      return;
+    }
+    try {
+      const { error } = await supabase.from("job_buyout_items").update({ [field]: value }).eq("id", item.id);
+      if (error) throw error;
+      flashSaved(`buyout-${item.id}`);
+      await logJobEvent(job.id, "buy-out changed", `${item.description} — ${field.replace(/_/g, " ")} ${item[field]} to ${value}`);
+      await openJobDetail(job);
+    } catch (err) {
+      console.error("Failed to change the buy-out:", err);
+      alert("That change didn't save — check your signal and try again.");
+    }
+  }
+
+  async function removeJobBuyoutItem(job, item) {
+    if (!supabase) return;
+    if (item.po_id) {
+      alert(`This line is already on ${item.po_number || "a purchase order"}, so it cannot be removed from here.`);
+      return;
+    }
+    if (!window.confirm(`Remove ${item.qty} × ${item.description} from this job's buy-outs?`)) return;
+    try {
+      const { error } = await supabase.from("job_buyout_items").delete().eq("id", item.id);
+      if (error) throw error;
+      await logJobEvent(job.id, "buy-out removed", `${item.qty} × ${item.description}`);
+      await openJobDetail(job);
+    } catch (err) {
+      console.error("Failed to remove the buy-out:", err);
+      alert("That didn't save — check your signal and try again.");
     }
   }
 
@@ -18830,6 +18903,10 @@ export default function StockControl() {
                 label: `Cut to size${jobDetail.cutItems?.length ? ` (${jobDetail.cutItems.length})` : ""}`,
               },
               {
+                key: "buyouts",
+                label: `Buy-outs${jobDetail.buyoutItems?.length ? ` (${jobDetail.buyoutItems.length})` : ""}`,
+              },
+              {
                 key: "files",
                 label: `Files${visibleJobFiles.length ? ` (${visibleJobFiles.length})` : ""}`,
               },
@@ -19807,6 +19884,20 @@ export default function StockControl() {
               findSectionType={findSectionType}
               onSetAside={(group, count) => setAsideBarsForCutList(jobDetail.job, group, count)}
               onRequisition={canRequisition ? (group, count) => requisitionBarsForCutList(jobDetail.job, group, count) : null}
+              SavedCheck={SavedCheck}
+            />
+          )}
+
+          {jobDetailTab === "buyouts" && (
+            <BuyOuts
+              lines={jobDetail.buyoutItems || []}
+              canEdit={canEditThisJob}
+              canSeeValue={canSeeValue}
+              codes={(items || []).filter((i) => i.mainCat === "buyouts")}
+              suppliers={master.suppliers || []}
+              onAdd={(line) => addJobBuyoutItem(jobDetail.job, line)}
+              onUpdate={(item, field, value) => updateJobBuyoutItem(jobDetail.job, item, field, value)}
+              onRemove={(item) => removeJobBuyoutItem(jobDetail.job, item)}
               SavedCheck={SavedCheck}
             />
           )}

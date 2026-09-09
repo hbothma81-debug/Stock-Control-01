@@ -1,0 +1,291 @@
+import { useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
+import { C, S } from "../theme.js";
+
+// The Buy-outs tab on a job: the bought-in parts this job needs, one
+// line each, and later the purchase orders raised for them.
+//
+// A line is typed to find against Buy-out Codes -- part number,
+// description or supplier -- and picking one brings the supplier and
+// the cost. A part not in the codes can be typed as a free line with a
+// supplier chosen by hand.
+//
+// Not invoiced: a buy-out is a cost inside something quoted, never a
+// line the customer is billed for. So there is no selling price here,
+// and the total at the foot is what the job costs to buy in.
+//
+// Lives in its own file, the same as CutToSize, so the quoting module
+// can show the same list on a quote. It owns only the line being typed;
+// everything saved comes in as `lines` and goes out through onAdd /
+// onUpdate / onRemove.
+
+const blankLine = () => ({ query: "", itemId: null, partNumber: "", description: "", supplier: "", qty: "", unitCost: "", note: "" });
+
+const cell = (width) => ({ ...S.input, width, fontSize: 14, padding: "4px 6px" });
+
+const money = (n) => `R ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+export default function BuyOuts({ lines, canEdit, canSeeValue, codes, suppliers, onAdd, onUpdate, onRemove, SavedCheck }) {
+  const [draft, setDraft] = useState(blankLine);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+
+  const q = draft.query.trim().toLowerCase();
+  const suggestions =
+    suggestOpen && q && !draft.itemId
+      ? (codes || [])
+          .filter(
+            (c) =>
+              (c.partNumber || "").toLowerCase().includes(q) ||
+              (c.name || "").toLowerCase().includes(q) ||
+              (c.supplier || "").toLowerCase().includes(q)
+          )
+          .slice(0, 8)
+      : [];
+  const supplierNames = [...new Set([...(suppliers || []).map((s) => s.name), ...(codes || []).map((c) => c.supplier)].filter(Boolean))].sort();
+
+  const pick = (c) => {
+    setDraft((d) => ({
+      ...d,
+      query: c.name,
+      itemId: c.id,
+      partNumber: c.partNumber || "",
+      description: c.name,
+      supplier: c.supplier || "",
+      unitCost: c.value != null ? String(c.value) : "",
+    }));
+    setSuggestOpen(false);
+  };
+
+  async function submitDraft() {
+    const description = (draft.itemId ? draft.description : draft.query).trim();
+    if (!description) return alert("What is it? Type a part number or description.");
+    if (!(Number(draft.qty) > 0)) return alert("How many?");
+    if (!draft.supplier.trim()) return alert("Which supplier? A buy-out with no supplier cannot go on a purchase order.");
+    setAdding(true);
+    const ok = await onAdd({
+      item_id: draft.itemId || null,
+      part_number: draft.partNumber.trim(),
+      description,
+      supplier: draft.supplier.trim(),
+      qty: Number(draft.qty),
+      unit_cost: Number(draft.unitCost) || 0,
+      note: draft.note.trim(),
+    });
+    setAdding(false);
+    // The next line is usually from the same supplier.
+    if (ok) setDraft((d) => ({ ...blankLine(), supplier: d.supplier }));
+  }
+
+  const total = (lines || []).reduce((sum, l) => sum + (Number(l.qty) || 0) * (Number(l.unit_cost) || 0), 0);
+  const bySupplier = {};
+  for (const l of lines || []) (bySupplier[l.supplier || "No supplier"] = bySupplier[l.supplier || "No supplier"] || []).push(l);
+
+  return (
+    <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+      <label style={S.label}>To buy in</label>
+      {(lines || []).length === 0 && <div style={S.empty}>Nothing to buy in for this job yet.</div>}
+
+      {/* Grouped by supplier, because that is how they will be ordered:
+          one purchase order per supplier. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 6 }}>
+        {Object.entries(bySupplier).map(([supplier, group]) => (
+          <div key={supplier}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>
+              {supplier}
+              <span style={{ ...S.roleHint, fontWeight: 400 }}>
+                {" "}
+                · {group.length} line{group.length === 1 ? "" : "s"}
+                {canSeeValue ? ` · ${money(group.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unit_cost) || 0), 0))}` : ""}
+              </span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {group.map((it) => (
+                <div key={it.id} style={S.managerRow}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      {canEdit ? (
+                        <>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            defaultValue={it.qty}
+                            onBlur={(e) => onUpdate(it, "qty", e.target.value)}
+                            style={cell(62)}
+                            title="Quantity"
+                          />
+                          <span style={{ color: C.muted }}>×</span>
+                          <input
+                            defaultValue={it.part_number}
+                            placeholder="Part no"
+                            onBlur={(e) => onUpdate(it, "part_number", e.target.value)}
+                            style={cell(110)}
+                          />
+                          <input
+                            defaultValue={it.description}
+                            placeholder="Description"
+                            onBlur={(e) => onUpdate(it, "description", e.target.value)}
+                            style={{ ...cell(160), flex: 1, minWidth: 120 }}
+                          />
+                          <input
+                            defaultValue={it.supplier}
+                            list="buyout-supplier-options"
+                            placeholder="Supplier"
+                            onBlur={(e) => onUpdate(it, "supplier", e.target.value)}
+                            style={cell(130)}
+                          />
+                          {canSeeValue && (
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              defaultValue={it.unit_cost}
+                              onBlur={(e) => onUpdate(it, "unit_cost", e.target.value)}
+                              style={cell(90)}
+                              title="Cost each, excluding VAT"
+                            />
+                          )}
+                          <input
+                            defaultValue={it.note}
+                            placeholder="Note"
+                            onBlur={(e) => onUpdate(it, "note", e.target.value)}
+                            style={{ ...cell(120), flex: 1, minWidth: 80 }}
+                          />
+                          <SavedCheck fieldKey={`buyout-${it.id}`} />
+                          <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => onRemove(it)} title="Remove this line">
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span style={{ fontWeight: 600 }}>{it.qty} ×</span>
+                          {it.part_number && <span style={S.roleHint}>{it.part_number}</span>}
+                          <span>{it.description}</span>
+                          {it.note && <span style={S.roleHint}>— {it.note}</span>}
+                        </>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, flexWrap: "wrap" }}>
+                      {canSeeValue && (
+                        <span style={S.roleHint}>
+                          {money(it.unit_cost)} each · {money((Number(it.qty) || 0) * (Number(it.unit_cost) || 0))}
+                        </span>
+                      )}
+                      {/* Ordered or not. The PO number lands here once
+                          the Raise PO step exists. */}
+                      <span style={{ ...S.roleHint, ...(it.po_number ? { color: C.accentFinished, fontWeight: 600 } : {}) }}>
+                        {it.po_number ? `On ${it.po_number}` : "Not ordered"}
+                      </span>
+                      {!it.item_id && <span style={S.roleHint}>· not in Buy-out Codes</span>}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {(lines || []).length > 0 && canSeeValue && (
+        <div style={{ ...S.roleHint, marginTop: 8, fontWeight: 600 }}>Buy-in cost for this job: {money(total)} excluding VAT</div>
+      )}
+
+      {canEdit && (
+        <div style={{ marginTop: 10, padding: 10, background: C.bg, borderRadius: 6, border: `1px solid ${C.border}` }}>
+          <label style={S.label}>Add a buy-out</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={draft.qty}
+              placeholder="Qty"
+              onChange={(e) => setDraft((d) => ({ ...d, qty: e.target.value }))}
+              style={cell(62)}
+            />
+            <span style={{ color: C.muted }}>×</span>
+            <div style={{ position: "relative", flex: "1 1 220px" }}>
+              <input
+                value={draft.query}
+                placeholder="Part number, description or supplier — start typing to match Buy-out Codes…"
+                onChange={(e) => {
+                  // Typing again un-links: the line no longer says what
+                  // the code says.
+                  setDraft((d) => ({ ...d, query: e.target.value, itemId: null, partNumber: "", description: "" }));
+                  setSuggestOpen(true);
+                }}
+                onFocus={() => setSuggestOpen(true)}
+                onBlur={() => setTimeout(() => setSuggestOpen(false), 150)}
+                style={S.input}
+              />
+              {suggestions.length > 0 && (
+                <div style={S.suggestDropdown}>
+                  {suggestions.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className="stk-btn"
+                      style={S.suggestItem}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        pick(c);
+                      }}
+                    >
+                      <span style={{ fontWeight: 600 }}>{c.partNumber || "—"}</span>
+                      <span style={{ color: C.muted }}> — {c.name}</span>
+                      <span style={{ color: C.muted }}> · {c.supplier || "no supplier"}</span>
+                      {canSeeValue && c.value != null && c.value !== "" && <span style={{ color: C.muted }}> · {money(c.value)}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <input
+              value={draft.supplier}
+              list="buyout-supplier-options"
+              placeholder="Supplier"
+              onChange={(e) => setDraft((d) => ({ ...d, supplier: e.target.value }))}
+              style={cell(130)}
+            />
+            {canSeeValue && (
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={draft.unitCost}
+                placeholder="Cost each"
+                onChange={(e) => setDraft((d) => ({ ...d, unitCost: e.target.value }))}
+                style={cell(90)}
+                title="Cost each, excluding VAT"
+              />
+            )}
+            <input
+              value={draft.note}
+              placeholder="Note (optional)"
+              onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))}
+              style={{ ...cell(120), flex: 1, minWidth: 80 }}
+              onKeyDown={(e) => e.key === "Enter" && submitDraft()}
+            />
+            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={submitDraft} disabled={adding}>
+              <Plus size={12} /> Add
+            </button>
+          </div>
+          <div style={{ ...S.roleHint, marginTop: 4 }}>
+            {draft.itemId
+              ? `Linked to Buy-out Codes${draft.partNumber ? ` — ${draft.partNumber}` : ""}`
+              : q
+                ? "Not matched to Buy-out Codes — pick from the list, or leave it as a free line with a supplier typed in."
+                : null}
+          </div>
+        </div>
+      )}
+
+      <datalist id="buyout-supplier-options">
+        {supplierNames.map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
+    </div>
+  );
+}
