@@ -5184,6 +5184,110 @@ export default function StockControl() {
     }
   }
 
+  // Pulls a quote into a job that already exists, the same two ways the
+  // New Job form does: the SigmaNest PDF or the ERS Excel. The lines are
+  // added under whatever is already on the job, never replacing it, and
+  // the job's own boxes are only filled where they are still empty -- a
+  // reference somebody typed is not overwritten by one read from a file.
+  async function importQuoteIntoJob(job, file, kind) {
+    if (!supabase || !file) return;
+    try {
+      let lines = [];
+      let fill = {};
+      let source = file.name;
+      const customer = job.customer || "";
+      const stockMatch = (name) =>
+        customer
+          ? (items || []).find(
+              (si) => si.mainCat === "custom" && si.customer === customer && si.name.trim().toLowerCase() === (name || "").trim().toLowerCase()
+            ) || null
+          : null;
+      if (kind === "sigmanest") {
+        const quote = await parseSigmaNestQuoteFile(file);
+        source = quote.quoteNumber || file.name;
+        lines = quote.lines.map((line) => {
+          const description = sigmaNestLineDescription(line);
+          return {
+            description,
+            qty: line.qty != null ? Number(line.qty) : 1,
+            unitPrice: line.unitPrice != null ? Number(line.unitPrice) : null,
+            linkedItemId: stockMatch(description)?.id || null,
+          };
+        });
+        fill = {
+          laser_job_reference: quote.quoteNumber || "",
+          description: quote.notes || "",
+          quoted_value: quote.quotedTotal != null ? Number(quote.quotedTotal) : null,
+        };
+      } else {
+        const parsed = await parseQuoteExcelFile(file);
+        source = parsed.quoteNumber || file.name;
+        lines = parsed.quoteItems.map((it) => ({
+          description: it.description,
+          qty: Number(it.qty),
+          unitPrice: it.priceNeedsReview ? null : Number(it.unitPrice),
+          linkedItemId: stockMatch(it.description)?.id || null,
+        }));
+        fill = { quote_reference: parsed.quoteNumber || "" };
+      }
+      lines = lines.filter((l) => l.description && l.qty > 0);
+      if (lines.length === 0) {
+        alert("Nothing usable was read from that file.");
+        return;
+      }
+      const unpriced = lines.filter((l) => l.unitPrice == null).length;
+      if (
+        !window.confirm(
+          `Add ${lines.length} line${lines.length === 1 ? "" : "s"} from ${source} to ${job.job_number}?` +
+            (jobDetail?.quoteItems?.length ? `\n\nThe ${jobDetail.quoteItems.length} already on the job stay as they are.` : "") +
+            (unpriced ? `\n\n${unpriced} line${unpriced === 1 ? " has" : "s have"} no price and will need one filled in.` : "")
+        )
+      )
+        return;
+
+      const start = (jobDetail?.quoteItems || []).reduce((m, i) => Math.max(m, Number(i.sort_order) || 0), -1) + 1;
+      const rows = lines.map((l, idx) => ({
+        job_id: job.id,
+        description: l.description.trim(),
+        qty: l.qty,
+        unit_price: l.unitPrice || 0,
+        linked_item_id: l.linkedItemId,
+        // A line matched to the customer's parts comes in tagged with
+        // where that part is made, the same as the New Job form does.
+        made_on: (l.linkedItemId && (items || []).find((i) => i.id === l.linkedItemId)?.madeOn) || "",
+        sort_order: start + idx,
+      }));
+      const { error } = await supabase.from("job_quote_items").insert(rows);
+      if (error) throw error;
+
+      // Only the empty boxes. Somebody's own typing beats a file.
+      const patch = {};
+      for (const [field, value] of Object.entries(fill)) {
+        if (value === "" || value == null) continue;
+        if (job[field] == null || job[field] === "") patch[field] = value;
+      }
+      if (Object.keys(patch).length) {
+        const { error: jobError } = await supabase.from("jobs").update(patch).eq("id", job.id);
+        if (jobError) console.error("The lines went in, but the job's own boxes did not update:", jobError);
+      }
+
+      // The file itself goes on the job, flagged as a quote so only the
+      // people who deal in prices see it.
+      await uploadJobDocument(job.id, file, null, true);
+      await logJobEvent(job.id, "quote imported", `${rows.length} line${rows.length === 1 ? "" : "s"} from ${source}`);
+      await openJobDetail(job);
+      fetchJobs();
+      alert(
+        `Added ${rows.length} line${rows.length === 1 ? "" : "s"} from ${source}.` +
+          (unpriced ? `\n\n${unpriced} came in without a price — fill those in on the Items tab.` : "") +
+          "\n\nCheck them against the file before invoicing, the prices especially."
+      );
+    } catch (err) {
+      console.error("Failed to import the quote into the job:", err);
+      alert(typeof err === "string" ? err : `Couldn't import that file: ${err.message || "unknown error"}.`);
+    }
+  }
+
   // ---- Cut to size ----
   // The parts to be cut from structural stock. Same shape of function as
   // the quoted items above; the screen itself is src/jobs/CutToSize.jsx.
@@ -18410,6 +18514,40 @@ export default function StockControl() {
 
                 {canEditThisJob && (
                   <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+                    {/* The same two imports the New Job form offers, for a
+                        job that already exists -- a quote that arrived after
+                        the job was booked in, or a job created before the
+                        quote was ready. Lines are added under the existing
+                        ones, never in place of them. */}
+                    <label style={S.label}>Import a quote</label>
+                    <div style={{ display: "flex", gap: 6, marginTop: 4, marginBottom: 10, flexWrap: "wrap" }}>
+                      <label className="stk-btn" style={{ ...S.addBtn, cursor: "pointer", justifyContent: "center", flex: "1 1 200px" }}>
+                        <Upload size={13} /> Upload SigmaNest Quote (PDF)
+                        <input
+                          type="file"
+                          accept=".pdf"
+                          style={{ display: "none" }}
+                          onChange={(e) => {
+                            const file = e.target.files[0] || null;
+                            e.target.value = "";
+                            if (file) importQuoteIntoJob(jobDetail.job, file, "sigmanest");
+                          }}
+                        />
+                      </label>
+                      <label className="stk-btn" style={{ ...S.addBtn, cursor: "pointer", justifyContent: "center", flex: "1 1 200px" }}>
+                        <Upload size={13} /> Upload Quote Excel
+                        <input
+                          type="file"
+                          accept=".xlsx,.xls,.xlsm,.csv"
+                          style={{ display: "none" }}
+                          onChange={(e) => {
+                            const file = e.target.files[0] || null;
+                            e.target.value = "";
+                            if (file) importQuoteIntoJob(jobDetail.job, file, "excel");
+                          }}
+                        />
+                      </label>
+                    </div>
                     <label style={S.label}>Add an item</label>
                     {/* Same type-to-find as the New Job form: start typing
                         a part number or name and this customer's stock
