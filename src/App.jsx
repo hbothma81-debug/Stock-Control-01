@@ -425,6 +425,7 @@ const PO_DB_FIELDS = [
   ["vatRate", "vat_rate", "num"], ["vatTotal", "vat_total", "num"], ["totalValue", "total_value", "num"],
   ["deliveryDate", "delivery_date", "text"], ["reference", "reference", "text"], ["salesPerson", "sales_person", "text"],
   ["notes", "notes", "text"], ["status", "status", "text"], ["receivedBy", "received_by", "text"], ["receivedDate", "received_date", "text"],
+  ["cancelledBy", "cancelled_by", "text"], ["cancelledDate", "cancelled_date", "text"], ["cancelReason", "cancel_reason", "text"],
   ["deliveryNoteNumber", "delivery_note_number", "text"],
   // The job number is kept beside the id so a finished order still reads
   // correctly if that job is ever deleted.
@@ -1267,6 +1268,7 @@ export default function StockControl() {
   const [poReportSupplier, setPoReportSupplier] = useState("");
   const [poReportStatus, setPoReportStatus] = useState("");
   const [poReportMonths, setPoReportMonths] = useState([]);
+  const [cancelPoModal, setCancelPoModal] = useState(null); // { po, reason }
   const [selectedReqIds, setSelectedReqIds] = useState([]);
   const [requisitionTarget, setRequisitionTarget] = useState(null);
   // Set when the requisition form is editing an existing request rather
@@ -9021,7 +9023,12 @@ export default function StockControl() {
     const byMonths = poReportMonths.length > 0;
     const matches = purchaseOrders
       .filter((po) => !poReportSupplier || po.supplierId === poReportSupplier)
-      .filter((po) => !poReportStatus || (poReportStatus === "received" ? po.status === "received" : po.status !== "received"))
+      .filter((po) => {
+        if (!poReportStatus) return true;
+        if (poReportStatus === "received") return po.status === "received";
+        if (poReportStatus === "cancelled") return po.status === "cancelled";
+        return poIsOpen(po);
+      })
       .filter((po) => (byMonths ? poReportMonths.includes(poMonthKey(po)) : true))
       .filter((po) => byMonths || !poReportFrom || new Date(po.dateCreated) >= new Date(poReportFrom))
       .filter((po) => byMonths || !poReportTo || new Date(po.dateCreated) <= new Date(poReportTo + "T23:59:59"))
@@ -9075,7 +9082,7 @@ export default function StockControl() {
       const list = months.get(key);
       const ex = list.reduce((s, po) => s + poExclusive(po), 0);
       const inc = list.reduce((s, po) => s + Number(po.totalValue || 0), 0);
-      const open = list.filter((po) => po.status !== "received");
+      const open = list.filter(poIsOpen);
       const openEx = open.reduce((s, po) => s + poExclusive(po), 0);
       allEx += ex;
       allInc += inc;
@@ -9102,7 +9109,7 @@ export default function StockControl() {
             po.poNumber,
             new Date(po.dateCreated).toLocaleDateString(),
             po.supplierName || "—",
-            po.status === "received" ? "Received" : "Outstanding",
+            po.status === "received" ? "Received" : po.status === "cancelled" ? "Cancelled" : "Outstanding",
             money(poEx),
             money(poInc - poEx),
             money(poInc),
@@ -9278,6 +9285,40 @@ export default function StockControl() {
           : li
       ),
     }));
+  }
+
+  // Still coming: not received, and not cancelled. Until an order could be
+  // cancelled, "not received" meant the same thing and was written out in
+  // eight places -- the list, receiving, the figures and the report. One
+  // definition now, so a cancelled order cannot go on counting as money on
+  // order in a place somebody forgot to change.
+  // Cancelling is deliberately not deleting. The order was sent to a
+  // supplier and may have been acted on, so the record stays and says who
+  // stopped it and why -- which is the whole point of the reason box.
+  function cancelPurchaseOrder(po, reason) {
+    const why = (reason || "").trim();
+    if (!why) return;
+    // Changing the list is what saves it -- purchase orders write
+    // themselves to the database whenever this state changes, the same way
+    // receiving does. A second write here would race that one.
+    setPurchaseOrders((prev) =>
+      prev.map((x) =>
+        x.id === po.id
+          ? {
+              ...x,
+              status: "cancelled",
+              cancelledBy: roleLabel,
+              cancelledDate: new Date().toISOString(),
+              cancelReason: why,
+            }
+          : x
+      )
+    );
+    setCancelPoModal(null);
+  }
+
+  function poIsOpen(po) {
+    return po.status !== "received" && po.status !== "cancelled";
   }
 
   function updatePoLineItem(idx, field, value) {
@@ -11505,7 +11546,7 @@ export default function StockControl() {
               guess which basis they are looking at. */}
           {purchaseOrders.length > 0 && canManageRequisitions && (() => {
             const thisMonth = new Date().toISOString().slice(0, 7);
-            const open = purchaseOrders.filter((po) => po.status !== "received");
+            const open = purchaseOrders.filter(poIsOpen);
             const raisedThisMonth = purchaseOrders.filter((po) => poMonthKey(po) === thisMonth);
             const openTotal = open.reduce((s, po) => s + poExclusive(po), 0);
             const monthTotal = raisedThisMonth.reduce((s, po) => s + poExclusive(po), 0);
@@ -11597,7 +11638,15 @@ export default function StockControl() {
                       {po.supplierName || "No supplier"}
                     </span>
                     <span style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-                      <span style={{ ...S.reqStatusTag, ...(po.status === "received" ? S.reqStatus_received : S.reqStatus_ordered) }}>
+                      <span
+                        style={{
+                          ...S.reqStatusTag,
+                          ...(po.status === "received" ? S.reqStatus_received : S.reqStatus_ordered),
+                          ...(po.status === "cancelled"
+                            ? { color: C.danger, borderColor: C.danger, textDecoration: "line-through" }
+                            : {}),
+                        }}
+                      >
                         R{po.totalValue.toFixed(2)}
                       </span>
                       <ChevronDown size={16} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
@@ -11616,8 +11665,19 @@ export default function StockControl() {
                             {po.deliveryNoteNumber && <span>Delivery note: {po.deliveryNoteNumber}</span>}
                           </>
                         )}
+                        {po.status === "cancelled" && (
+                          <span style={{ color: C.danger }}>
+                            Cancelled by {po.cancelledBy || "—"}
+                            {po.cancelledDate ? ` on ${new Date(po.cancelledDate).toLocaleDateString()}` : ""}
+                          </span>
+                        )}
                       </div>
                       {po.notes && <div style={S.itemComment}>{po.notes}</div>}
+                      {/* The reason is the point of the button, so it sits with
+                          the order rather than only in the audit trail. */}
+                      {po.status === "cancelled" && po.cancelReason && (
+                        <div style={{ ...S.itemComment, color: C.danger }}>Cancelled: {po.cancelReason}</div>
+                      )}
 
                       {/* The lines themselves, priced. Saying "3 lines" meant
                           opening the PDF to find out what had been ordered and
@@ -11675,6 +11735,19 @@ export default function StockControl() {
                             <Copy size={13} /> Copy
                           </button>
                         )}
+                        {/* Only while it is still coming. A received order is a
+                            record of goods that arrived, and cancelling one would
+                            be rewriting history rather than stopping anything. */}
+                        {canRaisePO && poIsOpen(po) && (
+                          <button
+                            type="button"
+                            className="stk-btn"
+                            style={{ ...S.reqActionBtnMuted, color: C.danger, borderColor: C.danger }}
+                            onClick={() => setCancelPoModal({ po, reason: "" })}
+                          >
+                            <X size={13} /> Cancel
+                          </button>
+                        )}
                       </div>
                     </>
                   )}
@@ -11687,7 +11760,7 @@ export default function StockControl() {
             // is the thing you are looking for -- the supplier just needs to
             // be readable once you have found it.
             const outstanding = [...purchaseOrders]
-              .filter((po) => po.status !== "received")
+              .filter(poIsOpen)
               .filter(matchesSearch)
               .sort((a, b) => new Date(b.dateCreated) - new Date(a.dateCreated));
 
@@ -11712,6 +11785,26 @@ export default function StockControl() {
                     <div style={S.empty}>Nothing matches that.</div>
                   )}
                 </Section>
+
+                {/* Only appears once something has been cancelled. An empty
+                    heading on every screen would be a permanent reminder of a
+                    thing that has never happened. */}
+                {purchaseOrders.some((po) => po.status === "cancelled") && (
+                  <Section
+                    title="Cancelled"
+                    defaultOpen={false}
+                    count={purchaseOrders.filter((po) => po.status === "cancelled").length}
+                  >
+                    {[...purchaseOrders]
+                      .filter((po) => po.status === "cancelled")
+                      .filter(matchesSearch)
+                      .sort((a, b) => new Date(b.cancelledDate || 0) - new Date(a.cancelledDate || 0))
+                      .map(renderPoCard)}
+                    {purchaseOrders.filter((po) => po.status === "cancelled").filter(matchesSearch).length === 0 && (
+                      <div style={S.empty}>Nothing matches that.</div>
+                    )}
+                  </Section>
+                )}
               </>
             );
           })()}
@@ -11719,7 +11812,7 @@ export default function StockControl() {
       ) : tab === "receiving" ? (
         <div style={S.list}>
           <div style={S.roleHint}>Pick an outstanding Purchase Order to confirm what actually arrived.</div>
-          {purchaseOrders.filter((po) => po.status !== "received").length > 0 && (
+          {purchaseOrders.filter(poIsOpen).length > 0 && (
             <input
               style={{ ...S.input, marginTop: 10 }}
               value={receivingSearchQuery}
@@ -11727,17 +11820,17 @@ export default function StockControl() {
               placeholder="Search PO number or supplier…"
             />
           )}
-          {purchaseOrders.filter((po) => po.status !== "received").length === 0 && (
+          {purchaseOrders.filter(poIsOpen).length === 0 && (
             <div style={S.empty}>Nothing outstanding to receive.</div>
           )}
           <Section
             title="Outstanding"
-            count={purchaseOrders.filter((po) => po.status !== "received").length}
+            count={purchaseOrders.filter(poIsOpen).length}
           >
             {(() => {
               const rq = receivingSearchQuery.trim().toLowerCase();
               const list = [...purchaseOrders]
-                .filter((po) => po.status !== "received")
+                .filter(poIsOpen)
                 .filter(
                   (po) =>
                     !rq ||
@@ -20066,6 +20159,59 @@ export default function StockControl() {
         </div>
       )}
 
+      {/* Why, not just that. A cancelled order with no explanation is a gap
+          somebody has to go and ask about weeks later, so the reason is
+          required rather than optional. */}
+      {cancelPoModal && (
+        <div style={S.modalOverlay}>
+          <div style={{ ...S.modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Cancel {cancelPoModal.po.poNumber}</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setCancelPoModal(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={S.roleHint}>
+              {cancelPoModal.po.supplierName || "No supplier"} · R{Number(cancelPoModal.po.totalValue || 0).toFixed(2)}
+            </div>
+            <div style={{ ...S.roleHint, marginTop: 8 }}>
+              The order stays on the books with the reason against it — it is not deleted. If the supplier has already
+              been sent it, tell them too; this only records the decision here.
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Why is it being cancelled?</label>
+              <input
+                autoFocus
+                style={S.input}
+                value={cancelPoModal.reason}
+                onChange={(e) => setCancelPoModal((m) => ({ ...m, reason: e.target.value }))}
+                placeholder="e.g. ordered in error, job cancelled, supplier cannot supply"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && cancelPoModal.reason.trim()) {
+                    e.preventDefault();
+                    cancelPurchaseOrder(cancelPoModal.po, cancelPoModal.reason);
+                  }
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              className="stk-btn"
+              style={{
+                ...S.submitBtn,
+                marginTop: 12,
+                background: C.danger,
+                ...(cancelPoModal.reason.trim() ? {} : S.submitBtnDisabled),
+              }}
+              disabled={!cancelPoModal.reason.trim()}
+              onClick={() => cancelPurchaseOrder(cancelPoModal.po, cancelPoModal.reason)}
+            >
+              Cancel this purchase order
+            </button>
+          </div>
+        </div>
+      )}
+
       {showPoReport && (
         <div style={S.modalOverlay}>
           <div style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
@@ -20136,6 +20282,7 @@ export default function StockControl() {
                 <option value="">Outstanding &amp; Received</option>
                 <option value="outstanding">Outstanding only</option>
                 <option value="received">Received only</option>
+                <option value="cancelled">Cancelled only</option>
               </select>
             </div>
             <button type="button" className="stk-btn" style={S.submitBtn} onClick={generatePoReport}>
