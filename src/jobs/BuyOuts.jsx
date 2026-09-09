@@ -25,7 +25,7 @@ const cell = (width) => ({ ...S.input, width, fontSize: 14, padding: "4px 6px" }
 
 const money = (n) => `R ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-export default function BuyOuts({ lines, canEdit, canSeeValue, codes, suppliers, onAdd, onUpdate, onRemove, SavedCheck }) {
+export default function BuyOuts({ lines, canEdit, canSeeValue, codes, suppliers, onAdd, onUpdate, onRemove, onRaisePo, SavedCheck }) {
   const [draft, setDraft] = useState(blankLine);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -91,13 +91,34 @@ export default function BuyOuts({ lines, canEdit, canSeeValue, codes, suppliers,
       <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 6 }}>
         {Object.entries(bySupplier).map(([supplier, group]) => (
           <div key={supplier}>
-            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>
-              {supplier}
-              <span style={{ ...S.roleHint, fontWeight: 400 }}>
-                {" "}
-                · {group.length} line{group.length === 1 ? "" : "s"}
-                {canSeeValue ? ` · ${money(group.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unit_cost) || 0), 0))}` : ""}
-              </span>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>
+                {supplier}
+                <span style={{ ...S.roleHint, fontWeight: 400 }}>
+                  {" "}
+                  · {group.length} line{group.length === 1 ? "" : "s"}
+                  {canSeeValue ? ` · ${money(group.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unit_cost) || 0), 0))}` : ""}
+                </span>
+              </div>
+              {/* One order per supplier, for the lines not yet ordered.
+                  A line added after the first order gets its own. */}
+              {onRaisePo &&
+                supplier !== "No supplier" &&
+                (() => {
+                  const open = group.filter((l) => !l.po_id);
+                  if (open.length === 0) return null;
+                  return (
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={S.reqActionBtn}
+                      onClick={() => onRaisePo(supplier, open)}
+                      title={`Open the purchase order form for ${supplier} with these ${open.length} line${open.length === 1 ? "" : "s"} and this job filled in`}
+                    >
+                      Raise PO for {supplier} · {open.length} line{open.length === 1 ? "" : "s"}
+                    </button>
+                  );
+                })()}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {group.map((it) => (

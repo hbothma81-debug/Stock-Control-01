@@ -5575,6 +5575,48 @@ export default function StockControl() {
     }
   }
 
+  // Raises a purchase order for one supplier's buy-outs on a job. Opens
+  // the ordinary PO form, filled in: the supplier, the lines not yet on an
+  // order, their costs, the job, and the job number as the reference. The
+  // form itself is unchanged, so the order gets the next number in the
+  // same sequence and lands on Purchase Orders and Receiving like any
+  // other. Each line carries its Buy-out Code, which is what lets
+  // receiving count the stock in and set it aside for the job.
+  function raisePoForBuyouts(job, supplierName, lines) {
+    const supplier = (master.suppliers || []).find((s) => sameText(s.name, supplierName));
+    if (!supplier) {
+      alert(
+        `"${supplierName}" is not in your suppliers list, so a purchase order cannot be addressed to them. ` +
+          "Add the supplier in Stock Manager first, or correct the name on these lines."
+      );
+      return;
+    }
+    const open = (lines || []).filter((l) => !l.po_id);
+    if (open.length === 0) {
+      alert("Everything from this supplier is already on a purchase order.");
+      return;
+    }
+    openPoBuilder(
+      [],
+      supplier.id,
+      open.map((l) => ({
+        description: l.description,
+        partNumber: l.part_number || "",
+        qty: String(l.qty),
+        unitPrice: l.unit_cost != null ? String(l.unit_cost) : "",
+        linkedItemId: l.item_id || null,
+      }))
+    );
+    setPoBuilder((b) => ({
+      ...b,
+      jobId: job.id,
+      jobNumber: job.job_number || "",
+      jobQuery: "",
+      reference: job.job_number || "",
+      buyoutLineIds: open.map((l) => l.id),
+    }));
+  }
+
   // ---- Cut to size ----
   // The parts to be cut from structural stock. Same shape of function as
   // the quoted items above; the screen itself is src/jobs/CutToSize.jsx.
@@ -9249,7 +9291,11 @@ export default function StockControl() {
     const linkedReqs = (po.linkedRequisitionIds || []).map((id) => requisitions.find((r) => r.id === id)).filter(Boolean);
     const lines = po.lineItems.map((li, idx) => {
       const linkedReq = linkedReqs[idx] || null;
-      const linkedItem = linkedReq ? items.find((it) => it.id === linkedReq.itemId) : null;
+      // A line raised from a requisition finds its stock item through the
+      // requisition. A line raised from a job's Buy-outs tab has no
+      // requisition and carries the stock item itself, so receiving it
+      // still counts the stock in and sets it aside for the job.
+      const linkedItem = linkedReq ? items.find((it) => it.id === linkedReq.itemId) : li.linkedItemId ? items.find((it) => it.id === li.linkedItemId) : null;
       return {
         description: li.description,
         orderedQty: li.qty,
@@ -9987,6 +10033,26 @@ export default function StockControl() {
     };
     setPurchaseOrders((prev) => [...prev, po]);
     setMaster((prev) => ({ ...prev, nextPoNumber: (prev.nextPoNumber || 1) + 1 }));
+    // A PO raised from a job's Buy-outs tab: stamp the order's number on
+    // the lines it covers, so the tab reads "On PO1573" and refuses to
+    // let those lines drift from what the supplier was sent.
+    if (poBuilder.buyoutLineIds?.length && supabase) {
+      const stampedJobId = poBuilder.jobId;
+      supabase
+        .from("job_buyout_items")
+        .update({ po_id: po.id, po_number: po.poNumber })
+        .in("id", poBuilder.buyoutLineIds)
+        .then(({ error }) => {
+          if (error) {
+            console.error("The PO was raised, but the job's buy-out lines were not marked as ordered:", error);
+            alert(`${po.poNumber} was raised, but the job's buy-out lines could not be marked as ordered. Refresh the job and check.`);
+          }
+          if (stampedJobId) {
+            logJobEvent(stampedJobId, "PO raised", `${po.poNumber} — ${po.supplierName}, ${validLines.length} line${validLines.length === 1 ? "" : "s"}`);
+            if (jobDetail?.job.id === stampedJobId) openJobDetail(jobDetail.job);
+          }
+        });
+    }
     // Bundling requisitions into a PO is the "ordering" step — move them on
     // the same way markOrdered does, and remember which PO they belong to.
     if (poBuilder.linkedRequisitionIds.length) {
@@ -19898,6 +19964,13 @@ export default function StockControl() {
               onAdd={(line) => addJobBuyoutItem(jobDetail.job, line)}
               onUpdate={(item, field, value) => updateJobBuyoutItem(jobDetail.job, item, field, value)}
               onRemove={(item) => removeJobBuyoutItem(jobDetail.job, item)}
+              // Sales people raise their own job's orders; so does anyone
+              // with the purchase order permission.
+              onRaisePo={
+                canEditThisJob && (isAdmin || profile?.isSalesPerson || canRaisePO)
+                  ? (supplierName, lines) => raisePoForBuyouts(jobDetail.job, supplierName, lines)
+                  : null
+              }
               SavedCheck={SavedCheck}
             />
           )}
