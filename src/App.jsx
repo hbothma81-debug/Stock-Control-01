@@ -1124,6 +1124,9 @@ export default function StockControl() {
   // What each job's quoted lines add up to, by job. Only ever read for
   // the total above the Jobs list.
   const [jobLineTotals, setJobLineTotals] = useState({});
+  // Every open job's stages, keyed by job id, for the progress bar on the
+  // Jobs list. Loaded with the list; refreshed when a stage is ticked.
+  const [jobStagesByJob, setJobStagesByJob] = useState({});
   const [allDeliveryNotes, setAllDeliveryNotes] = useState([]);
   const [generatedDocuments, setGeneratedDocuments] = useState(null);
   const [deliveryNotesSearchQuery, setDeliveryNotesSearchQuery] = useState("");
@@ -2882,6 +2885,9 @@ export default function StockControl() {
 
     if (jobsResult.status === "fulfilled") {
       setJobsList(jobsResult.value || []);
+      // The stages behind each row's progress bar. Needs the job ids, so
+      // it runs after the jobs land rather than beside them.
+      refreshJobStages(jobsResult.value || []);
     } else {
       console.error("Failed to load jobs:", jobsResult.reason);
       setJobsList([]);
@@ -2914,6 +2920,29 @@ export default function StockControl() {
       setJobLineTotals({});
     }
     setJobsLoading(false);
+  }
+
+  // The stages of every job not yet invoiced, for the progress bar on the
+  // Jobs list. Invoiced jobs are done and get no bar, so their stages are
+  // left out. Never fatal: the list is worth more than the bar.
+  async function refreshJobStages(jobs) {
+    const ids = (jobs || jobsList || []).filter((j) => j.status !== "invoiced").map((j) => j.id);
+    if (ids.length === 0) {
+      setJobStagesByJob({});
+      return;
+    }
+    try {
+      const rows = await fetchAllRows("job_processes", {
+        select: "id, job_id, process_name, is_complete, sort_order, is_urgent, shortage_id",
+        orderBy: "sort_order",
+        filter: (q) => q.in("job_id", ids),
+      });
+      const byJob = {};
+      for (const r of rows) (byJob[r.job_id] = byJob[r.job_id] || []).push(r);
+      setJobStagesByJob(byJob);
+    } catch (err) {
+      console.error("Failed to load stages for the Jobs list (the list still shows):", err);
+    }
   }
 
   function openNewJob() {
@@ -3680,6 +3709,9 @@ export default function StockControl() {
 
   async function refreshJobDetail() {
     if (!jobDetail) return;
+    // A stage ticked inside the job should move the bar on the list
+    // behind it too.
+    refreshJobStages();
     // Re-fetch the job's own row too, not just its sub-collections — the
     // job object passed to openJobDetail was otherwise stale, so a status
     // change (e.g. marking Complete) updated the database correctly but
@@ -4162,6 +4194,8 @@ export default function StockControl() {
         });
       }
       setProductionQueue(byProcessType);
+      // The floor ticking a stage moves the Jobs list's progress bars.
+      if (jobsList !== null) refreshJobStages();
     } catch (err) {
       console.error("Failed to load production queue:", err);
       setProductionQueue({});
@@ -11733,6 +11767,41 @@ export default function StockControl() {
                       </span>
                     );
                   })()}
+
+                  {/* Where the job is in the shop. One segment per stage
+                      in flow order: done is filled green, the stage it is
+                      at now is amber, the rest are outlines. Beside it,
+                      the current stage by name, so the list answers
+                      "where is it stuck" without opening anything. */}
+                  {job.status !== "invoiced" &&
+                    (() => {
+                      const stages = inFlowOrder((jobStagesByJob[job.id] || []).filter((p) => !p.shortage_id), job);
+                      if (stages.length === 0) return null;
+                      const done = stages.filter((p) => p.is_complete).length;
+                      const current = stages.find((p) => !p.is_complete) || null;
+                      return (
+                        <div style={{ flexBasis: "100%", display: "flex", alignItems: "center", gap: 10, marginTop: 2 }}>
+                          <div style={{ display: "flex", gap: 3, flex: "0 1 360px" }}>
+                            {stages.map((p) => {
+                              const isCurrent = current && p.id === current.id;
+                              const trouble = p.is_urgent && !p.is_complete;
+                              const fill = p.is_complete ? C.accentFinished : isCurrent ? C.accentRaw : "transparent";
+                              const edge = trouble ? C.danger : p.is_complete ? C.accentFinished : isCurrent ? C.accentRaw : C.border;
+                              return (
+                                <span
+                                  key={p.id}
+                                  title={`${p.process_name}${p.is_complete ? " — done" : isCurrent ? " — now" : " — to come"}${trouble ? " — urgent" : ""}`}
+                                  style={{ flex: 1, height: 8, borderRadius: 2, background: fill, border: `${trouble ? 2 : 1}px solid ${edge}`, boxSizing: "border-box" }}
+                                />
+                              );
+                            })}
+                          </div>
+                          <span style={{ ...S.roleHint, whiteSpace: "nowrap", ...(current?.is_urgent ? { color: C.danger, fontWeight: 600 } : {}) }}>
+                            {current ? `${current.process_name} · ${done} of ${stages.length}` : `All ${stages.length} stages done`}
+                          </span>
+                        </div>
+                      );
+                    })()}
                 </button>
               );
 
