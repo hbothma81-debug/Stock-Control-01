@@ -12851,13 +12851,13 @@ export default function StockControl() {
                         style={S.reqActionBtnMuted}
                         onClick={() => viewJobInvoiceRequest(jobInvoiceRequests.find((r) => r.job_id === job.id))}
                       >
-                        <FileText size={13} /> Open Invoice
+                        <FileText size={13} /> Open request
                       </button>
                     ) : (
                       <span style={S.roleHint}>No invoice request submitted yet</span>
                     )}
                     {/* The invoice itself, once accounts has raised it in Sage.
-                        Separate from Open Invoice above, which is the floor's
+                        Separate from Open request above, which is the floor's
                         request to bill -- two different documents that are easy
                         to confuse if they are not named apart. */}
                     {(() => {
@@ -12939,13 +12939,13 @@ export default function StockControl() {
                           style={S.reqActionBtnMuted}
                           onClick={() => viewJobInvoiceRequest(jobInvoiceRequests.find((r) => r.job_id === job.id))}
                         >
-                          <FileText size={13} /> Open Invoice
+                          <FileText size={13} /> Open request
                         </button>
                       ) : (
                         <span style={S.roleHint}>No invoice request on file</span>
                       )}
                       {/* The invoice itself, once accounts has raised it in Sage.
-                          Separate from Open Invoice above, which is the floor's
+                          Separate from Open request above, which is the floor's
                           request to bill -- two different documents that are easy
                           to confuse if they are not named apart. */}
                       {(() => {
