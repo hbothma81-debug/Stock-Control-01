@@ -1534,6 +1534,12 @@ export default function StockControl() {
   const [importFileLabel, setImportFileLabel] = useState("");
   const [importCustomer, setImportCustomer] = useState("");
   const [importReplaceAll, setImportReplaceAll] = useState(false);
+  // The buy-out catalogue has its own import, keyed on the supplier the
+  // way the customer stock one is keyed on the customer.
+  const [showBuyoutImportModal, setShowBuyoutImportModal] = useState(false);
+  const [buyoutImportSupplier, setBuyoutImportSupplier] = useState("");
+  const [buyoutImportReplaceAll, setBuyoutImportReplaceAll] = useState(false);
+  const [buyoutImportFileLabel, setBuyoutImportFileLabel] = useState("");
 
   const [editingId, setEditingId] = useState(null);
   const [previewItem, setPreviewItem] = useState(null);
@@ -2426,7 +2432,7 @@ export default function StockControl() {
   const anyModalOpen = !!(
     usageModal || assetRemoveModal || shortageModal || jobDetail || newStockItemModal ||
     markInvoicedModal || deliveryNoteBatchModal || copyJobModal || previewItem ||
-    showAddStockItemModal || showStockImportModal || editProcessesModal || productionSelectedDept ||
+    showAddStockItemModal || showStockImportModal || showBuyoutImportModal || editProcessesModal || productionSelectedDept ||
     productionSelectedProcessId || showManager || requisitionTarget || showRequisitionPicker ||
     assetManufacturerOpen || assetDetailOpen || serviceNowItem || repairListItem ||
     selectedGradeGroup || selectedItemDetail
@@ -2446,6 +2452,7 @@ export default function StockControl() {
     setPreviewItem(null);
     setShowAddStockItemModal(false);
     setShowStockImportModal(false);
+    setShowBuyoutImportModal(false);
     setEditProcessesModal(null);
     setProductionSelectedDept(null);
     setProductionSelectedProcessId(null);
@@ -8012,11 +8019,23 @@ export default function StockControl() {
     return Array.from(set).sort((a, b) => parseFloat(a) - parseFloat(b));
   }, [items]);
 
+  // What each stock division sorts itself into. A grade is the right
+  // heading for steel; for the divisions where a grade means nothing it
+  // is the thing you would actually go looking under -- the customer for
+  // their own stock, the manufacturer for a machine, and the supplier for
+  // a buy-out, because a buy-out is bought from somebody and every one of
+  // them was otherwise piled into a single heap called "Ungraded".
+  function stockGroupFor(it) {
+    if (tab === "custom" || tab === "stores") return it.customer || "Unassigned";
+    if (tab === "assets") return it.manufacturer || "Other";
+    if (tab === "buyouts") return it.supplier || "No supplier";
+    return it.grade || "Ungraded";
+  }
+
   const grouped = useMemo(() => {
     const map = {};
-    const isGrouped = tab === "custom" || tab === "stores";
     tabItems.forEach((it) => {
-      const g = isGrouped ? it.customer || "Unassigned" : tab === "assets" ? it.manufacturer || "Other" : it.grade || "Ungraded";
+      const g = stockGroupFor(it);
       if (!map[g]) map[g] = [];
       map[g].push(it);
     });
@@ -10089,6 +10108,43 @@ export default function StockControl() {
     XLSX.writeFile(wb, `Customer-Stock-${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
+  // The same sheet the importer reads back, so a supplier's list can be
+  // pulled out, edited in Excel and put back. Quantity on hand is in the
+  // sheet to make it a true picture, but the importer deliberately never
+  // reads it -- see handleBuyoutImportFile.
+  async function exportBuyoutCodes() {
+    const XLSX = await getXLSX();
+    const rows = (items || [])
+      .filter((it) => it.mainCat === "buyouts")
+      .filter((it) => !buyoutImportSupplier || it.supplier === buyoutImportSupplier)
+      .sort((a, b) =>
+        (a.supplier || "").localeCompare(b.supplier || "") ||
+        (a.partNumber || "").localeCompare(b.partNumber || "")
+      )
+      .map((it) => ({
+        "Part Number": it.partNumber || "",
+        Description: it.name || "",
+        "Cost (R)": it.value || 0,
+        Supplier: it.supplier || "",
+        Manufacturer: it.manufacturer || "",
+        "Qty on Hand": it.qty || 0,
+        "Low Stock Warning At": it.low || 0,
+      }));
+    if (rows.length === 0) {
+      alert(
+        buyoutImportSupplier
+          ? `No buy-outs for ${buyoutImportSupplier} yet.`
+          : "No buy-outs yet."
+      );
+      return;
+    }
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Buy-outs");
+    const who = buyoutImportSupplier ? `-${buyoutImportSupplier.replace(/[^A-Za-z0-9]+/g, "-")}` : "";
+    XLSX.writeFile(wb, `Buy-outs${who}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }
+
   // A full, one-click copy of everything — items, the whole master library,
   // requisitions, purchase orders, and the usage log — as one downloadable
   // file. Nothing fancy, just a real, in-your-hands safety net.
@@ -11176,6 +11232,265 @@ export default function StockControl() {
         }
       } catch (err) {
         alert("Couldn't read that file — make sure it's a .xlsx, .xls, or .csv export.");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = "";
+  }
+
+
+  // Reading a supplier's price list into the buy-out catalogue.
+  //
+  // Same rules as the customer stock import, for the same reasons:
+  //   * a part already in the list is UPDATED, not duplicated;
+  //   * the row keeps its id, so requisitions and purchase order lines
+  //     pointing at it stay pointing at it;
+  //   * quantity on hand is NEVER read from a file. Stock is counted in the
+  //     yard, not typed in a spreadsheet. It is in the export so the sheet
+  //     is a true picture, and ignored on the way back in.
+  //
+  // A supplier has to be picked, so nothing lands with no supplier against
+  // it. A Supplier column in the file beats the picked one row by row --
+  // that is what makes a full export editable and importable again.
+  async function handleBuyoutImportFile(e) {
+    const XLSX = await getXLSX();
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!buyoutImportSupplier) {
+      alert("Pick a supplier before importing — a buy-out with no supplier is one nobody can order.");
+      e.target.value = "";
+      return;
+    }
+    setBuyoutImportFileLabel(file.name);
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const wb = XLSX.read(data, { type: "array" });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+        if (!rows.length) {
+          alert("That sheet is empty.");
+          return;
+        }
+
+        // Real price lists often have a title or a blank row above the
+        // headings, so find the heading row rather than assuming row 1.
+        const HEADER_HINTS = ["part", "code", "desc", "price", "cost", "supplier", "manufact"];
+        let headerRowIdx = rows.findIndex((r) =>
+          r.map((c) => String(c).toLowerCase()).filter((c) => HEADER_HINTS.some((h) => c.includes(h))).length >= 2
+        );
+        if (headerRowIdx < 0) headerRowIdx = 0;
+        const header = rows[headerRowIdx].map((h) => String(h).toLowerCase().trim());
+
+        // Each column can be claimed once. Without that, "Supplier Part
+        // Number" gets read as both the part number and the supplier.
+        const used = new Set();
+        const pick = (...tests) => {
+          for (const test of tests) {
+            const idx = header.findIndex((h, i) => !used.has(i) && test(h));
+            if (idx >= 0) {
+              used.add(idx);
+              return idx;
+            }
+          }
+          return -1;
+        };
+        const partIdx = pick(
+          (h) => h === "part number" || h === "part no" || h === "part" || h === "stock code",
+          (h) => h.includes("part") || h.includes("code")
+        );
+        const descIdx = pick((h) => h.includes("desc") || h.includes("item"));
+        const costIdx = pick(
+          (h) => h.includes("cost") || h.includes("price") || h.includes("value") || h.includes("rand")
+        );
+        const supIdx = pick((h) => h.includes("supplier") || h.includes("vendor"));
+        const manuIdx = pick((h) => h.includes("manufact") || h.includes("brand") || h.includes("make"));
+        const lowIdx = pick(
+          (h) => h.includes("low") || h.includes("recommend") || h.includes("reorder") || h.includes("minimum")
+        );
+
+        const colLabel = (idx) => (idx >= 0 ? `col ${idx + 1} ("${rows[headerRowIdx][idx]}")` : "not found");
+        const sampleRow = rows[headerRowIdx + 1] || [];
+        console.log("Buy-out import diagnostic:", {
+          headerRowUsed: `row ${headerRowIdx + 1}`,
+          headerRow: rows[headerRowIdx],
+          detected: {
+            partNumber: colLabel(partIdx),
+            description: colLabel(descIdx),
+            cost: colLabel(costIdx),
+            supplier: colLabel(supIdx),
+            manufacturer: colLabel(manuIdx),
+            lowStockAt: colLabel(lowIdx),
+          },
+          firstDataRow: sampleRow,
+        });
+
+        const money = (v) => parseFloat(String(v).replace(/[^0-9.]/g, "")) || 0;
+
+        // A Supplier column is honoured only when it names a supplier we
+        // already have, matched ignoring case so a file that shouts or
+        // whispers the name still lands on the right one. An unknown name
+        // does NOT create a new supplier: the stock screen now groups
+        // buy-outs on this exact string, so a typo in somebody's price
+        // list would otherwise quietly open a heading of its own that no
+        // dropdown anywhere knows about.
+        const knownSuppliers = new Map(
+          (master.suppliers || [])
+            .map((sup) => sup.name || sup)
+            .filter(Boolean)
+            .map((name) => [String(name).toLowerCase(), String(name)])
+        );
+        const unknownNames = new Set();
+        const supplierFor = (raw) => {
+          const named = String(raw || "").trim();
+          if (!named) return buyoutImportSupplier;
+          const known = knownSuppliers.get(named.toLowerCase());
+          if (known) return known;
+          unknownNames.add(named);
+          return buyoutImportSupplier;
+        };
+
+        const newRows = rows
+          .slice(headerRowIdx + 1)
+          .filter((r) => r.length && r.some((c) => String(c).trim() !== ""))
+          .map((r) => ({
+            partNumber: String(partIdx >= 0 ? r[partIdx] : r[0] || "").trim(),
+            description: String(descIdx >= 0 ? r[descIdx] : r[1] || "").trim(),
+            cost: costIdx >= 0 ? money(r[costIdx]) : 0,
+            supplier: supIdx >= 0 ? supplierFor(r[supIdx]) : buyoutImportSupplier,
+            manufacturer: manuIdx >= 0 ? String(r[manuIdx] || "").trim() : "",
+            low: lowIdx >= 0 ? parseFloat(r[lowIdx]) || 0 : 0,
+          }))
+          .filter((r) => r.partNumber);
+
+        if (newRows.length === 0) {
+          alert(
+            "Nothing was read out of that file — no rows had a part number.\n\n" +
+              `Heading row used: row ${headerRowIdx + 1} — ${JSON.stringify(rows[headerRowIdx])}\n` +
+              `Part number column: ${colLabel(partIdx)}`
+          );
+          return;
+        }
+
+        const unknownNote = unknownNames.size
+          ? `\n\nThese names in the Supplier column are not on the supplier list, so those rows went under ` +
+            `${buyoutImportSupplier} instead: ${[...unknownNames].join(", ")}. ` +
+            `Add the supplier in Stock Manager first if that is wrong.`
+          : "";
+        const summary =
+          `Detected — Part number: ${colLabel(partIdx)}, Description: ${colLabel(descIdx)}, ` +
+          `Cost: ${colLabel(costIdx)}, Supplier: ${colLabel(supIdx)}, Manufacturer: ${colLabel(manuIdx)}, ` +
+          `Low at: ${colLabel(lowIdx)}.\nFirst data row read as: ${JSON.stringify(sampleRow)}` +
+          unknownNote;
+
+        // A buy-out is identified by its part number within one supplier.
+        // The same number under two suppliers is two different things.
+        const keyOf = (supplier, partNumber) => `${(supplier || "").toLowerCase()}|${(partNumber || "").toLowerCase()}`;
+
+        if (buyoutImportReplaceAll) {
+          setItems((prev) => {
+            const mine = prev.filter((it) => it.mainCat === "buyouts" && it.supplier === buyoutImportSupplier);
+            const others = prev.filter((it) => !(it.mainCat === "buyouts" && it.supplier === buyoutImportSupplier));
+            // Anything with real stock on hand survives a replace whether
+            // the file mentions it or not -- it is on a shelf either way.
+            const keptStock = mine.filter((it) => Number(it.qty) > 0);
+            const keptKeys = new Set(keptStock.map((it) => keyOf(it.supplier, it.partNumber)));
+            const before = new Map(mine.map((it) => [keyOf(it.supplier, it.partNumber), it]));
+            const rebuilt = newRows
+              .filter((row) => !keptKeys.has(keyOf(row.supplier, row.partNumber)))
+              .map((row) => {
+                const was = before.get(keyOf(row.supplier, row.partNumber));
+                return {
+                  ...(was || {}),
+                  id: was ? was.id : uid(),
+                  mainCat: "buyouts",
+                  partNumber: row.partNumber,
+                  name: row.description || row.partNumber,
+                  supplier: row.supplier,
+                  manufacturer: row.manufacturer || was?.manufacturer || "",
+                  value: row.cost,
+                  low: row.low,
+                  grade: "",
+                  qty: 0,
+                  unit: "ea",
+                  trackLength: false,
+                  length: 0,
+                };
+              });
+            return [...others, ...keptStock, ...rebuilt];
+          });
+          alert(
+            `Replaced the buy-outs for ${buyoutImportSupplier} with ${newRows.length} rows — anything with stock on hand was kept regardless, ` +
+              `and parts already on the list kept their id, so requisitions and purchase orders pointing at them still do.\n\n${summary}`
+          );
+        } else {
+          // Worked out here rather than inside the setItems updater. The
+          // updater does not run until React gets round to it, so counting
+          // in there and reading the totals underneath it reported 0 added
+          // and 0 updated on an import that had just changed five rows.
+          const existingKeys = new Set(
+            (items || [])
+              .filter((it) => it.mainCat === "buyouts")
+              .map((it) => keyOf(it.supplier, it.partNumber))
+          );
+          let updated = 0;
+          let added = 0;
+          newRows.forEach((row) => {
+            const key = keyOf(row.supplier, row.partNumber);
+            if (existingKeys.has(key)) {
+              updated += 1;
+            } else {
+              added += 1;
+              // A file that lists the same part twice adds it once and
+              // then updates it, which is what the counts should say.
+              existingKeys.add(key);
+            }
+          });
+
+          setItems((prev) => {
+            const next = [...prev];
+            newRows.forEach((row) => {
+              const idx = next.findIndex(
+                (it) => it.mainCat === "buyouts" && keyOf(it.supplier, it.partNumber) === keyOf(row.supplier, row.partNumber)
+              );
+              if (idx >= 0) {
+                // Only overwrite what the file actually carried. A column
+                // the importer could not find must not wipe a good value.
+                next[idx] = {
+                  ...next[idx],
+                  name: row.description || next[idx].name,
+                  value: row.cost || next[idx].value,
+                  low: row.low || next[idx].low,
+                  manufacturer: row.manufacturer || next[idx].manufacturer || "",
+                };
+              } else {
+                next.push({
+                  id: uid(),
+                  mainCat: "buyouts",
+                  partNumber: row.partNumber,
+                  name: row.description || row.partNumber,
+                  supplier: row.supplier,
+                  manufacturer: row.manufacturer,
+                  value: row.cost,
+                  low: row.low,
+                  grade: "",
+                  qty: 0,
+                  unit: "ea",
+                  trackLength: false,
+                  length: 0,
+                });
+              }
+            });
+            return next;
+          });
+          alert(
+            `${added} added, ${updated} updated — new buy-outs start at qty 0, and no quantity on hand was touched.\n\n${summary}`
+          );
+        }
+      } catch (err) {
+        console.error("Buy-out import failed:", err);
+        alert("Couldn't read that file — make sure it's a .xlsx, .xls, or .csv.");
       }
     };
     reader.readAsArrayBuffer(file);
@@ -15945,6 +16260,21 @@ export default function StockControl() {
                         onChange={setBuyoutSupplierFilter}
                         emptyLabel="All suppliers"
                       />
+                      {/* Opens on whichever supplier is being looked at, since
+                          that is almost always the one whose list is in hand. */}
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={S.roleChip}
+                        onClick={() => {
+                          setBuyoutImportSupplier(buyoutSupplierFilter || "");
+                          setBuyoutImportFileLabel("");
+                          setShowBuyoutImportModal(true);
+                        }}
+                      >
+                        <Upload size={13} />
+                        Import / Export
+                      </button>
                     </div>
 
                     {/* Adding one is a row rather than a pop-up, because the
@@ -19979,6 +20309,79 @@ export default function StockControl() {
               Imports the first sheet, matching columns containing "stock code", "description", "price", and "recommended"/"reorder". Test with a
               small file first.
               {!importReplaceAll && " Existing parts with a matching part number get updated, not duplicated — and their quantity is never touched."}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBuyoutImportModal && (
+        <div style={{ ...S.modalOverlay, zIndex: 30 }}>
+          <div style={{ ...S.modal, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Import / Export Buy-outs</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setShowBuyoutImportModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Supplier</label>
+              <TypeToFind
+                options={master.suppliers.map((sup) => sup.name || sup)}
+                value={buyoutImportSupplier}
+                onChange={setBuyoutImportSupplier}
+                emptyLabel="Pick the supplier this list is from — required to import"
+              />
+            </div>
+            <div style={{ ...S.managerAddRow, marginTop: 10 }}>
+              <label
+                className="stk-btn"
+                style={{
+                  ...S.addBtn,
+                  flex: 1,
+                  cursor: buyoutImportSupplier ? "pointer" : "not-allowed",
+                  opacity: buyoutImportSupplier ? 1 : 0.5,
+                }}
+              >
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  style={{ display: "none" }}
+                  onChange={handleBuyoutImportFile}
+                  disabled={!buyoutImportSupplier}
+                />
+                Import Excel
+              </label>
+              <button type="button" className="stk-btn" style={S.roleChip} onClick={exportBuyoutCodes}>
+                <Download size={13} />
+                {buyoutImportSupplier ? `Export ${buyoutImportSupplier}` : "Export all"}
+              </button>
+            </div>
+            {buyoutImportFileLabel && (
+              <div style={{ fontFamily: F.mono, fontSize: 12.5, color: C.muted, marginTop: 4 }}>{buyoutImportFileLabel}</div>
+            )}
+            <label style={{ ...S.checkRow, marginTop: 8 }}>
+              <input
+                type="checkbox"
+                checked={buyoutImportReplaceAll}
+                onChange={(e) => setBuyoutImportReplaceAll(e.target.checked)}
+              />
+              Replace this supplier's whole list with the file, instead of updating/adding
+            </label>
+            {buyoutImportReplaceAll && (
+              <div style={{ ...S.roleHint, color: C.danger }}>
+                Every buy-out for {buyoutImportSupplier || "this supplier"} that is not in the file will be removed —
+                anything with stock on hand is always kept regardless. Nothing under any other supplier is touched.
+              </div>
+            )}
+            <div style={S.roleHint}>
+              Reads the first sheet, matching columns containing "part"/"code", "description", "cost"/"price",
+              "supplier", "manufacturer" and "low"/"reorder". A Supplier column in the file wins over the one picked
+              above, row by row — which is what lets you export the whole list, edit it, and put it straight back —
+              but only where it names a supplier already on the supplier list. Anything else falls back to the one
+              picked above, and it tells you which.
+              {" "}
+              <strong>Quantity on hand is never read from a file</strong> — stock is counted, not typed. Test with a
+              small file first.
             </div>
           </div>
         </div>
