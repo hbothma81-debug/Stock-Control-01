@@ -8074,6 +8074,25 @@ export default function StockControl() {
   const effectiveSection = form.section === CUSTOM ? form.customSection.trim() : form.section.trim();
   const effectiveSectionType = form.sectionType === CUSTOM ? form.customSectionType.trim() : form.sectionType.trim();
   const effectiveCustomer = form.customer === CUSTOM ? form.customCustomer.trim() : form.customer.trim();
+  // Customer Stock parts already known, part number -> description: stock
+  // items for the customer chosen on the form, then drawings on file. Both
+  // the part number box and the description box on the item form search
+  // this, one from each end, so a part is not created twice under two
+  // spellings when only one half of it is remembered.
+  const knownCustomerParts = useMemo(() => {
+    const known = new Map();
+    for (const it of items || []) {
+      if (it.mainCat !== "custom" || !(it.partNumber || "").trim()) continue;
+      if (editingId && it.id === editingId) continue;
+      if (effectiveCustomer && it.customer && it.customer !== effectiveCustomer) continue;
+      const pn = it.partNumber.trim();
+      if (!known.has(pn)) known.set(pn, (it.name || "").trim());
+    }
+    for (const [pn, d] of Object.entries(drawingLookup || {})) {
+      if (!known.has(pn)) known.set(pn, (d?.description || "").trim());
+    }
+    return known;
+  }, [items, editingId, effectiveCustomer, drawingLookup]);
   const effectiveFastenerType = form.fastenerType === CUSTOM ? (form.customFastenerType || "").trim() : form.fastenerType.trim();
   const effectiveSalesPerson = form.salesPerson === CUSTOM ? form.customSalesPerson.trim() : form.salesPerson.trim();
   const effectiveSupplier = form.supplier === CUSTOM ? form.customSupplier.trim() : form.supplier.trim();
@@ -15561,17 +15580,7 @@ export default function StockControl() {
                       // those as you type, so the same part is not created
                       // twice with two spellings. Picking one that is on
                       // stock already fills the description in.
-                      const known = new Map();
-                      for (const it of items || []) {
-                        if (it.mainCat !== "custom" || !(it.partNumber || "").trim()) continue;
-                        if (editingId && it.id === editingId) continue;
-                        if (effectiveCustomer && it.customer && it.customer !== effectiveCustomer) continue;
-                        const pn = it.partNumber.trim();
-                        if (!known.has(pn)) known.set(pn, it.name || "");
-                      }
-                      for (const [pn, d] of Object.entries(drawingLookup || {})) {
-                        if (!known.has(pn)) known.set(pn, d?.description || "");
-                      }
+                      const known = knownCustomerParts;
                       const options = [...known.entries()]
                         .sort((a, b) => byText(a[0], b[0]))
                         .map(([pn, desc]) => ({ value: pn, label: pn, hint: desc }));
@@ -15619,12 +15628,44 @@ export default function StockControl() {
                 </div>
                 <div style={{ marginTop: 10 }}>
                   <label style={S.label}>Description</label>
-                  <input
-                    style={S.input}
-                    value={form.name}
-                    onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    placeholder={form.mainCat === "stores" ? "e.g. 10mm Carbide End Mill" : "e.g. Bracket, left-hand"}
-                  />
+                  {form.mainCat === "custom" ? (
+                    (() => {
+                      // The other way round: somebody remembers what the
+                      // part is but not its number. Same known parts,
+                      // searched by description, with the part number as
+                      // the hint. Picking one fills the part number in if
+                      // it is still empty.
+                      const byDescription = new Map();
+                      for (const [pn, desc] of knownCustomerParts.entries()) {
+                        if (desc && !byDescription.has(desc)) byDescription.set(desc, pn);
+                      }
+                      const options = [...byDescription.entries()]
+                        .sort((a, b) => byText(a[0], b[0]))
+                        .map(([desc, pn]) => ({ value: desc, label: desc, hint: pn }));
+                      return (
+                        <TypeToFind
+                          options={options}
+                          value={form.name}
+                          allowNew
+                          onChange={(v) =>
+                            setForm((f) => ({
+                              ...f,
+                              name: v,
+                              partNumber: f.partNumber || byDescription.get(v) || "",
+                            }))
+                          }
+                          emptyLabel="e.g. Bracket, left-hand — type to find an existing part"
+                        />
+                      );
+                    })()
+                  ) : (
+                    <input
+                      style={S.input}
+                      value={form.name}
+                      onChange={(e) => setForm({ ...form, name: e.target.value })}
+                      placeholder={form.mainCat === "stores" ? "e.g. 10mm Carbide End Mill" : "e.g. Bracket, left-hand"}
+                    />
+                  )}
                 </div>
                 <div style={{ marginTop: 10 }}>
                   <label style={S.label}>Drawing or photo (optional)</label>
