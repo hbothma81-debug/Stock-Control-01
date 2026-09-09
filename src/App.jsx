@@ -5582,14 +5582,32 @@ export default function StockControl() {
   // same sequence and lands on Purchase Orders and Receiving like any
   // other. Each line carries its Buy-out Code, which is what lets
   // receiving count the stock in and set it aside for the job.
+  // A supplier typed on a job that the suppliers list does not know yet.
+  // Made with the name alone, the same bare entry the pickers make;
+  // email, phone and address are filled in later in Stock Manager. Hands
+  // the entry back so the caller can carry straight on with it.
+  function addSupplierFromJob(name) {
+    const clean = (name || "").trim();
+    if (!clean) return null;
+    const existing = (master.suppliers || []).find((s) => sameText(s.name, clean));
+    if (existing) return existing;
+    const entry = { id: uid(), name: clean, email: "", phone: "", address: "", logo: "", vatNumber: "", contacts: [] };
+    setMaster((prev) => ({ ...prev, suppliers: [...(prev.suppliers || []), entry] }));
+    return entry;
+  }
+
   function raisePoForBuyouts(job, supplierName, lines) {
-    const supplier = (master.suppliers || []).find((s) => sameText(s.name, supplierName));
+    let supplier = (master.suppliers || []).find((s) => sameText(s.name, supplierName));
     if (!supplier) {
-      alert(
-        `"${supplierName}" is not in your suppliers list, so a purchase order cannot be addressed to them. ` +
-          "Add the supplier in Stock Manager first, or correct the name on these lines."
-      );
-      return;
+      if (
+        !window.confirm(
+          `"${supplierName}" is not in your suppliers list yet. Add them now, with just the name? ` +
+            "Email, phone and address can be filled in later in Stock Manager, before the PO is sent."
+        )
+      )
+        return;
+      supplier = addSupplierFromJob(supplierName);
+      if (!supplier) return;
     }
     const open = (lines || []).filter((l) => !l.po_id);
     if (open.length === 0) {
@@ -19971,6 +19989,7 @@ export default function StockControl() {
                   ? (supplierName, lines) => raisePoForBuyouts(jobDetail.job, supplierName, lines)
                   : null
               }
+              onAddSupplier={canEditThisJob ? (name) => addSupplierFromJob(name) : null}
               SavedCheck={SavedCheck}
             />
           )}

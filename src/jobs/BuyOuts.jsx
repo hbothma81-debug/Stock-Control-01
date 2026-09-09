@@ -25,7 +25,7 @@ const cell = (width) => ({ ...S.input, width, fontSize: 14, padding: "4px 6px" }
 
 const money = (n) => `R ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-export default function BuyOuts({ lines, canEdit, canSeeValue, codes, suppliers, onAdd, onUpdate, onRemove, onRaisePo, SavedCheck }) {
+export default function BuyOuts({ lines, canEdit, canSeeValue, codes, suppliers, onAdd, onUpdate, onRemove, onRaisePo, onAddSupplier, SavedCheck }) {
   const [draft, setDraft] = useState(blankLine);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -43,6 +43,9 @@ export default function BuyOuts({ lines, canEdit, canSeeValue, codes, suppliers,
           .slice(0, 8)
       : [];
   const supplierNames = [...new Set([...(suppliers || []).map((s) => s.name), ...(codes || []).map((c) => c.supplier)].filter(Boolean))].sort();
+  // Known to the suppliers list, which is what a purchase order needs. A
+  // name that only appears on Buy-out Codes is not enough to address one.
+  const supplierKnown = (name) => (suppliers || []).some((s) => (s.name || "").trim().toLowerCase() === (name || "").trim().toLowerCase());
 
   const pick = (c) => {
     setDraft((d) => ({
@@ -100,6 +103,19 @@ export default function BuyOuts({ lines, canEdit, canSeeValue, codes, suppliers,
                   {canSeeValue ? ` · ${money(group.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unit_cost) || 0), 0))}` : ""}
                 </span>
               </div>
+              {/* A supplier typed on a line but not in the suppliers list
+                  cannot be sent a PO. One press adds them, name only. */}
+              {onAddSupplier && supplier !== "No supplier" && !supplierKnown(supplier) && (
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={S.reqActionBtnMuted}
+                  onClick={() => onAddSupplier(supplier)}
+                  title="Not in your suppliers list yet — add them with just the name; email, phone and address can be filled in later in Stock Manager"
+                >
+                  <Plus size={11} /> Add {supplier} to suppliers
+                </button>
+              )}
               {/* One order per supplier, for the lines not yet ordered.
                   A line added after the first order gets its own. */}
               {onRaisePo &&
@@ -292,12 +308,25 @@ export default function BuyOuts({ lines, canEdit, canSeeValue, codes, suppliers,
               <Plus size={12} /> Add
             </button>
           </div>
-          <div style={{ ...S.roleHint, marginTop: 4 }}>
-            {draft.itemId
-              ? `Linked to Buy-out Codes${draft.partNumber ? ` — ${draft.partNumber}` : ""}`
-              : q
-                ? "Not matched to Buy-out Codes — pick from the list, or leave it as a free line with a supplier typed in."
-                : null}
+          <div style={{ ...S.roleHint, marginTop: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span>
+              {draft.itemId
+                ? `Linked to Buy-out Codes${draft.partNumber ? ` — ${draft.partNumber}` : ""}`
+                : q
+                  ? "Not matched to Buy-out Codes — pick from the list, or leave it as a free line with a supplier typed in."
+                  : null}
+            </span>
+            {onAddSupplier && draft.supplier.trim() && !supplierKnown(draft.supplier) && (
+              <button
+                type="button"
+                className="stk-btn"
+                style={S.reqActionBtnMuted}
+                onClick={() => onAddSupplier(draft.supplier)}
+                title="Not in your suppliers list yet — add them with just the name; the rest can be filled in later in Stock Manager"
+              >
+                <Plus size={11} /> Add {draft.supplier.trim()} to suppliers
+              </button>
+            )}
           </div>
         </div>
       )}
