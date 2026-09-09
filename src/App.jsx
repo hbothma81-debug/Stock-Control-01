@@ -1260,6 +1260,10 @@ export default function StockControl() {
   const [expandedDrawingHistory, setExpandedDrawingHistory] = useState({});
   const [showDrawingUpload, setShowDrawingUpload] = useState(false);
   const [drawingUploadCustomer, setDrawingUploadCustomer] = useState("");
+  // Which stage a file uploaded on the job's Files tab belongs to. Blank
+  // is "the whole job". A file filed against a stage shows on that
+  // stage's Production card and nowhere else on the floor.
+  const [jobFileUploadStage, setJobFileUploadStage] = useState("");
   const [drawingUploadFiles, setDrawingUploadFiles] = useState([]); // [{file, partNumber, skip}]
   const [drawingUploadBusy, setDrawingUploadBusy] = useState(false);
   const [drawingUploadResult, setDrawingUploadResult] = useState(null);
@@ -5886,6 +5890,38 @@ export default function StockControl() {
       console.error("Failed to upload document:", err);
       alert("Couldn't upload that file — check your connection and try again.");
     }
+  }
+
+  // Several files at once, filed against one stage (or the job), with one
+  // refresh at the end rather than one per file.
+  async function uploadJobDocuments(jobId, files, processName) {
+    if (!supabase) return;
+    const list = Array.from(files || []);
+    if (list.length === 0) return;
+    let failed = 0;
+    for (const file of list) {
+      try {
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const path = `${jobId}/${Date.now()}-${safeName}`;
+        const { error: upError } = await supabase.storage.from("job-documents").upload(path, file);
+        if (upError) throw upError;
+        const { error } = await supabase.from("job_documents").insert({
+          job_id: jobId,
+          file_name: file.name,
+          storage_path: path,
+          uploaded_by: roleLabel,
+          process_name: processName || null,
+          is_quote_file: false,
+        });
+        if (error) throw error;
+      } catch (err) {
+        console.error("Failed to upload document:", err);
+        failed += 1;
+      }
+    }
+    refreshJobDetail();
+    if (productionQueue !== null) fetchProductionQueue();
+    if (failed > 0) alert(`${failed} of ${list.length} file(s) didn't upload — check your connection and try again.`);
   }
 
   async function viewJobDocument(doc) {
@@ -12828,9 +12864,17 @@ export default function StockControl() {
                                 <SavedCheck fieldKey={`nesting-name-${process.id}`} />
                               </div>
                             )}
-                            {isNestingProcess(process.process_name) && (
+                            {/* Every stage has its own paper: the nest for
+                                nesting, the bending drawing for bending,
+                                the fabrication drawing for welding. Filed
+                                against the stage from the job's Files tab
+                                or from here, and shown only on this card.
+                                Before this only nesting had the block. */}
+                            {(
                               <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
-                                <label style={S.label}>Nesting document</label>
+                                <label style={S.label}>
+                                  {isNestingProcess(process.process_name) ? "Nesting document" : `${process.process_name} documents`}
+                                </label>
                                 <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
                                   {documents.map((doc) => (
                                     <button
@@ -12847,15 +12891,15 @@ export default function StockControl() {
                                     <Upload size={12} /> Upload document
                                     <input
                                       type="file"
+                                      multiple
                                       style={{ display: "none" }}
                                       onChange={(e) => {
-                                        const file = e.target.files[0];
-                                        // Tag it with the stage it was
-                                        // actually uploaded from. Hardcoding
+                                        // Filed against the stage it was
+                                        // uploaded from. Hardcoding
                                         // "Nesting" filed it under a stage
                                         // that may not exist in this shop,
                                         // so it never appeared again.
-                                        if (file) uploadJobDocument(job.id, file, process.process_name);
+                                        uploadJobDocuments(job.id, e.target.files, process.process_name);
                                         e.target.value = "";
                                       }}
                                     />
@@ -18434,18 +18478,40 @@ export default function StockControl() {
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <label style={S.label}>Files on this job</label>
                 {canEditThisJob && (
-                  <label className="stk-btn" style={{ ...S.reqActionBtnMuted, cursor: "pointer" }}>
-                    <Upload size={12} /> Upload
-                    <input
-                      type="file"
-                      style={{ display: "none" }}
-                      onChange={(e) => {
-                        const file = e.target.files[0];
-                        if (file) uploadJobDocument(jobDetail.job.id, file);
-                        e.target.value = "";
-                      }}
-                    />
-                  </label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    {/* Which stage these files are for. A bending drawing
+                        filed against Bending shows on the bender's card
+                        and nowhere else on the floor; "the whole job" is
+                        for anything that is not a stage's own paper. */}
+                    <select
+                      style={{ ...S.input, width: "auto", fontSize: 13, padding: "4px 6px" }}
+                      value={jobFileUploadStage}
+                      onChange={(e) => setJobFileUploadStage(e.target.value)}
+                      title="Which stage these files belong to. They show on that stage's Production card."
+                    >
+                      <option value="">For: the whole job</option>
+                      {inFlowOrder((jobDetail.processes || []).filter((p) => !p.shortage_id), jobDetail.job)
+                        .map((p) => p.process_name)
+                        .filter((name, i, all) => all.indexOf(name) === i)
+                        .map((name) => (
+                          <option key={name} value={name}>
+                            For: {name}
+                          </option>
+                        ))}
+                    </select>
+                    <label className="stk-btn" style={{ ...S.reqActionBtnMuted, cursor: "pointer" }}>
+                      <Upload size={12} /> Upload
+                      <input
+                        type="file"
+                        multiple
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          uploadJobDocuments(jobDetail.job.id, e.target.files, jobFileUploadStage || null);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
                 )}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
