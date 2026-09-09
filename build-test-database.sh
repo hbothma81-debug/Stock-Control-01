@@ -60,6 +60,7 @@ ORDER=(
   setup-usage-log-table.sql
   setup-job-allocations.sql
   setup-job-cut-items.sql
+  setup-job-buyout-items.sql
 
   # --- extra columns and permissions on profiles
   setup-production-access.sql
