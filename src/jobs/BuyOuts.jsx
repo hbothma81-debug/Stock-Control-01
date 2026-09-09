@@ -25,7 +25,32 @@ const cell = (width) => ({ ...S.input, width, fontSize: 14, padding: "4px 6px" }
 
 const money = (n) => `R ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-export default function BuyOuts({ lines, canEdit, canSeeValue, codes, suppliers, onAdd, onUpdate, onRemove, onRaisePo, onAddSupplier, SavedCheck }) {
+export default function BuyOuts({
+  lines,
+  canEdit,
+  canSeeValue,
+  codes,
+  suppliers,
+  purchaseOrders,
+  allocations,
+  items,
+  onAdd,
+  onUpdate,
+  onRemove,
+  onRaisePo,
+  onAddSupplier,
+  onViewPo,
+  SavedCheck,
+}) {
+  // What each line's order has come to. The PO is the record of whether
+  // the goods are here; the line only remembers which PO it went on.
+  const poFor = (line) => (line.po_id ? (purchaseOrders || []).find((po) => po.id === line.po_id) || null : null);
+  const lineState = (line) => {
+    const po = poFor(line);
+    if (!line.po_id) return { text: "Not ordered", color: null };
+    if (po?.status === "received") return { text: `Received — ${line.po_number}`, color: C.accentFinished };
+    return { text: `On ${line.po_number || "a PO"} — waiting for delivery`, color: C.accentRaw };
+  };
   const [draft, setDraft] = useState(blankLine);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -209,11 +234,12 @@ export default function BuyOuts({ lines, canEdit, canSeeValue, codes, suppliers,
                           {money(it.unit_cost)} each · {money((Number(it.qty) || 0) * (Number(it.unit_cost) || 0))}
                         </span>
                       )}
-                      {/* Ordered or not. The PO number lands here once
-                          the Raise PO step exists. */}
-                      <span style={{ ...S.roleHint, ...(it.po_number ? { color: C.accentFinished, fontWeight: 600 } : {}) }}>
-                        {it.po_number ? `On ${it.po_number}` : "Not ordered"}
-                      </span>
+                      {(() => {
+                        const state = lineState(it);
+                        return (
+                          <span style={{ ...S.roleHint, ...(state.color ? { color: state.color, fontWeight: 600 } : {}) }}>{state.text}</span>
+                        );
+                      })()}
                       {!it.item_id && <span style={S.roleHint}>· not in Buy-out Codes</span>}
                     </div>
                   </div>
@@ -330,6 +356,84 @@ export default function BuyOuts({ lines, canEdit, canSeeValue, codes, suppliers,
           </div>
         </div>
       )}
+
+      {/* The orders raised for this job, whichever tab they were raised
+          from, and what has arrived and been set aside. Both read from
+          data the Purchase Orders and Receiving tabs already keep; this
+          is the job's view of it. */}
+      {(purchaseOrders || []).length > 0 && (
+        <div style={{ marginTop: 14, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+          <label style={S.label}>Orders for this job</label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+            {(purchaseOrders || []).map((po) => {
+              const received = po.status === "received";
+              const lineCount = (po.lineItems || []).length;
+              return (
+                <div key={po.id} style={{ ...S.managerRow, flexWrap: "wrap", gap: 8 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600 }}>{po.poNumber}</span>
+                  <span style={{ fontSize: 14 }}>{po.supplierName}</span>
+                  <span style={S.roleHint}>
+                    {lineCount} line{lineCount === 1 ? "" : "s"}
+                    {po.dateCreated ? ` · raised ${new Date(po.dateCreated).toLocaleDateString()}` : ""}
+                    {po.createdBy ? ` by ${po.createdBy}` : ""}
+                  </span>
+                  {canSeeValue && <span style={S.roleHint}>{money(po.totalValue)} incl. VAT</span>}
+                  <span
+                    style={{
+                      ...S.chip,
+                      flexShrink: 0,
+                      ...(received ? { color: C.accentFinished, borderColor: C.accentFinished, fontWeight: 700 } : { color: C.accentRaw, borderColor: C.accentRaw, fontWeight: 700 }),
+                    }}
+                    title={
+                      received
+                        ? `Received${po.receivedDate ? ` ${new Date(po.receivedDate).toLocaleDateString()}` : ""}${po.receivedBy ? ` by ${po.receivedBy}` : ""}${po.deliveryNoteNumber ? ` — delivery note ${po.deliveryNoteNumber}` : ""}`
+                        : "Sent to the supplier, not delivered yet"
+                    }
+                  >
+                    {received ? "Received" : "Outstanding"}
+                  </span>
+                  {onViewPo && (
+                    <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => onViewPo(po)}>
+                      View PO
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {(() => {
+        // What receiving set aside for this job. Anything received
+        // against an order names the order in its note, which is how
+        // these are told apart from material set aside by hand.
+        const arrived = (allocations || []).filter((a) => a.status !== "released" && /^Received against/i.test(a.note || ""));
+        if (arrived.length === 0) return null;
+        return (
+          <div style={{ marginTop: 14, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+            <label style={S.label}>Arrived and set aside for this job</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+              {arrived.map((a) => {
+                const outstanding = Number(a.qty_allocated) - Number(a.qty_used);
+                const stockItem = (items || []).find((i) => i.id === a.item_id);
+                return (
+                  <div key={a.id} style={{ ...S.managerRow, flexWrap: "wrap", gap: 8 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600 }}>
+                      {a.qty_allocated} × {a.item_name}
+                    </span>
+                    <span style={S.roleHint}>{a.note}</span>
+                    {stockItem?.loc && <span style={S.roleHint}>· {stockItem.loc}</span>}
+                    <span style={{ ...S.roleHint, ...(outstanding > 0 ? { color: C.accentRaw, fontWeight: 600 } : { color: C.accentFinished, fontWeight: 600 }) }}>
+                      {outstanding > 0 ? `${outstanding} still to use` : "all used"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       <datalist id="buyout-supplier-options">
         {supplierNames.map((n) => (

@@ -19979,6 +19979,10 @@ export default function StockControl() {
               canSeeValue={canSeeValue}
               codes={(items || []).filter((i) => i.mainCat === "buyouts")}
               suppliers={master.suppliers || []}
+              purchaseOrders={(purchaseOrders || []).filter((po) => po.jobId === jobDetail.job.id)}
+              allocations={jobDetail.allocations || []}
+              items={items || []}
+              onViewPo={viewPoPdf}
               onAdd={(line) => addJobBuyoutItem(jobDetail.job, line)}
               onUpdate={(item, field, value) => updateJobBuyoutItem(jobDetail.job, item, field, value)}
               onRemove={(item) => removeJobBuyoutItem(jobDetail.job, item)}
