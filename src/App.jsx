@@ -62,6 +62,7 @@ import CompanyDetails from "./manager/CompanyDetails.jsx";
 import CutToSize from "./jobs/CutToSize.jsx";
 import { planBars, barsOnShelf, barsSetAside, barsOnOrder, matchingStock, materialName, offcutIsKeepable, KERF_MM, TRIM_MM, MIN_OFFCUT_MM } from "./jobs/cutToSize.js";
 import EditableName from "./EditableName.jsx";
+import TypeToFind from "./TypeToFind.jsx";
 import LaserStatus from "./laser/LaserStatus.jsx";
 import LaserTab from "./laser/LaserTab.jsx";
 import useLaserPrograms from "./laser/useLaserPrograms.js";
@@ -785,26 +786,44 @@ const emptyForm = {
   fastenerFinish: "",
 };
 
+// The form behind this keeps one of three shapes: an option from the list,
+// "" for nothing, or CUSTOM with the new name in customValue. The box shows
+// whichever applies and hands back the same three shapes, so the save code
+// never learns the picker changed from a dropdown to type-to-find.
 function LibraryField({ label, options, value, onChange, customValue, onCustomChange, placeholder, showComment, comment, onCommentChange, allowNone }) {
+  const isNew = value === CUSTOM;
+  // A brand-new name needs two changes on the form: value -> CUSTOM and
+  // customValue -> the name. The callers build each change from the form
+  // as it was when they rendered, so two calls in a row would overwrite
+  // each other. The name waits here until the CUSTOM change has rendered,
+  // then goes through a fresh callback that already sees CUSTOM.
+  const pendingNew = useRef(null);
+  useEffect(() => {
+    if (isNew && pendingNew.current !== null) {
+      const v = pendingNew.current;
+      pendingNew.current = null;
+      if (v !== customValue) onCustomChange(v);
+    }
+  });
   return (
     <div>
       <label style={S.label}>{label}</label>
-      <select style={S.input} value={value} onChange={(e) => onChange(e.target.value)}>
-        {allowNone ? <option value="">— None —</option> : <option value="" disabled>Choose…</option>}
-        {options.map((o) => (
-          <option key={o} value={o}>{o}</option>
-        ))}
-        <option value={CUSTOM}>+ Add new…</option>
-      </select>
-      {value === CUSTOM && (
+      <TypeToFind
+        options={options}
+        value={isNew ? customValue || "" : value || ""}
+        allowNew
+        emptyLabel={allowNone ? "None — type to find or add…" : "Type to find or add…"}
+        onChange={(v) => {
+          if (!v) return onChange("");
+          if (options.includes(v)) return onChange(v);
+          if (isNew) return onCustomChange(v);
+          pendingNew.current = v;
+          onChange(CUSTOM);
+        }}
+      />
+      {isNew && (
         <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
-          <input
-            style={S.input}
-            value={customValue}
-            onChange={(e) => onCustomChange(e.target.value)}
-            placeholder={placeholder}
-            autoFocus
-          />
+          <div style={S.roleHint}>New — goes onto the {String(label).toLowerCase()} list when this is saved.</div>
           {showComment && (
             <input
               style={S.input}
