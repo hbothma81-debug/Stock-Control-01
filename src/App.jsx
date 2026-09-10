@@ -305,6 +305,12 @@ const MADE_ON_OPTIONS = [
   { code: "tube_laser", label: "Tube laser" },
   { code: "cnc", label: "CNC" },
   { code: "cut_to_size", label: "Cut to size" },
+  // Where welded parts come together. Needs setup-made-on-welding.sql on
+  // the database first, or choosing it is refused and the line will not
+  // save. A part tagged Welding is listed by no stage until one is set
+  // to "Cuts: Welding" under Job Process Types -- see the note at the
+  // foot of that file.
+  { code: "welding", label: "Welding" },
   { code: "assembly", label: "Assembly" },
 ];
 const madeOnLabel = (code) => MADE_ON_OPTIONS.find((o) => o.code === code)?.label || "";
@@ -4029,8 +4035,20 @@ export default function StockControl() {
         const have = children.find((c) => (c.description || "").trim().toLowerCase() === name.toLowerCase());
         const fields = { qty: Number(p.qty) || 0, length_mm: p.length == null ? null : Number(p.length) };
         if (have) {
-          if (Number(have.qty) !== fields.qty || (have.length_mm == null ? null : Number(have.length_mm)) !== fields.length_mm) {
-            const { error } = await supabase.from("job_quote_items").update(fields).eq("id", have.id);
+          // A part already under this line keeps what somebody set on it:
+          // a cut method corrected by hand is not undone by importing the
+          // file again. A blank one is filled in, so a part typed before
+          // the report arrived ends up tagged like the rest of them.
+          const gaps = {};
+          if (madeOn && !(have.made_on || "")) gaps.made_on = madeOn;
+          if (p.linkedItemId && !have.linked_item_id) gaps.linked_item_id = p.linkedItemId;
+          const changed =
+            Number(have.qty) !== fields.qty || (have.length_mm == null ? null : Number(have.length_mm)) !== fields.length_mm;
+          if (changed || Object.keys(gaps).length) {
+            const { error } = await supabase
+              .from("job_quote_items")
+              .update({ ...(changed ? fields : {}), ...gaps })
+              .eq("id", have.id);
             if (error) throw error;
           }
         } else {
@@ -5870,7 +5888,16 @@ export default function StockControl() {
       await openJobDetail(job);
     } catch (err) {
       console.error("Failed to set where the item is made:", err);
-      alert("That didn't save — check your connection and try again.");
+      // The database keeps its own list of what a cut method may be, so
+      // that nobody invents a second spelling of one. A choice it does
+      // not know is refused, and saying "check your connection" would
+      // send somebody looking in entirely the wrong place.
+      const refused = /violates check constraint|made_on_check/i.test(err?.message || "");
+      alert(
+        refused
+          ? `The database does not allow "${madeOnLabel(code) || code}" yet. Run setup-made-on-welding.sql on this database, then try again.`
+          : "That didn't save — check your connection and try again."
+      );
     }
   }
 

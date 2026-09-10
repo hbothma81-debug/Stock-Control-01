@@ -63,6 +63,7 @@ ORDER=(
   setup-job-cut-items.sql
   setup-job-buyout-items.sql
   setup-quoting-and-bom.sql
+  setup-made-on-welding.sql
 
   # --- extra columns and permissions on profiles
   setup-production-access.sql

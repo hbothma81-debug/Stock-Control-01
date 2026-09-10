@@ -80,7 +80,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-tube-laser.sql',            'index laser_programs_machine_number_live_idx (numbers unique per machine)',
       exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'laser_programs_machine_number_live_idx')),
     ('setup-tube-laser-import.sql',     'table tube_section_aliases',
-      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'tube_section_aliases'))
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'tube_section_aliases')),
+    ('setup-made-on-welding.sql',       'cut method Welding allowed',
+      exists (select 1 from pg_constraint where conname = 'job_quote_items_made_on_check' and pg_get_constraintdef(oid) like '%welding%'))
 )
 select
   setup_file,
