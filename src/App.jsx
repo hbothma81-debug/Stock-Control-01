@@ -3330,9 +3330,11 @@ export default function StockControl() {
     setNewJobForm((f) => {
       const line = f.quoteItems[idx];
       if (!line || !line.description.trim() || !f.customer || f.customer === CUSTOM) return f;
-      const match = (items || []).find(
-        (it) => it.mainCat === "custom" && it.customer === f.customer && it.name.trim().toLowerCase() === line.description.trim().toLowerCase()
-      );
+      // A line already linked was picked from the list, code and all.
+      // Re-matching it by description could swap it for another part
+      // with the same description and a different code.
+      if (line.linkedItemId) return f;
+      const match = findCustomerStockMatch(f.customer, line.description);
       if (!match) return f;
       return {
         ...f,
@@ -3348,10 +3350,50 @@ export default function StockControl() {
     setNewJobForm((f) => ({
       ...f,
       quoteItems: f.quoteItems.map((it, i) =>
-        i === idx ? { ...it, description: stockItem.name, linkedItemId: stockItem.id, unitPrice: String(stockItem.value ?? "") } : it
+        i === idx ? { ...it, description: customerStockLabel(stockItem), linkedItemId: stockItem.id, unitPrice: String(stockItem.value ?? "") } : it
       ),
     }));
     setNewJobItemSuggestOpen(null);
+  }
+
+  // What a line reads as once it is a known part: the stock code and the
+  // description together. Parts with different codes share a description
+  // often enough that the description alone cannot tell them apart -- on
+  // paper or in the app.
+  function customerStockLabel(stockItem) {
+    const code = (stockItem?.partNumber || "").trim();
+    const name = (stockItem?.name || "").trim();
+    return code && name ? `${code} — ${name}` : code || name;
+  }
+
+  // The one rule for matching typed text to a customer's stock part, used
+  // by every box and every import that links a line:
+  //   1. the stock code, exactly -- on its own or as "CODE — description";
+  //   2. failing that, the description, but only when exactly one part
+  //      carries it. Two parts with the same description and different
+  //      codes is a question for a person, so nothing is guessed.
+  // Returns the stock item, or null.
+  function findCustomerStockMatch(customer, text) {
+    const clean = (text || "").trim().toLowerCase();
+    if (!customer || !clean) return null;
+    const pool = (items || []).filter((si) => si.mainCat === "custom" && si.customer === customer);
+    const codeOf = (si) => (si.partNumber || "").trim().toLowerCase();
+    const nameOf = (si) => (si.name || "").trim().toLowerCase();
+    const typedCode = clean.includes(" — ") ? clean.split(" — ")[0].trim() : clean;
+    const byCode = pool.find((si) => codeOf(si) && codeOf(si) === typedCode);
+    if (byCode) return byCode;
+    const byLabel = pool.find((si) => customerStockLabel(si).toLowerCase() === clean);
+    if (byLabel) return byLabel;
+    const byName = pool.filter((si) => nameOf(si) === clean);
+    return byName.length === 1 ? byName[0] : null;
+  }
+
+  // How many of a customer's parts carry this description. More than one
+  // is the case the rule above refuses to guess at, and the screen says so.
+  function countCustomerStockByName(customer, text) {
+    const clean = (text || "").trim().toLowerCase();
+    if (!customer || !clean) return 0;
+    return (items || []).filter((si) => si.mainCat === "custom" && si.customer === customer && (si.name || "").trim().toLowerCase() === clean).length;
   }
 
   // The description didn't match anything — add it to Customer Stock right
@@ -5575,12 +5617,7 @@ export default function StockControl() {
       let fill = {};
       let source = file.name;
       const customer = job.customer || "";
-      const stockMatch = (name) =>
-        customer
-          ? (items || []).find(
-              (si) => si.mainCat === "custom" && si.customer === customer && si.name.trim().toLowerCase() === (name || "").trim().toLowerCase()
-            ) || null
-          : null;
+      const stockMatch = (name) => findCustomerStockMatch(customer, name);
       if (kind === "sigmanest") {
         const quote = await parseSigmaNestQuoteFile(file);
         source = quote.quoteNumber || file.name;
@@ -19929,7 +19966,7 @@ export default function StockControl() {
                           : [];
                       const linked = newItemForm.linkedItemId ? customerStock.find((si) => si.id === newItemForm.linkedItemId) : null;
                       const pick = (si) => {
-                        setNewItemForm((f) => ({ ...f, description: si.name, linkedItemId: si.id, unitPrice: String(si.value ?? "") }));
+                        setNewItemForm((f) => ({ ...f, description: customerStockLabel(si), linkedItemId: si.id, unitPrice: String(si.value ?? "") }));
                         setJobItemSuggestOpen(false);
                       };
                       return (
@@ -19958,7 +19995,7 @@ export default function StockControl() {
                                 onBlur={() => {
                                   // An exact name typed in full links on its
                                   // own, without needing the tap.
-                                  const exact = customerStock.find((si) => si.name.trim().toLowerCase() === q);
+                                  const exact = findCustomerStockMatch(jobDetail.job.customer, newItemForm.description);
                                   if (exact && !newItemForm.linkedItemId) pick(exact);
                                   setTimeout(() => setJobItemSuggestOpen(false), 150);
                                 }}
@@ -20016,6 +20053,10 @@ export default function StockControl() {
                               <>
                                 Linked to Customer Stock{linked.partNumber ? ` — ${linked.partNumber}` : ""} — Available: {linked.qty}
                               </>
+                            ) : q && countCustomerStockByName(jobDetail.job.customer, newItemForm.description) > 1 ? (
+                              <span style={{ color: C.danger, fontWeight: 600 }}>
+                                Several parts share this description — pick one from the list so the right stock code is used.
+                              </span>
                             ) : q && jobDetail.job.customer ? (
                               // Same small form the New Job line uses: a
                               // part number is required there too, so the
@@ -21082,7 +21123,7 @@ export default function StockControl() {
                             // working when someone types the item by hand.
                             const stockMatch = matchedCustomer
                               ? (items || []).find(
-                                  (si) => si.mainCat === "custom" && si.customer === matchedCustomer && si.name.trim().toLowerCase() === it.description.trim().toLowerCase()
+                                  (si) => si.id === findCustomerStockMatch(matchedCustomer, it.description)?.id
                                 )
                               : null;
                             return {
@@ -21249,6 +21290,10 @@ export default function StockControl() {
                             </>
                           )}
                         </>
+                      ) : it.description.trim() && countCustomerStockByName(newJobForm.customer, it.description) > 1 ? (
+                        <span style={{ color: C.danger, fontWeight: 600 }}>
+                          Several parts share this description — pick one from the list so the right stock code is used.
+                        </span>
                       ) : it.description.trim() && newJobForm.customer && newJobForm.customer !== CUSTOM ? (
                         <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => addNewJobQuoteItemToStockManager(idx)}>
                           <Plus size={11} /> Not in Customer Stock — add it
