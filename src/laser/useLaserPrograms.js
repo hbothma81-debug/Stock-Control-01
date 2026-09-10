@@ -1,24 +1,28 @@
 import { useState } from "react";
 import { supabase } from "../lib/supabaseClient.js";
 
-// Everything the Laser 4kw tab knows and does: the programs, the job
-// stages behind them, and every change the nesting and cutting screens
-// can make. Lifted out of App.jsx as one piece, so the laser can be
-// worked on without opening the file that wires the whole app together.
+// Everything a laser tab knows and does: the programs, the job stages
+// behind them, and every change the nesting and cutting screens can
+// make. Lifted out of App.jsx as one piece, so the laser can be worked
+// on without opening the file that wires the whole app together.
+//
+// One laser per call. `deps.machine` is the profile from constants.js
+// (LASER_MACHINES) with the two stage-name rules attached: which stage
+// is this laser's nesting, which is its cutting. Everything here reads
+// only this machine's programs and this lane's shortages, so the plate
+// laser and the tube laser never see each other's work -- Laser Status,
+// the counter and the Shifts report all follow from what is loaded here.
+// App.jsx calls this twice, once per laser.
 //
 // What it borrows from the app comes in through `deps`: who is signed
 // in, the jobs and people lists, and the handful of app-wide helpers a
 // program change has to reach (notifications, the production queue, the
 // shortage lifecycle). Nothing in here reads app state any other way.
-//
-// The functions below are exactly as they were in App.jsx. The only
-// thing that changed is where they live.
 
 export default function useLaserPrograms(deps) {
   const {
     fetchAllRows,
-    isPlateNestingProcess,
-    isProgramLaserProcess,
+    machine,
     sendNotifications,
     roleLabel,
     currentUser,
@@ -33,9 +37,12 @@ export default function useLaserPrograms(deps) {
     shortageSummary,
     refreshShortageStatus,
   } = deps;
+  // The stage-name rules, under the names the code below has always used.
+  const isPlateNestingProcess = machine.isNestingStage;
+  const isProgramLaserProcess = machine.isCutStage;
 
-  // Everything the Laser 4kw tab needs: the programs, which jobs are on
-  // them, and the job stages so "waiting to be nested" can be worked out.
+  // Everything the tab needs: the programs, which jobs are on them, and
+  // the job stages so "waiting to be nested" can be worked out.
   const [laserData, setLaserData] = useState(null);
   const [laserLoadFailed, setLaserLoadFailed] = useState(false);
   const [laserView, setLaserView] = useState("nesting");
@@ -86,17 +93,39 @@ export default function useLaserPrograms(deps) {
       // needs it for a packing stage set to Each.
       fetchAllRows("job_process_item_progress", { select: "id, job_process_id, job_quote_item_id, qty_complete" }),
     ]);
+    // What the tube software's section wording means, for the import.
+    // Only a laser that imports reports reads it, and a database where
+    // setup-tube-laser-import.sql has not run yet must not blank the tab:
+    // no aliases means asking every time, which is merely slower.
+    let aliases = [];
+    if (machine.importsReport) {
+      try {
+        aliases = (await fetchAllRows("tube_section_aliases", { orderBy: "report_section" })) || [];
+      } catch (err) {
+        console.error("Could not load the section aliases (run setup-tube-laser-import.sql):", err);
+      }
+    }
+    // This machine's programs only. Every row carries its machine, so the
+    // plate screens never see a tube program and the other way round.
+    // Filtered here, once, and everything downstream follows.
+    const mine = (programs || []).filter((p) => p.machine === machine.machine);
+    // And this lane's shortages. A shortage with no lane yet is from
+    // before lanes existed, when everything was plate.
+    const inLane = (shortages || []).filter((sh) =>
+      machine.lane === "tube" ? sh.lane === "tube" : sh.lane !== "tube"
+    );
     return {
-      programs: programs || [],
+      programs: mine,
       links: links || [],
       processes: processes || [],
-      shortages: shortages || [],
+      shortages: inLane,
       documents: documents || [],
       allocations: allocations || [],
       quoteItems: quoteItems || [],
       events: events || [],
       shifts: shifts || [],
       itemProgress: itemProgress || [],
+      aliases,
     };
   }
 
@@ -485,15 +514,39 @@ export default function useLaserPrograms(deps) {
     }
   }
 
-  async function createLaserProgram({ program_number, material, machine, sheet_name, sheets_required, cut_minutes, jobs }) {
+  // The next number for a laser that numbers its own programs. One row
+  // per machine in laser_program_counters, bumped in the database so two
+  // nesters pressing Create together cannot be handed the same number.
+  // A number is used the moment it is handed out: if the program then
+  // fails to save, that number is skipped, which is fine -- gaps are
+  // harmless, duplicates are not.
+  async function nextProgramNumber() {
+    const { data, error } = await supabase.rpc("next_laser_program_number", {
+      p_machine: machine.machine,
+      p_prefix: machine.numberPrefix || "",
+    });
+    if (error) throw error;
+    if (!data) throw new Error("The database handed back no program number.");
+    return data;
+  }
+
+  async function createLaserProgram({ program_number, nesting_name, material, sheet_name, sheets_required, cut_minutes, jobs }) {
     if (!supabase) return false;
     try {
+      // A typed number is the nester's; a generated one comes from the
+      // database and is shown on the program the moment it exists, so the
+      // nest can be saved under it in the machine's software.
+      const number = machine.numbering === "generated" ? await nextProgramNumber() : program_number;
       const { data, error } = await supabase
         .from("laser_programs")
         .insert({
-          program_number,
+          program_number: number,
+          // Only a laser that names its nests writes the column, so the
+          // plate laser keeps working on a database where
+          // setup-tube-laser.sql has not been run yet.
+          ...(machine.numbering === "generated" ? { nesting_name: (nesting_name || "").trim() } : {}),
           material,
-          machine,
+          machine: machine.machine,
           sheet_name: sheet_name || null,
           // The same nest run several times off the same material. One
           // unless somebody says otherwise, so nothing changes for the
@@ -527,7 +580,9 @@ export default function useLaserPrograms(deps) {
         if (sh && sh.status === "flagged") await markShortageNested(sh);
       }
       await fetchLaserData();
-      return true;
+      // Truthy for the screens that only ask "did it work"; the number
+      // for the import, which shows what was handed out.
+      return { id: data.id, program_number: number };
     } catch (err) {
       console.error("Failed to create laser program:", err);
       alert(
@@ -537,6 +592,55 @@ export default function useLaserPrograms(deps) {
       );
       return false;
     }
+  }
+
+  // The tube software's spreadsheet export, turned into programs: one per
+  // section in the file, each with the next number, the section's tube
+  // count as its lengths, and the nests written into its notes for the
+  // operator. The file name is the job's reference and is the nesting
+  // name on every program made from it.
+  //
+  // Each section's wording is remembered against the list entry chosen
+  // for it, so the next import of that section asks nothing.
+  //
+  // Returns the programs made, or false. Stops at the first failure and
+  // says how far it got: the programs already made are real and on the
+  // cut list, and must not be made twice.
+  async function importNestingReport({ nesting_name, sections, jobs }) {
+    if (!supabase) return false;
+    const made = [];
+    for (const s of sections) {
+      const result = await createLaserProgram({
+        nesting_name,
+        material: s.material,
+        sheets_required: s.lengths,
+        jobs,
+      });
+      if (!result) {
+        if (made.length) {
+          alert(
+            `Stopped after ${made.length} of ${sections.length}: ` +
+              made.map((m) => m.program_number).join(", ") +
+              " were made and are on the cut list. The rest were not — import again with only those sections."
+          );
+        }
+        return false;
+      }
+      made.push({ ...result, material: s.material, lengths: s.lengths });
+      if (s.note) await logProgramEvent(result.id, "note", s.note);
+      if (s.reportSection && s.material) {
+        const { error } = await supabase
+          .from("tube_section_aliases")
+          .upsert(
+            { report_section: s.reportSection, section_name: s.material, updated_by: roleLabel, updated_at: new Date().toISOString() },
+            { onConflict: "report_section" }
+          );
+        // Not fatal: the program exists; the memory is a convenience.
+        if (error) console.error("Could not remember the section alias:", error);
+      }
+    }
+    await fetchLaserData();
+    return made;
   }
 
   async function updateLaserProgram(program, fields) {
@@ -623,7 +727,11 @@ export default function useLaserPrograms(deps) {
   // A job with no programs at all never completes here. That is a job
   // handled outside the app -- already cut before this existed, or sent
   // out -- and its laser stage is ticked by hand the way it is today.
+  //
+  // On the tube laser the cutting stage is also where the operator packs,
+  // so cutting never closes it: he ticks it packed on the Packing screen.
   async function syncLaserStagesFor(jobIds, d) {
+    if (machine.cutStageIsPacking) return 0;
     const live = d.programs.filter((p) => !p.is_cancelled);
     const changes = [];
     for (const jobId of new Set(jobIds)) {
@@ -671,10 +779,14 @@ export default function useLaserPrograms(deps) {
     for (const id of new Set(ids)) {
       const sh = d.shortages.find((x) => x.id === id);
       if (!sh) continue;
+      // The re-cut's own nesting and cutting stages close with the cut.
+      // Not the cutting stage on the tube laser: that is its packing, and
+      // the re-cut is ticked packed on the Packing screen like a job.
       const catchUp = d.processes.filter(
         (pr) =>
           pr.shortage_id === id &&
-          (isPlateNestingProcess(pr.process_name) || isProgramLaserProcess(pr.process_name))
+          (isPlateNestingProcess(pr.process_name) ||
+            (!machine.cutStageIsPacking && isProgramLaserProcess(pr.process_name)))
       );
       for (const stage of catchUp) {
         if (!!stage.is_complete === nowCut) continue;
@@ -833,6 +945,7 @@ export default function useLaserPrograms(deps) {
   }
 
   return {
+    machine,
     laserData,
     setLaserData,
     laserLoadFailed,
@@ -851,6 +964,7 @@ export default function useLaserPrograms(deps) {
     clearProgramReport,
     logProgramEvent,
     createLaserProgram,
+    importNestingReport,
     updateLaserProgram,
     cancelLaserProgram,
     addJobToLaserProgram,

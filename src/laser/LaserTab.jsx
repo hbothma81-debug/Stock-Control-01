@@ -1,23 +1,39 @@
 import { C, S } from "../theme.js";
-import { LASER_MACHINE } from "../constants.js";
 import NestingView from "./NestingView.jsx";
 import CutList from "./CutList.jsx";
 import ShiftReport from "./ShiftReport.jsx";
 import ShortageCentre from "./ShortageCentre.jsx";
+import LaserStatus from "./LaserStatus.jsx";
 
-// The Laser 4kw tab: the switch between Nesting, Cutting, Shortages and
-// Shifts, and the screen behind whichever is chosen. Lifted out of
-// App.jsx exactly as it was; `laser` is what useLaserPrograms returns,
-// and the rest is what the screens still reach back into the app for.
+// A laser tab: the switch between Nesting, Cutting, Shortages, Shifts
+// (and Packing, on a laser that packs on its own tab) and the screen
+// behind whichever is chosen. Rendered once per laser -- Laser 4kw and
+// Tube Laser -- with `machine` saying which (LASER_MACHINES in
+// constants.js, with the stage rules attached by App.jsx) and `laser`
+// being what useLaserPrograms returned for it. The rest is what the
+// screens still reach back into the app for.
+//
+// Who sees what: someone who may nest (or an admin) gets the switch and
+// every screen. Someone who may only cut lands on Cutting with no switch
+// -- that is by design, the operator's screen is the cut list and nothing
+// else. The one exception is a laser whose operator also packs: he gets
+// Cutting and Packing, and only those two.
+
+// The material picker's list for a laser that picks a section rather
+// than a thickness: the section names under Structural Steel, once each,
+// in the order every other list in the app uses.
+function sectionNames(master) {
+  const names = [...new Set((master?.sections || []).map((s) => (s.name || "").trim()).filter(Boolean))];
+  return names.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+}
 
 export default function LaserTab({
   laser,
+  machine,
   isAdmin,
   profile,
   jobsList,
   master,
-  isPlateNestingProcess,
-  isProgramLaserProcess,
   shortageSummary,
   SavedCheck,
   ExpandableProcessNotes,
@@ -29,6 +45,9 @@ export default function LaserTab({
   setPullStockModal,
   viewJobDocument,
   openDrawingPreview,
+  // Only on a laser that packs on its own tab: everything the Packing
+  // screen needs, built by App.jsx from this laser's data.
+  packing,
 }) {
   const {
     laserData,
@@ -42,6 +61,7 @@ export default function LaserTab({
     reportProgram,
     clearProgramReport,
     createLaserProgram,
+    importNestingReport,
     updateLaserProgram,
     cancelLaserProgram,
     addJobToLaserProgram,
@@ -51,6 +71,8 @@ export default function LaserTab({
     setProgramActualMinutes,
     setJobNestingDone,
   } = laser;
+
+  const hasPacking = !!machine.hasPacking && !!packing;
 
   return (
         laserData === null || jobsList === null ? (
@@ -66,14 +88,18 @@ export default function LaserTab({
         ) : (
           (() => {
             const { rows, nestedRows, programs, candidates } = laserNestingData();
-            const canNest = isAdmin || !!profile?.allowedProcessTypes?.some(isPlateNestingProcess);
-            const canCut = isAdmin || !!profile?.allowedProcessTypes?.some(isProgramLaserProcess);
+            const canNest = isAdmin || !!profile?.allowedProcessTypes?.some(machine.isNestingStage);
+            const canCut = isAdmin || !!profile?.allowedProcessTypes?.some(machine.isCutStage);
             // Someone who only nests, or only cuts, still lands on their own
             // screen; Shortages is there for everyone, so the switch always
             // has at least two things on it now.
             const view =
-              laserView === "shortages" || laserView === "shifts"
-                ? laserView
+              laserView === "packing" && !hasPacking
+                ? "cutting"
+                : laserView === "shortages" || laserView === "shifts" || laserView === "packing"
+                ? !canNest && laserView !== "packing"
+                  ? "cutting"
+                  : laserView
                 : !canNest
                 ? laserView === "nesting"
                   ? "cutting"
@@ -83,16 +109,27 @@ export default function LaserTab({
                   ? "nesting"
                   : laserView
                 : laserView;
+            // The operator's switch: none at all, unless his laser is one
+            // he packs on, when it is Cutting and Packing and nothing else.
+            const segments = canNest
+              ? [
+                  { key: "nesting", label: "Nesting" },
+                  ...(canCut ? [{ key: "cutting", label: "Cutting" }] : []),
+                  { key: "shortages", label: "Shortages" },
+                  { key: "shifts", label: "Shifts" },
+                  ...(hasPacking ? [{ key: "packing", label: "Packing" }] : []),
+                ]
+              : hasPacking && canCut
+              ? [
+                  { key: "cutting", label: "Cutting" },
+                  { key: "packing", label: "Packing" },
+                ]
+              : [];
             return (
               <>
-                {canNest && (
+                {segments.length > 0 && (
                   <div style={{ ...S.segRow, marginBottom: 10 }}>
-                    {[
-                      { key: "nesting", label: "Nesting" },
-                      ...(canCut ? [{ key: "cutting", label: "Cutting" }] : []),
-                      { key: "shortages", label: "Shortages" },
-                      { key: "shifts", label: "Shifts" },
-                    ].map((v) => (
+                    {segments.map((v) => (
                       <button
                         key={v.key}
                         type="button"
@@ -112,7 +149,7 @@ export default function LaserTab({
                 )}
                 {view === "nesting" ? (
                   <NestingView
-                    machine={LASER_MACHINE}
+                    machine={machine}
                     rows={rows}
                     nestedRows={nestedRows}
                     programs={programs}
@@ -120,9 +157,12 @@ export default function LaserTab({
                     thicknesses={master.laserThicknesses || []}
                     grades={(master.grades || []).map((g) => g.shortName || g.name)}
                     sheetNames={master.sheetNames || []}
+                    sections={sectionNames(master)}
+                    aliases={laserData ? laserData.aliases || [] : []}
                     canManage={canNest}
                     onClearReport={clearProgramReport}
                     onCreateProgram={createLaserProgram}
+                    onImportReport={machine.importsReport ? importNestingReport : null}
                     onCancelProgram={cancelLaserProgram}
                     onAddJobToProgram={addJobToLaserProgram}
                     onRemoveJobFromProgram={removeJobFromLaserProgram}
@@ -144,8 +184,12 @@ export default function LaserTab({
                   />
                 ) : view === "cutting" ? (
                   <CutList
+                    machine={machine}
                     programs={programs}
-                    thicknesses={master.laserThicknesses || []}
+                    // Grouped in the shop's thickness order on the plate
+                    // laser; a tube program's section has no such order,
+                    // so those group by name.
+                    thicknesses={machine.materialFrom === "thicknesses" ? master.laserThicknesses || [] : []}
                     events={laserData ? laserData.events : []}
                     shifts={laserData ? laserData.shifts : []}
                     myShiftId={profile?.shiftId || null}
@@ -158,7 +202,21 @@ export default function LaserTab({
                     busyId={programBusyId}
                   />
                 ) : view === "shifts" ? (
-                  <ShiftReport programs={programs} shifts={laserData ? laserData.shifts : []} />
+                  <ShiftReport machine={machine} programs={programs} shifts={laserData ? laserData.shifts : []} />
+                ) : view === "packing" ? (
+                  <LaserStatus
+                    rows={packing.rows}
+                    canPack={packing.canPack}
+                    canTake={packing.canTake}
+                    words={machine}
+                    meName={packing.meName}
+                    onTakeJob={packing.onTakeJob}
+                    onFinishPacking={packing.onFinishPacking}
+                    onFlagShortage={packing.onFlagShortage}
+                    onLogItem={packing.onLogItem}
+                    ItemProgress={packing.ItemProgress}
+                    busyId={programBusyId}
+                  />
                 ) : (
                   <ShortageCentre
                     shortages={

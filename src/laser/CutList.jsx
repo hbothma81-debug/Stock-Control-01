@@ -3,9 +3,15 @@ import { Check, Undo2, OctagonAlert, MessageSquare, X, Clock } from "lucide-reac
 import { C, S } from "../theme.js";
 import Section from "../Section.jsx";
 import { pickShift, currentAndPreviousWindow, lastEndedShift, fmtTime } from "../lib/shiftWindow.js";
-import { plannedMinutes, outstandingMinutes, fmtMinutes, laserShifts } from "../lib/cuttingTime.js";
+import { plannedMinutes, outstandingMinutes, fmtMinutes, laserShifts, outstandingUnits } from "../lib/cuttingTime.js";
+import { programTitle } from "./programTitle.js";
 
 // The laser operator's screen. A to-do list of programs to cut.
+//
+// One screen for both lasers. `machine` (LASER_MACHINES in constants.js)
+// says which: the word for a repeat (sheet or length), whether there is
+// a cutting time to add up and ask for, and which shift tick to read.
+// With no profile given it behaves as the plate laser always has.
 //
 // He works off the program number -- that is what he loads at the machine
 // -- so that is what this leads with. The jobs on each program are shown
@@ -29,6 +35,7 @@ const grid = {
 };
 
 export default function CutList({
+  machine = {},
   programs,
   thicknesses,
   events,
@@ -43,6 +50,7 @@ export default function CutList({
   busyId,
 }) {
   const [query, setQuery] = useState("");
+  const hasTime = machine.hasCutTime !== false;
   // Which program the "how long did it take" popup is open for. Held
   // here, not on the card: marking the last sheet cut moves the card
   // from the to-cut list into Already cut, and a card that moves is torn
@@ -57,6 +65,7 @@ export default function CutList({
     return programs.filter(
       (p) =>
         (p.program_number || "").toLowerCase().includes(q) ||
+        (p.nesting_name || "").toLowerCase().includes(q) ||
         (p.material || "").toLowerCase().includes(q) ||
         (p.sheet_name || "").toLowerCase().includes(q) ||
         (p.jobs || []).some(
@@ -99,10 +108,14 @@ export default function CutList({
         style={S.input}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search program, job number, or SigmaNest number…"
+        placeholder={
+          machine.numbering === "generated"
+            ? "Search program, nesting name, or job number…"
+            : "Search program, job number, or SigmaNest number…"
+        }
       />
 
-      <ShiftCounter programs={programs} shifts={shifts} myShiftId={myShiftId} />
+      <ShiftCounter programs={programs} shifts={shifts} myShiftId={myShiftId} machine={machine} />
 
       {toCut.length === 0 ? (
         <div style={S.empty}>
@@ -120,9 +133,10 @@ export default function CutList({
                     (e) => e.program_id === p.id && (e.action === "note" || e.action === "stopped")
                   )}
                   canCut={canCut}
+                  machine={machine}
                   onToggleCut={onToggleCut}
                   onSetCutCount={onSetCutCount}
-                  onAskTime={(pr) => setAskTimeFor(pr.id)}
+                  onAskTime={hasTime ? (pr) => setAskTimeFor(pr.id) : () => {}}
                   onReport={onReport}
                   onAddNote={onAddNote}
                   busy={busyId === p.id}
@@ -144,9 +158,10 @@ export default function CutList({
                   (e) => e.program_id === p.id && (e.action === "note" || e.action === "stopped")
                 )}
                 canCut={canCut}
+                machine={machine}
                 onToggleCut={onToggleCut}
                 onSetCutCount={onSetCutCount}
-                onAskTime={(pr) => setAskTimeFor(pr.id)}
+                onAskTime={hasTime ? (pr) => setAskTimeFor(pr.id) : () => {}}
                 onReport={onReport}
                 onAddNote={onAddNote}
                 busy={busyId === p.id}
@@ -167,9 +182,10 @@ export default function CutList({
                   (e) => e.program_id === p.id && (e.action === "note" || e.action === "stopped")
                 )}
                 canCut={canCut}
+                machine={machine}
                 onToggleCut={onToggleCut}
                 onSetCutCount={onSetCutCount}
-                onAskTime={(pr) => setAskTimeFor(pr.id)}
+                onAskTime={hasTime ? (pr) => setAskTimeFor(pr.id) : () => {}}
                 onReport={onReport}
                 onAddNote={onAddNote}
                 busy={busyId === p.id}
@@ -201,7 +217,10 @@ export default function CutList({
 // Which shift: whichever is on the clock right now, as set up under Time
 // Manager. Nothing on the clock -- a Sunday, or no shifts set up yet --
 // counts today since midnight instead, and says so.
-function ShiftCounter({ programs, shifts, myShiftId }) {
+function ShiftCounter({ programs, shifts, myShiftId, machine = {} }) {
+  const hasTime = machine.hasCutTime !== false;
+  const units = machine.units || "sheets";
+  const who = machine.lane === "tube" ? "the tube laser" : "the laser";
   // The clock has to move while the screen sits open on the machine all
   // day, or the count would never roll over when the shift changes.
   const [now, setNow] = useState(() => new Date());
@@ -214,7 +233,7 @@ function ShiftCounter({ programs, shifts, myShiftId }) {
     // Only the shifts ticked "the laser cuts on this shift" under Time
     // Manager, so a factory shift with overlapping hours is not the one
     // the count lands on.
-    const { shifts: mine, fallback } = laserShifts(shifts);
+    const { shifts: mine, fallback } = laserShifts(shifts, machine.shiftFlag || "cuts_laser");
     let shift = pickShift(mine, myShiftId, now);
     let win = shift ? currentAndPreviousWindow(shift, now) : { current: null, previous: null };
     let ended = false;
@@ -235,7 +254,7 @@ function ShiftCounter({ programs, shifts, myShiftId }) {
     if (current) {
       label = `${shift.name} · ${fmtTime(current.start)}–${fmtTime(current.end)}`;
       if (ended) label += " · ended, next shift not started";
-      if (fallback) label += " · no shift is ticked for the laser yet";
+      if (fallback) label += ` · no shift is ticked for ${who} yet`;
     } else {
       const start = new Date(now);
       start.setHours(0, 0, 0, 0);
@@ -262,12 +281,16 @@ function ShiftCounter({ programs, shifts, myShiftId }) {
       label,
       count: cutNow.length,
       minutes: sum(cutNow, plannedMinutes),
+      // The repeats: sheets on plate, lengths on tube. The tube laser has
+      // no cutting time to add up, so lengths are what its counter shows.
+      units: sum(cutNow, (p) => Math.max(1, Number(p.sheets_required) || 1)),
       previous: win.previous ? (programs || []).filter(within(win.previous)).length : null,
       openCount: open.length,
       openMinutes: sum(open, outstandingMinutes),
+      openUnits: sum(open, outstandingUnits),
       untimed,
     };
-  }, [programs, shifts, myShiftId, now]);
+  }, [programs, shifts, myShiftId, now, machine.shiftFlag, who]);
 
   const line = { display: "flex", flexWrap: "wrap", gap: "4px 18px", justifyContent: "center" };
   return (
@@ -275,7 +298,13 @@ function ShiftCounter({ programs, shifts, myShiftId }) {
       <div style={line}>
         <span>
           <b style={{ fontSize: 18 }}>{view.count}</b> {view.count === 1 ? "program" : "programs"} cut this shift
-          {view.minutes > 0 ? ` · ${fmtMinutes(view.minutes)} planned` : ""}
+          {hasTime
+            ? view.minutes > 0
+              ? ` · ${fmtMinutes(view.minutes)} planned`
+              : ""
+            : view.count > 0
+              ? ` · ${view.units} ${units}`
+              : ""}
         </span>
         <span style={{ color: C.muted }}>{view.label}</span>
         {view.previous != null && <span style={{ color: C.muted }}>last shift {view.previous}</span>}
@@ -284,14 +313,19 @@ function ShiftCounter({ programs, shifts, myShiftId }) {
         <span>
           Still on the list: <b style={{ color: C.text }}>{view.openCount}</b>{" "}
           {view.openCount === 1 ? "program" : "programs"}
-          {view.openCount > 0 ? (
+          {view.openCount > 0 && hasTime ? (
             <>
               {" "}
               · <b style={{ color: C.text }}>{fmtMinutes(view.openMinutes)}</b> of cutting
             </>
+          ) : view.openCount > 0 ? (
+            <>
+              {" "}
+              · <b style={{ color: C.text }}>{view.openUnits}</b> {units} to cut
+            </>
           ) : null}
         </span>
-        {view.untimed > 0 && (
+        {hasTime && view.untimed > 0 && (
           <span style={{ color: C.danger }}>
             {view.untimed} with no time given — not in that total
           </span>
@@ -301,8 +335,11 @@ function ShiftCounter({ programs, shifts, myShiftId }) {
   );
 }
 
-function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onAskTime, onReport, onAddNote, busy }) {
+function ProgramRow({ program, notes, canCut, machine = {}, onToggleCut, onSetCutCount, onAskTime, onReport, onAddNote, busy }) {
   const p = program;
+  const hasTime = machine.hasCutTime !== false;
+  const unit = machine.unit || "sheet";
+  const isTube = machine.lane === "tube";
   const repeats = Math.max(1, Number(p.sheets_required) || 1);
   const done = Math.min(Math.max(0, Number(p.sheets_cut) || 0), repeats);
   const [countDraft, setCountDraft] = useState(String(done));
@@ -323,7 +360,7 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onAskT
   return (
     <div style={S.row}>
       <div style={S.rowMain}>
-        <span style={{ ...S.itemName, fontSize: 18, letterSpacing: "0.02em" }}>{p.program_number}</span>
+        <span style={{ ...S.itemName, fontSize: 18, letterSpacing: "0.02em" }}>{programTitle(p)}</span>
         <div style={S.rowMeta}>
           <span style={S.partTag}>{p.material}</span>
           {p.sheet_name && <span style={S.partTag}>{p.sheet_name}</span>}
@@ -365,6 +402,8 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onAskT
             <b>Stopped</b> — {p.reported_reason}
             {p.reported_offcut_length && p.reported_offcut_width ? (
               <> · offcut {p.reported_offcut_length} × {p.reported_offcut_width}</>
+            ) : p.reported_offcut_length ? (
+              <> · offcut {p.reported_offcut_length} long</>
             ) : null}
             {p.reported_plate ? <> · plate {p.reported_plate}</> : null}
             <div style={{ ...S.roleHint, color: C.danger }}>
@@ -418,7 +457,7 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onAskT
           <div style={S.roleHint}>
             Cut by {p.completed_by}
             {p.completed_at ? ` — ${new Date(p.completed_at).toLocaleString()}` : ""}
-            {p.actual_minutes != null ? ` · took ${fmtMinutes(p.actual_minutes)}` : " · time not given"}
+            {!hasTime ? "" : p.actual_minutes != null ? ` · took ${fmtMinutes(p.actual_minutes)}` : " · time not given"}
           </div>
         )}
       </div>
@@ -470,7 +509,7 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onAskT
                   onClick={async () => {
                     if ((await onSetCutCount(p, done + 1)) && done + 1 >= repeats) openTime();
                   }}
-                  title="One more sheet of this program is cut"
+                  title={`One more ${unit} of this program is cut`}
                 >
                   <Check size={14} strokeWidth={2.5} /> {busy ? "Saving…" : "Cut one"}
                 </button>
@@ -560,7 +599,7 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onAskT
 
           {/* Skipped at the time, or got wrong: the time can be put in
               or changed afterwards from the card. */}
-          {p.is_complete && (
+          {hasTime && p.is_complete && (
             <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={openTime}>
               <Clock size={13} /> {p.actual_minutes != null ? "Change time" : "Add time"}
             </button>
@@ -572,7 +611,7 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onAskT
         <div style={{ ...S.modalOverlay, zIndex: 30 }}>
           <div style={{ ...S.modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
-              <span style={S.modalTitle}>Stop {p.program_number}</span>
+              <span style={S.modalTitle}>Stop {programTitle(p)}</span>
               <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setShowReport(false)}>
                 <X size={18} />
               </button>
@@ -586,12 +625,14 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onAskT
               style={S.input}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="Short and plain — e.g. plate is short"
+              placeholder={isTube ? "Short and plain — e.g. section is short" : "Short and plain — e.g. plate is short"}
               autoFocus
             />
 
+            {/* An offcut of plate has a length and a width; an offcut of
+                tube is a length and nothing else. */}
             <label style={{ ...S.label, marginTop: 10, display: "block" }}>
-              Offcut to nest on instead (optional)
+              {isTube ? "Offcut length to nest on instead (optional)" : "Offcut to nest on instead (optional)"}
             </label>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <input
@@ -602,23 +643,29 @@ function ProgramRow({ program, notes, canCut, onToggleCut, onSetCutCount, onAskT
                 onChange={(e) => setOffcutL(e.target.value)}
                 placeholder="Length"
               />
-              <span style={{ color: C.muted }}>×</span>
-              <input
-                style={{ ...S.input, flex: 1 }}
-                type="number"
-                inputMode="numeric"
-                value={offcutW}
-                onChange={(e) => setOffcutW(e.target.value)}
-                placeholder="Width"
-              />
+              {!isTube && (
+                <>
+                  <span style={{ color: C.muted }}>×</span>
+                  <input
+                    style={{ ...S.input, flex: 1 }}
+                    type="number"
+                    inputMode="numeric"
+                    value={offcutW}
+                    onChange={(e) => setOffcutW(e.target.value)}
+                    placeholder="Width"
+                  />
+                </>
+              )}
             </div>
 
-            <label style={{ ...S.label, marginTop: 10, display: "block" }}>Or a plate name (optional)</label>
+            <label style={{ ...S.label, marginTop: 10, display: "block" }}>
+              {isTube ? "Or a section to use instead (optional)" : "Or a plate name (optional)"}
+            </label>
             <input
               style={S.input}
               value={plate}
               onChange={(e) => setPlate(e.target.value)}
-              placeholder="Which plate to use instead"
+              placeholder={isTube ? "Which section to use instead" : "Which plate to use instead"}
             />
 
             <button

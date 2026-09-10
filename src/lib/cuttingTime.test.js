@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { plannedMinutes, outstandingMinutes, fmtMinutes, laserShifts } from "./cuttingTime.js";
+import { plannedMinutes, outstandingMinutes, fmtMinutes, laserShifts, outstandingUnits } from "./cuttingTime.js";
 
 test("planned time is minutes per sheet times the sheets required", () => {
   assert.equal(plannedMinutes({ cut_minutes: 12, sheets_required: 2 }), 24);
@@ -73,4 +73,27 @@ test("with shifts ticked for the laser, only those are used", () => {
 test("no shifts at all is not a fallback, it is nothing", () => {
   assert.deepEqual(laserShifts([]), { shifts: [], fallback: false });
   assert.deepEqual(laserShifts(null), { shifts: [], fallback: false });
+});
+
+test("the tube laser reads its own tick, not the plate laser's", () => {
+  const shifts = [
+    { id: "a", cuts_laser: true, cuts_tube_laser: false },
+    { id: "b", cuts_laser: false, cuts_tube_laser: true },
+  ];
+  assert.deepEqual(laserShifts(shifts, "cuts_tube_laser").shifts.map((s) => s.id), ["b"]);
+  assert.deepEqual(laserShifts(shifts).shifts.map((s) => s.id), ["a"]);
+});
+
+test("with no tube tick set anywhere, the tube laser falls back to every shift and says so", () => {
+  const shifts = [{ id: "a", cuts_laser: true }, { id: "b", cuts_laser: false }];
+  const r = laserShifts(shifts, "cuts_tube_laser");
+  assert.deepEqual(r.shifts.map((s) => s.id), ["a", "b"]);
+  assert.equal(r.fallback, true);
+});
+
+test("outstanding units are what is left of the repeats, never below nothing", () => {
+  assert.equal(outstandingUnits({ sheets_required: 4, sheets_cut: 1 }), 3);
+  assert.equal(outstandingUnits({ sheets_required: 4, sheets_cut: 9 }), 0);
+  assert.equal(outstandingUnits({}), 1);
+  assert.equal(outstandingUnits({ sheets_required: 2 }), 2);
 });

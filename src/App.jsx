@@ -57,7 +57,7 @@ async function getPdf() {
   }
   return pdfLib;
 }
-import { TABS, NAV_TABS, TAB_GROUPS, LASER_MACHINE } from "./constants.js";
+import { TABS, NAV_TABS, TAB_GROUPS, LASER_MACHINES } from "./constants.js";
 import UserManagement from "./UserManagement.jsx";
 import CompanyDetails from "./manager/CompanyDetails.jsx";
 import CutToSize from "./jobs/CutToSize.jsx";
@@ -233,6 +233,17 @@ const isProgramLaserProcess = (name) =>
 // and stays in the main line.
 const isTubeLaserProcess = (name) => /tube/i.test(name || "") && /laser|nest/i.test(name || "");
 const isPlateLaserProcess = (name) => isPlateNestingProcess(name) || isProgramLaserProcess(name);
+// The tube laser's two stages, told apart the way the plate laser's are.
+// "Tube Laser Nesting" has all three words in it, so the cutting rule has
+// to say "not nesting" as well as "tube" and "laser".
+const isTubeNestingProcess = (name) => /tube/i.test(name || "") && /nest/i.test(name || "");
+const isTubeCutProcess = (name) => /tube/i.test(name || "") && /laser/i.test(name || "") && !/nest/i.test(name || "");
+
+// The two lasers as the laser screens see them: the profile from
+// constants.js plus the two stage rules above. Everything under src/laser
+// takes one of these and nothing else tells it which machine it is on.
+const PLATE_LASER = { ...LASER_MACHINES.laser4kw, isNestingStage: isPlateNestingProcess, isCutStage: isProgramLaserProcess };
+const TUBE_LASER = { ...LASER_MACHINES.tubeLaser, isNestingStage: isTubeNestingProcess, isCutStage: isTubeCutProcess };
 // True when a stage should not wait for another: one is in the tube lane
 // and the other in the plate lane.
 const inOtherLaserLane = (mine, other) =>
@@ -297,6 +308,9 @@ const madeOnLabel = (code) => MADE_ON_OPTIONS.find((o) => o.code === code)?.labe
 // Laser Status is not a process type, so it needs a key that no process
 // type could ever collide with.
 const LASER_STATUS_DEPT = "__laser_status__";
+// Its tube twin under Production: the same rows as the Tube Laser tab's
+// Packing screen, where the next department takes the job.
+const TUBE_LASER_STATUS_DEPT = "__tube_laser_status__";
 
 // A job open longer than this is worth a second look on the Jobs list.
 // One place, so changing it changes it everywhere it is mentioned.
@@ -1463,11 +1477,11 @@ export default function StockControl() {
       return Array.isArray(list) ? [...list].sort(byName) : list;
     });
 
-  // Everything the Laser 4kw tab knows and does. See src/laser/useLaserPrograms.js.
-  const laser = useLaserPrograms({
+  // Everything a laser tab knows and does. See src/laser/useLaserPrograms.js.
+  // Once per laser: each reads only its own machine's programs and its
+  // own lane's shortages, so the two never see each other's work.
+  const laserDeps = {
     fetchAllRows,
-    isPlateNestingProcess,
-    isProgramLaserProcess,
     sendNotifications,
     roleLabel,
     currentUser,
@@ -1481,11 +1495,20 @@ export default function StockControl() {
     markShortageNested,
     shortageSummary,
     refreshShortageStatus,
-  });
+  };
+  const laser = useLaserPrograms({ ...laserDeps, machine: PLATE_LASER });
+  const tubeLaser = useLaserPrograms({ ...laserDeps, machine: TUBE_LASER });
   // What the rest of the app still reaches for: Laser Status under
-  // Production reads the programs and shares the busy marker, and a
-  // handful of job changes re-read the laser data afterwards.
-  const { laserData, setLaserData, programBusyId, setProgramBusyId, fetchLaserData } = laser;
+  // Production reads the plate programs and shares the busy marker, and
+  // a handful of job changes re-read the laser data afterwards.
+  const { laserData, setLaserData, programBusyId, setProgramBusyId } = laser;
+  // A job change re-reads the plate screens, and the tube screens too if
+  // anyone has opened them this session -- otherwise there is nothing
+  // loaded to go stale, and nothing is fetched for a tab nobody uses.
+  async function fetchLaserData() {
+    await laser.fetchLaserData();
+    if (tubeLaser.laserData !== null) await tubeLaser.fetchLaserData();
+  }
   const [authMode, setAuthMode] = useState("signin"); // "signin" | "signup"
   const [authName, setAuthName] = useState("");
   const [authEmail, setAuthEmail] = useState("");
@@ -2402,6 +2425,10 @@ export default function StockControl() {
     if (tab === "laser4kw" && laserData === null) fetchLaserData();
   }, [tab, laserData]);
 
+  useEffect(() => {
+    if (tab === "tubeLaser" && tubeLaser.laserData === null) tubeLaser.fetchLaserData();
+  }, [tab, tubeLaser.laserData]);
+
   // Needed before the production queue can decide what is actionable, so
   // it loads with the session rather than with a tab. An empty map means
   // every stage behaves the old way, which is the safe default.
@@ -2434,6 +2461,13 @@ export default function StockControl() {
     if (tab !== "production" || laserData !== null) return;
     if (isAdmin || profile?.allowedProcessTypes?.some(workedInLaserStatus)) fetchLaserData();
   }, [tab, laserData, profile, processTypeSettings]);
+
+  // Tube Laser Status is for whoever comes next -- welding, delivery --
+  // so it loads for anyone who can see Production at all.
+  useEffect(() => {
+    if (tab !== "production" || tubeLaser.laserData !== null) return;
+    if (isAdmin || profile?.allowedProcessTypes?.length) tubeLaser.fetchLaserData();
+  }, [tab, tubeLaser.laserData, profile]);
 
   // Dropdown menus (the Stock/Procurement/Records group menus, the
   // customer/section-type filter) should always close on an outside
@@ -4169,14 +4203,18 @@ export default function StockControl() {
 
   // Everything Laser Status shows: a job appears once its first program is
   // cut, and stays until the packer marks it packed and checked.
-  function laserStatusRows() {
-    const d = laserData || { programs: [], links: [], processes: [] };
+  //
+  // For the plate laser as it always was; for the tube laser with its own
+  // data and its own packing rule -- the tube operator packs under the
+  // Tube Laser stage itself, so that stage is the packing stage there.
+  function laserStatusRows(source = laserData, isPackingStage = workedInLaserStatus) {
+    const d = source || { programs: [], links: [], processes: [] };
     const jobs = jobsList || [];
     const live = d.programs.filter((pg) => !pg.is_cancelled);
     const rows = [];
     for (const job of jobs.filter((j) => j.status === "in_progress")) {
       const packing = d.processes.find(
-        (pr) => pr.job_id === job.id && !pr.shortage_id && workedInLaserStatus(pr.process_name)
+        (pr) => pr.job_id === job.id && !pr.shortage_id && isPackingStage(pr.process_name)
       );
       // A finished job leaves the screen. A job with no packing stage at
       // all stays on it: someone did not tick Packer when the job was
@@ -4219,7 +4257,7 @@ export default function StockControl() {
     for (const sh of d.shortages || []) {
       if (sh.status === "cut") continue;
       const packing = (d.processes || []).find(
-        (pr) => pr.shortage_id === sh.id && workedInLaserStatus(pr.process_name) && !pr.is_complete
+        (pr) => pr.shortage_id === sh.id && isPackingStage(pr.process_name) && !pr.is_complete
       );
       if (!packing) continue;
       // Nothing off the machine yet is nothing to come and collect.
@@ -4247,9 +4285,13 @@ export default function StockControl() {
   // Taking a job does two things at once: it puts a name against it, and
   // it opens every stage after packing. started_at is only set the first
   // time, so taking a job over from someone does not re-open anything.
-  async function takePackingJob(row) {
-    if (!supabase || programBusyId) return;
-    setProgramBusyId(row.process.id);
+  //
+  // `lz` is which laser's screens are being worked: the plate one unless
+  // told otherwise, so the busy marker and the re-read land on the right
+  // tab.
+  async function takePackingJob(row, lz = laser) {
+    if (!supabase || lz.programBusyId) return;
+    lz.setProgramBusyId(row.process.id);
     try {
       const fields = { assigned_to: currentUser?.id || null, operator: roleLabel };
       if (!row.process.started_at) {
@@ -4258,19 +4300,19 @@ export default function StockControl() {
       }
       const { error } = await supabase.from("job_processes").update(fields).eq("id", row.process.id);
       if (error) throw error;
-      await fetchLaserData();
+      await lz.fetchLaserData();
       if (productionQueue !== null) fetchProductionQueue();
     } catch (err) {
       console.error("Failed to take packing job:", err);
       alert("That didn't save — check your connection and try again.");
     } finally {
-      setProgramBusyId(null);
+      lz.setProgramBusyId(null);
     }
   }
 
-  async function finishPacking(row) {
-    if (!supabase || programBusyId) return;
-    setProgramBusyId(row.process.id);
+  async function finishPacking(row, lz = laser) {
+    if (!supabase || lz.programBusyId) return;
+    lz.setProgramBusyId(row.process.id);
     try {
       const { error } = await supabase
         .from("job_processes")
@@ -4282,13 +4324,13 @@ export default function StockControl() {
       // as everywhere else decides that.
       if (row.shortage) await refreshShortageStatus(row.shortage);
       await settleJobAfterTick(row.process.job_id);
-      await fetchLaserData();
+      await lz.fetchLaserData();
       if (productionQueue !== null) fetchProductionQueue();
     } catch (err) {
       console.error("Failed to finish packing:", err);
       alert("That didn't save — check your connection and try again.");
     } finally {
-      setProgramBusyId(null);
+      lz.setProgramBusyId(null);
     }
   }
 
@@ -4297,9 +4339,28 @@ export default function StockControl() {
   // the same path a Production card uses. Laser Status reads laserData
   // rather than the production queue, so it has to be refreshed here or
   // the count on screen stays where it was.
-  async function logPackingItem(row, item, qty, progress) {
+  async function logPackingItem(row, item, qty, progress, lz = laser) {
     await submitProcessItemProgress(row.process, row.job, item, qty, progress, row.quoteItems || [], row.itemProgress || []);
-    await fetchLaserData();
+    await lz.fetchLaserData();
+  }
+
+  // The Packing screen on the Tube Laser tab and Tube Laser Status under
+  // Production are the same rows and the same buttons; only who may press
+  // Take job differs. Built here because the rows and the packing
+  // functions live in this file.
+  function tubePackingProps({ canTake }) {
+    const canPack = isAdmin || !!profile?.allowedProcessTypes?.some(isTubeCutProcess);
+    return {
+      rows: laserStatusRows(tubeLaser.laserData, isTubeCutProcess),
+      canPack,
+      canTake: canTake || canPack,
+      meName: roleLabel,
+      onTakeJob: (row) => takePackingJob(row, tubeLaser),
+      onFinishPacking: (row) => finishPacking(row, tubeLaser),
+      onFlagShortage: (row) => openShortageFlagModal(row.job, row.process),
+      onLogItem: (row, item, qty, progress) => logPackingItem(row, item, qty, progress, tubeLaser),
+      ItemProgress: QtyProgressControl,
+    };
   }
 
   // Marks a program cut, then brings every job on it into line.
@@ -7877,11 +7938,14 @@ export default function StockControl() {
   // counter on Cutting and the Shifts report -- read only ticked shifts,
   // so a factory shift that overlaps the laser's hours does not get the
   // laser's programs counted under it too. The lockout ignores this.
-  async function toggleShiftLaser(shift, on) {
+  // One tick per laser: cuts_laser for the plate laser, cuts_tube_laser
+  // for the tube laser, because they do not necessarily keep the same
+  // hours.
+  async function toggleShiftLaser(shift, on, column = "cuts_laser") {
     if (!supabase) return;
-    setShiftsList((prev) => prev.map((sh) => (sh.id === shift.id ? { ...sh, cuts_laser: on } : sh)));
+    setShiftsList((prev) => prev.map((sh) => (sh.id === shift.id ? { ...sh, [column]: on } : sh)));
     try {
-      const { error } = await supabase.from("shifts").update({ cuts_laser: on }).eq("id", shift.id);
+      const { error } = await supabase.from("shifts").update({ [column]: on }).eq("id", shift.id);
       if (error) throw error;
       flashSaved(`shift-${shift.id}`);
     } catch (err) {
@@ -8209,6 +8273,10 @@ export default function StockControl() {
     // Manager cannot quietly take the tab away from the people using it.
     if (section === "laser4kw")
       return !!profile?.allowedProcessTypes?.some((t) => isPlateNestingProcess(t) || isProgramLaserProcess(t));
+    // The tube laser's tab belongs to whoever nests or cuts tube, by the
+    // same rule.
+    if (section === "tubeLaser")
+      return !!profile?.allowedProcessTypes?.some((t) => isTubeNestingProcess(t) || isTubeCutProcess(t));
     if (section === "usageLog") return !!profile?.canViewUsageLog;
     return profile ? !!profile.permissions?.[section]?.view : false;
   }
@@ -13291,12 +13359,11 @@ export default function StockControl() {
       ) : tab === "laser4kw" ? (
         <LaserTab
           laser={laser}
+          machine={PLATE_LASER}
           isAdmin={isAdmin}
           profile={profile}
           jobsList={jobsList}
           master={master}
-          isPlateNestingProcess={isPlateNestingProcess}
-          isProgramLaserProcess={isProgramLaserProcess}
           shortageSummary={shortageSummary}
           SavedCheck={SavedCheck}
           ExpandableProcessNotes={ExpandableProcessNotes}
@@ -13308,6 +13375,27 @@ export default function StockControl() {
           setPullStockModal={setPullStockModal}
           viewJobDocument={viewJobDocument}
           openDrawingPreview={openDrawingPreview}
+        />
+      ) : tab === "tubeLaser" ? (
+        <LaserTab
+          laser={tubeLaser}
+          machine={TUBE_LASER}
+          isAdmin={isAdmin}
+          profile={profile}
+          jobsList={jobsList}
+          master={master}
+          shortageSummary={shortageSummary}
+          SavedCheck={SavedCheck}
+          ExpandableProcessNotes={ExpandableProcessNotes}
+          saveJobSigmaNestNumber={saveJobSigmaNestNumber}
+          toggleProcessUrgent={toggleProcessUrgent}
+          saveProcessNote={saveProcessNote}
+          uploadJobDocument={uploadJobDocument}
+          openShortageFlagModal={openShortageFlagModal}
+          setPullStockModal={setPullStockModal}
+          viewJobDocument={viewJobDocument}
+          openDrawingPreview={openDrawingPreview}
+          packing={tubePackingProps({ canTake: false })}
         />
       ) : tab === "production" ? (
         productionSelectedDept === null ? (
@@ -13402,6 +13490,28 @@ export default function StockControl() {
                         <ChevronRight size={20} />
                       </button>
                     )}
+                    {/* Tube Laser Status: what is off the tube laser, for
+                        whoever comes next to take. Everyone on Production
+                        sees it; only the tube operators pack there. */}
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={S.productionDeptCard}
+                      onClick={() => {
+                        setProductionSelectedDept(TUBE_LASER_STATUS_DEPT);
+                        setProductionSelectedProcessId(null);
+                      }}
+                    >
+                      <span style={{ flex: 1 }}>Tube Laser Status</span>
+                      <span style={S.gradeCount}>
+                        {tubeLaser.laserData === null
+                          ? "…"
+                          : laserStatusRows(tubeLaser.laserData, isTubeCutProcess).filter(
+                              (r) => !productionFiltering || productionJobMatches(r.job)
+                            ).length}
+                      </span>
+                      <ChevronRight size={20} />
+                    </button>
                     {visibleDepts.map(({ procType, readyCount, waitingCount, hasPendingShortage, oldestPending }) => {
                 // A department with work on the way but nothing that can
                 // start stays on the list, dimmed: it should know what is
@@ -13465,6 +13575,43 @@ export default function StockControl() {
                 ItemProgress={QtyProgressControl}
                 busyId={programBusyId}
               />
+            )}
+          </div>
+        ) : productionSelectedDept === TUBE_LASER_STATUS_DEPT ? (
+          <div style={S.list}>
+            <button
+              type="button"
+              className="stk-btn"
+              style={{ ...S.prominentBackBtn, marginBottom: 10 }}
+              onClick={() => setProductionSelectedDept(null)}
+            >
+              <ChevronLeft size={18} strokeWidth={2.5} /> All departments
+            </button>
+            <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 10 }}>Tube Laser Status</div>
+            {tubeLaser.laserData === null || jobsList === null ? (
+              <div style={S.empty}>Loading…</div>
+            ) : (
+              (() => {
+                // Anyone here may take a job: taking is what lets welding
+                // or delivery start on what is cut. Packing stays with
+                // the tube operators.
+                const p = tubePackingProps({ canTake: true });
+                return (
+                  <LaserStatus
+                    rows={p.rows.filter((r) => !productionFiltering || productionJobMatches(r.job))}
+                    canPack={p.canPack}
+                    canTake={p.canTake}
+                    words={TUBE_LASER}
+                    meName={p.meName}
+                    onTakeJob={p.onTakeJob}
+                    onFinishPacking={p.onFinishPacking}
+                    onFlagShortage={p.onFlagShortage}
+                    onLogItem={p.onLogItem}
+                    ItemProgress={p.ItemProgress}
+                    busyId={tubeLaser.programBusyId}
+                  />
+                );
+              })()
             )}
           </div>
         ) : (
@@ -17629,6 +17776,17 @@ export default function StockControl() {
                                 onChange={(e) => toggleShiftLaser(sh, e.target.checked)}
                               />
                               the laser cuts on this shift
+                            </label>
+                            <label
+                              style={{ ...S.roleHint, display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+                              title="The Tube Laser tab's counter and Shifts report count programs against ticked shifts only"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={!!sh.cuts_tube_laser}
+                                onChange={(e) => toggleShiftLaser(sh, e.target.checked, "cuts_tube_laser")}
+                              />
+                              the tube laser cuts on this shift
                             </label>
                             {!hasHours && (
                               <span style={{ ...S.chip, color: C.danger, borderColor: C.danger }}>

@@ -24,15 +24,28 @@ export function outstandingMinutes(p) {
   return per * (required - done);
 }
 
-// The shifts the laser cuts on: those ticked under Time Manager. The
+// The shifts a laser cuts on: those ticked under Time Manager. The
 // factory keeps other hours, and a factory shift overlapping the laser's
 // would otherwise claim the laser's programs too. With nothing ticked
 // yet, every shift is used, as before, and `fallback` says so, so the
 // screen can tell the reader why two day shifts are showing.
-export function laserShifts(shifts) {
+//
+// `flag` is which tick: cuts_laser for the plate laser, cuts_tube_laser
+// for the tube laser. Each machine keeps its own, because they do not
+// necessarily run the same hours.
+export function laserShifts(shifts, flag = "cuts_laser") {
   const all = shifts || [];
-  const ticked = all.filter((s) => s.cuts_laser);
+  const ticked = all.filter((s) => s[flag]);
   return ticked.length ? { shifts: ticked, fallback: false } : { shifts: all, fallback: all.length > 0 };
+}
+
+// How many repeats a program still has to cut: sheets on the plate
+// laser, lengths on the tube laser. The tube counter adds these up
+// because the tube software gives no cutting time to add up instead.
+export function outstandingUnits(p) {
+  const required = Math.max(1, Number(p.sheets_required) || 1);
+  const done = Math.min(Math.max(0, Number(p.sheets_cut) || 0), required);
+  return required - done;
 }
 
 // "45 min" up to an hour, "3h 20m" past it. Read across a workshop, so

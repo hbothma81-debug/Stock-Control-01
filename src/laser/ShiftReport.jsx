@@ -3,8 +3,14 @@ import { C, S } from "../theme.js";
 import Section from "../Section.jsx";
 import { shiftDayWindow, fmtTime } from "../lib/shiftWindow.js";
 import { plannedMinutes, fmtMinutes, laserShifts } from "../lib/cuttingTime.js";
+import { programTitle } from "./programTitle.js";
 
 // What each shift cut, shift by shift, going back two weeks.
+//
+// One screen for both lasers. `machine` (LASER_MACHINES in constants.js)
+// says which shift tick to read and what a repeat is called, and whether
+// there is a planned time at all: the tube software gives none, so the
+// tube report is programs and lengths per shift with no efficiency.
 //
 // A program belongs to the shift its last sheet was marked cut in. The
 // planned time is what was typed in at nesting, off SigmaNest, and that
@@ -20,11 +26,16 @@ import { plannedMinutes, fmtMinutes, laserShifts } from "../lib/cuttingTime.js";
 
 const DAYS_BACK = 14;
 
-export default function ShiftReport({ programs, shifts }) {
+export default function ShiftReport({ programs, shifts, machine = {} }) {
+  const hasTime = machine.hasCutTime !== false;
+  const unit = machine.unit || "sheet";
+  const unitsTitle = (machine.units || "sheets").replace(/^./, (c) => c.toUpperCase());
+  const who = machine.lane === "tube" ? "the tube laser" : "the laser";
+  const flag = machine.shiftFlag || "cuts_laser";
   // Only the shifts ticked "the laser cuts on this shift" under Time
   // Manager. The factory keeps other hours, and a factory shift that
   // overlaps the laser's would otherwise list the same programs again.
-  const { shifts: mine, fallback } = useMemo(() => laserShifts(shifts), [shifts]);
+  const { shifts: mine, fallback } = useMemo(() => laserShifts(shifts, flag), [shifts, flag]);
   const days = useMemo(() => buildDays(programs || [], mine), [programs, mine]);
 
   if (!(shifts || []).length) {
@@ -38,13 +49,16 @@ export default function ShiftReport({ programs, shifts }) {
   return (
     <div style={S.list}>
       <div style={S.roleHint}>
-        A program counts for the shift its last sheet was marked cut in. Efficiency is the planned cutting
-        time, as nested, against the length of the shift. The operator's own time is for the record only.
+        {hasTime
+          ? "A program counts for the shift its last sheet was marked cut in. Efficiency is the planned cutting " +
+            "time, as nested, against the length of the shift. The operator's own time is for the record only."
+          : `A program counts for the shift its last ${unit} was marked cut in. The tube software gives no cutting ` +
+            "time, so there is no efficiency figure here: programs and lengths are what each shift is measured by."}
       </div>
       {fallback && (
         <div style={{ ...S.roleHint, color: C.danger }}>
-          No shift is ticked "the laser cuts on this shift" under Time Manager yet, so every shift is
-          shown — and two shifts with overlapping hours will both list the same programs. Tick the laser's
+          No shift is ticked "{who} cuts on this shift" under Time Manager yet, so every shift is
+          shown — and two shifts with overlapping hours will both list the same programs. Tick the right
           shifts and only those will show.
         </div>
       )}
@@ -54,7 +68,7 @@ export default function ShiftReport({ programs, shifts }) {
         days.map((d, i) => (
           <Section key={d.key} title={d.title} count={d.rows.reduce((n, r) => n + r.count, 0)} defaultOpen={i === 0}>
             {d.rows.map((r) => (
-              <ShiftRow key={r.key} row={r} />
+              <ShiftRow key={r.key} row={r} hasTime={hasTime} unitsTitle={unitsTitle} />
             ))}
           </Section>
         ))
@@ -102,7 +116,7 @@ function buildDays(programs, shifts) {
         programs: onShift
           .slice()
           .sort((a, b) => a.at - b.at)
-          .map((p) => p.program_number),
+          .map((p) => programTitle(p)),
       });
     }
     if (rows.length) {
@@ -116,7 +130,7 @@ function buildDays(programs, shifts) {
   return days;
 }
 
-function ShiftRow({ row: r }) {
+function ShiftRow({ row: r, hasTime = true, unitsTitle = "Sheets" }) {
   const stat = (label, value, hint) => (
     <div style={{ minWidth: 90 }} title={hint}>
       <div style={{ ...S.roleHint, marginTop: 0 }}>{label}</div>
@@ -134,20 +148,22 @@ function ShiftRow({ row: r }) {
         </div>
         <div style={{ display: "flex", gap: 22, flexWrap: "wrap", marginTop: 8 }}>
           {stat("Programs", r.count)}
-          {stat("Sheets", r.sheets)}
-          {stat("Planned", r.planned > 0 ? fmtMinutes(r.planned) : "—", "Cutting time as nested, all programs finished this shift")}
-          {stat(
-            "Efficiency",
-            r.efficiency == null || r.planned === 0 ? "—" : `${r.efficiency}%`,
-            `Planned cutting time against ${fmtMinutes(r.shiftMinutes)} of shift${r.running ? " so far" : ""}`
-          )}
-          {stat(
-            "Operator's time",
-            r.actual == null ? "—" : fmtMinutes(r.actual),
-            r.actualCount ? `Given for ${r.actualCount} of ${r.count}` : "Not given"
-          )}
+          {stat(unitsTitle, r.sheets)}
+          {hasTime && stat("Planned", r.planned > 0 ? fmtMinutes(r.planned) : "—", "Cutting time as nested, all programs finished this shift")}
+          {hasTime &&
+            stat(
+              "Efficiency",
+              r.efficiency == null || r.planned === 0 ? "—" : `${r.efficiency}%`,
+              `Planned cutting time against ${fmtMinutes(r.shiftMinutes)} of shift${r.running ? " so far" : ""}`
+            )}
+          {hasTime &&
+            stat(
+              "Operator's time",
+              r.actual == null ? "—" : fmtMinutes(r.actual),
+              r.actualCount ? `Given for ${r.actualCount} of ${r.count}` : "Not given"
+            )}
         </div>
-        {r.untimed > 0 && (
+        {hasTime && r.untimed > 0 && (
           <div style={{ ...S.roleHint, color: C.danger }}>
             {r.untimed} of these had no planned time, so the planned figure is short.
           </div>

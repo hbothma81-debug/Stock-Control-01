@@ -4,8 +4,17 @@ import { C, S } from "../theme.js";
 import { plannedMinutes, fmtMinutes } from "../lib/cuttingTime.js";
 import Section from "../Section.jsx";
 import TypeToFind from "../TypeToFind.jsx";
+import { programTitle } from "./programTitle.js";
+import ImportReportModal from "./ImportReportModal.jsx";
 
 // Prince's screen, and very nearly the only one he uses.
+//
+// One screen for both lasers. `machine` is the profile from constants.js
+// (LASER_MACHINES): on the plate laser the nester types the SigmaNest
+// number, picks a thickness and a grade, names the sheet and gives the
+// minutes; on the tube laser the app hands out the number, he types the
+// nesting name, picks the section off the Structural Steel list, and
+// there is no sheet and no time. The rows and lists are the same.
 //
 // One line per thing to nest, and nothing else until he asks. Everything
 // that used to be spread across a form at the top and a card at the
@@ -45,6 +54,21 @@ function candidateLabel(c) {
   return bits.join(" · ");
 }
 
+// What differs between the lasers on this screen, read off the profile.
+// Missing profile means the plate laser, as it always was.
+function machineWords(machine) {
+  const m = machine || {};
+  return {
+    name: m.label || m.machine || "Laser 4kw",
+    generated: m.numbering === "generated",
+    bySections: m.materialFrom === "sections",
+    hasSheet: m.hasSheetName !== false,
+    hasTime: m.hasCutTime !== false,
+    unit: m.unit || "sheet",
+    units: m.units || "sheets",
+  };
+}
+
 export default function NestingView({
   machine,
   rows,
@@ -54,12 +78,15 @@ export default function NestingView({
   thicknesses,
   grades,
   sheetNames,
+  sections,
+  aliases,
   canManage,
   onClearReport,
   actions,
   SavedCheck,
   Notes,
   onCreateProgram,
+  onImportReport,
   onCancelProgram,
   onAddJobToProgram,
   onRemoveJobFromProgram,
@@ -83,17 +110,24 @@ export default function NestingView({
   // in one popup here rather than on each card, and the card may be
   // inside a shut section by the time the answer comes back.
   const [cancelling, setCancelling] = useState(null);
+  // The tube software's spreadsheet, brought in instead of typed.
+  const [importing, setImporting] = useState(false);
 
   // The other way in: start from the sheet rather than from a job. Prince
   // uses this when he has an offcut to fill and goes looking for what
   // fits, which is the opposite direction from working down the list.
   const [building, setBuilding] = useState(false);
   const [newNumber, setNewNumber] = useState("");
+  // The nesting name, on a laser whose numbers the app hands out.
+  const [newName, setNewName] = useState("");
   const [newThickness, setNewThickness] = useState("");
   const [newGrade, setNewGrade] = useState("");
+  // The section, on a laser whose material is picked off one list.
+  const [newMaterial, setNewMaterial] = useState("");
   const [picked, setPicked] = useState([]);
   const [jobQuery, setJobQuery] = useState("");
   const [saving, setSaving] = useState(false);
+  const w = machineWords(machine);
 
   const suggestions = useMemo(
     () => matchCandidates(candidates.filter((c) => !picked.some((x) => x.key === c.key)), jobQuery),
@@ -103,14 +137,18 @@ export default function NestingView({
   function resetBuilder() {
     setBuilding(false);
     setNewNumber("");
+    setNewName("");
     setNewThickness("");
     setNewGrade("");
+    setNewMaterial("");
     setNewMinutes("");
     setPicked([]);
     setJobQuery("");
   }
 
-  const canSubmit = !!newNumber.trim() && !!newThickness && !!newGrade && picked.length > 0 && !saving;
+  const identified = w.generated ? !!newName.trim() : !!newNumber.trim();
+  const materialPicked = w.bySections ? !!newMaterial : !!newThickness && !!newGrade;
+  const canSubmit = identified && materialPicked && picked.length > 0 && !saving;
 
   async function submitProgram() {
     if (!canSubmit) return;
@@ -118,11 +156,11 @@ export default function NestingView({
     try {
       const ok = await onCreateProgram({
         program_number: newNumber.trim(),
-        material: `${newThickness} ${newGrade}`,
-        sheet_name: newSheet.trim(),
+        nesting_name: newName.trim(),
+        material: w.bySections ? newMaterial : `${newThickness} ${newGrade}`,
+        sheet_name: w.hasSheet ? newSheet.trim() : "",
         sheets_required: newRepeats,
-        cut_minutes: newMinutes,
-        machine,
+        cut_minutes: w.hasTime ? newMinutes : "",
         jobs: picked.map((c) => ({
           job_id: c.job_id,
           shortage_id: c.shortage_id || null,
@@ -161,11 +199,11 @@ export default function NestingView({
     (r.job?.customer || "").toLowerCase().includes(q) ||
     (r.job?.laser_job_reference || "").toLowerCase().includes(q) ||
     (r.shortage?.board_number || "").toLowerCase().includes(q) ||
-    (r.onPrograms || []).some((pg) => (pg.program_number || "").toLowerCase().includes(q)) ||
+    (r.onPrograms || []).some((pg) => programTitle(pg).toLowerCase().includes(q)) ||
     (r.program?.jobs || []).some((l) => (l.job_number || "").toLowerCase().includes(q));
   const programMatches = (pg) =>
     !q ||
-    (pg.program_number || "").toLowerCase().includes(q) ||
+    programTitle(pg).toLowerCase().includes(q) ||
     (pg.material || "").toLowerCase().includes(q) ||
     (pg.jobs || []).some(
       (l) =>
@@ -190,7 +228,11 @@ export default function NestingView({
         style={S.input}
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search job, SigmaNest number, customer, or program…"
+        placeholder={
+          w.generated
+            ? "Search job, nesting name, customer, or program…"
+            : "Search job, SigmaNest number, customer, or program…"
+        }
       />
 
       {cancelling && (
@@ -201,17 +243,44 @@ export default function NestingView({
         />
       )}
 
+      {importing && (
+        <ImportReportModal
+          candidates={candidates}
+          sections={sections || []}
+          aliases={aliases || []}
+          programs={programs}
+          onImport={onImportReport}
+          onClose={() => setImporting(false)}
+        />
+      )}
+
       {canManage && !building && (
-        <button type="button" className="stk-btn" style={{ ...S.addBtn, width: "100%" }} onClick={() => setBuilding(true)}>
-          <Plus size={15} strokeWidth={2.5} />
-          New program
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" className="stk-btn" style={{ ...S.addBtn, flex: "1 1 200px" }} onClick={() => setBuilding(true)}>
+            <Plus size={15} strokeWidth={2.5} />
+            New program
+          </button>
+          {/* The usual way in on the tube laser: the software's export
+              makes the programs, and the nester types nothing. */}
+          {machine?.importsReport && onImportReport && (
+            <button
+              type="button"
+              className="stk-btn"
+              style={{ ...S.addBtn, flex: "1 1 200px" }}
+              onClick={() => setImporting(true)}
+              title="Bring in the tube software's spreadsheet: one program per section"
+            >
+              <Upload size={15} strokeWidth={2.5} />
+              Import nesting report
+            </button>
+          )}
+        </div>
       )}
 
       {canManage && building && (
         <div style={{ ...S.deptCard, borderColor: C.accentRaw }}>
           <div style={S.deptCardHead}>
-            <span style={{ fontWeight: 600, fontSize: 15 }}>New program on {machine}</span>
+            <span style={{ fontWeight: 600, fontSize: 15 }}>New program on {w.name}</span>
             <button type="button" className="stk-btn" style={S.iconBtn} onClick={resetBuilder} title="Discard">
               <X size={16} />
             </button>
@@ -219,36 +288,60 @@ export default function NestingView({
 
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <div style={{ flex: "1 1 160px" }}>
-                <label style={S.label}>Program number</label>
-                <input
-                  style={S.input}
-                  value={newNumber}
-                  onChange={(e) => setNewNumber(e.target.value)}
-                  placeholder="What the operator loads"
-                  autoFocus
-                />
-              </div>
-              <div style={{ flex: "1 1 120px" }}>
-                <label style={S.label}>Thickness</label>
-                <TypeToFind options={thicknesses} value={newThickness} onChange={setNewThickness} emptyLabel="Pick…" />
-              </div>
-              <div style={{ flex: "1 1 120px" }}>
-                <label style={S.label}>Grade</label>
-                <TypeToFind options={grades} value={newGrade} onChange={setNewGrade} emptyLabel="Pick…" />
-              </div>
-              <div style={{ flex: "1 1 150px" }}>
-                <label style={S.label}>Sheet name</label>
-                <input
-                  style={S.input}
-                  list="stk-sheet-names"
-                  value={newSheet}
-                  onChange={(e) => setNewSheet(e.target.value)}
-                  placeholder="Which sheet"
-                />
-              </div>
+              {w.generated ? (
+                <div style={{ flex: "1 1 200px" }}>
+                  <label style={S.label}>Nesting name</label>
+                  <input
+                    style={S.input}
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="What you call this nest"
+                    autoFocus
+                  />
+                </div>
+              ) : (
+                <div style={{ flex: "1 1 160px" }}>
+                  <label style={S.label}>Program number</label>
+                  <input
+                    style={S.input}
+                    value={newNumber}
+                    onChange={(e) => setNewNumber(e.target.value)}
+                    placeholder="What the operator loads"
+                    autoFocus
+                  />
+                </div>
+              )}
+              {w.bySections ? (
+                <div style={{ flex: "1 1 200px" }}>
+                  <label style={S.label}>Section</label>
+                  <TypeToFind options={sections || []} value={newMaterial} onChange={setNewMaterial} emptyLabel="Pick…" />
+                </div>
+              ) : (
+                <>
+                  <div style={{ flex: "1 1 120px" }}>
+                    <label style={S.label}>Thickness</label>
+                    <TypeToFind options={thicknesses} value={newThickness} onChange={setNewThickness} emptyLabel="Pick…" />
+                  </div>
+                  <div style={{ flex: "1 1 120px" }}>
+                    <label style={S.label}>Grade</label>
+                    <TypeToFind options={grades} value={newGrade} onChange={setNewGrade} emptyLabel="Pick…" />
+                  </div>
+                </>
+              )}
+              {w.hasSheet && (
+                <div style={{ flex: "1 1 150px" }}>
+                  <label style={S.label}>Sheet name</label>
+                  <input
+                    style={S.input}
+                    list="stk-sheet-names"
+                    value={newSheet}
+                    onChange={(e) => setNewSheet(e.target.value)}
+                    placeholder="Which sheet"
+                  />
+                </div>
+              )}
               <div style={{ flex: "0 0 108px" }}>
-                <label style={S.label}>How many</label>
+                <label style={S.label}>{w.hasSheet ? "How many" : `How many ${w.units}`}</label>
                 <input
                   type="number"
                   min="1"
@@ -257,27 +350,38 @@ export default function NestingView({
                   style={S.input}
                   value={newRepeats}
                   onChange={(e) => setNewRepeats(e.target.value)}
-                  title="How many times this same nest is run off the material"
+                  title={`How many ${w.units} this nest is cut off`}
                 />
               </div>
-              <div style={{ flex: "0 0 130px" }}>
-                <label style={S.label}>Minutes per sheet</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.1"
-                  inputMode="decimal"
-                  style={S.input}
-                  value={newMinutes}
-                  onChange={(e) => setNewMinutes(e.target.value)}
-                  placeholder="From SigmaNest"
-                  title="Planned cutting time for one sheet, in minutes"
-                />
-              </div>
+              {w.hasTime && (
+                <div style={{ flex: "0 0 130px" }}>
+                  <label style={S.label}>Minutes per sheet</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    inputMode="decimal"
+                    style={S.input}
+                    value={newMinutes}
+                    onChange={(e) => setNewMinutes(e.target.value)}
+                    placeholder="From SigmaNest"
+                    title="Planned cutting time for one sheet, in minutes"
+                  />
+                </div>
+              )}
             </div>
 
-            {thicknesses.length === 0 && (
+            {w.generated && (
+              <div style={S.roleHint}>
+                The program number is handed out when you press Create. Save the nest under that number in the
+                machine's software. One section per program — do not mix sections.
+              </div>
+            )}
+            {!w.bySections && thicknesses.length === 0 && (
               <div style={S.roleHint}>No thicknesses set up yet — add them under Stock Manager → Laser Thicknesses.</div>
+            )}
+            {w.bySections && (sections || []).length === 0 && (
+              <div style={S.roleHint}>No sections set up yet — add them under Stock Manager → Structural Steel.</div>
             )}
 
             <div>
@@ -372,6 +476,7 @@ export default function NestingView({
               <StoppedRow
                 key={r.key}
                 row={r}
+                machine={machine}
                 canManage={canManage}
                 onClearReport={onClearReport}
                 onUpdateProgram={onUpdateProgram}
@@ -387,6 +492,7 @@ export default function NestingView({
                 machine={machine}
                 thicknesses={thicknesses}
                 grades={grades}
+                sections={sections}
                 canManage={canManage}
                 expanded={openRow === r.key}
                 onToggle={() => setOpenRow((k) => (k === r.key ? null : r.key))}
@@ -420,6 +526,7 @@ export default function NestingView({
         emptyText="Nothing waiting to be cut."
         canManage={canManage}
         onClearReport={onClearReport}
+        machine={machine}
         thicknesses={thicknesses}
         grades={grades}
         addingTo={addingTo}
@@ -447,6 +554,7 @@ export default function NestingView({
           collapsible
           canManage={canManage}
           onClearReport={onClearReport}
+          machine={machine}
           thicknesses={thicknesses}
           grades={grades}
           addingTo={addingTo}
@@ -493,6 +601,7 @@ function NestRow({
   thicknesses,
   grades,
   sheetNames,
+  sections,
   canManage,
 
   expanded,
@@ -505,17 +614,20 @@ function NestRow({
   Notes,
 }) {
   const [programNumber, setProgramNumber] = useState("");
+  const [nestingName, setNestingName] = useState("");
   const [thickness, setThickness] = useState("");
   const [grade, setGrade] = useState("");
+  const [section, setSection] = useState("");
   const [alsoOn, setAlsoOn] = useState([]);
   const [alsoQuery, setAlsoQuery] = useState("");
   const [sheet, setSheet] = useState("");
   const [repeats, setRepeats] = useState("1");
   const [minutes, setMinutes] = useState("");
   const [saving, setSaving] = useState(false);
+  const w = machineWords(machine);
 
   const sigmanest = r.job?.laser_job_reference || r.shortage?.board_number || "";
-  const programText = r.onPrograms && r.onPrograms.length > 0 ? r.onPrograms.map((p) => p.program_number).join(", ") : "";
+  const programText = r.onPrograms && r.onPrograms.length > 0 ? r.onPrograms.map((p) => programTitle(p)).join(", ") : "";
   const hasPrograms = (r.onPrograms || []).length > 0;
 
   // Anything else can ride on the same sheet -- that is the whole reason
@@ -537,7 +649,9 @@ function NestRow({
       .slice(0, 8);
   })();
 
-  const canCreate = !!programNumber.trim() && !!thickness && !!grade && !!r.candidate && !saving;
+  const identified = w.generated ? !!nestingName.trim() : !!programNumber.trim();
+  const materialPicked = w.bySections ? !!section : !!thickness && !!grade;
+  const canCreate = identified && materialPicked && !!r.candidate && !saving;
 
   async function create() {
     if (!canCreate) return;
@@ -546,13 +660,14 @@ function NestRow({
       const chosen = [r.candidate, ...alsoOn];
       const ok = await onCreateProgram({
         program_number: programNumber.trim(),
-        sheet_name: sheet.trim(),
+        nesting_name: nestingName.trim(),
+        sheet_name: w.hasSheet ? sheet.trim() : "",
         sheets_required: repeats,
-        cut_minutes: minutes,
+        cut_minutes: w.hasTime ? minutes : "",
         // Stored as one line the way the machine reads it, built from the
-        // two lists so nobody types "1.2mm MS" three different ways.
-        material: `${thickness} ${grade}`,
-        machine,
+        // two lists so nobody types "1.2mm MS" three different ways. On
+        // the tube laser it is the section, as named under Structural Steel.
+        material: w.bySections ? section : `${thickness} ${grade}`,
         jobs: chosen.map((c) => ({
           job_id: c.job_id,
           shortage_id: c.shortage_id || null,
@@ -561,8 +676,10 @@ function NestRow({
       });
       if (ok) {
         setProgramNumber("");
+        setNestingName("");
         setThickness("");
         setGrade("");
+        setSection("");
         setSheet("");
         setMinutes("");
         setAlsoOn([]);
@@ -658,7 +775,7 @@ function NestRow({
                     }}
                   >
                     <span style={{ fontSize: 17, fontWeight: 700, letterSpacing: "0.02em" }}>
-                      {pg.program_number}
+                      {programTitle(pg)}
                     </span>
                     {pg.material && <span style={S.partTag}>{pg.material}</span>}
                     {pg.sheet_name && <span style={S.partTag}>{pg.sheet_name}</span>}
@@ -725,39 +842,62 @@ function NestRow({
                 <Plus size={14} />
                 {hasPrograms
                   ? `Add another program — ${r.onPrograms.length} already on this job`
-                  : `Nest it on ${machine}`}
+                  : `Nest it on ${w.name}`}
               </div>
 
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <div style={{ flex: "1 1 160px" }}>
-                  <label style={S.label}>Program number</label>
-                  <input
-                    style={S.input}
-                    value={programNumber}
-                    onChange={(e) => setProgramNumber(e.target.value)}
-                    placeholder="What the operator loads"
-                  />
-                </div>
-                <div style={{ flex: "1 1 120px" }}>
-                  <label style={S.label}>Thickness</label>
-                  <TypeToFind options={thicknesses} value={thickness} onChange={setThickness} emptyLabel="Pick…" />
-                </div>
-                <div style={{ flex: "1 1 120px" }}>
-                  <label style={S.label}>Grade</label>
-                  <TypeToFind options={grades} value={grade} onChange={setGrade} emptyLabel="Pick…" />
-                </div>
-                <div style={{ flex: "1 1 150px" }}>
-                  <label style={S.label}>Sheet name</label>
-                  <input
-                    style={S.input}
-                    list="stk-sheet-names"
-                    value={sheet}
-                    onChange={(e) => setSheet(e.target.value)}
-                    placeholder="Which sheet"
-                  />
-                </div>
+                {w.generated ? (
+                  <div style={{ flex: "1 1 200px" }}>
+                    <label style={S.label}>Nesting name</label>
+                    <input
+                      style={S.input}
+                      value={nestingName}
+                      onChange={(e) => setNestingName(e.target.value)}
+                      placeholder="What you call this nest"
+                    />
+                  </div>
+                ) : (
+                  <div style={{ flex: "1 1 160px" }}>
+                    <label style={S.label}>Program number</label>
+                    <input
+                      style={S.input}
+                      value={programNumber}
+                      onChange={(e) => setProgramNumber(e.target.value)}
+                      placeholder="What the operator loads"
+                    />
+                  </div>
+                )}
+                {w.bySections ? (
+                  <div style={{ flex: "1 1 200px" }}>
+                    <label style={S.label}>Section</label>
+                    <TypeToFind options={sections || []} value={section} onChange={setSection} emptyLabel="Pick…" />
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ flex: "1 1 120px" }}>
+                      <label style={S.label}>Thickness</label>
+                      <TypeToFind options={thicknesses} value={thickness} onChange={setThickness} emptyLabel="Pick…" />
+                    </div>
+                    <div style={{ flex: "1 1 120px" }}>
+                      <label style={S.label}>Grade</label>
+                      <TypeToFind options={grades} value={grade} onChange={setGrade} emptyLabel="Pick…" />
+                    </div>
+                  </>
+                )}
+                {w.hasSheet && (
+                  <div style={{ flex: "1 1 150px" }}>
+                    <label style={S.label}>Sheet name</label>
+                    <input
+                      style={S.input}
+                      list="stk-sheet-names"
+                      value={sheet}
+                      onChange={(e) => setSheet(e.target.value)}
+                      placeholder="Which sheet"
+                    />
+                  </div>
+                )}
                 <div style={{ flex: "0 0 108px" }}>
-                  <label style={S.label}>How many</label>
+                  <label style={S.label}>{w.hasSheet ? "How many" : `How many ${w.units}`}</label>
                   <input
                     type="number"
                     min="1"
@@ -766,31 +906,42 @@ function NestRow({
                     style={S.input}
                     value={repeats}
                     onChange={(e) => setRepeats(e.target.value)}
-                    title="How many times this same nest is run off the material"
+                    title={`How many ${w.units} this nest is cut off`}
                   />
                 </div>
-                <div style={{ flex: "0 0 130px" }}>
-                  <label style={S.label}>Minutes per sheet</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    inputMode="decimal"
-                    style={S.input}
-                    value={minutes}
-                    onChange={(e) => setMinutes(e.target.value)}
-                    placeholder="From SigmaNest"
-                    title="Planned cutting time for one sheet, in minutes"
-                  />
-                </div>
+                {w.hasTime && (
+                  <div style={{ flex: "0 0 130px" }}>
+                    <label style={S.label}>Minutes per sheet</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      inputMode="decimal"
+                      style={S.input}
+                      value={minutes}
+                      onChange={(e) => setMinutes(e.target.value)}
+                      placeholder="From SigmaNest"
+                      title="Planned cutting time for one sheet, in minutes"
+                    />
+                  </div>
+                )}
               </div>
 
-              {thicknesses.length === 0 && (
+              {w.generated && (
+                <div style={S.roleHint}>
+                  The program number is handed out when you press Nest it. Save the nest under that number in the
+                  machine's software. One section per program — do not mix sections.
+                </div>
+              )}
+              {!w.bySections && thicknesses.length === 0 && (
                 <div style={S.roleHint}>No thicknesses set up yet — add them under Stock Manager → Laser Thicknesses.</div>
+              )}
+              {w.bySections && (sections || []).length === 0 && (
+                <div style={S.roleHint}>No sections set up yet — add them under Stock Manager → Structural Steel.</div>
               )}
 
               <div>
-                <label style={S.label}>Anything else on the same sheet</label>
+                <label style={S.label}>{w.hasSheet ? "Anything else on the same sheet" : "Anything else on the same program"}</label>
                 {alsoOn.length > 0 && (
                   <div style={{ ...S.chipRow, marginBottom: 6 }}>
                     {alsoOn.map((c) => (
@@ -1010,7 +1161,7 @@ function NestedRow({ row: r, canManage, onSetNestingDone }) {
       <span style={{ color: C.muted, fontSize: 14 }}>{sigmanest || "no SigmaNest #"}</span>
       <span style={{ color: C.muted, fontSize: 14 }}>{r.job?.customer || "no customer"}</span>
       <span style={{ flex: 1, minWidth: 0, fontSize: 14, color: C.accentFinished }}>
-        {(r.onPrograms || []).map((p) => p.program_number).join(", ")}
+        {(r.onPrograms || []).map((p) => programTitle(p)).join(", ")}
       </span>
       <span style={{ ...S.chip, flexShrink: 0, ...(allCut ? { color: C.accentFinished, borderColor: C.accentFinished } : {}) }}>
         {total === 0 ? "no programs" : allCut ? "all cut" : `${r.cutCount} of ${total} cut`}
@@ -1042,6 +1193,7 @@ function ProgramList({
   collapsible = false,
   canManage,
   onClearReport,
+  machine,
   thicknesses,
   grades,
   addingTo,
@@ -1056,6 +1208,7 @@ function ProgramList({
   SavedCheck,
 }) {
   const [openId, setOpenId] = useState(null);
+  const w = machineWords(machine);
 
   return (
     <Section title={title} count={programs.length} collapsible defaultOpen={!collapsible}>
@@ -1087,7 +1240,7 @@ function ProgramList({
                     flexWrap: "wrap",
                   }}
                 >
-                  <span style={{ fontWeight: 700, fontSize: 15 }}>{p.program_number}</span>
+                  <span style={{ fontWeight: 700, fontSize: 15 }}>{programTitle(p)}</span>
                   <span style={{ color: C.muted, fontSize: 14 }}>{p.material}</span>
                   {p.sheet_name && <span style={{ color: C.muted, fontSize: 14 }}>{p.sheet_name}</span>}
                   <span style={{ flex: 1, minWidth: 0, color: C.muted, fontSize: 14 }}>{jobsText}</span>
@@ -1137,19 +1290,37 @@ function ProgramList({
                     )}
                     {canManage && (
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {/* A number the app handed out is not for changing:
+                            the nest is saved under it in the machine's
+                            software. The name is the nester's, and is. */}
+                        {w.generated ? (
+                          <div style={{ flex: "1 1 200px" }}>
+                            <label style={S.label}>Nesting name</label>
+                            <input
+                              style={S.input}
+                              defaultValue={p.nesting_name || ""}
+                              placeholder="What you call this nest"
+                              onBlur={(e) => {
+                                const v = e.target.value.trim();
+                                if (v && v !== (p.nesting_name || "")) onUpdateProgram(p, { nesting_name: v });
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div style={{ flex: "1 1 150px" }}>
+                            <label style={S.label}>Program number</label>
+                            <input
+                              style={S.input}
+                              defaultValue={p.program_number}
+                              onBlur={(e) => {
+                                const v = e.target.value.trim();
+                                if (v && v !== p.program_number) onUpdateProgram(p, { program_number: v });
+                              }}
+                            />
+                          </div>
+                        )}
                         <div style={{ flex: "1 1 150px" }}>
-                          <label style={S.label}>Program number</label>
-                          <input
-                            style={S.input}
-                            defaultValue={p.program_number}
-                            onBlur={(e) => {
-                              const v = e.target.value.trim();
-                              if (v && v !== p.program_number) onUpdateProgram(p, { program_number: v });
-                            }}
-                          />
-                        </div>
-                        <div style={{ flex: "1 1 150px" }}>
-                          <label style={S.label}>Material</label>
+                          <label style={S.label}>{w.bySections ? "Section" : "Material"}</label>
                           <input
                             style={S.input}
                             defaultValue={p.material}
@@ -1159,23 +1330,25 @@ function ProgramList({
                             }}
                           />
                         </div>
-                        <div style={{ flex: "0 0 130px" }}>
-                          <label style={S.label}>Minutes per sheet</label>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.1"
-                            inputMode="decimal"
-                            style={S.input}
-                            defaultValue={p.cut_minutes ?? ""}
-                            placeholder="From SigmaNest"
-                            onBlur={(e) => {
-                              const v = e.target.value.trim();
-                              const was = p.cut_minutes == null ? "" : String(p.cut_minutes);
-                              if (v !== was) onUpdateProgram(p, { cut_minutes: v === "" ? null : Number(v) });
-                            }}
-                          />
-                        </div>
+                        {w.hasTime && (
+                          <div style={{ flex: "0 0 130px" }}>
+                            <label style={S.label}>Minutes per sheet</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.1"
+                              inputMode="decimal"
+                              style={S.input}
+                              defaultValue={p.cut_minutes ?? ""}
+                              placeholder="From SigmaNest"
+                              onBlur={(e) => {
+                                const v = e.target.value.trim();
+                                const was = p.cut_minutes == null ? "" : String(p.cut_minutes);
+                                if (v !== was) onUpdateProgram(p, { cut_minutes: v === "" ? null : Number(v) });
+                              }}
+                            />
+                          </div>
+                        )}
                         <SavedCheck fieldKey={`program-${p.id}`} />
                       </div>
                     )}
@@ -1284,10 +1457,11 @@ function ProgramList({
 // it right usually means re-nesting on the offcut he named and giving
 // the new nest its own number. Sorted takes the stop off and puts the
 // program back on his cut list.
-function StoppedRow({ row: r, canManage, onClearReport, onUpdateProgram, onDelete, SavedCheck }) {
+function StoppedRow({ row: r, machine, canManage, onClearReport, onUpdateProgram, onDelete, SavedCheck }) {
   const p = r.program;
   const [open, setOpen] = useState(false);
   const jobs = (p.jobs || []).map((l) => l.job_number || "unknown job");
+  const w = machineWords(machine);
 
   // Each box saves on its own when you leave it, the way the program
   // list below does. Blank minutes means not given, not zero.
@@ -1345,7 +1519,7 @@ function StoppedRow({ row: r, canManage, onClearReport, onUpdateProgram, onDelet
         <span style={{ ...S.chip, borderColor: C.danger, color: C.danger, fontWeight: 700, flexShrink: 0 }}>
           Stopped at the machine
         </span>
-        <span style={{ fontWeight: 700, fontSize: 15 }}>{p.program_number}</span>
+        <span style={{ fontWeight: 700, fontSize: 15 }}>{programTitle(p)}</span>
         <span style={{ color: C.muted, fontSize: 14 }}>{p.material}</span>
         {p.sheet_name && <span style={{ color: C.muted, fontSize: 14 }}>{p.sheet_name}</span>}
         <span style={{ flex: 1, minWidth: 0, color: C.muted, fontSize: 14 }}>
@@ -1358,8 +1532,10 @@ function StoppedRow({ row: r, canManage, onClearReport, onUpdateProgram, onDelet
         <b>{p.reported_reason}</b>
         {p.reported_offcut_length && p.reported_offcut_width ? (
           <> · nest on offcut {p.reported_offcut_length} × {p.reported_offcut_width}</>
+        ) : p.reported_offcut_length ? (
+          <> · nest on offcut {p.reported_offcut_length} long</>
         ) : null}
-        {p.reported_plate ? <> · use plate {p.reported_plate}</> : null}
+        {p.reported_plate ? <> · use {w.bySections ? "section" : "plate"} {p.reported_plate}</> : null}
       </div>
       <div style={{ ...S.roleHint, color: C.danger }}>
         {p.reported_by}
@@ -1370,10 +1546,12 @@ function StoppedRow({ row: r, canManage, onClearReport, onUpdateProgram, onDelet
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.danger}44`, display: "flex", flexDirection: "column", gap: 10 }}>
           {canManage ? (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-              {field("Program number", "program_number", { required: true })}
-              {field("Material", "material", { required: true })}
-              {field("Sheet name", "sheet_name", { list: "stk-sheet-names", placeholder: "Which sheet" })}
-              {field("Minutes per sheet", "cut_minutes", { type: "number", flex: "0 0 130px", placeholder: "From SigmaNest" })}
+              {w.generated
+                ? field("Nesting name", "nesting_name", { required: true, placeholder: "What you call this nest" })
+                : field("Program number", "program_number", { required: true })}
+              {field(w.bySections ? "Section" : "Material", "material", { required: true })}
+              {w.hasSheet && field("Sheet name", "sheet_name", { list: "stk-sheet-names", placeholder: "Which sheet" })}
+              {w.hasTime && field("Minutes per sheet", "cut_minutes", { type: "number", flex: "0 0 130px", placeholder: "From SigmaNest" })}
               {SavedCheck && <SavedCheck fieldKey={`program-${p.id}`} />}
             </div>
           ) : (
@@ -1426,7 +1604,7 @@ function DeleteProgramModal({ program: p, onConfirm, onClose }) {
     <div style={{ ...S.modalOverlay, zIndex: 30 }} onClick={onClose}>
       <div style={{ ...S.modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
         <div style={S.modalHead}>
-          <span style={S.modalTitle}>Delete {p.program_number}?</span>
+          <span style={S.modalTitle}>Delete {programTitle(p)}?</span>
           <button type="button" className="stk-btn" style={S.iconBtn} onClick={onClose}>
             <X size={18} />
           </button>

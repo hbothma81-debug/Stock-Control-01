@@ -117,6 +117,12 @@ cuts tube takes only the lines tagged for it.
 
 ## Building the same for the tube laser
 
+**Done, 2026-09-10.** The route below was taken: the plate code takes a
+machine profile (`LASER_MACHINES` in `src/constants.js`) and the tube
+laser runs on the same screens. The decisions, the differences and the
+switch-on steps are in `TUBE-LASER-HOW-IT-WORKS.md`. What follows is the
+plan as it was written, kept for the reasoning.
+
 Heinrich wants the tube laser on its own tab, out of Production, working
 the way the plate laser does. What has to be decided first, in order:
 

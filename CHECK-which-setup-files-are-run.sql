@@ -70,7 +70,17 @@ with checks (setup_file, looks_for, found) as (
     ('setup-quoting-and-bom.sql',       'column job_quote_items.parent_quote_item_id',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'job_quote_items' and column_name = 'parent_quote_item_id')),
     ('setup-quoting-and-bom.sql',       'column profiles.can_quote',
-      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'can_quote'))
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'can_quote')),
+    ('setup-tube-laser.sql',            'column shifts.cuts_tube_laser',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'shifts' and column_name = 'cuts_tube_laser')),
+    ('setup-tube-laser.sql',            'column laser_programs.nesting_name',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'laser_programs' and column_name = 'nesting_name')),
+    ('setup-tube-laser.sql',            'function next_laser_program_number',
+      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'next_laser_program_number')),
+    ('setup-tube-laser.sql',            'index laser_programs_machine_number_live_idx (numbers unique per machine)',
+      exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'laser_programs_machine_number_live_idx')),
+    ('setup-tube-laser-import.sql',     'table tube_section_aliases',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'tube_section_aliases'))
 )
 select
   setup_file,

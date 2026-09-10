@@ -1,8 +1,18 @@
 import { useState, useMemo } from "react";
 import { Check, Hand, AlertTriangle, ChevronDown } from "lucide-react";
 import { C, S } from "../theme.js";
+import { programTitle } from "./programTitle.js";
 
 // Where a job goes after the laser, and where the packer works.
+//
+// Used twice. Under Production it is Laser Status: the plate packer's
+// screen, fed with plate programs. On the Tube Laser tab it is the
+// Packing screen, fed with tube programs, where the tube operator packs
+// under the Tube Laser stage itself -- and under Production again as
+// Tube Laser Status, where the next person along (welding, delivery)
+// takes the job. `words` says which machine's parts these are, so the
+// hints do not tell the tube operator his parts are packed elsewhere.
+// `canTake` lets someone take a job without being able to pack it.
 //
 // Two things run side by side on every row, and they are not the same
 // thing:
@@ -41,6 +51,11 @@ function laserState(programs) {
 export default function LaserStatus({
   rows,
   canPack,
+  // Who may press Take job. Defaults to whoever may pack, which is the
+  // plate rule; Tube Laser Status under Production opens it to the next
+  // department while packing stays with the tube operators.
+  canTake = canPack,
+  words = {},
   meName,
   onTakeJob,
   onFinishPacking,
@@ -55,6 +70,8 @@ export default function LaserStatus({
 }) {
   const [query, setQuery] = useState("");
   const [openRow, setOpenRow] = useState(null);
+  const partsLabel = words.partsLabel || "Laser parts";
+  const otherNote = words.otherMachineNote || "tube parts are packed under Tube Laser";
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -66,7 +83,7 @@ export default function LaserStatus({
         (r.job.laser_job_reference || "").toLowerCase().includes(q) ||
         (r.packerName || "").toLowerCase().includes(q) ||
         (r.detail || "").toLowerCase().includes(q) ||
-        r.programs.some((p) => (p.program_number || "").toLowerCase().includes(q))
+        r.programs.some((p) => programTitle(p).toLowerCase().includes(q))
     );
   }, [rows, query]);
 
@@ -93,6 +110,9 @@ export default function LaserStatus({
             expanded={openRow === r.key}
             onToggle={() => setOpenRow((k) => (k === r.key ? null : r.key))}
             canPack={canPack}
+            canTake={canTake}
+            partsLabel={partsLabel}
+            otherNote={otherNote}
             busyId={busyId}
             onTakeJob={onTakeJob}
             onFinishPacking={onFinishPacking}
@@ -104,15 +124,28 @@ export default function LaserStatus({
       )}
 
       <div style={S.roleHint}>
-        A job leaves this screen once its laser parts are marked packed and checked; tube parts are packed under
-        Tube Laser. Taking a job is what opens the stages after packing — the job does not have to be finished
-        first.
+        A job leaves this screen once its {partsLabel.toLowerCase()} are marked packed and checked; {otherNote}.
+        Taking a job is what opens the stages after packing — the job does not have to be finished first.
       </div>
     </div>
   );
 }
 
-function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onFinishPacking, onFlagShortage, onLogItem, ItemProgress }) {
+function StatusRow({
+  row: r,
+  expanded,
+  onToggle,
+  canPack,
+  canTake,
+  partsLabel,
+  otherNote,
+  busyId,
+  onTakeJob,
+  onFinishPacking,
+  onFlagShortage,
+  onLogItem,
+  ItemProgress,
+}) {
   const laser = laserState(r.programs);
   // A job can reach here with no packing stage at all, when nobody ticked
   // Packer as the job was built.
@@ -210,7 +243,7 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
                       border: `1px solid ${p.is_complete ? C.accentFinished : C.border}`,
                     }}
                   >
-                    {p.program_number} · {p.material}
+                    {programTitle(p)} · {p.material}
                     {p.is_complete ? " · cut" : ""}
                   </span>
                 ))
@@ -244,7 +277,7 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
               <div style={{ ...S.roleHint, color: C.accentRaw }}>The stages after packing are open for this job.</div>
             )}
 
-            {canPack && r.process && (
+            {(canPack || canTake) && r.process && (
               <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
                 <button
                   type="button"
@@ -262,7 +295,7 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
                   {busy ? "Saving…" : taken ? (r.isMine ? "You have it" : "Take it over") : "Take job"}
                 </button>
 
-                {taken && !perItem && (
+                {canPack && taken && !perItem && (
                   <button
                     type="button"
                     className="stk-btn"
@@ -273,7 +306,7 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
                     {/* "Laser parts", not "the job": tube lines are packed
                         by the tube operator under the Tube Laser stage,
                         so on a mixed job this tick is the plate half. */}
-                    <Check size={14} strokeWidth={2.5} /> {busy ? "Saving…" : "Laser parts packed & checked"}
+                    <Check size={14} strokeWidth={2.5} /> {busy ? "Saving…" : `${partsLabel} packed & checked`}
                   </button>
                 )}
 
@@ -281,7 +314,7 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
                     nest, so this is where a shortage gets raised. Not on a
                     re-cut though: a shortage on a shortage is not something
                     anything downstream knows how to follow. */}
-                {!r.isRecut && (
+                {canPack && !r.isRecut && (
                   <button
                     type="button"
                     className="stk-btn"
@@ -313,8 +346,8 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
                   />
                 </div>
                 <div style={S.roleHint}>
-                  Laser parts only — tube lines are packed under Tube Laser. This job leaves the screen on its own once
-                  every laser line is packed in full.
+                  {partsLabel} only — {otherNote}. This job leaves the screen on its own once every line here is
+                  packed in full.
                 </div>
               </div>
             )}
@@ -322,7 +355,7 @@ function StatusRow({ row: r, expanded, onToggle, canPack, busyId, onTakeJob, onF
               <div style={S.roleHint}>Packed item by item on this job. Take it to start logging.</div>
             )}
 
-            {!canPack && !taken && r.process && <div style={S.roleHint}>Only packers can take a job.</div>}
+            {!canPack && !canTake && !taken && r.process && <div style={S.roleHint}>Only packers can take a job.</div>}
           </div>
         </div>
       )}
