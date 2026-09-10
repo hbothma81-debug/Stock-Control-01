@@ -3744,8 +3744,12 @@ export default function StockControl() {
         if (newCutItems.length && cutStageName && !processRows.some((p) => sameText(p.process_name, cutStageName))) {
           processRows.push({ job_id: job.id, process_name: cutStageName, operator: "", assigned_to: null, tracking_mode: "batch", sort_order: processRows.length });
         }
-        const { error: procError } = await supabase.from("job_processes").insert(processRows);
-        if (procError) throw procError;
+        // A job now starts with no stages as a rule -- they are ticked on
+        // the job itself -- so there is often nothing to insert here.
+        if (processRows.length) {
+          const { error: procError } = await supabase.from("job_processes").insert(processRows);
+          if (procError) throw procError;
+        }
 
         // A real, accountable assignment is what makes this notification
         // possible at all — this couldn't exist back when it was just a
@@ -3820,6 +3824,9 @@ export default function StockControl() {
 
       closeNewJob();
       fetchJobs();
+      // Straight into the editor: that is where the job gets filled in.
+      setJobDetailTab("overview");
+      openJobDetail(job);
     } catch (err) {
       console.error("Failed to create job:", err);
       alert(`Couldn't create that job: ${err.message || "unknown error"}. If this mentions a missing column, an SQL migration hasn't been run yet in Supabase.`);
@@ -19284,6 +19291,69 @@ export default function StockControl() {
                 </div>
               )}
 
+              {/* The rest of what the New Job pop-up used to ask for,
+                  editable here now that the pop-up asks only for the
+                  customer. A job is filled in on the job. */}
+              {canEditThisJob && (
+                <>
+                  <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={S.label}>Description</label>
+                      <input
+                        style={S.input}
+                        defaultValue={jobDetail.job.description || ""}
+                        onBlur={(e) => updateJobField(jobDetail.job.id, "description", e.target.value)}
+                        placeholder="What this job is"
+                      />
+                    </div>
+                    <SavedCheck fieldKey={`job-${jobDetail.job.id}-description`} />
+                  </div>
+                  <div style={S.formGrid}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={S.label}>Due date</label>
+                        <input
+                          type="date"
+                          style={S.input}
+                          defaultValue={jobDetail.job.due_date ? String(jobDetail.job.due_date).slice(0, 10) : ""}
+                          onBlur={(e) => updateJobField(jobDetail.job.id, "due_date", e.target.value || null)}
+                        />
+                      </div>
+                      <SavedCheck fieldKey={`job-${jobDetail.job.id}-due_date`} />
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={S.label}>Quote reference</label>
+                        <input
+                          style={S.input}
+                          defaultValue={jobDetail.job.quote_reference || ""}
+                          onBlur={(e) => updateJobField(jobDetail.job.id, "quote_reference", e.target.value)}
+                          placeholder="e.g. QU226331 — filled in by a quote import too"
+                        />
+                      </div>
+                      <SavedCheck fieldKey={`job-${jobDetail.job.id}-quote_reference`} />
+                    </div>
+                    {canSeeValue && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <div style={{ flex: 1 }}>
+                          <label style={S.label}>Quoted value</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            style={S.input}
+                            defaultValue={jobDetail.job.quoted_value ?? ""}
+                            onBlur={(e) => updateJobField(jobDetail.job.id, "quoted_value", e.target.value === "" ? null : Number(e.target.value))}
+                            placeholder="Total quoted, before VAT"
+                          />
+                        </div>
+                        <SavedCheck fieldKey={`job-${jobDetail.job.id}-quoted_value`} />
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
             {jobDetail.quoteItems.length > 0 && (
               <div style={{ marginTop: 8, padding: 10, background: C.bg, borderRadius: 6, border: `1px solid ${C.border}` }}>
                 <span style={{ fontWeight: 600 }}>
@@ -20977,6 +21047,12 @@ export default function StockControl() {
         </div>
       )}
 
+      {/* The doorway to a job, not the job. Only what a job cannot exist
+          without: who it is for, what it is, when it is due. Everything
+          else -- the quote, items, cut to size, buy-outs, files, stages
+          -- is done on the job itself, which opens the moment this is
+          saved. It used to ask for all of that here, in a box a third the
+          size of the editor that does it better. */}
       {showNewJob && newJobForm && (
         <div style={S.modalOverlay}>
           <div style={{ ...S.modal, maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
@@ -20989,19 +21065,17 @@ export default function StockControl() {
 
             <div style={{ marginTop: 10 }}>
               <label style={S.label}>Customer</label>
-              {/* A name not on the list becomes a new customer: the form
-                  flips to CUSTOM and the typed name lands in the new-customer
-                  box below, where the contact details go too. */}
-              <TypeToFind
-                options={master.customers}
-                value={newJobForm.customer === CUSTOM ? newJobForm.newCustomerName || "" : newJobForm.customer || ""}
-                allowNew
-                onChange={(v) => {
-                  if (!v || master.customers.includes(v)) setNewJobForm((f) => ({ ...f, customer: v }));
-                  else setNewJobForm((f) => ({ ...f, customer: CUSTOM, newCustomerName: v }));
-                }}
-                emptyLabel="Select a customer, or type a new one…"
-              />
+              <select
+                style={S.input}
+                value={newJobForm.customer === CUSTOM ? CUSTOM : newJobForm.customer}
+                onChange={(e) => setNewJobForm((f) => ({ ...f, customer: e.target.value }))}
+              >
+                <option value="">Select a customer…</option>
+                {master.customers.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+                <option value={CUSTOM}>+ Add new customer…</option>
+              </select>
               {newJobForm.customer === CUSTOM && (
                 <div style={{ marginTop: 8, padding: 10, background: C.bg, borderRadius: 6, border: `1px solid ${C.border}` }}>
                   <input
@@ -21036,121 +21110,12 @@ export default function StockControl() {
                 value={newJobForm.description}
                 onChange={(e) => setNewJobForm((f) => ({ ...f, description: e.target.value }))}
                 placeholder="What this job is"
+                onKeyDown={(e) => e.key === "Enter" && !jobSubmitting && submitNewJob()}
               />
             </div>
 
             <div style={{ marginTop: 10 }}>
-              <label style={S.label}>Quote (optional)</label>
-
-              {/* Straight off the nesting machine, no retyping. Sits beside
-                  the Excel one because they are the same job: get a quote
-                  into the form without doing it by hand. */}
-              <label className="stk-btn" style={{ ...S.addBtn, cursor: "pointer", justifyContent: "center", width: "100%", marginBottom: 6 }}>
-                <Upload size={13} /> {newJobForm.sigmaNestFile ? newJobForm.sigmaNestFile.name : "Upload SigmaNest Quote (PDF)"}
-                <input
-                  type="file"
-                  accept=".pdf"
-                  style={{ display: "none" }}
-                  onChange={async (e) => {
-                    const file = e.target.files[0] || null;
-                    setNewJobForm((f) => ({ ...f, sigmaNestFile: file }));
-                    if (!file) return;
-                    try {
-                      const quote = await parseSigmaNestQuoteFile(file);
-                      const matchedCustomer = (master.customers || []).find(
-                        (c) => c.toLowerCase() === (quote.customer || "").toLowerCase()
-                      );
-                      setNewJobForm((f) => ({
-                        ...f,
-                        customer: matchedCustomer || (quote.customer ? CUSTOM : f.customer),
-                        newCustomerName: matchedCustomer ? "" : quote.customer || f.newCustomerName,
-                        // The number SigmaNest knows this by, which is the
-                        // same field the nesting screen matches jobs on.
-                        laserJobReference: quote.quoteNumber || f.laserJobReference,
-                        description: quote.notes || f.description,
-                        quotedValue: quote.quotedTotal != null ? String(quote.quotedTotal) : f.quotedValue,
-                        quoteItems: quote.lines.map((line) => ({
-                          id: uid(),
-                          description: sigmaNestLineDescription(line),
-                          qty: line.qty != null ? String(line.qty) : "1",
-                          unitPrice: line.unitPrice != null ? String(line.unitPrice) : "",
-                          priceNeedsReview: line.unitPrice == null,
-                          linkedItemId: null,
-                        })),
-                      }));
-                      alert(
-                        `Pulled ${quote.lines.length} line(s) from ${quote.quoteNumber || "the quote"}` +
-                          (quote.customer ? ` for ${quote.customer}` : "") +
-                          ".\n\nCheck it against the PDF before saving — the prices especially."
-                      );
-                    } catch (err) {
-                      console.error("Failed to read the SigmaNest quote:", err);
-                      alert(
-                        typeof err === "string"
-                          ? err
-                          : "Couldn't read that PDF — fill the job in by hand."
-                      );
-                    }
-                  }}
-                />
-              </label>
-
-              <label className="stk-btn" style={{ ...S.addBtn, cursor: "pointer", justifyContent: "center", width: "100%" }}>
-                <Upload size={13} /> {newJobForm.quoteExcelFile ? newJobForm.quoteExcelFile.name : "Upload Quote Excel"}
-                  <input
-                    type="file"
-                    accept=".xlsx,.xls,.xlsm,.csv"
-                    style={{ display: "none" }}
-                    onChange={async (e) => {
-                      const file = e.target.files[0] || null;
-                      setNewJobForm((f) => ({ ...f, quoteExcelFile: file }));
-                      if (!file) return;
-                      try {
-                        const parsed = await parseQuoteExcelFile(file);
-                        const matchedCustomer = master.customers.find((c) => c.toLowerCase() === parsed.customer.toLowerCase());
-                        setNewJobForm((f) => ({
-                          ...f,
-                          customer: matchedCustomer || CUSTOM,
-                          newCustomerName: matchedCustomer ? "" : parsed.customer,
-                          newCustomerContactName: matchedCustomer ? f.newCustomerContactName : parsed.contact,
-                          quoteReference: parsed.quoteNumber || f.quoteReference,
-                          quoteItems: parsed.quoteItems.map((it) => {
-                            // Same match as manual entry uses on blur — exact
-                            // name match within the same customer's existing
-                            // Customer Stock. Doing it here too means an
-                            // imported item with a drawing already on file
-                            // picks it up automatically, instead of only
-                            // working when someone types the item by hand.
-                            const stockMatch = matchedCustomer
-                              ? (items || []).find(
-                                  (si) => si.id === findCustomerStockMatch(matchedCustomer, it.description)?.id
-                                )
-                              : null;
-                            return {
-                              id: uid(),
-                              description: it.description,
-                              qty: String(it.qty),
-                              unitPrice: String(it.unitPrice),
-                              priceNeedsReview: it.priceNeedsReview,
-                              linkedItemId: stockMatch?.id || null,
-                            };
-                          }),
-                        }));
-                        const reviewFlags = parsed.quoteItems.filter((it) => it.priceNeedsReview).length;
-                        alert(
-                          `Pulled ${parsed.quoteItems.length} item(s) from the quote — check everything below before saving, especially the prices.` +
-                            (reviewFlags ? `\n\n${reviewFlags} item(s) had a price that couldn't be read and were left blank — fill those in manually.` : "")
-                        );
-                      } catch (err) {
-                        alert(typeof err === "string" ? err : "Couldn't read that file — fill in the job details manually.");
-                      }
-                    }}
-                  />
-              </label>
-            </div>
-
-            <div style={{ marginTop: 10 }}>
-              <label style={S.label}>Due date</label>
+              <label style={S.label}>Due date (optional)</label>
               <input
                 type="date"
                 style={S.input}
@@ -21159,254 +21124,9 @@ export default function StockControl() {
               />
             </div>
 
-            <div style={S.formGrid}>
-              <div>
-                <label style={S.label}>Quote reference (optional)</label>
-                <input
-                  style={S.input}
-                  value={newJobForm.quoteReference}
-                  onChange={(e) => setNewJobForm((f) => ({ ...f, quoteReference: e.target.value }))}
-                  placeholder="e.g. JOB-31513 or QU226331"
-                />
-              </div>
-              <div>
-                <label style={S.label}>Customer PO (optional)</label>
-                <input
-                  style={S.input}
-                  value={newJobForm.customerPo}
-                  onChange={(e) => setNewJobForm((f) => ({ ...f, customerPo: e.target.value }))}
-                  placeholder="Their PO number — often arrives later"
-                />
-              </div>
-              <div>
-                <label style={S.label}>Laser job reference (optional)</label>
-                <input
-                  style={S.input}
-                  value={newJobForm.laserJobReference}
-                  onChange={(e) => setNewJobForm((f) => ({ ...f, laserJobReference: e.target.value }))}
-                  placeholder="SigmaNest reference"
-                />
-              </div>
-            </div>
-
-            <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <label style={S.label}>Quoted items (optional)</label>
-                <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={addNewJobQuoteItem}>
-                  <Plus size={12} /> Add line
-                </button>
-              </div>
-              {newJobForm.quoteItems.map((it, idx) => {
-                const linkedItem = it.linkedItemId ? (items || []).find((i) => i.id === it.linkedItemId) : null;
-                const revision = linkedItem?.partNumber ? drawingLookup[linkedItem.partNumber.trim()] : null;
-                const q = it.description.trim().toLowerCase();
-                const suggestions =
-                  newJobItemSuggestOpen === idx && q
-                    ? (items || [])
-                        .filter(
-                          (si) =>
-                            si.mainCat === "custom" &&
-                            si.customer === newJobForm.customer &&
-                            ((si.partNumber || "").toLowerCase().includes(q) || si.name.toLowerCase().includes(q))
-                        )
-                        .slice(0, 8)
-                    : [];
-                return (
-                  <div key={idx} style={{ marginTop: 6 }}>
-                    {it.priceNeedsReview && (
-                      <div style={{ ...S.roleHint, color: C.danger, marginBottom: 2 }}>
-                        ⚠ Price couldn't be read from the quote — check and fill in manually
-                      </div>
-                    )}
-                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <div style={{ position: "relative", flex: 2 }}>
-                        <input
-                          style={S.input}
-                          value={it.description}
-                          onChange={(e) => {
-                            updateNewJobQuoteItem(idx, "description", e.target.value);
-                            setNewJobItemSuggestOpen(idx);
-                          }}
-                          onFocus={() => setNewJobItemSuggestOpen(idx)}
-                          onBlur={() => {
-                            matchNewJobQuoteItemToStock(idx);
-                            // Slight delay so a tap on a suggestion below
-                            // registers (via onMouseDown) before this closes
-                            // the list out from under it.
-                            setTimeout(() => setNewJobItemSuggestOpen((v) => (v === idx ? null : v)), 150);
-                          }}
-                          placeholder="Part number or description — start typing to match Customer Stock…"
-                        />
-                        {suggestions.length > 0 && (
-                          <div style={S.suggestDropdown}>
-                            {suggestions.map((si) => (
-                              <button
-                                key={si.id}
-                                type="button"
-                                className="stk-btn"
-                                style={S.suggestItem}
-                                onMouseDown={(e) => {
-                                  e.preventDefault();
-                                  selectNewJobQuoteItemSuggestion(idx, si);
-                                }}
-                              >
-                                <span style={{ fontWeight: 600 }}>{si.partNumber || "—"}</span>
-                                <span style={{ color: C.muted }}> — {si.name}</span>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <input
-                        style={{ ...S.input, width: 60 }}
-                        type="number"
-                        min="0"
-                        value={it.qty}
-                        onChange={(e) => updateNewJobQuoteItem(idx, "qty", e.target.value)}
-                        placeholder="Qty"
-                      />
-                      <input
-                        style={{ ...S.input, width: 80 }}
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={it.unitPrice}
-                        onChange={(e) => updateNewJobQuoteItem(idx, "unitPrice", e.target.value)}
-                        placeholder="Unit R"
-                      />
-                      <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeNewJobQuoteItem(idx)}>
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                    <div style={{ ...S.roleHint, marginTop: 2 }}>
-                      {linkedItem ? (
-                        <>
-                          Linked to Customer Stock — Available: {linkedItem.qty}
-                          {revision && (
-                            <>
-                              {" "}
-                              — Our rev {revision.internalRevision ?? "—"}
-                              {revision.customerRevision ? `, customer rev ${revision.customerRevision}` : ""}
-                            </>
-                          )}
-                        </>
-                      ) : it.description.trim() && countCustomerStockByName(newJobForm.customer, it.description) > 1 ? (
-                        <span style={{ color: C.danger, fontWeight: 600 }}>
-                          Several parts share this description — pick one from the list so the right stock code is used.
-                        </span>
-                      ) : it.description.trim() && newJobForm.customer && newJobForm.customer !== CUSTOM ? (
-                        <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => addNewJobQuoteItemToStockManager(idx)}>
-                          <Plus size={11} /> Not in Customer Stock — add it
-                        </button>
-                      ) : it.description.trim() ? (
-                        // The item goes into Customer Stock, which is kept per
-                        // customer, so there is nowhere to put it until one is
-                        // chosen. Saying so beats hiding the button, which reads
-                        // as the feature having been taken away.
-                        <>Pick a customer above to add this to their stock.</>
-                      ) : null}
-                    </div>
-                  </div>
-                );
-              })}
-              <div style={{ marginTop: 10 }}>
-                <label style={S.label}>Quoted value (optional)</label>
-                <input
-                  style={S.input}
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={newJobForm.quotedValue}
-                  onChange={(e) => setNewJobForm((f) => ({ ...f, quotedValue: e.target.value }))}
-                  placeholder="Total quoted value, for comparing against actual cost later"
-                />
-              </div>
-            </div>
-
-            {/* The saw lines, if the job has any, typed here and saved
-                with the job. The tab's own screen, holding the lines in
-                the form until there is a job to keep them on. */}
-            <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-              <label style={S.label}>Cut to size (optional)</label>
-              <CutToSize
-                lines={newJobForm.cutItems || []}
-                canEdit={true}
-                canSeeValue={canSeeValue}
-                sections={master.sections || []}
-                customerItems={
-                  newJobForm.customer && newJobForm.customer !== CUSTOM
-                    ? (items || []).filter((i) => i.mainCat === "custom" && i.customer === newJobForm.customer)
-                    : []
-                }
-                items={items || []}
-                findSectionFactor={findSectionFactor}
-                findSectionPrice={findSectionPrice}
-                findSectionType={findSectionType}
-                allocations={[]}
-                requisitions={requisitions || []}
-                onAdd={addNewJobCutItem}
-                onUpdate={updateNewJobCutItem}
-                onRemove={removeNewJobCutItem}
-                SavedCheck={SavedCheck}
-              />
-            </div>
-
-            <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-              <label style={S.label}>Which processes does this job need?</label>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-                {master.jobProcessTypes.map((p) => (
-                  <button
-                    type="button"
-                    key={p}
-                    className="stk-btn"
-                    onClick={() => toggleNewJobProcess(p)}
-                    style={{
-                      ...S.segBtn,
-                      ...(newJobForm.selectedProcesses.some((sp) => sp.name === p) ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
-                    }}
-                  >
-                    {p}
-                  </button>
-                ))}
-              </div>
-              {newJobForm.selectedProcesses.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
-                  {/* No per-job reordering. The sequence is the factory
-                      flow and nothing else, so it cannot drift from the
-                      list: change the flow in Stock Manager and every job
-                      follows, new or already running. */}
-                  <div style={S.roleHint}>
-                    Numbered in the order work moves through the shop — each stage opens up as the one before it is completed. This is the
-                    factory flow set in Stock Manager, and it applies to every job. To change it, change it there.
-                  </div>
-                  {newJobForm.selectedProcesses.map((sp, idx) => (
-                    <div key={sp.name} style={{ marginBottom: 4 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontSize: 12, color: C.muted, flexShrink: 0, minWidth: 16 }}>{idx + 1}.</span>
-                        <span style={{ fontSize: 14, fontWeight: 600, flex: 1 }}>{sp.name}</span>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
-                        <TypeToFind
-                          style={{ flex: "1 1 180px" }}
-                          options={(people || []).map((person) => ({ value: person.id, label: person.name }))}
-                          value={sp.assignedToId || ""}
-                          onChange={(v) => updateNewJobProcessAssignee(sp.name, v)}
-                          emptyLabel="Not assigned yet"
-                        />
-                        <select
-                          style={{ ...S.input, width: 110, flexShrink: 0 }}
-                          value={sp.trackingMode}
-                          onChange={(e) => updateNewJobProcessTrackingMode(sp.name, e.target.value)}
-                          title="Batch: one tick completes the whole line. Each: a running count against the item's quantity."
-                        >
-                          <option value="batch">Batch</option>
-                          <option value="each">Each</option>
-                        </select>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+            <div style={{ ...S.roleHint, marginTop: 10 }}>
+              The quote, items, cut to size, buy-outs, files and stages are all added on the job itself, which opens as soon
+              as it is created.
             </div>
 
             <button
@@ -21416,7 +21136,7 @@ export default function StockControl() {
               onClick={submitNewJob}
               disabled={jobSubmitting}
             >
-              {jobSubmitting ? "Creating…" : "Create Job"}
+              {jobSubmitting ? "Creating…" : "Create Job and open it"}
             </button>
           </div>
         </div>
