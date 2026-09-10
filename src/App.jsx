@@ -414,7 +414,7 @@ async function loadMasterFromTables() {
     (contactsBySupplier[c.supplier_id] ||= []).push({ id: c.id, name: c.name, email: c.email });
   }
   result.suppliers = (suppliers.data || []).map((s) => ({
-    id: s.id, name: s.name, email: s.email, phone: s.phone, address: s.address, logo: s.logo, vatNumber: s.vat_number,
+    id: s.id, name: s.name, email: s.email, phone: s.phone, address: s.address, vatNumber: s.vat_number,
     contacts: contactsBySupplier[s.id] || [],
   }));
 
@@ -2107,7 +2107,7 @@ export default function StockControl() {
       const nextSuppliers = newMaster.suppliers || [];
       const prevById = new Map(prevSuppliers.map((s) => [s.id, s]));
       const nextById = new Map(nextSuppliers.map((s) => [s.id, s]));
-      const toRow = (s) => ({ id: s.id, name: s.name, email: s.email || "", phone: s.phone || "", address: s.address || "", logo: s.logo || "", vat_number: s.vatNumber || "" });
+      const toRow = (s) => ({ id: s.id, name: s.name, email: s.email || "", phone: s.phone || "", address: s.address || "", vat_number: s.vatNumber || "" });
       const added = nextSuppliers.filter((s) => !prevById.has(s.id));
       const removedIds = prevSuppliers.filter((s) => !nextById.has(s.id)).map((s) => s.id);
       const modified = nextSuppliers.filter((s) => {
@@ -5687,7 +5687,7 @@ export default function StockControl() {
     if (!clean) return null;
     const existing = (master.suppliers || []).find((s) => sameText(s.name, clean));
     if (existing) return existing;
-    const entry = { id: uid(), name: clean, email: "", phone: "", address: "", logo: "", vatNumber: "", contacts: [] };
+    const entry = { id: uid(), name: clean, email: "", phone: "", address: "", vatNumber: "", contacts: [] };
     setMaster((prev) => ({ ...prev, suppliers: [...(prev.suppliers || []), entry] }));
     return entry;
   }
@@ -8609,7 +8609,7 @@ export default function StockControl() {
     });
   }
 
-  // Suppliers hold more than a name (email, phone, address, logo — for
+  // Suppliers hold more than a name (email, phone, address — for
   // Purchase Orders), so a quick "+ Add new" from a picker just creates a
   // bare-minimum entry; an admin fills in the rest later in Stock Manager.
   function ensureSupplierEntry(name) {
@@ -9251,24 +9251,9 @@ export default function StockControl() {
     let y = Math.max(c1y, c2y, c3y) + 6;
 
     // ---- Supplier block ----
-    let supX = leftX;
-    if (supplier?.logo) {
-      try {
-        const imgProps = doc.getImageProperties(supplier.logo);
-        const maxW = 18;
-        const maxH = 18;
-        let logoW = maxW;
-        let logoH = (imgProps.height / imgProps.width) * logoW;
-        if (logoH > maxH) {
-          logoH = maxH;
-          logoW = (imgProps.width / imgProps.height) * logoH;
-        }
-        doc.addImage(supplier.logo, "JPEG", leftX, y, logoW, logoH);
-        supX = leftX + 24;
-      } catch {
-        // skip on bad image data
-      }
-    }
+    // Supplier logos were dropped in Sept 2026; only the company's own
+    // logo appears on documents now.
+    const supX = leftX;
     doc.setFontSize(10);
     doc.setFont(undefined, "bold");
     doc.text("Supplier", supX, y + 4);
@@ -11200,7 +11185,7 @@ export default function StockControl() {
     if (!newSupplierName.trim()) return;
     setMaster((prev) => ({
       ...prev,
-      suppliers: [...prev.suppliers, { id: uid(), name: newSupplierName.trim(), email: "", phone: "", address: "", logo: "", vatNumber: "", contacts: [] }],
+      suppliers: [...prev.suppliers, { id: uid(), name: newSupplierName.trim(), email: "", phone: "", address: "", vatNumber: "", contacts: [] }],
     }));
     setNewSupplierName("");
   }
@@ -11276,23 +11261,6 @@ export default function StockControl() {
         [customerName]: (prev.customerContacts?.[customerName] || []).filter((c) => c.id !== contactId),
       },
     }));
-  }
-
-  async function handleSupplierLogoSelect(id, e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      alert("Please choose a JPEG or PNG image.");
-      e.target.value = "";
-      return;
-    }
-    try {
-      const dataUrl = await compressImage(file, 400, 0.85);
-      updateSupplierField(id, "logo", dataUrl);
-    } catch {
-      alert("Couldn't process that image.");
-    }
-    e.target.value = "";
   }
 
   function updateCompanyDetail(field, value) {
@@ -17129,8 +17097,8 @@ export default function StockControl() {
               !managerSupplierOpen ? (
                 <>
                   <div style={S.roleHint}>
-                    Add a logo and contact details for any supplier you'll be raising Purchase Orders to — these appear on the
-                    PO document. Suppliers with no email or logo still work fine everywhere else in the app.
+                    Add contact details for any supplier you'll be raising Purchase Orders to — these appear on the
+                    PO document. Suppliers with no email still work fine everywhere else in the app.
                   </div>
                   <div style={{ ...S.managerAddRow, marginTop: 10 }}>
                     <input
@@ -17168,13 +17136,6 @@ export default function StockControl() {
                         style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", flexDirection: "row", alignItems: "center", gap: 10 }}
                         onClick={() => setManagerSupplierOpen(s.id)}
                       >
-                        {s.logo ? (
-                          <img src={s.logo} alt="" style={S.supplierLogoPreview} />
-                        ) : (
-                          <div style={S.supplierLogoPlaceholder}>
-                            <ImageIcon size={16} color={C.muted} />
-                          </div>
-                        )}
                         <span style={{ ...S.itemName, flex: 1 }}>{s.name}</span>
                         <span style={S.gradeCount}>{(s.contacts || []).length}</span>
                       </button>
@@ -17201,18 +17162,7 @@ export default function StockControl() {
                       </button>
                       <div style={S.deptCard}>
                         <div style={S.deptCardHead}>
-                          {s.logo ? (
-                            <img src={s.logo} alt="" style={S.supplierLogoPreview} />
-                          ) : (
-                            <div style={S.supplierLogoPlaceholder}>
-                              <ImageIcon size={16} color={C.muted} />
-                            </div>
-                          )}
                           <EditableName value={s.name} onCommit={(v) => updateSupplierField(s.id, "name", v)} style={{ fontWeight: 600, fontSize: 15 }} />
-                          <label className="stk-btn" style={S.managerDelete} title="Upload logo">
-                            <Paperclip size={13} />
-                            <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleSupplierLogoSelect(s.id, e)} />
-                          </label>
                           <button
                             type="button"
                             className="stk-btn"
