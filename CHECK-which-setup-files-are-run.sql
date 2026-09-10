@@ -58,7 +58,17 @@ with checks (setup_file, looks_for, found) as (
     ('setup-invoice-notes.sql',         'table job_invoice_notes',
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'job_invoice_notes')),
     ('setup-job-documents-move.sql',    'rule: job_documents rows can be changed (Move to...)',
-      exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'job_documents' and cmd = 'UPDATE'))
+      exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'job_documents' and cmd = 'UPDATE')),
+    ('setup-quoting-and-bom.sql',       'table quotes',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'quotes')),
+    ('setup-quoting-and-bom.sql',       'table bom_parts',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'bom_parts')),
+    ('setup-quoting-and-bom.sql',       'table stock_item_events',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'stock_item_events')),
+    ('setup-quoting-and-bom.sql',       'column job_quote_items.parent_quote_item_id',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'job_quote_items' and column_name = 'parent_quote_item_id')),
+    ('setup-quoting-and-bom.sql',       'column profiles.can_quote',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'can_quote'))
 )
 select
   setup_file,
