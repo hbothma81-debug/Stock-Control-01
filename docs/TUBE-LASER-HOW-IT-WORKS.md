@@ -71,6 +71,47 @@ COFFEE TABLE job as the example of what the operator receives.
   Cutting alone, by design. On the tube laser he also packs, so he sees
   Cutting and Packing, and only those two. Whoever nests sees all five.
 
+## The parts become lines on the job (parent and child)
+
+Decided and built 2026-09-10, later the same day. The job's own line for
+a piece of tube work is the **parent** (the batch item); the parts the
+tube software nests are **child lines** under it, each with a quantity
+and a length. The parent column `job_quote_items.parent_quote_item_id`
+came from the Quoting conversation's SQL (meant for assemblies); this is
+its first use in the app, and the pattern the Jobs and Quoting
+conversations inherit.
+
+- **Where the parts come from.** The import reads the report's Part
+  Info sheet (name, "nested/needed" quantity, length); a hand-typed
+  program has a parts box, one per line, "name, qty, length". After the
+  job is picked the import asks which of its lines is the parent, unless
+  it can tell: one tube-tagged line, or one line at all, picks itself;
+  no lines makes a parent named after the reference. `addPartsToJob` in
+  App.jsx writes them, updating a part already under that parent rather
+  than adding it twice.
+- **One rule for who sees which line** (`stageTakesItem` in App.jsx):
+  a child is taken only by a stage with a machine tag matching its
+  made-on; a parent with children is taken only by stages with no
+  machine; a plain line is as it always was. `itemFlowLimit` adds: a
+  stage that takes a line's parts holds the parent back, whole, until
+  that stage is signed off, so welding cannot start on the batch item
+  while the tube laser still has its parts.
+- **Money sees parents only.** `billableLines` filters invoicing (both
+  buttons and Invoice now from the list), the outstanding count, the
+  on-order total on the Jobs list, and the job sheet, which prints the
+  parts indented under their parent with lengths.
+- **Where the parts show:** indented under their parent on the Items
+  tab (delete only, no price or invoice box); on the Production cards
+  of the tube stages (not on welding's); on Packing and Tube Laser
+  Status as the pick list, or as the per-item ticks when the stage is
+  Each; "150 parts" on the nesting card and the operator's card, with a
+  Parts button for the list; on the printed job sheet.
+- **On the program itself:** `laser_programs.parts` (the list) and
+  `part_count`, from `setup-tube-laser-parts.sql`, which also adds
+  `job_quote_items.length_mm`.
+- The laser hook now reads every column of a job line (`select *`), so a
+  column a database does not have yet cannot fail the plate laser.
+
 ## How it is built: one set of code, told the machine
 
 `src/constants.js` has `LASER_MACHINES`, one profile per laser, saying
