@@ -239,6 +239,42 @@ const inOtherLaserLane = (mine, other) =>
   (isTubeLaserProcess(mine) && isPlateLaserProcess(other)) ||
   (isPlateLaserProcess(mine) && isTubeLaserProcess(other));
 
+// Which laser a shortage belongs to: 'plate', 'tube', or null for one
+// flagged before shortages knew (setup-shortage-lane.sql). A shortage
+// with no lane is shown to both nesting departments, and says so, rather
+// than vanishing from both.
+const shortageInLane = (shortage, processName) => {
+  if (!shortage?.lane) return true;
+  return isTubeLaserProcess(processName) ? shortage.lane === "tube" : shortage.lane === "plate";
+};
+// A stage that belongs to the OTHER laser from the shortage. Used to
+// keep a tube re-cut off the plate nester's list and vice versa.
+const stageInOtherLane = (shortage, processName) => {
+  if (shortage?.lane === "tube") return isPlateLaserProcess(processName);
+  if (shortage?.lane === "plate") return isTubeLaserProcess(processName);
+  return false;
+};
+const laneLabel = (lane) => (lane === "tube" ? "Tube laser" : lane === "plate" ? "Plate laser" : "");
+
+// How long a shortage has been waiting, in words, from when it was
+// flagged. One day outstanding is already too long: it is work that was
+// supposed to be finished.
+const SHORTAGE_AGE_WARNING_DAYS = 1;
+const shortageAgeDays = (shortage) => {
+  const t = new Date(shortage?.created_at || 0).getTime();
+  if (!t) return null;
+  return Math.floor((Date.now() - t) / 86400000);
+};
+const shortageFlaggedLabel = (shortage) => {
+  const d = new Date(shortage?.created_at || 0);
+  if (!d.getTime()) return `Flagged by ${shortage?.flagged_by || "someone"} (${shortage?.flagged_department || "?"})`;
+  const days = shortageAgeDays(shortage);
+  const age = days === 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`;
+  const when = d.toLocaleString("en-ZA", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  return `Flagged by ${shortage.flagged_by || "someone"} (${shortage.flagged_department || "?"}) · ${age}, ${when}`;
+};
+const shortageIsOverdue = (shortage) => (shortageAgeDays(shortage) ?? 0) >= SHORTAGE_AGE_WARNING_DAYS;
+
 // Where an item is made. Stored as a fixed code, shown as a label, so
 // nobody can end up with "Tube Laser" and "tube laser" as two different
 // things. The database refuses anything else (setup-made-on-tag.sql).
@@ -4620,10 +4656,31 @@ export default function StockControl() {
     }
   }
 
-  function openShortageFlagModal(job, process) {
+  async function openShortageFlagModal(job, process) {
+    // Which laser does this job cut on? A job with one kind of nesting
+    // stage answers for itself; a mixed job has to be asked. Read fresh
+    // rather than from productionQueue, which only holds what this
+    // person is allowed to see.
+    let hasPlate = false;
+    let hasTube = false;
+    try {
+      const { data } = await supabase
+        .from("job_processes")
+        .select("process_name")
+        .eq("job_id", job.id)
+        .is("shortage_id", null);
+      for (const p of data || []) {
+        if (isTubeLaserProcess(p.process_name)) hasTube = true;
+        else if (isPlateLaserProcess(p.process_name)) hasPlate = true;
+      }
+    } catch (err) {
+      console.error("Could not read the job's stages to pick a lane:", err);
+    }
     setShortageModal({
       job,
       process,
+      lanesOnJob: { plate: hasPlate, tube: hasTube },
+      lane: hasPlate && !hasTube ? "plate" : hasTube && !hasPlate ? "tube" : null,
       // Prefilled from the job when nesting has already recorded it, since
       // that is the number the nesting operator needs and retyping it is
       // just a chance to get it wrong. Still editable — a shortage can
@@ -4639,7 +4696,7 @@ export default function StockControl() {
   }
 
   async function submitNewShortage() {
-    const { job, process, boardNumber, lines, reason, isPriority, priorityNote } = shortageModal;
+    const { job, process, boardNumber, lines, reason, isPriority, priorityNote, lane } = shortageModal;
     // Blank rows are ignored rather than rejected — someone adding a line
     // and changing their mind should not have to remove it again.
     const items = (lines || [])
@@ -4678,6 +4735,7 @@ export default function StockControl() {
         status: "flagged",
         is_priority: !!isPriority,
         priority_note: (priorityNote || "").trim(),
+        lane: lane || null,
       });
       if (error) throw error;
 
@@ -4736,7 +4794,13 @@ export default function StockControl() {
       // the right stages even if the job's stored order predates a change
       // to that flow.
       const upTo = flowRank(shortage.flagged_department);
-      const needed = inFlowOrder((jobStages || []).filter((p) => flowRank(p.process_name) <= upTo));
+      // And only the shortage's own laser. On a mixed job the other lane's
+      // nesting and cutting stages are not part of the re-cut.
+      const needed = inFlowOrder(
+        (jobStages || [])
+          .filter((p) => flowRank(p.process_name) <= upTo)
+          .filter((p) => !stageInOtherLane(shortage, p.process_name))
+      );
 
       const { data: already, error: existingError } = await supabase
         .from("job_processes")
@@ -13234,9 +13298,12 @@ export default function StockControl() {
                   // point is carried by its own run, which shows up in the
                   // department's normal list like any other work — a second
                   // marker would be pointing at something already there.
-                  const hasPendingShortage =
-                    !q && isNestingProcess(procType) && (shortagesList || []).some((s) => s.status === "flagged");
-                  return { procType, readyCount, waitingCount, hasPendingShortage };
+                  const pendingHere = !q && isNestingProcess(procType)
+                    ? (shortagesList || []).filter((s) => s.status === "flagged" && shortageInLane(s, procType))
+                    : [];
+                  const hasPendingShortage = pendingHere.length > 0;
+                  const oldestPending = pendingHere.reduce((worst, s) => (shortageAgeDays(s) > (shortageAgeDays(worst) ?? -1) ? s : worst), pendingHere[0] || null);
+                  return { procType, readyCount, waitingCount, hasPendingShortage, oldestPending };
                 })
                 // A department with nothing ready and no shortage needing
                 // attention has nothing to actually do right now — hide it
@@ -13291,7 +13358,7 @@ export default function StockControl() {
                         <ChevronRight size={20} />
                       </button>
                     )}
-                    {visibleDepts.map(({ procType, readyCount, waitingCount, hasPendingShortage }) => {
+                    {visibleDepts.map(({ procType, readyCount, waitingCount, hasPendingShortage, oldestPending }) => {
                 // A department with work on the way but nothing that can
                 // start stays on the list, dimmed: it should know what is
                 // coming, but nobody should walk over to it.
@@ -13308,9 +13375,14 @@ export default function StockControl() {
                     }}
                   >
                     {hasPendingShortage && (
-                      <span style={{ width: 10, height: 10, borderRadius: "50%", background: C.danger, flexShrink: 0 }} title="Shortage needs attention" />
+                      <span style={{ width: 10, height: 10, borderRadius: "50%", background: C.danger, flexShrink: 0 }} title={oldestPending ? shortageFlaggedLabel(oldestPending) : "Shortage needs attention"} />
                     )}
                     <span style={{ flex: 1 }}>{procType}</span>
+                    {hasPendingShortage && oldestPending && (
+                      <span style={{ fontSize: 12, fontWeight: 600, color: C.danger, whiteSpace: "nowrap" }}>
+                        {(() => { const d = shortageAgeDays(oldestPending); return d === 0 ? "shortage today" : `shortage ${d} day${d === 1 ? "" : "s"}`; })()}
+                      </span>
+                    )}
                     {waitingCount > 0 && (
                       <span style={{ fontSize: 13, fontWeight: 500, color: C.muted, whiteSpace: "nowrap" }}>{waitingCount} waiting</span>
                     )}
@@ -13422,6 +13494,7 @@ export default function StockControl() {
                         (jobsList || []).find((j) => j.id === s.job_id) || { job_number: s.job_number, customer: s.customer };
                       const relevant = (shortagesList || [])
                         .filter((s) => s.status === relevantStatus)
+                        .filter((s) => shortageInLane(s, procType))
                         .filter((s) => !productionFiltering || productionJobMatches(shortageJob(s)))
                         .slice()
                         .sort((a, b) => {
@@ -13473,7 +13546,8 @@ export default function StockControl() {
                                 </div>
                                 <div className="stk-meta-row" style={S.rowMeta}>
                                   <span>Reason: {s.reason}</span>
-                                  <span>Flagged by {s.flagged_by} ({s.flagged_department})</span>
+                                  <span style={shortageIsOverdue(s) ? { color: C.danger, fontWeight: 600 } : undefined}>{shortageFlaggedLabel(s)}</span>
+                                  {!s.lane && <span style={{ color: C.muted }}>Laser not set — flagged before that was asked; shows on both nesters</span>}
                                 </div>
                                 {/* There used to be a "Shortage nested" button here, from
                                     before re-cuts went on programs. It set the shortage to
@@ -13590,7 +13664,8 @@ export default function StockControl() {
                                 </div>
                                 <div className="stk-meta-row" style={S.rowMeta}>
                                   <span>Reason: {shortage.reason}</span>
-                                  <span>Flagged by {shortage.flagged_by} at {shortage.flagged_department}</span>
+                                  <span style={shortageIsOverdue(shortage) ? { color: C.danger, fontWeight: 600 } : undefined}>{shortageFlaggedLabel(shortage)}</span>
+                                  {shortage.lane && <span>{laneLabel(shortage.lane)}</span>}
                                 </div>
                               </div>
                             )}
@@ -13897,7 +13972,9 @@ export default function StockControl() {
                             ) : (
                               <span style={{ color: C.muted }}>No quantity set yet</span>
                             )}
-                            {shortage && <span>Originally flagged at {shortage.flagged_department}</span>}
+                            {shortage && (
+                              <span style={shortageIsOverdue(shortage) ? { color: C.danger, fontWeight: 600 } : undefined}>{shortageFlaggedLabel(shortage)}</span>
+                            )}
                             {process.is_urgent && <span style={{ color: C.danger, fontWeight: 600 }}>Urgent</span>}
                           </div>
                         </button>
@@ -20385,6 +20462,29 @@ export default function StockControl() {
                 </select>
               </div>
             </div>
+            {/* Which laser cuts the replacement. Prefilled when the job only
+                has one kind of nesting stage; a mixed job must be told, or
+                the re-cut lands on both nesters' lists. */}
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>
+                Which laser
+                {shortageModal.lanesOnJob?.plate && shortageModal.lanesOnJob?.tube ? " — this job cuts on both, pick one" : ""}
+              </label>
+              <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                {[["plate", "Plate laser"], ["tube", "Tube laser"]].map(([code, label]) => (
+                  <button
+                    key={code}
+                    type="button"
+                    className="stk-btn"
+                    style={{ ...(shortageModal.lane === code ? S.reqActionBtn : S.reqActionBtnMuted), flex: 1, justifyContent: "center" }}
+                    onClick={() => setShortageModal((m) => ({ ...m, lane: code }))}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* On by default. A shortage is work that was supposed to be
                 finished, so it normally jumps the queue — the exception is
                 one that genuinely can wait, and that is worth saying out
@@ -20413,7 +20513,7 @@ export default function StockControl() {
               type="button"
               className="stk-btn"
               style={S.submitBtn}
-              disabled={!shortageModal.lines.some((l) => (l.description || "").trim() && Number(l.qty) > 0)}
+              disabled={!shortageModal.lane || !shortageModal.lines.some((l) => (l.description || "").trim() && Number(l.qty) > 0)}
               onClick={submitNewShortage}
             >
               Flag Shortage

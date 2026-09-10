@@ -57,6 +57,8 @@ with checks (setup_file, looks_for, found) as (
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'stock_items' and column_name = 'sell_price')),
     ('setup-invoice-notes.sql',         'table job_invoice_notes',
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'job_invoice_notes')),
+    ('setup-shortage-lane.sql',           'column shortages.lane',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'shortages' and column_name = 'lane')),
     ('setup-job-documents-move.sql',    'rule: job_documents rows can be changed (Move to...)',
       exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'job_documents' and cmd = 'UPDATE')),
     ('setup-quoting-and-bom.sql',       'table quotes',
