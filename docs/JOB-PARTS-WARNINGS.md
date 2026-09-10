@@ -33,6 +33,25 @@ nothing. Set the cut method on every part, or it will not appear
 anywhere on the floor. The imports set it for you; a part typed by
 hand does not.
 
+**The counter above the items does not count parts.**
+It counts the job's own lines only. So a part left with no cut method
+is not nagged about and Guess the rest cannot be reached to fix it,
+because the button only appears when a line is untagged. Check the
+parts by eye after adding any by hand.
+
+**Leave the cut method blank on a line that has parts.**
+Its parts carry the machines. The line's own cut method is ignored
+entirely while they are there, so there is nothing to set it to. It is
+not counted as untagged and Guess the rest leaves it alone, and the
+box says so if you hover it.
+
+**A line the tube import created carries Tube laser.**
+When the tube nesting import makes a new line to hang its parts on, it
+tags that line Tube laser. Harmless while the parts are on it, because
+the tag is ignored. Not harmless the day somebody takes the parts off:
+it becomes an ordinary line again and that tag starts sending it to
+the tube stages. Clear it then.
+
 **Never set a machine on the stage where parts come together.**
 Setting Welding to "Cuts: Welding" makes Welding stop listing the
 job's own lines and list only welding-tagged parts instead. That is

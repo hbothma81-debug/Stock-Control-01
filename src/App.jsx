@@ -324,6 +324,16 @@ const hasChildLines = (it, all) => !!it && (all || []).some((c) => c.parent_quot
 const childLinesOf = (it, all) => (all || []).filter((c) => c.parent_quote_item_id === it?.id);
 // The lines money is counted on: everything that is not a part.
 const billableLines = (all) => (all || []).filter((it) => !isChildLine(it));
+// Whether a line still wants a cut method set on it.
+//
+// A line that has parts under it never does. Its parts carry the
+// machines, and its own cut method is ignored for as long as they are
+// there -- stageTakesItem gives a line with parts to the stages that
+// have no machine, whatever the line itself says. So it is not counted
+// as untagged and Guess the rest leaves it alone: a tag put on it now
+// would mean nothing today and would quietly start deciding things the
+// day somebody takes its parts off.
+const wantsCutMethod = (it, all) => !it?.made_on && !hasChildLines(it, all);
 
 // Laser Status is not a process type, so it needs a key that no process
 // type could ever collide with.
@@ -5905,7 +5915,9 @@ export default function StockControl() {
   // not. Never touches a line that already has a tag.
   async function guessRestMadeOn(job, quoteItems) {
     if (!supabase) return;
-    const blanks = (quoteItems || []).filter((it) => !it.made_on);
+    // Parts are guessed like any other line; a line that has parts is
+    // left alone, because blank is the right answer for it.
+    const blanks = (quoteItems || []).filter((it) => wantsCutMethod(it, quoteItems));
     let tagged = 0;
     try {
       for (const it of blanks) {
@@ -20368,12 +20380,13 @@ export default function StockControl() {
                     every line on every stage, so the count is here to be
                     noticed and the button to clear it in one press. */}
                 {(() => {
-                  const untagged = billableLines(jobDetail.quoteItems).filter((it) => !it.made_on).length;
+                  const wants = billableLines(jobDetail.quoteItems).filter((it) => !hasChildLines(it, jobDetail.quoteItems));
+                  const untagged = wants.filter((it) => wantsCutMethod(it, jobDetail.quoteItems)).length;
                   if (untagged === 0 || !canEditThisJob) return null;
                   return (
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
                       <span style={{ ...S.roleHint, color: C.accentRaw, fontWeight: 600 }}>
-                        {untagged} of {billableLines(jobDetail.quoteItems).length} not tagged with where they are made
+                        {untagged} of {wants.length} not tagged with where they are made
                       </span>
                       <button
                         type="button"
@@ -20500,9 +20513,16 @@ export default function StockControl() {
                                     // The whole border, not just its colour:
                                     // S.input sets border as one value and
                                     // React refuses to mix the two.
-                                    ...(it.made_on ? {} : { border: `1px solid ${C.accentRaw}` }),
+                                    // Blank is correct on a line that has
+                                    // parts, so it is not marked as
+                                    // wanting attention.
+                                    ...(it.made_on || parts.length > 0 ? {} : { border: `1px solid ${C.accentRaw}` }),
                                   }}
-                                  title="Where this item is made. Decides which cutting stage lists it."
+                                  title={
+                                    parts.length > 0
+                                      ? "Not used while this line has parts: the parts carry the machines, and this line goes to the stages that have none. It matters again if its parts are taken off."
+                                      : "Where this item is made. Decides which cutting stage lists it."
+                                  }
                                 >
                                   <option value="">Made on…</option>
                                   {MADE_ON_OPTIONS.map((o) => (
