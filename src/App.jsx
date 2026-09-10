@@ -5962,6 +5962,69 @@ export default function StockControl() {
     }
   }
 
+  // Moves a line under another one, so it becomes a part of it, or a
+  // part back out to being a line of its own. Both are the same write:
+  // the parent column, set or cleared.
+  //
+  // What it refuses, and why:
+  //
+  //   a line that has parts of its own   parts inside parts are not a
+  //                                      thing here (see the plan); the
+  //                                      parts would be orphaned
+  //   a line already invoiced            money is counted on lines, not
+  //                                      parts, so it would vanish off
+  //                                      the invoice screen
+  //   a line with a delivery note        the note points at a line that
+  //                                      would stop being one
+  async function moveJobLineUnder(job, item, parentId) {
+    if (!supabase || !item) return;
+    const all = jobDetail?.quoteItems || [];
+    const parent = parentId ? all.find((l) => l.id === parentId) : null;
+    if (parentId && !parent) return;
+    if (parentId) {
+      if (hasChildLines(item, all)) {
+        alert(`"${item.description}" has parts of its own, so it cannot go under another line. Take its parts off first.`);
+        return;
+      }
+      if (Number(item.qty_invoiced || 0) > 0) {
+        alert(
+          `${item.qty_invoiced} of "${item.description}" have already been invoiced. A part is not invoiced on its own, so this one has to stay a line.`
+        );
+        return;
+      }
+      if ((jobDetail?.deliveryNotes || []).some((dn) => dn.quote_item_id === item.id)) {
+        alert(`"${item.description}" has a delivery note against it, so it has to stay a line of its own.`);
+        return;
+      }
+      // A part is only listed by a stage that cuts its machine. One with
+      // no cut method would be listed nowhere at all, which is worth
+      // knowing before it disappears off the floor rather than after.
+      const warning = item.made_on
+        ? ""
+        : "\n\nIt has no cut method, so no stage will list it until one is set on it.";
+      if (!window.confirm(`Make "${item.description}" a part of "${parent.description}"?` + warning)) return;
+    } else if (!window.confirm(`Take "${item.description}" out of "${(all.find((l) => l.id === item.parent_quote_item_id) || {}).description || "its line"}" and make it a line of its own?`)) {
+      return;
+    }
+    try {
+      const { error } = await supabase
+        .from("job_quote_items")
+        .update({ parent_quote_item_id: parentId || null })
+        .eq("id", item.id);
+      if (error) throw error;
+      await logJobEvent(
+        job.id,
+        parentId ? "line made a part" : "part made a line",
+        parentId ? `${item.description} under ${parent.description}` : item.description
+      );
+      await openJobDetail(job);
+      fetchJobs();
+    } catch (err) {
+      console.error("Failed to move that line:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
   async function removeJobQuoteItem(job, item) {
     if (!supabase) return;
     if (Number(item.qty_invoiced || 0) > 0) {
@@ -7407,7 +7470,20 @@ export default function StockControl() {
           return [row, ...parts];
         }),
         theme: "grid",
-        headStyles: { fillColor: [27, 29, 31] },
+        headStyles: { fillColor: [27, 29, 31], fontSize: 8 },
+        // Left to itself autoTable sets 10pt, which is bigger than this
+        // sheet's own body text and turns a job with its parts listed
+        // into pages of very large type. 8pt with tighter rows is a
+        // fifth shorter and still easily read at a machine.
+        styles: { fontSize: 8, cellPadding: 1.4 },
+        // The numbers need only their own width; the description gets
+        // what is left, because that is what wraps.
+        columnStyles: {
+          1: { cellWidth: 22 },
+          2: { cellWidth: 16, halign: "right" },
+          3: { cellWidth: 18, halign: "right" },
+          4: { cellWidth: 22, halign: "right" },
+        },
         margin: { left: leftX },
       });
       y = doc.lastAutoTable.finalY + 5;
@@ -20329,6 +20405,12 @@ export default function StockControl() {
                       addPartUnder === it.id
                         ? (items || []).filter((si) => si.mainCat === "custom" && si.customer === jobDetail.job.customer)
                         : [];
+                    // The other lines this one could become a part of:
+                    // every line but itself. A part is not offered,
+                    // because parts do not hold parts.
+                    const moveTargets = billableLines(jobDetail.quoteItems)
+                      .filter((l) => l.id !== it.id)
+                      .map((l) => ({ value: l.id, label: `${Number(l.qty) || 0}× ${l.description || "(no description)"}` }));
                     return (
                       <div key={it.id}>
                       <div style={S.managerRow}>
@@ -20567,15 +20649,29 @@ export default function StockControl() {
                                 </>
                               )}
                               {canEditThisJob && (
-                                <button
-                                  type="button"
-                                  className="stk-btn"
-                                  style={{ ...S.managerDelete, padding: "2px 6px" }}
-                                  onClick={() => removeJobQuoteItem(jobDetail.job, c)}
-                                  title="Take this part off the job"
-                                >
-                                  <Trash2 size={12} />
-                                </button>
+                                <>
+                                  {/* Out of this line and back to being one
+                                      of its own -- the way back from a move
+                                      made by mistake. */}
+                                  <button
+                                    type="button"
+                                    className="stk-btn"
+                                    style={{ ...S.managerDelete, padding: "2px 6px" }}
+                                    onClick={() => moveJobLineUnder(jobDetail.job, c, null)}
+                                    title="Take this part out and make it a line of its own"
+                                  >
+                                    <ChevronLeft size={12} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="stk-btn"
+                                    style={{ ...S.managerDelete, padding: "2px 6px" }}
+                                    onClick={() => removeJobQuoteItem(jobDetail.job, c)}
+                                    title="Take this part off the job"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </>
                               )}
                             </div>
                           ))}
@@ -20709,6 +20805,23 @@ export default function StockControl() {
                                   }}
                                 />
                               </label>
+                              {/* A line that turns out to be a part of
+                                  another one. Offered only where it can
+                                  actually go somewhere: a line with parts
+                                  of its own cannot become a part, and
+                                  there has to be another line to go
+                                  under. */}
+                              {parts.length === 0 && moveTargets.length > 0 && (
+                                <TypeToFind
+                                  style={{ flex: "0 1 190px", minWidth: 140 }}
+                                  options={moveTargets}
+                                  value=""
+                                  onChange={(v) => v && moveJobLineUnder(jobDetail.job, it, v)}
+                                  emptyLabel="Move under…"
+                                  title="Make this line a part of another line on this job"
+                                  inputStyle={{ fontSize: 13, padding: "3px 5px" }}
+                                />
+                              )}
                             </div>
                           )}
                         </div>
