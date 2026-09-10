@@ -6229,6 +6229,25 @@ export default function StockControl() {
     }
   }
 
+  // What accounts needs off a job to raise the invoice in Sage, in the
+  // order they look for it. The PO number comes first and is printed
+  // even when blank -- "not on the job" is information; a missing line
+  // is a guess. A job can be invoiced without one, so it never blocks.
+  function invoiceHeaderLines(job) {
+    const dns = (allDeliveryNotes || [])
+      .filter((d) => d.job_id === job.id)
+      .map((d) => d.delivery_note_number)
+      .filter(Boolean)
+      .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+    return [
+      ["Customer PO", job.customer_po || "— not on the job"],
+      ["Sales rep", job.sales_rep || "—"],
+      job.laser_job_reference ? ["SigmaNest #", job.laser_job_reference] : null,
+      job.description ? ["Description", job.description] : null,
+      ["Delivery notes", dns.length ? dns.join(", ") : "none issued"],
+    ].filter(Boolean);
+  }
+
   // Dates on the invoicing cards. Short, and the same shape on every one
   // of them -- "9 Sep 2026", not the browser's idea of a date, which
   // differs from one machine to the next.
@@ -6792,7 +6811,20 @@ export default function StockControl() {
     doc.text("Customer:", leftX, y);
     doc.setFont(undefined, "normal");
     doc.text(job.customer || "—", leftX + 30, y);
-    y += 10;
+    y += 6;
+    doc.setFontSize(10);
+    for (const [label, value] of invoiceHeaderLines(job)) {
+      doc.setFont(undefined, "bold");
+      doc.text(`${label}:`, leftX, y);
+      doc.setFont(undefined, "normal");
+      // The description is typed prose and can run long; it wraps
+      // rather than running off the page.
+      const wrapped = doc.splitTextToSize(String(value), 180 - 30);
+      doc.text(wrapped, leftX + 30, y);
+      y += 5 * wrapped.length;
+    }
+    doc.setFontSize(11);
+    y += 5;
     const grandTotal = lines.reduce((sum, li) => sum + li.qty * li.unitPrice, 0);
     autoTable(doc, {
       startY: y,
@@ -13978,6 +14010,17 @@ export default function StockControl() {
                         </span>
                       );
                     })()}
+                  </div>
+                  {/* The same lines the request PDF carries, so accounts can
+                      see a missing PO number without opening anything. */}
+                  <div className="stk-meta-row" style={S.rowMeta}>
+                    {invoiceHeaderLines(job)
+                      .filter(([label]) => label !== "Sales rep")
+                      .map(([label, value]) => (
+                        <span key={label} style={label === "Customer PO" && !job.customer_po ? { color: C.danger } : undefined}>
+                          {label}: {value}
+                        </span>
+                      ))}
                   </div>
                   <div style={S.reqActions}>
                     {jobInvoiceRequests.find((r) => r.job_id === job.id) ? (
