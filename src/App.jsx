@@ -3680,10 +3680,8 @@ export default function StockControl() {
       alert("Pick or add a customer before creating the job.");
       return;
     }
-    if (newJobForm.selectedProcesses.length === 0) {
-      alert("Select at least one process this job needs.");
-      return;
-    }
+    // No stage check here any more: stages are ticked on the job itself,
+    // once it exists. The doorway asks only for the customer.
     setJobSubmitting(true);
     try {
       // A brand-new customer, added right here — same info a full Stock
