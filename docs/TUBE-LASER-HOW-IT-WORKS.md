@@ -108,8 +108,8 @@ Stage rules, in App.jsx beside the plate ones:
   Laser stage is its packing and shows as a re-cut row on Packing.
 - **Take job** sets started_at/by and assigned_to on the Tube Laser
   stage, as on Packer. For that to open the stages after it, the Tube
-  Laser stage needs "releases on start" ticked under Stock Manager → Job
-  Process Types. That is a setting Heinrich sets, not code.
+  Laser stage needs "releases on start" in process_type_settings, which
+  `setup-tube-laser-stages.sql` sets. There is no tick box for it.
 - **Program numbers are unique per machine**, not across both. The old
   index went; `laser_programs_machine_number_live_idx` replaces it.
 - **Two data loads.** The tube hook loads the same job tables the plate
@@ -139,10 +139,12 @@ with whoever else touches `next_laser_program_number`.
 1. Run `setup-tube-laser.sql` on practice, check four rows say ready,
    then on live.
 2. Push the build.
-3. Under Stock Manager → Job Process Types: tick "releases on start" on
-   Tube Laser; hide Tube Laser Nesting and Tube Laser from Production
-   once the tab is in use (the nesting-name box on the Production card
-   goes with the card; nothing was removed by code).
+3. Run `setup-tube-laser-stages.sql`. It sets "releases on start" on
+   the Tube Laser stage and hides both tube stages from Production. Those
+   three stage settings have no tick box in the app; they have only ever
+   been set by SQL (see `setup-hide-from-production.sql`). The
+   nesting-name box on the Production card goes with the card; nothing
+   was removed by code.
 4. Under Time Manager, tick "the tube laser cuts on this shift" on the
    right shifts. Until then the tube screens read every shift and say so.
 5. The tube nester and operator need the tube stages under User
