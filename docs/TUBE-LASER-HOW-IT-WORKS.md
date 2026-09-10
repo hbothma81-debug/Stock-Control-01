@@ -37,8 +37,17 @@ COFFEE TABLE job as the example of what the operator receives.
   shown at the end, to type into the software. New program by hand
   stays for the odd nest. Parser: `src/laser/nestingReport.js`, tested
   against the MARCH and BOOTH DOORS exports.
-- **Material is the section**, picked off the Structural Steel list
-  under Stock Manager. No thickness, no grade, no sheet name.
+- **Material is a real stock line.** The section box (on Nest it, New
+  program and the import) is a type-to-find over the structural stock
+  rows: each reads section, grade (mild steel or stainless), length in
+  metres, and what is free to take, with anything already set aside for
+  this job first. Picking it stores "section grade" on the program and
+  **reserves that many lengths** for the first job on the program,
+  against its tube nesting stage, through the same allocation the Pull
+  from stock screen makes. A line with 0 available can still be picked
+  and offers "Request stock to order" to whoever may requisition.
+  `src/laser/stockOptions.js` (tested) builds the list;
+  `StockSectionPicker.jsx` is the box. No thickness, no sheet name.
 - **The repeat is a length.** A program is cut off N lengths of section
   (the report's "Tube Count"); the operator ticks them off one at a
   time, as sheets on plate.

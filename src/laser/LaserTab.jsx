@@ -48,6 +48,11 @@ export default function LaserTab({
   // Only on a laser that packs on its own tab: everything the Packing
   // screen needs, built by App.jsx from this laser's data.
   packing,
+  // For a laser whose section picker is real stock: the stock rows, and
+  // the requisition form for a section with nothing on the shelf.
+  items,
+  canRequisition,
+  openRequisition,
 }) {
   const {
     laserData,
@@ -158,6 +163,10 @@ export default function LaserTab({
                     grades={(master.grades || []).map((g) => g.shortName || g.name)}
                     sheetNames={master.sheetNames || []}
                     sections={sectionNames(master)}
+                    stockItems={items || []}
+                    allocations={laserData ? laserData.allocations || [] : []}
+                    canRequisition={!!canRequisition}
+                    onRequisition={openRequisition}
                     aliases={laserData ? laserData.aliases || [] : []}
                     canManage={canNest}
                     onClearReport={clearProgramReport}

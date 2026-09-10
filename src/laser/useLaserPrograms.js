@@ -36,6 +36,9 @@ export default function useLaserPrograms(deps) {
     markShortageNested,
     shortageSummary,
     refreshShortageStatus,
+    // Sets stock aside for a job's stage (job, process, item, qty);
+    // the tube nester picks a real stock line, and that reserves it.
+    reserveStock,
   } = deps;
   // The stage-name rules, under the names the code below has always used.
   const isPlateNestingProcess = machine.isNestingStage;
@@ -530,7 +533,29 @@ export default function useLaserPrograms(deps) {
     return data;
   }
 
-  async function createLaserProgram({ program_number, nesting_name, material, sheet_name, sheets_required, cut_minutes, jobs }) {
+  // `reserve` ({ item, qty }) sets that many of a stock line aside for the
+  // first job on the program, against its nesting stage -- the tube
+  // laser's way: picking the section is picking the stock. Not fatal if
+  // it cannot: the program is real either way, and Pull from stock is
+  // still there.
+  async function reserveForProgram(jobs, reserve) {
+    if (!reserve || !reserve.item || !(Number(reserve.qty) > 0) || typeof reserveStock !== "function") return;
+    const first = (jobs || [])[0];
+    const job = first ? (jobsList || []).find((j) => j.id === first.job_id) : null;
+    const stage = first
+      ? (laserData?.processes || []).find(
+          (pr) => pr.job_id === first.job_id && !pr.shortage_id && isPlateNestingProcess(pr.process_name)
+        )
+      : null;
+    if (!job || !stage) {
+      console.warn("No nesting stage to set the stock aside against; nothing reserved.");
+      return;
+    }
+    const ok = await reserveStock(job, stage, reserve.item, Number(reserve.qty));
+    if (!ok) alert("The program was made, but the stock could not be set aside for it. Use Pull from stock on the job.");
+  }
+
+  async function createLaserProgram({ program_number, nesting_name, material, sheet_name, sheets_required, cut_minutes, jobs, reserve }) {
     if (!supabase) return false;
     try {
       // A typed number is the nester's; a generated one comes from the
@@ -579,6 +604,7 @@ export default function useLaserPrograms(deps) {
         const sh = (laserData?.shortages || []).find((x) => x.id === j.shortage_id);
         if (sh && sh.status === "flagged") await markShortageNested(sh);
       }
+      await reserveForProgram(jobs, reserve);
       await fetchLaserData();
       // Truthy for the screens that only ask "did it work"; the number
       // for the import, which shows what was handed out.
@@ -615,6 +641,7 @@ export default function useLaserPrograms(deps) {
         material: s.material,
         sheets_required: s.lengths,
         jobs,
+        reserve: s.item ? { item: s.item, qty: s.lengths } : null,
       });
       if (!result) {
         if (made.length) {

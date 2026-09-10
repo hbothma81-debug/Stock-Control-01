@@ -6,6 +6,8 @@ import Section from "../Section.jsx";
 import TypeToFind from "../TypeToFind.jsx";
 import { programTitle } from "./programTitle.js";
 import ImportReportModal from "./ImportReportModal.jsx";
+import StockSectionPicker from "./StockSectionPicker.jsx";
+import { stockOptions } from "./stockOptions.js";
 
 // Prince's screen, and very nearly the only one he uses.
 //
@@ -79,6 +81,13 @@ export default function NestingView({
   grades,
   sheetNames,
   sections,
+  // The tube laser's section picker is real stock: the structural stock
+  // rows, every allocation (to say what is set aside and for whom), and
+  // the requisition form for a section with nothing on the shelf.
+  stockItems,
+  allocations,
+  canRequisition,
+  onRequisition,
   aliases,
   canManage,
   onClearReport,
@@ -122,8 +131,8 @@ export default function NestingView({
   const [newName, setNewName] = useState("");
   const [newThickness, setNewThickness] = useState("");
   const [newGrade, setNewGrade] = useState("");
-  // The section, on a laser whose material is picked off one list.
-  const [newMaterial, setNewMaterial] = useState("");
+  // The stock line, on a laser whose section is picked off real stock.
+  const [newStock, setNewStock] = useState(null);
   const [picked, setPicked] = useState([]);
   const [jobQuery, setJobQuery] = useState("");
   const [saving, setSaving] = useState(false);
@@ -133,6 +142,12 @@ export default function NestingView({
     () => matchCandidates(candidates.filter((c) => !picked.some((x) => x.key === c.key)), jobQuery),
     [candidates, jobQuery, picked]
   );
+  // What is set aside "for this job" follows the first job put on the
+  // program, since that is the job the stock is reserved against.
+  const stockChoices = useMemo(
+    () => (w.bySections ? stockOptions(stockItems, allocations, picked[0]?.job_id) : []),
+    [w.bySections, stockItems, allocations, picked]
+  );
 
   function resetBuilder() {
     setBuilding(false);
@@ -140,14 +155,14 @@ export default function NestingView({
     setNewName("");
     setNewThickness("");
     setNewGrade("");
-    setNewMaterial("");
+    setNewStock(null);
     setNewMinutes("");
     setPicked([]);
     setJobQuery("");
   }
 
   const identified = w.generated ? !!newName.trim() : !!newNumber.trim();
-  const materialPicked = w.bySections ? !!newMaterial : !!newThickness && !!newGrade;
+  const materialPicked = w.bySections ? !!newStock : !!newThickness && !!newGrade;
   const canSubmit = identified && materialPicked && picked.length > 0 && !saving;
 
   async function submitProgram() {
@@ -157,10 +172,13 @@ export default function NestingView({
       const ok = await onCreateProgram({
         program_number: newNumber.trim(),
         nesting_name: newName.trim(),
-        material: w.bySections ? newMaterial : `${newThickness} ${newGrade}`,
+        material: w.bySections ? newStock.material : `${newThickness} ${newGrade}`,
         sheet_name: w.hasSheet ? newSheet.trim() : "",
         sheets_required: newRepeats,
         cut_minutes: w.hasTime ? newMinutes : "",
+        // Picking the stock line is picking the stock: that many lengths
+        // are set aside for the first job on the program.
+        reserve: w.bySections && newStock ? { item: newStock.item, qty: newRepeats } : null,
         jobs: picked.map((c) => ({
           job_id: c.job_id,
           shortage_id: c.shortage_id || null,
@@ -246,7 +264,10 @@ export default function NestingView({
       {importing && (
         <ImportReportModal
           candidates={candidates}
-          sections={sections || []}
+          stockItems={stockItems || []}
+          allocations={allocations || []}
+          canRequisition={canRequisition}
+          onRequisition={onRequisition}
           aliases={aliases || []}
           programs={programs}
           onImport={onImportReport}
@@ -312,9 +333,15 @@ export default function NestingView({
                 </div>
               )}
               {w.bySections ? (
-                <div style={{ flex: "1 1 200px" }}>
-                  <label style={S.label}>Section</label>
-                  <TypeToFind options={sections || []} value={newMaterial} onChange={setNewMaterial} emptyLabel="Pick…" />
+                <div style={{ flex: "2 1 320px" }}>
+                  <label style={S.label}>Section, from stock</label>
+                  <StockSectionPicker
+                    options={stockChoices}
+                    value={newStock?.value || ""}
+                    onChange={setNewStock}
+                    canRequisition={canRequisition}
+                    onRequisition={onRequisition}
+                  />
                 </div>
               ) : (
                 <>
@@ -374,14 +401,12 @@ export default function NestingView({
             {w.generated && (
               <div style={S.roleHint}>
                 The program number is handed out when you press Create. Save the nest under that number in the
-                machine's software. One section per program — do not mix sections.
+                machine's software. One section per program — do not mix sections. The lengths are set aside for
+                the first job on the program.
               </div>
             )}
             {!w.bySections && thicknesses.length === 0 && (
               <div style={S.roleHint}>No thicknesses set up yet — add them under Stock Manager → Laser Thicknesses.</div>
-            )}
-            {w.bySections && (sections || []).length === 0 && (
-              <div style={S.roleHint}>No sections set up yet — add them under Stock Manager → Structural Steel.</div>
             )}
 
             <div>
@@ -492,7 +517,10 @@ export default function NestingView({
                 machine={machine}
                 thicknesses={thicknesses}
                 grades={grades}
-                sections={sections}
+                stockItems={stockItems}
+                allocations={allocations}
+                canRequisition={canRequisition}
+                onRequisition={onRequisition}
                 canManage={canManage}
                 expanded={openRow === r.key}
                 onToggle={() => setOpenRow((k) => (k === r.key ? null : r.key))}
@@ -601,7 +629,10 @@ function NestRow({
   thicknesses,
   grades,
   sheetNames,
-  sections,
+  stockItems,
+  allocations,
+  canRequisition,
+  onRequisition,
   canManage,
 
   expanded,
@@ -617,7 +648,8 @@ function NestRow({
   const [nestingName, setNestingName] = useState("");
   const [thickness, setThickness] = useState("");
   const [grade, setGrade] = useState("");
-  const [section, setSection] = useState("");
+  // The stock line picked, on the tube laser.
+  const [stockPick, setStockPick] = useState(null);
   const [alsoOn, setAlsoOn] = useState([]);
   const [alsoQuery, setAlsoQuery] = useState("");
   const [sheet, setSheet] = useState("");
@@ -625,6 +657,10 @@ function NestRow({
   const [minutes, setMinutes] = useState("");
   const [saving, setSaving] = useState(false);
   const w = machineWords(machine);
+  const stockChoices = useMemo(
+    () => (w.bySections ? stockOptions(stockItems, allocations, r.job?.id) : []),
+    [w.bySections, stockItems, allocations, r.job?.id]
+  );
 
   const sigmanest = r.job?.laser_job_reference || r.shortage?.board_number || "";
   const programText = r.onPrograms && r.onPrograms.length > 0 ? r.onPrograms.map((p) => programTitle(p)).join(", ") : "";
@@ -650,7 +686,7 @@ function NestRow({
   })();
 
   const identified = w.generated ? !!nestingName.trim() : !!programNumber.trim();
-  const materialPicked = w.bySections ? !!section : !!thickness && !!grade;
+  const materialPicked = w.bySections ? !!stockPick : !!thickness && !!grade;
   const canCreate = identified && materialPicked && !!r.candidate && !saving;
 
   async function create() {
@@ -666,8 +702,11 @@ function NestRow({
         cut_minutes: w.hasTime ? minutes : "",
         // Stored as one line the way the machine reads it, built from the
         // two lists so nobody types "1.2mm MS" three different ways. On
-        // the tube laser it is the section, as named under Structural Steel.
-        material: w.bySections ? section : `${thickness} ${grade}`,
+        // the tube laser it is the stock line's section and grade.
+        material: w.bySections ? stockPick.material : `${thickness} ${grade}`,
+        // Picking the stock line is picking the stock: that many lengths
+        // are set aside for this job.
+        reserve: w.bySections && stockPick ? { item: stockPick.item, qty: repeats } : null,
         jobs: chosen.map((c) => ({
           job_id: c.job_id,
           shortage_id: c.shortage_id || null,
@@ -679,7 +718,7 @@ function NestRow({
         setNestingName("");
         setThickness("");
         setGrade("");
-        setSection("");
+        setStockPick(null);
         setSheet("");
         setMinutes("");
         setAlsoOn([]);
@@ -868,9 +907,15 @@ function NestRow({
                   </div>
                 )}
                 {w.bySections ? (
-                  <div style={{ flex: "1 1 200px" }}>
-                    <label style={S.label}>Section</label>
-                    <TypeToFind options={sections || []} value={section} onChange={setSection} emptyLabel="Pick…" />
+                  <div style={{ flex: "2 1 320px" }}>
+                    <label style={S.label}>Section, from stock</label>
+                    <StockSectionPicker
+                      options={stockChoices}
+                      value={stockPick?.value || ""}
+                      onChange={setStockPick}
+                      canRequisition={canRequisition}
+                      onRequisition={onRequisition}
+                    />
                   </div>
                 ) : (
                   <>
@@ -930,14 +975,12 @@ function NestRow({
               {w.generated && (
                 <div style={S.roleHint}>
                   The program number is handed out when you press Nest it. Save the nest under that number in the
-                  machine's software. One section per program — do not mix sections.
+                  machine's software. One section per program — do not mix sections. The lengths are set aside for
+                  this job.
                 </div>
               )}
               {!w.bySections && thicknesses.length === 0 && (
                 <div style={S.roleHint}>No thicknesses set up yet — add them under Stock Manager → Laser Thicknesses.</div>
-              )}
-              {w.bySections && (sections || []).length === 0 && (
-                <div style={S.roleHint}>No sections set up yet — add them under Stock Manager → Structural Steel.</div>
               )}
 
               <div>

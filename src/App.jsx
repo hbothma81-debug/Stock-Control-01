@@ -1495,6 +1495,7 @@ export default function StockControl() {
     markShortageNested,
     shortageSummary,
     refreshShortageStatus,
+    reserveStock: reserveStockForProcess,
   };
   const laser = useLaserPrograms({ ...laserDeps, machine: PLATE_LASER });
   const tubeLaser = useLaserPrograms({ ...laserDeps, machine: TUBE_LASER });
@@ -3952,8 +3953,18 @@ export default function StockControl() {
   // the shelf. It only drops when an operator books the material out.
   async function allocateStockToProcess(item, qty) {
     const { job, process } = allocateModal;
+    if (await reserveStockForProcess(job, process, item, qty)) {
+      setAllocateModal(null);
+      refreshJobDetail();
+    }
+  }
+
+  // The reservation itself, apart from the modal, so the tube nester's
+  // section picker can set stock aside for a program without opening
+  // one. True when it saved.
+  async function reserveStockForProcess(job, process, item, qty) {
     const amount = Number(qty);
-    if (!amount || amount <= 0) return;
+    if (!amount || amount <= 0 || !job || !process || !item) return false;
     try {
       const { error } = await supabase.from("job_allocations").insert({
         id: uid(),
@@ -3971,14 +3982,14 @@ export default function StockControl() {
         status: "open",
       });
       if (error) throw error;
-      setAllocateModal(null);
-      refreshJobDetail();
       // The stock screens show what is reserved too, so they need telling
       // as much as the job screen does.
       fetchAllocations();
+      return true;
     } catch (err) {
       console.error("Failed to allocate stock:", err);
       alert(`Couldn't allocate that: ${err.message || "unknown error"}. If this mentions a missing table, setup-job-allocations.sql hasn't been run yet in Supabase.`);
+      return false;
     }
   }
 
@@ -13395,6 +13406,9 @@ export default function StockControl() {
           setPullStockModal={setPullStockModal}
           viewJobDocument={viewJobDocument}
           openDrawingPreview={openDrawingPreview}
+          items={items}
+          canRequisition={canRequisition}
+          openRequisition={openRequisition}
           packing={tubePackingProps({ canTake: false })}
         />
       ) : tab === "production" ? (

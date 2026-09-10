@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import { X, Upload, Check } from "lucide-react";
 import { C, S } from "../theme.js";
-import TypeToFind from "../TypeToFind.jsx";
+import StockSectionPicker from "./StockSectionPicker.jsx";
+import { stockOptions, optionForMaterial } from "./stockOptions.js";
 import { parseNestingList, findNestingListSheet, nestsNote, referenceFromFileName } from "./nestingReport.js";
 
 // Bringing in the tube software's spreadsheet export, so the nester does
@@ -20,7 +21,10 @@ import { parseNestingList, findNestingListSheet, nestsNote, referenceFromFileNam
 // Three steps on one screen: pick, check, done.
 export default function ImportReportModal({
   candidates,
-  sections,
+  stockItems,
+  allocations,
+  canRequisition,
+  onRequisition,
   aliases,
   programs,
   onImport,
@@ -31,15 +35,26 @@ export default function ImportReportModal({
   const [error, setError] = useState("");
   const [reading, setReading] = useState(false);
   const [reference, setReference] = useState("");
-  // Each section's chosen list entry, by the software's wording.
+  // Each section's chosen stock line (its id), by the software's wording.
   const [chosen, setChosen] = useState({});
   const [picked, setPicked] = useState([]);
   const [jobQuery, setJobQuery] = useState("");
   const [saving, setSaving] = useState(false);
   const [made, setMade] = useState(null);
 
+  // The stock lines to pick from. What is "set aside for this job"
+  // follows the first job picked; the ids stay the same whichever job
+  // it is, so a choice made before the job is picked still stands.
+  const options = useMemo(
+    () => stockOptions(stockItems, allocations, picked[0]?.job_id),
+    [stockItems, allocations, picked]
+  );
+  const optionOf = (reportSection) => options.find((o) => o.value === chosen[reportSection]) || null;
+
   const aliasFor = (reportSection) =>
     (aliases || []).find((a) => a.report_section === reportSection)?.section_name || "";
+  // The stock line the remembered wording points at, if it still exists.
+  const remembered = (reportSection) => optionForMaterial(options, aliasFor(reportSection));
 
   async function readFile(file) {
     if (!file) return;
@@ -64,7 +79,7 @@ export default function ImportReportModal({
       setFileName(file.name);
       setReference(referenceFromFileName(file.name));
       const first = {};
-      for (const s of result.sections) first[s.reportSection] = aliasFor(s.reportSection);
+      for (const s of result.sections) first[s.reportSection] = remembered(s.reportSection)?.value || "";
       setChosen(first);
     } catch (err) {
       console.error("Could not read the nesting report:", err);
@@ -92,14 +107,14 @@ export default function ImportReportModal({
   // cut list: the same file brought in twice. Said, not stopped -- a
   // second batch of the same section is a real thing too.
   const alreadyThere = (reportSection) => {
-    const material = chosen[reportSection];
+    const material = optionOf(reportSection)?.material;
     if (!material || !reference.trim()) return false;
     return (programs || []).some(
       (p) => !p.is_cancelled && (p.nesting_name || "").trim().toLowerCase() === reference.trim().toLowerCase() && p.material === material
     );
   };
 
-  const allChosen = parsed ? parsed.sections.every((s) => !!chosen[s.reportSection]) : false;
+  const allChosen = parsed ? parsed.sections.every((s) => !!optionOf(s.reportSection)) : false;
   const canCreate = !!parsed && allChosen && picked.length > 0 && !!reference.trim() && !saving;
 
   async function create() {
@@ -108,12 +123,16 @@ export default function ImportReportModal({
     try {
       const result = await onImport({
         nesting_name: reference.trim(),
-        sections: parsed.sections.map((s) => ({
-          reportSection: s.reportSection,
-          material: chosen[s.reportSection],
-          lengths: s.tubes,
-          note: `From ${fileName}: ${nestsNote(s)}`,
-        })),
+        sections: parsed.sections.map((s) => {
+          const o = optionOf(s.reportSection);
+          return {
+            reportSection: s.reportSection,
+            material: o.material,
+            item: o.item,
+            lengths: s.tubes,
+            note: `From ${fileName}: ${nestsNote(s)}`,
+          };
+        }),
         jobs: picked.map((c) => ({ job_id: c.job_id, shortage_id: null, sigmanest_number: c.sigmanest || "" })),
       });
       if (result) setMade(result);
@@ -265,13 +284,14 @@ export default function ImportReportModal({
                             <div style={S.roleHint}>The software calls it</div>
                             <div style={{ fontSize: 14, fontWeight: 600 }}>{s.reportSection}</div>
                           </div>
-                          <div style={{ flex: "1 1 200px" }}>
-                            <label style={S.label}>On the Structural Steel list it is</label>
-                            <TypeToFind
-                              options={sections || []}
+                          <div style={{ flex: "2 1 300px" }}>
+                            <label style={S.label}>In stock it is</label>
+                            <StockSectionPicker
+                              options={options}
                               value={chosen[s.reportSection] || ""}
-                              onChange={(v) => setChosen((prev) => ({ ...prev, [s.reportSection]: v }))}
-                              emptyLabel="Pick…"
+                              onChange={(o) => setChosen((prev) => ({ ...prev, [s.reportSection]: o ? o.value : "" }))}
+                              canRequisition={canRequisition}
+                              onRequisition={onRequisition}
                             />
                           </div>
                           <div style={{ flex: "0 0 auto", textAlign: "right" }}>
@@ -280,7 +300,7 @@ export default function ImportReportModal({
                           </div>
                         </div>
                         <div style={{ ...S.roleHint, marginTop: 4 }}>{nestsNote(s)}</div>
-                        {aliasFor(s.reportSection) && chosen[s.reportSection] === aliasFor(s.reportSection) && (
+                        {remembered(s.reportSection) && chosen[s.reportSection] === remembered(s.reportSection).value && (
                           <div style={S.roleHint}>Remembered from last time.</div>
                         )}
                         {alreadyThere(s.reportSection) && (
@@ -292,11 +312,9 @@ export default function ImportReportModal({
                       </div>
                     ))}
                   </div>
-                  {(sections || []).length === 0 && (
-                    <div style={{ ...S.roleHint, color: C.danger }}>
-                      No sections set up under Stock Manager → Structural Steel, so nothing can be picked.
-                    </div>
-                  )}
+                  <div style={{ ...S.roleHint, marginTop: 6 }}>
+                    Each section's lengths are set aside for the first job picked, against its nesting stage.
+                  </div>
                 </div>
 
                 <button
@@ -310,7 +328,7 @@ export default function ImportReportModal({
                     ? "Making programs…"
                     : `Create ${parsed.sections.length === 1 ? "program" : `${parsed.sections.length} programs`}`}
                 </button>
-                {parsed && !allChosen && <div style={S.roleHint}>Pick a list entry for every section first.</div>}
+                {parsed && !allChosen && <div style={S.roleHint}>Pick a stock line for every section first.</div>}
                 {parsed && allChosen && picked.length === 0 && <div style={S.roleHint}>Pick the job first.</div>}
               </>
             )}
