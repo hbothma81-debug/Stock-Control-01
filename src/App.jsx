@@ -13077,6 +13077,7 @@ export default function StockControl() {
                 </button>
               );
 
+              const jobsWith = (status) => jobsList.filter((j) => j.status === status && matchesFilters(j));
               return (
                 <>
                   <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
@@ -13137,12 +13138,27 @@ export default function StockControl() {
 
                   <Section
                     title="Active"
-                    count={jobsList.filter((j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j)).length}
+                    count={jobsWith("in_progress").length}
                   >
                     <div style={S.managerListFullPage}>
-                      {jobsList.filter((j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j)).map(renderJobRow)}
-                      {jobsList.filter((j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j)).length === 0 && (
-                        <div style={S.empty}>Nothing matches that.</div>
+                      {jobsWith("in_progress").map(renderJobRow)}
+                      {jobsWith("in_progress").length === 0 && <div style={S.empty}>Nothing matches that.</div>}
+                    </div>
+                  </Section>
+
+                  {/* A job's life on this page: Active while the floor has it,
+                      To invoice once every stage is ticked, Completed once
+                      accounts has raised the invoice. The moves are automatic:
+                      the last tick sets Complete, Mark as Invoiced sets Invoiced.
+                      Nobody drags anything. */}
+                  <Section
+                    title="To invoice"
+                    count={jobsWith("complete").length}
+                  >
+                    <div style={S.managerListFullPage}>
+                      {jobsWith("complete").map(renderJobRow)}
+                      {jobsWith("complete").length === 0 && (
+                        <div style={S.empty}>Nothing finished and waiting on an invoice.</div>
                       )}
                     </div>
                   </Section>
@@ -13150,13 +13166,11 @@ export default function StockControl() {
                   <Section
                     title="Completed"
                     defaultOpen={false}
-                    count={jobsList.filter((j) => j.status === "invoiced" && matchesFilters(j)).length}
+                    count={jobsWith("invoiced").length}
                   >
                     <div style={S.managerListFullPage}>
-                      {jobsList.filter((j) => j.status === "invoiced" && matchesFilters(j)).map(renderJobRow)}
-                      {jobsList.filter((j) => j.status === "invoiced" && matchesFilters(j)).length === 0 && (
-                        <div style={S.empty}>Nothing matches that.</div>
-                      )}
+                      {jobsWith("invoiced").map(renderJobRow)}
+                      {jobsWith("invoiced").length === 0 && <div style={S.empty}>Nothing matches that.</div>}
                     </div>
                   </Section>
                 </>
