@@ -3,7 +3,31 @@ import { X, Upload, Check } from "lucide-react";
 import { C, S } from "../theme.js";
 import StockSectionPicker from "./StockSectionPicker.jsx";
 import { stockOptions, optionForMaterial } from "./stockOptions.js";
-import { parseNestingList, findNestingListSheet, nestsNote, referenceFromFileName } from "./nestingReport.js";
+import TypeToFind from "../TypeToFind.jsx";
+import {
+  parseNestingList,
+  parsePartInfo,
+  findNestingListSheet,
+  findSheet,
+  PART_INFO_SHEET,
+  nestsNote,
+  referenceFromFileName,
+} from "./nestingReport.js";
+
+// Which of the job's lines the parts go under. One tube-tagged line
+// picks itself; one line of any kind picks itself; none means a new
+// line from the reference; more than one is asked.
+export const NEW_PARENT = "__new__";
+export function parentChoices(jobLines, jobId) {
+  const lines = (jobLines || []).filter((l) => l.job_id === jobId && !l.parent_quote_item_id);
+  const options = [
+    ...lines.map((l) => ({ value: String(l.id), label: `${Number(l.qty) || 0}× ${l.description || "(no description)"}` })),
+    { value: NEW_PARENT, label: "A new line, named after the reference" },
+  ];
+  const tube = lines.filter((l) => l.made_on === "tube_laser");
+  const auto = tube.length === 1 ? tube[0] : lines.length === 1 ? lines[0] : null;
+  return { options, initial: auto ? String(auto.id) : lines.length === 0 ? NEW_PARENT : "" };
+}
 
 // Bringing in the tube software's spreadsheet export, so the nester does
 // not type programs by hand.
@@ -27,6 +51,8 @@ export default function ImportReportModal({
   onRequisition,
   aliases,
   programs,
+  // Every job's lines, so the parts can go under the right one.
+  jobLines,
   onImport,
   onClose,
 }) {
@@ -41,6 +67,18 @@ export default function ImportReportModal({
   const [jobQuery, setJobQuery] = useState("");
   const [saving, setSaving] = useState(false);
   const [made, setMade] = useState(null);
+  // The job line the parts go under. Settled when the first job is
+  // picked; asked only when the job has several lines.
+  const [parent, setParent] = useState("");
+  const parentPick = useMemo(() => parentChoices(jobLines, picked[0]?.job_id), [jobLines, picked]);
+  function pickJob(c) {
+    setPicked((prev) => {
+      const next = [...prev, c];
+      if (prev.length === 0) setParent(parentChoices(jobLines, c.job_id).initial);
+      return next;
+    });
+    setJobQuery("");
+  }
 
   // The stock lines to pick from. What is "set aside for this job"
   // follows the first job picked; the ids stay the same whichever job
@@ -75,6 +113,23 @@ export default function ImportReportModal({
       }
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, blankrows: false, defval: "" });
       const result = parseNestingList(rows);
+      // The parts, off the Part Info sheet, matched to their section.
+      // A report without that sheet still makes programs, with no parts.
+      const partSheet = findSheet(wb.SheetNames, PART_INFO_SHEET);
+      if (partSheet) {
+        const partRows = XLSX.utils.sheet_to_json(wb.Sheets[partSheet], { header: 1, blankrows: false, defval: "" });
+        const { sections: partSections } = parsePartInfo(partRows);
+        for (const s of result.sections) {
+          const ps = partSections.find((x) => x.reportSection === s.reportSection);
+          s.parts = ps ? ps.parts : [];
+          s.partCount = ps ? ps.partCount : 0;
+        }
+      } else {
+        for (const s of result.sections) {
+          s.parts = [];
+          s.partCount = 0;
+        }
+      }
       setParsed(result);
       setFileName(file.name);
       setReference(referenceFromFileName(file.name));
@@ -115,7 +170,9 @@ export default function ImportReportModal({
   };
 
   const allChosen = parsed ? parsed.sections.every((s) => !!optionOf(s.reportSection)) : false;
-  const canCreate = !!parsed && allChosen && picked.length > 0 && !!reference.trim() && !saving;
+  const hasParts = parsed ? parsed.sections.some((s) => (s.parts || []).length > 0) : false;
+  const parentSettled = !hasParts || !!parent;
+  const canCreate = !!parsed && allChosen && picked.length > 0 && !!reference.trim() && parentSettled && !saving;
 
   async function create() {
     if (!canCreate) return;
@@ -130,10 +187,12 @@ export default function ImportReportModal({
             material: o.material,
             item: o.item,
             lengths: s.tubes,
+            parts: s.parts || [],
             note: `From ${fileName}: ${nestsNote(s)}`,
           };
         }),
         jobs: picked.map((c) => ({ job_id: c.job_id, shortage_id: null, sigmanest_number: c.sigmanest || "" })),
+        parent_line_id: parent && parent !== NEW_PARENT ? parent : null,
       });
       if (result) setMade(result);
     } finally {
@@ -169,6 +228,9 @@ export default function ImportReportModal({
                 </span>
               </div>
             ))}
+            {hasParts && (
+              <div style={S.roleHint}>The parts are on the job's Items tab, under {parent === NEW_PARENT ? "a new line" : "the line you picked"}.</div>
+            )}
             <button type="button" className="stk-btn" style={S.submitBtn} onClick={onClose}>
               <Check size={14} /> Done
             </button>
@@ -252,10 +314,7 @@ export default function ImportReportModal({
                             type="button"
                             className="stk-btn"
                             style={{ ...S.suggestItem, width: "100%", textAlign: "left" }}
-                            onClick={() => {
-                              setPicked((prev) => [...prev, c]);
-                              setJobQuery("");
-                            }}
+                            onClick={() => pickJob(c)}
                           >
                             <b>{c.job_number}</b> {c.customer || "no customer"}
                           </button>
@@ -267,6 +326,20 @@ export default function ImportReportModal({
                     <div style={{ ...S.roleHint, marginTop: 6 }}>Nothing matches that. The job has to be in the app already.</div>
                   )}
                 </div>
+
+                {/* ---- which line the parts go under ---- */}
+                {hasParts && picked.length > 0 && (
+                  <div>
+                    <label style={S.label}>The parts go under</label>
+                    <TypeToFind options={parentPick.options} value={parent} onChange={setParent} emptyLabel="Pick the job's line…" />
+                    <div style={{ ...S.roleHint, marginTop: 4 }}>
+                      {parsed.sections.reduce((n, s) => n + (s.parts || []).length, 0)} parts,{" "}
+                      {parsed.sections.reduce((n, s) => n + (s.partCount || 0), 0)} off, go on {picked[0].job_number} as lines under
+                      this one, with their lengths. That line stays the one that is invoiced; the parts are what the tube laser
+                      cuts and packs.
+                    </div>
+                  </div>
+                )}
 
                 {/* ---- the programs it will make ---- */}
                 <div>
@@ -299,7 +372,10 @@ export default function ImportReportModal({
                             <div style={{ fontSize: 18, fontWeight: 700 }}>{s.tubes}</div>
                           </div>
                         </div>
-                        <div style={{ ...S.roleHint, marginTop: 4 }}>{nestsNote(s)}</div>
+                        <div style={{ ...S.roleHint, marginTop: 4 }}>
+                          {nestsNote(s)}
+                          {(s.parts || []).length > 0 ? ` · ${s.partCount} parts: ${s.parts.map((p) => `${p.qty}× ${p.name}${p.length ? ` @ ${p.length} mm` : ""}`).join(", ")}` : ""}
+                        </div>
                         {remembered(s.reportSection) && chosen[s.reportSection] === remembered(s.reportSection).value && (
                           <div style={S.roleHint}>Remembered from last time.</div>
                         )}
@@ -330,6 +406,9 @@ export default function ImportReportModal({
                 </button>
                 {parsed && !allChosen && <div style={S.roleHint}>Pick a stock line for every section first.</div>}
                 {parsed && allChosen && picked.length === 0 && <div style={S.roleHint}>Pick the job first.</div>}
+                {parsed && allChosen && picked.length > 0 && !parentSettled && (
+                  <div style={S.roleHint}>Say which of the job's lines the parts go under.</div>
+                )}
               </>
             )}
           </div>

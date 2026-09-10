@@ -165,6 +165,7 @@ export default function LaserTab({
                     sections={sectionNames(master)}
                     stockItems={items || []}
                     allocations={laserData ? laserData.allocations || [] : []}
+                    jobLines={laserData ? laserData.quoteItems || [] : []}
                     canRequisition={!!canRequisition}
                     onRequisition={openRequisition}
                     aliases={laserData ? laserData.aliases || [] : []}

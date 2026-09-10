@@ -305,6 +305,16 @@ const MADE_ON_OPTIONS = [
 ];
 const madeOnLabel = (code) => MADE_ON_OPTIONS.find((o) => o.code === code)?.label || "";
 
+// Parent and child job lines. A child is a part under the job's own line
+// for that work (its parent); the tube nesting import makes them. Only
+// parents are quoted, invoiced, delivered and counted; see stageTakesItem
+// for who cuts what. The column comes from setup-quoting-and-bom.sql.
+const isChildLine = (it) => !!it?.parent_quote_item_id;
+const hasChildLines = (it, all) => !!it && (all || []).some((c) => c.parent_quote_item_id === it.id);
+const childLinesOf = (it, all) => (all || []).filter((c) => c.parent_quote_item_id === it?.id);
+// The lines money is counted on: everything that is not a part.
+const billableLines = (all) => (all || []).filter((it) => !isChildLine(it));
+
 // Laser Status is not a process type, so it needs a key that no process
 // type could ever collide with.
 const LASER_STATUS_DEPT = "__laser_status__";
@@ -922,7 +932,8 @@ function QtyProgressControl({ process, job, quoteItems, itemProgress, limitFor, 
         return (
           <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
             <span style={{ fontSize: 12.5, flex: "1 1 140px", color: itemDone ? C.accentFinished : C.text }}>
-              {item.description || "Item"} — {done}/{itemQty}
+              {item.description || "Item"}
+              {item.length_mm ? ` · ${Number(item.length_mm)} mm` : ""} — {done}/{itemQty}
             </span>
             {itemDone ? (
               <span style={{ fontSize: 12, color: C.accentFinished, fontWeight: 600 }}>Done</span>
@@ -1496,6 +1507,7 @@ export default function StockControl() {
     shortageSummary,
     refreshShortageStatus,
     reserveStock: reserveStockForProcess,
+    addParts: addPartsToJob,
   };
   const laser = useLaserPrograms({ ...laserDeps, machine: PLATE_LASER });
   const tubeLaser = useLaserPrograms({ ...laserDeps, machine: TUBE_LASER });
@@ -3129,7 +3141,11 @@ export default function StockControl() {
       // A wider version of this fetch was taken out once for filling a
       // variable nothing read. This one is two columns and puts a number
       // on screen.
-      fetchAllRows("job_quote_items", { select: "job_id, qty, unit_price" }),
+      // Parents only: a part under a line is not money on the job.
+      fetchAllRows("job_quote_items", {
+        select: "job_id, qty, unit_price, parent_quote_item_id",
+        filter: (q) => q.is("parent_quote_item_id", null),
+      }),
     ]);
 
     if (jobsResult.status === "fulfilled") {
@@ -3957,6 +3973,77 @@ export default function StockControl() {
     }
   }
 
+  // The parts on a tube nesting, put on the job as child lines under the
+  // job's own line for that work (the parent). From the import, or typed
+  // on the Nest it form. `parentId` null means the job has no line for
+  // it yet, so one is made from the reference. A part already under the
+  // parent (same name) has its quantity and length brought up to date
+  // rather than being added twice. Returns the parent line, or null.
+  async function addPartsToJob(job, parentId, parts, reference) {
+    if (!supabase || !job || !(parts || []).length) return null;
+    try {
+      const { data: existing, error: readError } = await supabase.from("job_quote_items").select("*").eq("job_id", job.id).order("sort_order");
+      if (readError) throw readError;
+      const lines = existing || [];
+      let parent = parentId ? lines.find((it) => it.id === parentId) : null;
+      let nextOrder = lines.reduce((m, i) => Math.max(m, Number(i.sort_order) || 0), -1) + 1;
+      if (!parent) {
+        const { data, error } = await supabase
+          .from("job_quote_items")
+          .insert({
+            job_id: job.id,
+            description: (reference || "Tube laser parts").trim(),
+            qty: 1,
+            unit_price: 0,
+            sort_order: nextOrder++,
+            made_on: "tube_laser",
+          })
+          .select()
+          .single();
+        if (error) throw error;
+        parent = data;
+      }
+      const children = lines.filter((it) => it.parent_quote_item_id === parent.id);
+      const toInsert = [];
+      for (const p of parts) {
+        const name = String(p.name || "").trim();
+        if (!name) continue;
+        const have = children.find((c) => (c.description || "").trim().toLowerCase() === name.toLowerCase());
+        const fields = { qty: Number(p.qty) || 0, length_mm: p.length == null ? null : Number(p.length) };
+        if (have) {
+          if (Number(have.qty) !== fields.qty || (have.length_mm == null ? null : Number(have.length_mm)) !== fields.length_mm) {
+            const { error } = await supabase.from("job_quote_items").update(fields).eq("id", have.id);
+            if (error) throw error;
+          }
+        } else {
+          toInsert.push({
+            job_id: job.id,
+            parent_quote_item_id: parent.id,
+            description: name,
+            ...fields,
+            unit_price: 0,
+            sort_order: nextOrder++,
+            made_on: "tube_laser",
+          });
+        }
+      }
+      if (toInsert.length) {
+        const { error } = await supabase.from("job_quote_items").insert(toInsert);
+        if (error) throw error;
+      }
+      if (jobDetail?.job?.id === job.id) refreshJobDetail();
+      if (productionQueue !== null) fetchProductionQueue();
+      return parent;
+    } catch (err) {
+      console.error("Failed to put the parts on the job:", err);
+      alert(
+        `The parts could not be put on ${job.job_number || "the job"}: ${err.message || "unknown error"}. ` +
+          "If this mentions a missing column, setup-tube-laser-parts.sql has not been run yet."
+      );
+      return null;
+    }
+  }
+
   // The reservation itself, apart from the modal, so the tube nester's
   // section picker can set stock aside for a program without opening
   // one. True when it saved.
@@ -4413,13 +4500,27 @@ export default function StockControl() {
   // takes another machine's lines, and never an assembly: nothing cuts an
   // assembly. A stage with no machine (bending, delivery, invoicing)
   // takes everything.
-  function stageTakesItem(processName, quoteItem) {
+  //
+  // A job line is one of three things. A plain line, as every line was
+  // until now. A parent: the job's own line for a piece of work, whose
+  // parts sit under it as children -- the tube nesting import makes
+  // those. A child: one of those parts, with a quantity and a length.
+  // The parent is what is quoted, invoiced and delivered; the children
+  // are what a cutting stage cuts and packs. So a stage with a machine
+  // takes the children and leaves the parent alone, and a stage with no
+  // machine takes the parent and never sees the children. `allItems` is
+  // the job's whole list, needed to know whether a line has children;
+  // without it a parent is treated as a plain line.
+  function stageTakesItem(processName, quoteItem, allItems) {
     const tag = cutsMadeOn(processName);
-    if (!tag) return true;
     const made = quoteItem?.made_on || "";
+    if (isChildLine(quoteItem)) return !!tag && (!made || made === tag);
+    if (allItems && hasChildLines(quoteItem, allItems)) return !tag;
+    if (!tag) return true;
     return !made || made === tag;
   }
-  const itemsForStage = (processName, quoteItems) => (quoteItems || []).filter((it) => stageTakesItem(processName, it));
+  const itemsForStage = (processName, quoteItems) =>
+    (quoteItems || []).filter((it) => stageTakesItem(processName, it, quoteItems));
 
   // A cutting stage on a job whose lines are all tagged for other
   // machines has nothing to do. It must not finish itself -- a wrongly
@@ -4498,7 +4599,7 @@ export default function StockControl() {
   // A batch stage carries no per-item information -- it only knows done or
   // not done -- so it hands nothing forward until it is signed off as a
   // whole. Anything not switched to Each keeps behaving as it does today.
-  function itemFlowLimit(process, jobProcesses, itemProgressForJob, quoteItem) {
+  function itemFlowLimit(process, jobProcesses, itemProgressForJob, quoteItem, allItems) {
     const sameRun = (p) => (p.shortage_id || null) === (process.shortage_id || null);
     const mine = flowRank(process.process_name);
     let allowed = Number(quoteItem.qty) || 0;
@@ -4511,7 +4612,17 @@ export default function StockControl() {
       // A stage that never handles this line cannot hold it back: a CNC
       // part does not wait for the plate laser, an assembly waits for
       // no cutting stage at all.
-      if (!stageTakesItem(p.process_name, quoteItem)) continue;
+      //
+      // A stage that cuts this line's parts rather than the line itself
+      // does hold it back, as a whole: welding has the parent, the tube
+      // laser has its children, and the parent may not move until that
+      // stage is signed off. The parts' own counts are not the parent's.
+      const takesIt = stageTakesItem(p.process_name, quoteItem, allItems);
+      if (!takesIt) {
+        const takesItsParts = childLinesOf(quoteItem, allItems).some((c) => stageTakesItem(p.process_name, c, allItems));
+        if (takesItsParts) return { allowed: 0, waitingOn: p.process_name };
+        continue;
+      }
       if ((p.tracking_mode || "batch") !== "each") {
         return { allowed: 0, waitingOn: p.process_name };
       }
@@ -4637,9 +4748,9 @@ export default function StockControl() {
           let totalQty = 0;
           if (!isReady && (p.tracking_mode || "batch") === "each") {
             for (const it of jobQuoteItems) {
-              if (!stageTakesItem(p.process_name, it)) continue;
+              if (!stageTakesItem(p.process_name, it, jobQuoteItems)) continue;
               totalQty += Number(it.qty) || 0;
-              const { allowed } = itemFlowLimit(p, jobProcesses, jobItemProgress, it);
+              const { allowed } = itemFlowLimit(p, jobProcesses, jobItemProgress, it, jobQuoteItems);
               const doneHere = Number(
                 jobItemProgress.find((ip) => ip.job_process_id === p.id && ip.job_quote_item_id === it.id)?.qty_complete
               ) || 0;
@@ -5407,7 +5518,9 @@ export default function StockControl() {
 
   function submitInvoiceForEnteredQuantities(job, quoteItems) {
     const itemsWithQty = [];
-    for (const it of quoteItems) {
+    // Parents only: a part under a line is never invoiced or delivered
+    // on its own.
+    for (const it of billableLines(quoteItems)) {
       const raw = invoiceQtyInputs[it.id];
       const qty = Number(raw);
       if (!raw || !qty || qty <= 0) continue;
@@ -6354,7 +6467,7 @@ export default function StockControl() {
   }
 
   async function invoiceEntireJob(job, quoteItems) {
-    const eligibleItems = quoteItems
+    const eligibleItems = billableLines(quoteItems)
       .filter((it) => (it.item_status || "on_floor") !== "out_external" && Number(it.qty) - Number(it.qty_invoiced) > 0)
       .map((it) => ({ item: it, qty: Number(it.qty) - Number(it.qty_invoiced) }));
     if (eligibleItems.length === 0) {
@@ -7100,10 +7213,20 @@ export default function StockControl() {
         // Made on: which machine each line goes to, so the paper matches
         // what each cutting stage on screen will list.
         head: [["Item", "Made on", "Qty", "Invoiced", "Outstanding"]],
-        body: quoteItems.map((it) => {
+        // Parents carry the money columns; their parts follow, indented,
+        // with the length, so the paper is also the shop's parts list.
+        body: billableLines(quoteItems).flatMap((it) => {
           const qty = Number(it.qty) || 0;
           const invoiced = Number(it.qty_invoiced) || 0;
-          return [it.description || "", madeOnLabel(it.made_on) || "—", qty, invoiced, Math.max(qty - invoiced, 0)];
+          const row = [it.description || "", madeOnLabel(it.made_on) || "—", qty, invoiced, Math.max(qty - invoiced, 0)];
+          const parts = childLinesOf(it, quoteItems).map((c) => [
+            `   ↳ ${c.description || ""}${c.length_mm ? ` · ${Number(c.length_mm)} mm` : ""}`,
+            madeOnLabel(c.made_on) || "—",
+            Number(c.qty) || 0,
+            "",
+            "",
+          ]);
+          return [row, ...parts];
         }),
         theme: "grid",
         headStyles: { fillColor: [27, 29, 31] },
@@ -13848,7 +13971,10 @@ export default function StockControl() {
                           return drawing ? { description: it.description, partNumber: linkedItem.partNumber, drawing } : null;
                         })
                         .filter(Boolean);
-                      const totalQty = quoteItems.reduce((sum, it) => sum + Number(it.qty || 0), 0);
+                      // This stage's lines only: a cutting stage counts the
+                      // parts, not the parent they sit under, and the
+                      // other way round.
+                      const totalQty = itemsForStage(process.process_name, quoteItems).reduce((sum, it) => sum + Number(it.qty || 0), 0);
                       return (
                         <div>
                           <button
@@ -14053,7 +14179,7 @@ export default function StockControl() {
                                   job={job}
                                   quoteItems={itemsForStage(process.process_name, quoteItems)}
                                   itemProgress={itemProgress}
-                                  limitFor={(item) => itemFlowLimit(process, stagesOnJob, progressOnJob, item)}
+                                  limitFor={(item) => itemFlowLimit(process, stagesOnJob, progressOnJob, item, quoteItems)}
                                   onSubmit={submitProcessItemProgress}
                                 />
                               ) : (
@@ -14154,7 +14280,7 @@ export default function StockControl() {
                   ) : (
                     (() => {
                     const renderCard = ({ job, process, isReady, partlyReady, readyQty, totalQty: partTotal, waitingOn, quoteItems, shortage }) => {
-                      const totalQty = quoteItems.reduce((sum, it) => sum + Number(it.qty || 0), 0);
+                      const totalQty = itemsForStage(process.process_name, quoteItems).reduce((sum, it) => sum + Number(it.qty || 0), 0);
                       return (
                         <button
                           key={process.id}
@@ -19564,7 +19690,7 @@ export default function StockControl() {
             {jobDetail.quoteItems.length > 0 && (
               <div style={{ marginTop: 8, padding: 10, background: C.bg, borderRadius: 6, border: `1px solid ${C.border}` }}>
                 <span style={{ fontWeight: 600 }}>
-                  {jobDetail.quoteItems.reduce((sum, it) => sum + Math.max(Number(it.qty) - Number(it.qty_invoiced), 0), 0)} outstanding
+                  {billableLines(jobDetail.quoteItems).reduce((sum, it) => sum + Math.max(Number(it.qty) - Number(it.qty_invoiced), 0), 0)} outstanding
                   {" "}(not yet invoiced)
                 </span>
               </div>
@@ -19988,12 +20114,12 @@ export default function StockControl() {
                     every line on every stage, so the count is here to be
                     noticed and the button to clear it in one press. */}
                 {(() => {
-                  const untagged = jobDetail.quoteItems.filter((it) => !it.made_on).length;
+                  const untagged = billableLines(jobDetail.quoteItems).filter((it) => !it.made_on).length;
                   if (untagged === 0 || !canEditThisJob) return null;
                   return (
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
                       <span style={{ ...S.roleHint, color: C.accentRaw, fontWeight: 600 }}>
-                        {untagged} of {jobDetail.quoteItems.length} not tagged with where they are made
+                        {untagged} of {billableLines(jobDetail.quoteItems).length} not tagged with where they are made
                       </span>
                       <button
                         type="button"
@@ -20008,15 +20134,20 @@ export default function StockControl() {
                   );
                 })()}
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-                  {jobDetail.quoteItems.map((it) => {
+                  {/* Parents only on the list; each one's parts follow it,
+                      indented. A part is cut and packed, never invoiced
+                      or delivered on its own, so it gets no boxes. */}
+                  {billableLines(jobDetail.quoteItems).map((it) => {
                     const remaining = Number(it.qty) - Number(it.qty_invoiced);
                     const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
                     const revision = linkedItem?.partNumber ? drawingLookup[linkedItem.partNumber.trim()] : null;
                     const status = it.item_status || "on_floor";
                     const openDeliveryNote = jobDetail.deliveryNotes.find((dn) => dn.quote_item_id === it.id && !dn.checked_back_in_at);
                     const canActOnThis = canEditThisJob && remaining > 0 && status !== "out_external";
+                    const parts = childLinesOf(it, jobDetail.quoteItems);
                     return (
-                      <div key={it.id} style={S.managerRow}>
+                      <div key={it.id}>
+                      <div style={S.managerRow}>
                         {canActOnThis && (
                           <input
                             type="number"
@@ -20181,6 +20312,34 @@ export default function StockControl() {
                             {jobDetail.job.status === "invoiced" ? "Invoiced" : "Invoice requested — awaiting accounts"}
                           </span>
                         )}
+                      </div>
+                      {parts.length > 0 && (
+                        <div style={{ marginLeft: 22, marginTop: 4, display: "flex", flexDirection: "column", gap: 3 }}>
+                          <div style={S.roleHint}>
+                            {parts.length} part{parts.length === 1 ? "" : "s"} · {parts.reduce((n, c) => n + (Number(c.qty) || 0), 0)} off
+                          </div>
+                          {parts.map((c) => (
+                            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                              <span style={{ color: C.muted }}>↳</span>
+                              <span style={{ fontWeight: 600 }}>{Number(c.qty)}×</span>
+                              <span style={{ flex: 1, minWidth: 0 }}>{c.description}</span>
+                              {c.length_mm != null && c.length_mm !== "" && <span style={S.roleHint}>{Number(c.length_mm)} mm</span>}
+                              {c.made_on && <span style={S.roleHint}>{madeOnLabel(c.made_on)}</span>}
+                              {canEditThisJob && (
+                                <button
+                                  type="button"
+                                  className="stk-btn"
+                                  style={{ ...S.managerDelete, padding: "2px 6px" }}
+                                  onClick={() => removeJobQuoteItem(jobDetail.job, c)}
+                                  title="Take this part off the job"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       </div>
                     );
                   })}

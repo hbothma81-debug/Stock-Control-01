@@ -25,6 +25,7 @@
 // No spreadsheet library in here, so it can be tested in a second.
 
 export const NESTING_LIST_SHEET = "Nesting List";
+export const PART_INFO_SHEET = "Part Info";
 
 const text = (c) => (c == null ? "" : String(c).trim());
 const num = (c) => {
@@ -45,11 +46,94 @@ function tubeCountOf(cell) {
   return m ? Number(m[1]) : null;
 }
 
-// Finds the sheet by name, tolerant of the double space the software
+// Finds a sheet by name, tolerant of the double space the software
 // puts in "Nesting  Summary" and of case.
-export function findNestingListSheet(sheetNames) {
-  const want = NESTING_LIST_SHEET.replace(/\s+/g, "").toLowerCase();
+export function findSheet(sheetNames, name) {
+  const want = String(name).replace(/\s+/g, "").toLowerCase();
   return (sheetNames || []).find((n) => String(n).replace(/\s+/g, "").toLowerCase() === want) || null;
+}
+export function findNestingListSheet(sheetNames) {
+  return findSheet(sheetNames, NESTING_LIST_SHEET);
+}
+
+// The Part Info sheet: every part on the report with its total quantity
+// and its length, grouped by section. This is what goes on the job as
+// the parts under the parent line.
+//
+//   Part Info
+//          | Section:Round tube R19.05mm | Part Type:2 | Part Count:150
+//   ID | Part Name | Qty | Part Length(mm) | Contour Qty | ...
+//   1  | SSD-5-HOLE-POST THRU | 100/100 | 1000.00 | ...
+//
+// Qty reads "100/100": nested of required. The second is what the job
+// needs; the first is how many the software placed, and a report where
+// they differ is refused rather than guessed at.
+export function parsePartInfo(rows) {
+  const sections = [];
+  let section = null;
+  let inParts = false;
+  for (const raw of rows || []) {
+    const r = Array.isArray(raw) ? raw : [];
+    const a = text(r[0]);
+    const b = text(r[1]);
+    const secName = sectionOf(b) || (a && sectionOf(a));
+    if (secName) {
+      const count = r.map((c) => {
+        const m = /^Part Count:\s*(\d+)/i.exec(text(c));
+        return m ? Number(m[1]) : null;
+      }).find((n) => n != null);
+      section = { reportSection: secName, partCount: count ?? null, parts: [] };
+      sections.push(section);
+      inParts = false;
+      continue;
+    }
+    if (!section) continue;
+    if (/^ID$/i.test(a) && /^Part Name$/i.test(b)) {
+      inParts = true;
+      continue;
+    }
+    if (inParts && b && num(a) != null) {
+      const q = text(r[2]);
+      const m = /^(\d+)\s*\/\s*(\d+)$/.exec(q);
+      const placed = m ? Number(m[1]) : num(q);
+      const needed = m ? Number(m[2]) : num(q);
+      if (needed == null) continue;
+      if (placed !== needed) {
+        throw new Error(`"${b}" is ${placed} of ${needed} nested. Finish the nesting in the software before importing.`);
+      }
+      section.parts.push({ name: b, qty: needed, length: num(r[3]) });
+    }
+  }
+  if (sections.length === 0) throw new Error("No parts found on the Part Info sheet.");
+  for (const s of sections) {
+    const total = s.parts.reduce((n, p) => n + p.qty, 0);
+    if (s.partCount == null) s.partCount = total;
+    if (s.partCount !== total) {
+      throw new Error(`"${s.reportSection}" says ${s.partCount} parts, but its lines add up to ${total}. Check the export.`);
+    }
+  }
+  return { sections };
+}
+
+// The parts typed by hand when nothing was imported: one per line,
+// "name, qty, length". Length may be left off. Blank lines are skipped;
+// a line that cannot be read is an error naming it.
+export function parseTypedParts(textBlock) {
+  const parts = [];
+  const lines = String(textBlock || "").split(/\r?\n/);
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) continue;
+    const bits = t.split(/\s*[,;\t]\s*/);
+    const name = (bits[0] || "").trim();
+    const qty = Number(bits[1]);
+    const length = bits[2] != null && bits[2] !== "" ? Number(String(bits[2]).replace(/mm$/i, "")) : null;
+    if (!name || !Number.isFinite(qty) || qty <= 0 || (length != null && !Number.isFinite(length))) {
+      throw new Error(`Could not read "${t}". Write each part as: name, qty, length`);
+    }
+    parts.push({ name, qty, length });
+  }
+  return parts;
 }
 
 export function parseNestingList(rows) {

@@ -383,6 +383,24 @@ function StatusRow({
               <div style={S.roleHint}>Packed item by item on this job. Take it to start logging.</div>
             )}
 
+            {/* The pick list: this stage's lines with their lengths. In
+                Each mode the count above is the list; otherwise it is
+                shown here so the packer knows what to look for. */}
+            {!perItem && (r.quoteItems || []).length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <div style={S.label}>To pack · {(r.quoteItems || []).reduce((n, it) => n + (Number(it.qty) || 0), 0)} off</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 4 }}>
+                  {(r.quoteItems || []).map((it) => (
+                    <div key={it.id} style={{ fontSize: 13, display: "flex", gap: 8 }}>
+                      <span style={{ fontWeight: 600 }}>{Number(it.qty)}×</span>
+                      <span style={{ flex: 1, minWidth: 0 }}>{it.description}</span>
+                      {it.length_mm != null && it.length_mm !== "" && <span style={S.roleHint}>{Number(it.length_mm)} mm</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {!canPack && !canTake && !taken && r.process && <div style={S.roleHint}>Only packers can take a job.</div>}
           </div>
         </div>

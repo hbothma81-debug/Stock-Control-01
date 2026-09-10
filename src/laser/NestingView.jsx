@@ -8,6 +8,31 @@ import { programTitle } from "./programTitle.js";
 import ImportReportModal from "./ImportReportModal.jsx";
 import StockSectionPicker from "./StockSectionPicker.jsx";
 import { stockOptions } from "./stockOptions.js";
+import { parseTypedParts } from "./nestingReport.js";
+import { parentChoices, NEW_PARENT } from "./ImportReportModal.jsx";
+
+// The parts box on a hand-typed tube program: one part per line.
+function TypedPartsBox({ value, onChange, parentPick, parent, setParent }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div>
+        <label style={S.label}>Parts on this program (one per line: name, qty, length mm)</label>
+        <textarea
+          style={{ ...S.input, minHeight: 64, fontFamily: "inherit" }}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={"SSD-5-HOLE-POST THRU, 100, 1000\nSSD-7-HOLE-POST THRU, 50, 1000"}
+        />
+      </div>
+      {value.trim() && parentPick && (
+        <div>
+          <label style={S.label}>The parts go under</label>
+          <TypeToFind options={parentPick.options} value={parent} onChange={setParent} emptyLabel="Pick the job's line…" />
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Prince's screen, and very nearly the only one he uses.
 //
@@ -88,6 +113,7 @@ export default function NestingView({
   allocations,
   canRequisition,
   onRequisition,
+  jobLines,
   aliases,
   canManage,
   onClearReport,
@@ -133,6 +159,9 @@ export default function NestingView({
   const [newGrade, setNewGrade] = useState("");
   // The stock line, on a laser whose section is picked off real stock.
   const [newStock, setNewStock] = useState(null);
+  // The parts, typed, and which of the first job's lines they go under.
+  const [newParts, setNewParts] = useState("");
+  const [newParent, setNewParent] = useState("");
   const [picked, setPicked] = useState([]);
   const [jobQuery, setJobQuery] = useState("");
   const [saving, setSaving] = useState(false);
@@ -148,6 +177,10 @@ export default function NestingView({
     () => (w.bySections ? stockOptions(stockItems, allocations, picked[0]?.job_id) : []),
     [w.bySections, stockItems, allocations, picked]
   );
+  const newParentPick = useMemo(
+    () => (w.generated && picked[0] ? parentChoices(jobLines, picked[0].job_id) : null),
+    [w.generated, jobLines, picked]
+  );
 
   function resetBuilder() {
     setBuilding(false);
@@ -156,6 +189,8 @@ export default function NestingView({
     setNewThickness("");
     setNewGrade("");
     setNewStock(null);
+    setNewParts("");
+    setNewParent("");
     setNewMinutes("");
     setPicked([]);
     setJobQuery("");
@@ -163,10 +198,18 @@ export default function NestingView({
 
   const identified = w.generated ? !!newName.trim() : !!newNumber.trim();
   const materialPicked = w.bySections ? !!newStock : !!newThickness && !!newGrade;
-  const canSubmit = identified && materialPicked && picked.length > 0 && !saving;
+  const partsSettled = !newParts.trim() || !!newParent;
+  const canSubmit = identified && materialPicked && picked.length > 0 && partsSettled && !saving;
 
   async function submitProgram() {
     if (!canSubmit) return;
+    let parts = [];
+    try {
+      parts = w.generated ? parseTypedParts(newParts) : [];
+    } catch (err) {
+      alert(err.message);
+      return;
+    }
     setSaving(true);
     try {
       const ok = await onCreateProgram({
@@ -179,6 +222,8 @@ export default function NestingView({
         // Picking the stock line is picking the stock: that many lengths
         // are set aside for the first job on the program.
         reserve: w.bySections && newStock ? { item: newStock.item, qty: newRepeats } : null,
+        parts,
+        parent_line_id: newParent && newParent !== NEW_PARENT ? newParent : null,
         jobs: picked.map((c) => ({
           job_id: c.job_id,
           shortage_id: c.shortage_id || null,
@@ -268,6 +313,7 @@ export default function NestingView({
           allocations={allocations || []}
           canRequisition={canRequisition}
           onRequisition={onRequisition}
+          jobLines={jobLines || []}
           aliases={aliases || []}
           programs={programs}
           onImport={onImportReport}
@@ -455,7 +501,10 @@ export default function NestingView({
                         className="stk-btn"
                         style={{ ...S.suggestItem, width: "100%", textAlign: "left", ...(c.kind === "shortage" ? { color: C.danger } : {}) }}
                         onClick={() => {
-                          setPicked((prev) => [...prev, c]);
+                          setPicked((prev) => {
+                            if (prev.length === 0 && w.generated) setNewParent(parentChoices(jobLines, c.job_id).initial);
+                            return [...prev, c];
+                          });
                           setJobQuery("");
                         }}
                       >
@@ -471,6 +520,10 @@ export default function NestingView({
                 </div>
               )}
             </div>
+
+            {w.generated && (
+              <TypedPartsBox value={newParts} onChange={setNewParts} parentPick={newParentPick} parent={newParent} setParent={setNewParent} />
+            )}
 
             <button
               type="button"
@@ -521,6 +574,7 @@ export default function NestingView({
                 allocations={allocations}
                 canRequisition={canRequisition}
                 onRequisition={onRequisition}
+                jobLines={jobLines}
                 canManage={canManage}
                 expanded={openRow === r.key}
                 onToggle={() => setOpenRow((k) => (k === r.key ? null : r.key))}
@@ -633,6 +687,7 @@ function NestRow({
   allocations,
   canRequisition,
   onRequisition,
+  jobLines,
   canManage,
 
   expanded,
@@ -650,6 +705,9 @@ function NestRow({
   const [grade, setGrade] = useState("");
   // The stock line picked, on the tube laser.
   const [stockPick, setStockPick] = useState(null);
+  // The parts typed, and which of this job's lines they go under.
+  const [typedParts, setTypedParts] = useState("");
+  const [partsParent, setPartsParent] = useState(null);
   const [alsoOn, setAlsoOn] = useState([]);
   const [alsoQuery, setAlsoQuery] = useState("");
   const [sheet, setSheet] = useState("");
@@ -661,6 +719,9 @@ function NestRow({
     () => (w.bySections ? stockOptions(stockItems, allocations, r.job?.id) : []),
     [w.bySections, stockItems, allocations, r.job?.id]
   );
+  const parentPick = useMemo(() => (w.generated && r.job ? parentChoices(jobLines, r.job.id) : null), [w.generated, jobLines, r.job]);
+  // Settled from the job's lines unless the nester picks otherwise.
+  const parentValue = partsParent ?? parentPick?.initial ?? "";
 
   const sigmanest = r.job?.laser_job_reference || r.shortage?.board_number || "";
   const programText = r.onPrograms && r.onPrograms.length > 0 ? r.onPrograms.map((p) => programTitle(p)).join(", ") : "";
@@ -687,10 +748,18 @@ function NestRow({
 
   const identified = w.generated ? !!nestingName.trim() : !!programNumber.trim();
   const materialPicked = w.bySections ? !!stockPick : !!thickness && !!grade;
-  const canCreate = identified && materialPicked && !!r.candidate && !saving;
+  const partsSettled = !typedParts.trim() || !!parentValue;
+  const canCreate = identified && materialPicked && !!r.candidate && partsSettled && !saving;
 
   async function create() {
     if (!canCreate) return;
+    let parts = [];
+    try {
+      parts = w.generated ? parseTypedParts(typedParts) : [];
+    } catch (err) {
+      alert(err.message);
+      return;
+    }
     setSaving(true);
     try {
       const chosen = [r.candidate, ...alsoOn];
@@ -707,6 +776,8 @@ function NestRow({
         // Picking the stock line is picking the stock: that many lengths
         // are set aside for this job.
         reserve: w.bySections && stockPick ? { item: stockPick.item, qty: repeats } : null,
+        parts,
+        parent_line_id: parentValue && parentValue !== NEW_PARENT ? parentValue : null,
         jobs: chosen.map((c) => ({
           job_id: c.job_id,
           shortage_id: c.shortage_id || null,
@@ -719,6 +790,8 @@ function NestRow({
         setThickness("");
         setGrade("");
         setStockPick(null);
+        setTypedParts("");
+        setPartsParent(null);
         setSheet("");
         setMinutes("");
         setAlsoOn([]);
@@ -1047,6 +1120,16 @@ function NestRow({
                 </div>
               </div>
 
+              {w.generated && (
+                <TypedPartsBox
+                  value={typedParts}
+                  onChange={setTypedParts}
+                  parentPick={parentPick}
+                  parent={parentValue}
+                  setParent={setPartsParent}
+                />
+              )}
+
               <button
                 type="button"
                 className="stk-btn"
@@ -1286,6 +1369,9 @@ function ProgramList({
                   <span style={{ fontWeight: 700, fontSize: 15 }}>{programTitle(p)}</span>
                   <span style={{ color: C.muted, fontSize: 14 }}>{p.material}</span>
                   {p.sheet_name && <span style={{ color: C.muted, fontSize: 14 }}>{p.sheet_name}</span>}
+                  {Number(p.part_count) > 0 && (
+                    <span style={{ color: C.muted, fontSize: 14 }}>{p.part_count} parts</span>
+                  )}
                   <span style={{ flex: 1, minWidth: 0, color: C.muted, fontSize: 14 }}>{jobsText}</span>
                   {p.reported_at && (
                     <span style={{ ...S.chip, color: C.danger, border: `1px solid ${C.danger}`, fontWeight: 700 }}>
@@ -1393,6 +1479,21 @@ function ProgramList({
                           </div>
                         )}
                         <SavedCheck fieldKey={`program-${p.id}`} />
+                      </div>
+                    )}
+
+                    {Array.isArray(p.parts) && p.parts.length > 0 && (
+                      <div>
+                        <label style={S.label}>Parts on this program · {p.part_count} off</label>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 4 }}>
+                          {p.parts.map((pt, i) => (
+                            <div key={i} style={{ fontSize: 13, display: "flex", gap: 8 }}>
+                              <span style={{ fontWeight: 600 }}>{pt.qty}×</span>
+                              <span style={{ flex: 1 }}>{pt.name}</span>
+                              {pt.length ? <span style={S.roleHint}>{pt.length} mm</span> : null}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
 

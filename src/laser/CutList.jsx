@@ -351,6 +351,8 @@ function ProgramRow({ program, notes, canCut, machine = {}, onToggleCut, onSetCu
   const openTime = () => onAskTime(p);
   const [showReport, setShowReport] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
+  const [showParts, setShowParts] = useState(false);
+  const parts = Array.isArray(p.parts) ? p.parts : [];
   const [reason, setReason] = useState("");
   const [offcutL, setOffcutL] = useState("");
   const [offcutW, setOffcutW] = useState("");
@@ -365,6 +367,11 @@ function ProgramRow({ program, notes, canCut, machine = {}, onToggleCut, onSetCu
           <span style={S.partTag}>{p.material}</span>
           {p.sheet_name && <span style={S.partTag}>{p.sheet_name}</span>}
           {p.machine && <span style={S.partTag}>{p.machine}</span>}
+          {Number(p.part_count) > 0 && (
+            <span style={S.partTag} title="Parts on this program">
+              {p.part_count} parts
+            </span>
+          )}
           {planned != null && (
             <span style={S.partTag} title="Planned cutting time, all sheets">
               {fmtMinutes(planned)}
@@ -410,6 +417,18 @@ function ProgramRow({ program, notes, canCut, machine = {}, onToggleCut, onSetCu
               {p.reported_by}
               {p.reported_at ? ` — ${new Date(p.reported_at).toLocaleString()}` : ""}
             </div>
+          </div>
+        )}
+
+        {showParts && parts.length > 0 && (
+          <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 2 }}>
+            {parts.map((pt, i) => (
+              <div key={i} style={{ fontSize: 13, display: "flex", gap: 8 }}>
+                <span style={{ fontWeight: 600 }}>{pt.qty}×</span>
+                <span style={{ flex: 1 }}>{pt.name}</span>
+                {pt.length ? <span style={S.roleHint}>{pt.length} mm</span> : null}
+              </div>
+            ))}
           </div>
         )}
 
@@ -596,6 +615,12 @@ function ProgramRow({ program, notes, canCut, machine = {}, onToggleCut, onSetCu
           >
             <MessageSquare size={13} /> Notes{(notes || []).length ? ` (${notes.length})` : ""}
           </button>
+
+          {parts.length > 0 && (
+            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => setShowParts((v) => !v)}>
+              Parts ({parts.length})
+            </button>
+          )}
 
           {/* Skipped at the time, or got wrong: the time can be put in
               or changed afterwards from the card. */}

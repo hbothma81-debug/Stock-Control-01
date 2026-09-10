@@ -1,6 +1,62 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseNestingList, nestsNote, referenceFromFileName, findNestingListSheet } from "./nestingReport.js";
+import { parseNestingList, nestsNote, referenceFromFileName, findNestingListSheet, parsePartInfo, parseTypedParts, findSheet } from "./nestingReport.js";
+
+// MARCH.xlsx, Part Info sheet.
+const MARCH_PARTS = [
+  ["Part Info", "", "", ""],
+  ["", "Section:Round tube R19.05mm", "Part Type:2", "Part Count:150"],
+  ["ID", "Part Name", "Qty", "Part Length(mm)"],
+  [1, "SSD-5-HOLE-POST THRU", "100/100", "1000.00"],
+  [2, "SSD-7-HOLE-POST THRU", "50/50", "1000.00"],
+];
+
+test("the parts: name, total quantity and length, per section", () => {
+  const { sections } = parsePartInfo(MARCH_PARTS);
+  assert.equal(sections.length, 1);
+  assert.equal(sections[0].partCount, 150);
+  assert.deepEqual(sections[0].parts, [
+    { name: "SSD-5-HOLE-POST THRU", qty: 100, length: 1000 },
+    { name: "SSD-7-HOLE-POST THRU", qty: 50, length: 1000 },
+  ]);
+});
+
+test("a part not fully nested is refused, saying which", () => {
+  const rows = MARCH_PARTS.map((r) => (r[1] === "SSD-7-HOLE-POST THRU" ? [2, r[1], "40/50", "1000.00"] : r));
+  assert.throws(() => parsePartInfo(rows), /SSD-7-HOLE-POST THRU.*40 of 50/);
+});
+
+test("two sections on the detailed export keep their parts apart", () => {
+  const rows = [
+    ["Part Info"],
+    ["", "Section:Square tube Width50.8mm X R3mm", "Part Type:1", "Part Count:2"],
+    ["ID", "Part Name", "Qty", "Part Length(mm)", "Contour Qty", "Cut Length(mm)", "Price(元)"],
+    [1, "MRSB_BOOTH-01 GATES TUBING_02", "2/2", "2525.00", 4, "570.32", "0.00"],
+    ["", "Section:L tube(L) Width50mm X Height50mm", "Part Type:1", "Part Count:2"],
+    ["ID", "Part Name", "Qty", "Part Length(mm)", "Contour Qty", "Cut Length(mm)", "Price(元)"],
+    [6, "MRSB_BOOTH-01 GATES ANGLE", "2/2", "1828.18", 4, "252.74", "0.00"],
+  ];
+  const { sections } = parsePartInfo(rows);
+  assert.deepEqual(sections.map((s) => [s.reportSection, s.parts.length, s.parts[0].length]), [
+    ["Square tube Width50.8mm X R3mm", 1, 2525],
+    ["L tube(L) Width50mm X Height50mm", 1, 1828.18],
+  ]);
+});
+
+test("hand-typed parts: name, qty, length per line; length optional; bad lines named", () => {
+  assert.deepEqual(parseTypedParts("POST, 10, 1000\nBRACE, 4\n\nRAIL; 2; 2500mm"), [
+    { name: "POST", qty: 10, length: 1000 },
+    { name: "BRACE", qty: 4, length: null },
+    { name: "RAIL", qty: 2, length: 2500 },
+  ]);
+  assert.deepEqual(parseTypedParts(""), []);
+  assert.throws(() => parseTypedParts("POST, ten"), /Could not read "POST, ten"/);
+});
+
+test("the Part Info sheet is found like the Nesting List", () => {
+  assert.equal(findSheet(["Part Info", "Tube Info", "Nesting List"], "Part Info"), "Part Info");
+  assert.equal(findSheet(["Tube Info"], "Part Info"), null);
+});
 
 // MARCH.xlsx, the simple export, as its Nesting List sheet reads.
 const MARCH = [

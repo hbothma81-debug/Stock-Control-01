@@ -39,6 +39,9 @@ export default function useLaserPrograms(deps) {
     // Sets stock aside for a job's stage (job, process, item, qty);
     // the tube nester picks a real stock line, and that reserves it.
     reserveStock,
+    // Puts a nesting's parts on the job as lines under the job's own
+    // line for that work (job, parentLineId, parts, reference).
+    addParts,
   } = deps;
   // The stage-name rules, under the names the code below has always used.
   const isPlateNestingProcess = machine.isNestingStage;
@@ -85,7 +88,11 @@ export default function useLaserPrograms(deps) {
       fetchAllRows("job_documents", { orderBy: "created_at", ascending: false }),
       fetchAllRows("job_allocations", { orderBy: "created_at" }),
       // qty: the packer's per-item count runs against it.
-      fetchAllRows("job_quote_items", { select: "id, job_id, description, qty, linked_item_id" }),
+      // Every column, not a named few: parent_quote_item_id, made_on and
+      // length_mm arrived with the tube laser, and naming a column that a
+      // database does not have yet fails the whole load -- for the plate
+      // laser too. A job has a handful of lines; the cost is nothing.
+      fetchAllRows("job_quote_items", { select: "*" }),
       // Notes and stop reports live in the event log, and both screens
       // show them, so it has to come back with everything else.
       fetchAllRows("laser_program_events", { orderBy: "acted_at" }),
@@ -555,7 +562,32 @@ export default function useLaserPrograms(deps) {
     if (!ok) alert("The program was made, but the stock could not be set aside for it. Use Pull from stock on the job.");
   }
 
-  async function createLaserProgram({ program_number, nesting_name, material, sheet_name, sheets_required, cut_minutes, jobs, reserve }) {
+  // The parts on the program, put on the first job as lines under its
+  // parent line. `parentId` null makes the parent from the reference.
+  async function partsOntoJob(jobs, parts, parentId, reference) {
+    if (!(parts || []).length || typeof addParts !== "function") return;
+    const first = (jobs || [])[0];
+    const job = first ? (jobsList || []).find((j) => j.id === first.job_id) : null;
+    if (!job) return;
+    await addParts(job, parentId || null, parts, reference);
+  }
+
+  async function createLaserProgram({
+    program_number,
+    nesting_name,
+    material,
+    sheet_name,
+    sheets_required,
+    cut_minutes,
+    jobs,
+    reserve,
+    // The parts cut on this program ({ name, qty, length }), and which
+    // job line they sit under. Only a laser whose programs know their
+    // parts sends these; a plate program sends nothing and the columns
+    // are left alone.
+    parts,
+    parent_line_id,
+  }) {
     if (!supabase) return false;
     try {
       // A typed number is the nester's; a generated one comes from the
@@ -570,6 +602,9 @@ export default function useLaserPrograms(deps) {
           // plate laser keeps working on a database where
           // setup-tube-laser.sql has not been run yet.
           ...(machine.numbering === "generated" ? { nesting_name: (nesting_name || "").trim() } : {}),
+          ...(Array.isArray(parts) && parts.length
+            ? { parts, part_count: parts.reduce((n, p) => n + (Number(p.qty) || 0), 0) }
+            : {}),
           material,
           machine: machine.machine,
           sheet_name: sheet_name || null,
@@ -605,6 +640,7 @@ export default function useLaserPrograms(deps) {
         if (sh && sh.status === "flagged") await markShortageNested(sh);
       }
       await reserveForProgram(jobs, reserve);
+      await partsOntoJob(jobs, parts, parent_line_id, nesting_name);
       await fetchLaserData();
       // Truthy for the screens that only ask "did it work"; the number
       // for the import, which shows what was handed out.
@@ -632,7 +668,7 @@ export default function useLaserPrograms(deps) {
   // Returns the programs made, or false. Stops at the first failure and
   // says how far it got: the programs already made are real and on the
   // cut list, and must not be made twice.
-  async function importNestingReport({ nesting_name, sections, jobs }) {
+  async function importNestingReport({ nesting_name, sections, jobs, parent_line_id }) {
     if (!supabase) return false;
     const made = [];
     for (const s of sections) {
@@ -642,6 +678,8 @@ export default function useLaserPrograms(deps) {
         sheets_required: s.lengths,
         jobs,
         reserve: s.item ? { item: s.item, qty: s.lengths } : null,
+        parts: s.parts || [],
+        parent_line_id,
       });
       if (!result) {
         if (made.length) {
