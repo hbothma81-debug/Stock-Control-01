@@ -1371,6 +1371,12 @@ export default function StockControl() {
   // Whether the Customer Stock suggestions are open under the "Add an
   // item" box inside a job. The New Job form keeps its own, per row.
   const [jobItemSuggestOpen, setJobItemSuggestOpen] = useState(false);
+  // Adding a part by hand under one of the job's lines: which line has
+  // its form open, and what is being typed into it. The tube nesting
+  // import writes the same rows in bulk; this is one at a time, for
+  // work that never came through a report.
+  const [addPartUnder, setAddPartUnder] = useState(null);
+  const [newPartForm, setNewPartForm] = useState({ description: "", qty: "", lengthMm: "", madeOn: "", linkedItemId: null });
   const [jobHistoryOpen, setJobHistoryOpen] = useState(false); // { [quoteItemId]: "3" }
   const [deliveryNoteBatchModal, setDeliveryNoteBatchModal] = useState(null);
   const [copyJobModal, setCopyJobModal] = useState(null);
@@ -5697,6 +5703,44 @@ export default function StockControl() {
     }
   }
 
+  // A part added by hand under one of the job's lines. The tube nesting
+  // import writes these same rows in bulk (addPartsToJob); this is the
+  // one-at-a-time way in, for work that never came through a report.
+  //
+  // A part carries no price. Money is counted on the parent only --
+  // see billableLines -- so a price here would be charged twice or not
+  // at all, and neither is worth offering.
+  async function addJobQuoteChild(job, parent, { description, qty, lengthMm, madeOn, linkedItemId }) {
+    if (!supabase || !parent || !String(description || "").trim() || !(Number(qty) > 0)) return false;
+    try {
+      const nextOrder = (jobDetail?.quoteItems || []).reduce((m, i) => Math.max(m, Number(i.sort_order) || 0), -1) + 1;
+      const length = lengthMm === "" || lengthMm == null ? null : Number(lengthMm);
+      const { error } = await supabase.from("job_quote_items").insert({
+        job_id: job.id,
+        parent_quote_item_id: parent.id,
+        description: String(description).trim(),
+        qty: Number(qty),
+        unit_price: 0,
+        linked_item_id: linkedItemId || null,
+        made_on: madeOn || "",
+        length_mm: Number.isFinite(length) ? length : null,
+        sort_order: nextOrder,
+      });
+      if (error) throw error;
+      await logJobEvent(job.id, "part added", `${qty} × ${String(description).trim()} under ${parent.description}`);
+      await openJobDetail(job);
+      fetchJobs();
+      return true;
+    } catch (err) {
+      console.error("Failed to add the part:", err);
+      alert(
+        `That part didn't save: ${err.message || "unknown error"}. ` +
+          "If this mentions a missing column, setup-tube-laser-parts.sql has not been run on this database yet."
+      );
+      return false;
+    }
+  }
+
   // A quantity cannot go below what has already been invoiced. The
   // invoice is out; the numbers would stop matching and there would be
   // no honest way to reconcile them.
@@ -5772,11 +5816,14 @@ export default function StockControl() {
 
   async function updateJobQuoteItem(job, item, field, rawValue) {
     if (!supabase) return;
-    const label = { description: "description", qty: "quantity", unit_price: "price" }[field] || field;
-    let value = field === "description" ? String(rawValue).trim() : Number(rawValue);
+    const label = { description: "description", qty: "quantity", unit_price: "price", length_mm: "length" }[field] || field;
+    // A length can be cleared. A part that is not cut to a length has
+    // none at all, and blank is not the same as a length of zero.
+    const cleared = field === "length_mm" && (rawValue === "" || rawValue == null);
+    let value = field === "description" ? String(rawValue).trim() : cleared ? null : Number(rawValue);
     if (field === "description" && !value) return;
-    if (field !== "description" && !(value >= 0)) return;
-    if (String(item[field] ?? "") === String(value)) return;
+    if (field !== "description" && !cleared && !(value >= 0)) return;
+    if (String(item[field] ?? "") === String(value ?? "")) return;
 
     if (field === "qty" && value < Number(item.qty_invoiced || 0)) {
       alert(
@@ -5789,7 +5836,8 @@ export default function StockControl() {
     try {
       const { error } = await supabase.from("job_quote_items").update({ [field]: value }).eq("id", item.id);
       if (error) throw error;
-      await logJobEvent(job.id, "item changed", `${item.description} — ${label} ${item[field]} to ${value}`);
+      const shown = (v) => (v == null || v === "" ? "(blank)" : v);
+      await logJobEvent(job.id, "item changed", `${item.description} — ${label} ${shown(item[field])} to ${shown(value)}`);
       await openJobDetail(job);
       fetchJobs();
     } catch (err) {
@@ -5809,11 +5857,25 @@ export default function StockControl() {
       alert("This has a delivery note against it, so it cannot be removed. Change the quantity instead.");
       return;
     }
-    if (!window.confirm(`Remove "${item.description}" from this job?`)) return;
+    // The database takes a line's parts with it (the parent column
+    // cascades), so the box has to say so. Being told after the fact
+    // that 150 parts went is no use to anybody.
+    const parts = childLinesOf(item, jobDetail?.quoteItems);
+    if (
+      !window.confirm(
+        `Remove "${item.description}" from this job?` +
+          (parts.length ? `\n\nIts ${parts.length} part${parts.length === 1 ? " goes" : "s go"} with it.` : "")
+      )
+    )
+      return;
     try {
       const { error } = await supabase.from("job_quote_items").delete().eq("id", item.id);
       if (error) throw error;
-      await logJobEvent(job.id, "item removed", `${item.qty} × ${item.description}`);
+      await logJobEvent(
+        job.id,
+        isChildLine(item) ? "part removed" : "item removed",
+        `${item.qty} × ${item.description}` + (parts.length ? ` and its ${parts.length} parts` : "")
+      );
       await openJobDetail(job);
       fetchJobs();
     } catch (err) {
@@ -20145,6 +20207,12 @@ export default function StockControl() {
                     const openDeliveryNote = jobDetail.deliveryNotes.find((dn) => dn.quote_item_id === it.id && !dn.checked_back_in_at);
                     const canActOnThis = canEditThisJob && remaining > 0 && status !== "out_external";
                     const parts = childLinesOf(it, jobDetail.quoteItems);
+                    // Only for the line whose Add part form is open: this
+                    // runs inside the map, once per line on the job.
+                    const customerParts =
+                      addPartUnder === it.id
+                        ? (items || []).filter((si) => si.mainCat === "custom" && si.customer === jobDetail.job.customer)
+                        : [];
                     return (
                       <div key={it.id}>
                       <div style={S.managerRow}>
@@ -20313,18 +20381,75 @@ export default function StockControl() {
                           </span>
                         )}
                       </div>
-                      {parts.length > 0 && (
+                      {(parts.length > 0 || canEditThisJob) && (
                         <div style={{ marginLeft: 22, marginTop: 4, display: "flex", flexDirection: "column", gap: 3 }}>
-                          <div style={S.roleHint}>
-                            {parts.length} part{parts.length === 1 ? "" : "s"} · {parts.reduce((n, c) => n + (Number(c.qty) || 0), 0)} off
-                          </div>
+                          {parts.length > 0 && (
+                            <div style={S.roleHint}>
+                              {parts.length} part{parts.length === 1 ? "" : "s"} · {parts.reduce((n, c) => n + (Number(c.qty) || 0), 0)} off
+                            </div>
+                          )}
                           {parts.map((c) => (
-                            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, flexWrap: "wrap" }}>
                               <span style={{ color: C.muted }}>↳</span>
-                              <span style={{ fontWeight: 600 }}>{Number(c.qty)}×</span>
-                              <span style={{ flex: 1, minWidth: 0 }}>{c.description}</span>
-                              {c.length_mm != null && c.length_mm !== "" && <span style={S.roleHint}>{Number(c.length_mm)} mm</span>}
-                              {c.made_on && <span style={S.roleHint}>{madeOnLabel(c.made_on)}</span>}
+                              {canEditThisJob ? (
+                                <>
+                                  {/* Typed straight over, the same as the
+                                      line above it. A part has no price:
+                                      the parent is what gets invoiced. */}
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    defaultValue={c.qty}
+                                    onBlur={(e) => updateJobQuoteItem(jobDetail.job, c, "qty", e.target.value)}
+                                    style={{ ...S.input, width: 58, fontSize: 13, padding: "3px 5px" }}
+                                    title="How many of this part"
+                                  />
+                                  <input
+                                    defaultValue={c.description}
+                                    onBlur={(e) => updateJobQuoteItem(jobDetail.job, c, "description", e.target.value)}
+                                    style={{ ...S.input, flex: "1 1 140px", minWidth: 90, fontSize: 13, padding: "3px 5px" }}
+                                    title="What the part is"
+                                  />
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    defaultValue={c.length_mm ?? ""}
+                                    onBlur={(e) => updateJobQuoteItem(jobDetail.job, c, "length_mm", e.target.value)}
+                                    style={{ ...S.input, width: 80, fontSize: 13, padding: "3px 5px" }}
+                                    placeholder="mm"
+                                    title="Cut length in millimetres. Leave it blank where a length means nothing."
+                                  />
+                                  <select
+                                    value={c.made_on || ""}
+                                    onChange={(e) => setJobItemMadeOn(jobDetail.job, c, e.target.value)}
+                                    style={{
+                                      ...S.input,
+                                      width: "auto",
+                                      fontSize: 12.5,
+                                      padding: "2px 6px",
+                                      ...(c.made_on ? {} : { border: `1px solid ${C.accentRaw}` }),
+                                    }}
+                                    title="Which machine cuts this part. Decides which cutting stage lists it."
+                                  >
+                                    <option value="">Cut method…</option>
+                                    {MADE_ON_OPTIONS.map((o) => (
+                                      <option key={o.code} value={o.code}>
+                                        {o.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <SavedCheck fieldKey={`quoteitem-madeon-${c.id}`} />
+                                </>
+                              ) : (
+                                <>
+                                  <span style={{ fontWeight: 600 }}>{Number(c.qty)}×</span>
+                                  <span style={{ flex: 1, minWidth: 0 }}>{c.description}</span>
+                                  {c.length_mm != null && c.length_mm !== "" && <span style={S.roleHint}>{Number(c.length_mm)} mm</span>}
+                                  {c.made_on && <span style={S.roleHint}>{madeOnLabel(c.made_on)}</span>}
+                                </>
+                              )}
                               {canEditThisJob && (
                                 <button
                                   type="button"
@@ -20338,6 +20463,97 @@ export default function StockControl() {
                               )}
                             </div>
                           ))}
+                          {canEditThisJob && addPartUnder === it.id && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, flexWrap: "wrap" }}>
+                              <span style={{ color: C.muted, fontSize: 13 }}>↳</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                style={{ ...S.input, width: 58, fontSize: 13, padding: "3px 5px" }}
+                                value={newPartForm.qty}
+                                onChange={(e) => setNewPartForm((f) => ({ ...f, qty: e.target.value }))}
+                                placeholder="Qty"
+                              />
+                              {/* Typed to find against this customer's parts,
+                                  the same as every other picker in the app.
+                                  A part that is not on their list can still
+                                  be typed: allowNew lets the words stand. */}
+                              <TypeToFind
+                                style={{ flex: "1 1 160px", minWidth: 120 }}
+                                options={customerParts.map((si) => ({ value: si.id, label: customerStockLabel(si), hint: si.name }))}
+                                value={newPartForm.linkedItemId || newPartForm.description}
+                                allowNew
+                                onChange={(v) => {
+                                  const si = customerParts.find((s) => s.id === v);
+                                  setNewPartForm((f) =>
+                                    si
+                                      ? { ...f, linkedItemId: si.id, description: customerStockLabel(si), madeOn: f.madeOn || si.madeOn || "" }
+                                      : { ...f, linkedItemId: null, description: v }
+                                  );
+                                }}
+                                placeholder="Part number or description…"
+                                inputStyle={{ fontSize: 13, padding: "3px 5px" }}
+                              />
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                style={{ ...S.input, width: 80, fontSize: 13, padding: "3px 5px" }}
+                                value={newPartForm.lengthMm}
+                                onChange={(e) => setNewPartForm((f) => ({ ...f, lengthMm: e.target.value }))}
+                                placeholder="mm"
+                                title="Cut length in millimetres. Leave it blank where a length means nothing."
+                              />
+                              <select
+                                value={newPartForm.madeOn}
+                                onChange={(e) => setNewPartForm((f) => ({ ...f, madeOn: e.target.value }))}
+                                style={{ ...S.input, width: "auto", fontSize: 12.5, padding: "2px 6px" }}
+                                title="Which machine cuts this part"
+                              >
+                                <option value="">Cut method…</option>
+                                {MADE_ON_OPTIONS.map((o) => (
+                                  <option key={o.code} value={o.code}>
+                                    {o.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                className="stk-btn"
+                                style={S.reqActionBtn}
+                                disabled={!String(newPartForm.description || "").trim() || !(Number(newPartForm.qty) > 0)}
+                                onClick={async () => {
+                                  const ok = await addJobQuoteChild(jobDetail.job, it, newPartForm);
+                                  if (ok) setNewPartForm({ description: "", qty: "", lengthMm: "", madeOn: newPartForm.madeOn, linkedItemId: null });
+                                }}
+                              >
+                                <Plus size={12} /> Add part
+                              </button>
+                              <button
+                                type="button"
+                                className="stk-btn"
+                                style={S.roleChip}
+                                onClick={() => setAddPartUnder(null)}
+                              >
+                                Done
+                              </button>
+                            </div>
+                          )}
+                          {canEditThisJob && addPartUnder !== it.id && (
+                            <button
+                              type="button"
+                              className="stk-btn"
+                              style={{ ...S.reqActionBtnMuted, alignSelf: "flex-start" }}
+                              onClick={() => {
+                                setNewPartForm({ description: "", qty: "", lengthMm: "", madeOn: "", linkedItemId: null });
+                                setAddPartUnder(it.id);
+                              }}
+                              title="Add a part under this line. Parts are cut and counted; this line is what gets invoiced."
+                            >
+                              <Plus size={11} /> Add part
+                            </button>
+                          )}
                         </div>
                       )}
                       </div>
