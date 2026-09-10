@@ -12896,6 +12896,9 @@ export default function StockControl() {
                 (!jobsSalesRepFilter || j.sales_rep === jobsSalesRepFilter) &&
                 (!q ||
                   (j.job_number || "").toLowerCase().includes(q) ||
+                  // The SigmaNest number is what the laser side quotes
+                  // back, so it has to find the job as readily as ours.
+                  (j.laser_job_reference || "").toLowerCase().includes(q) ||
                   (j.customer || "").toLowerCase().includes(q) ||
                   (j.sales_rep || "").toLowerCase().includes(q));
               // How long this job has been with us. Counted from when it was
@@ -13053,7 +13056,7 @@ export default function StockControl() {
                       style={{ ...S.input, flex: 2, minWidth: 160 }}
                       value={jobsSearchQuery}
                       onChange={(e) => setJobsSearchQuery(e.target.value)}
-                      placeholder="Search job number, customer, or sales rep…"
+                      placeholder="Search job number, SigmaNest number, customer, or sales rep…"
                     />
                     <TypeToFind
                       style={{ flex: 1, minWidth: 130 }}
