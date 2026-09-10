@@ -17144,8 +17144,23 @@ export default function StockControl() {
                       Add
                     </button>
                   </div>
+                  <input
+                    style={{ ...S.input, marginTop: 10 }}
+                    value={managerSearchQuery}
+                    onChange={(e) => setManagerSearchQuery(e.target.value)}
+                    placeholder="Search suppliers, categories or contact names…"
+                  />
+                  {(() => {
+                    // Matches the supplier's own name, any category it is
+                    // filed under, and any contact person's name — so a
+                    // rep's name finds the company they work for.
+                    const q = managerSearchQuery.trim().toLowerCase();
+                    const visibleSuppliers = master.suppliers.filter((s) =>
+                      !q || [s.name, ...(s.categories || []), ...(s.contacts || []).map((c) => c.name)].join(" ").toLowerCase().includes(q)
+                    );
+                    return (
                   <div style={S.managerListFullPage}>
-                    {master.suppliers.map((s) => (
+                    {visibleSuppliers.map((s) => (
                       <button
                         key={s.id}
                         type="button"
@@ -17165,7 +17180,10 @@ export default function StockControl() {
                       </button>
                     ))}
                     {master.suppliers.length === 0 && <div style={S.empty}>Nothing here yet — add one above.</div>}
+                    {master.suppliers.length > 0 && visibleSuppliers.length === 0 && <div style={S.empty}>No supplier matches that search.</div>}
                   </div>
+                    );
+                  })()}
                 </>
               ) : (
                 (() => {
