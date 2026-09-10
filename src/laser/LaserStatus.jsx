@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { Check, Hand, AlertTriangle, ChevronDown } from "lucide-react";
 import { C, S } from "../theme.js";
+import Section from "../Section.jsx";
 import { programTitle } from "./programTitle.js";
 
 // Where a job goes after the laser, and where the packer works.
@@ -41,11 +42,22 @@ import { programTitle } from "./programTitle.js";
 //
 // No database calls in here. The parent owns those.
 
-function laserState(programs) {
+// The laser side of a row, in words. A row still waiting (the tube
+// laser lists those too) says what it waits on; one part-way through
+// says how many programs, and how many lengths when the row knows.
+function laserState(r) {
+  const programs = r.programs || [];
+  const lengths =
+    r.lengths && r.lengths.total > 1 ? ` · ${r.lengths.cut} of ${r.lengths.total} lengths` : "";
+  if (r.waiting === "nesting") return { label: "Waiting on nesting", tone: C.muted, done: false };
   if (programs.length === 0) return { label: "No programs", tone: C.muted, done: false };
   const cut = programs.filter((p) => p.is_complete).length;
   if (cut === programs.length) return { label: "Cut — all programs", tone: C.accentFinished, done: true };
-  return { label: `Cutting — ${cut} of ${programs.length} programs`, tone: C.accentRaw, done: false };
+  return {
+    label: `${r.waiting ? "Waiting on cutting" : "Cutting"} — ${cut} of ${programs.length} programs${lengths}`,
+    tone: r.waiting ? C.muted : C.accentRaw,
+    done: false,
+  };
 }
 
 export default function LaserStatus({
@@ -87,6 +99,31 @@ export default function LaserStatus({
     );
   }, [rows, query]);
 
+  // Off the laser first; what is still coming underneath, the way a
+  // Production department shows its waiting work: shut when there is
+  // something ready to do, open when the waiting list is all there is.
+  const ready = filtered.filter((r) => !r.waiting);
+  const waiting = filtered.filter((r) => r.waiting);
+
+  const renderRow = (r) => (
+    <StatusRow
+      key={r.key}
+      row={r}
+      expanded={openRow === r.key}
+      onToggle={() => setOpenRow((k) => (k === r.key ? null : r.key))}
+      canPack={canPack}
+      canTake={canTake}
+      partsLabel={partsLabel}
+      otherNote={otherNote}
+      busyId={busyId}
+      onTakeJob={onTakeJob}
+      onFinishPacking={onFinishPacking}
+      onFlagShortage={onFlagShortage}
+      onLogItem={onLogItem}
+      ItemProgress={ItemProgress}
+    />
+  );
+
   return (
     <div style={S.list}>
       <input
@@ -96,31 +133,22 @@ export default function LaserStatus({
         placeholder="Search job, customer, program, or packer…"
       />
 
-      {filtered.length === 0 ? (
+      {ready.length === 0 ? (
         <div style={S.empty}>
           {query.trim()
             ? "Nothing matches that."
-            : "Nothing off the laser yet. A job appears here as soon as its first program is cut."}
+            : waiting.length > 0
+              ? "Nothing off the laser yet. What is on its way is listed below; a job moves up here as soon as its first program is cut."
+              : "Nothing off the laser yet. A job appears here as soon as its first program is cut."}
         </div>
       ) : (
-        filtered.map((r) => (
-          <StatusRow
-            key={r.key}
-            row={r}
-            expanded={openRow === r.key}
-            onToggle={() => setOpenRow((k) => (k === r.key ? null : r.key))}
-            canPack={canPack}
-            canTake={canTake}
-            partsLabel={partsLabel}
-            otherNote={otherNote}
-            busyId={busyId}
-            onTakeJob={onTakeJob}
-            onFinishPacking={onFinishPacking}
-            onFlagShortage={onFlagShortage}
-            onLogItem={onLogItem}
-            ItemProgress={ItemProgress}
-          />
-        ))
+        ready.map(renderRow)
+      )}
+
+      {waiting.length > 0 && (
+        <Section title="Waiting on earlier stages" count={waiting.length} collapsible defaultOpen={ready.length === 0} quiet>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{waiting.map(renderRow)}</div>
+        </Section>
       )}
 
       <div style={S.roleHint}>
@@ -146,7 +174,7 @@ function StatusRow({
   onLogItem,
   ItemProgress,
 }) {
-  const laser = laserState(r.programs);
+  const laser = laserState(r);
   // A job can reach here with no packing stage at all, when nobody ticked
   // Packer as the job was built.
   const taken = !!r.process?.started_at;

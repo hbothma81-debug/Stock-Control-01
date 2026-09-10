@@ -4218,7 +4218,14 @@ export default function StockControl() {
   // For the plate laser as it always was; for the tube laser with its own
   // data and its own packing rule -- the tube operator packs under the
   // Tube Laser stage itself, so that stage is the packing stage there.
-  function laserStatusRows(source = laserData, isPackingStage = workedInLaserStatus) {
+  //
+  // `includeWaiting` (the tube laser) lists the jobs still to come as
+  // well, the way a Production department shows what is waiting on an
+  // earlier stage: a job with a packing stage but nothing cut yet is on
+  // the list marked waiting -- on nesting when it is on no program, on
+  // cutting once it is -- so the next department can see what is coming.
+  // Those rows carry `waiting`; the rest are ready, as before.
+  function laserStatusRows(source = laserData, isPackingStage = workedInLaserStatus, { includeWaiting = false, isNestingStage = null } = {}) {
     const d = source || { programs: [], links: [], processes: [] };
     const jobs = jobsList || [];
     const live = d.programs.filter((pg) => !pg.is_cancelled);
@@ -4235,13 +4242,33 @@ export default function StockControl() {
       const programs = live.filter((pg) =>
         d.links.some((l) => l.program_id === pg.id && l.job_id === job.id)
       );
+      const anyCut = programs.some((pg) => pg.is_complete);
       // Nothing off the machine yet is nothing for the packer to look for.
-      if (!programs.some((pg) => pg.is_complete)) continue;
+      let waiting = null;
+      if (!anyCut) {
+        // Only a job that has the stage at all is coming this way.
+        if (!includeWaiting || !packing) continue;
+        const nesting = isNestingStage
+          ? d.processes.find((pr) => pr.job_id === job.id && !pr.shortage_id && isNestingStage(pr.process_name))
+          : null;
+        waiting = programs.length > 0 || nesting?.is_complete ? "cutting" : "nesting";
+      }
+      // Lengths (sheets on plate) cut against required, across the
+      // job's programs, so "waiting on cutting" says how far along it is.
+      const lengths = programs.reduce(
+        (n, pg) => {
+          const req = Math.max(1, Number(pg.sheets_required) || 1);
+          return { cut: n.cut + Math.min(req, Math.max(0, Number(pg.sheets_cut) || 0)), total: n.total + req };
+        },
+        { cut: 0, total: 0 }
+      );
       rows.push({
         key: "job:" + job.id,
         job,
         process: packing || null,
         programs,
+        waiting,
+        lengths,
         packerName: packing?.operator || packing?.started_by || "",
         isMine: !!currentUser?.id && !!packing && packing.assigned_to === currentUser.id,
         // For a packing stage set to Each: the lines this stage handles
@@ -4362,7 +4389,7 @@ export default function StockControl() {
   function tubePackingProps({ canTake }) {
     const canPack = isAdmin || !!profile?.allowedProcessTypes?.some(isTubeCutProcess);
     return {
-      rows: laserStatusRows(tubeLaser.laserData, isTubeCutProcess),
+      rows: laserStatusRows(tubeLaser.laserData, isTubeCutProcess, { includeWaiting: true, isNestingStage: isTubeNestingProcess }),
       canPack,
       canTake: canTake || canPack,
       meName: roleLabel,
@@ -13517,13 +13544,23 @@ export default function StockControl() {
                       }}
                     >
                       <span style={{ flex: 1 }}>Tube Laser Status</span>
-                      <span style={S.gradeCount}>
-                        {tubeLaser.laserData === null
-                          ? "…"
-                          : laserStatusRows(tubeLaser.laserData, isTubeCutProcess).filter(
-                              (r) => !productionFiltering || productionJobMatches(r.job)
-                            ).length}
-                      </span>
+                      {(() => {
+                        if (tubeLaser.laserData === null) return <span style={S.gradeCount}>…</span>;
+                        // Ready and waiting apart, the way every other
+                        // department card says it.
+                        const all = tubePackingProps({ canTake: true }).rows.filter(
+                          (r) => !productionFiltering || productionJobMatches(r.job)
+                        );
+                        const waitingCount = all.filter((r) => r.waiting).length;
+                        return (
+                          <>
+                            {waitingCount > 0 && (
+                              <span style={{ fontSize: 13, fontWeight: 500, color: C.muted, whiteSpace: "nowrap" }}>{waitingCount} waiting</span>
+                            )}
+                            <span style={S.gradeCount} title="Off the laser, ready to take">{all.length - waitingCount}</span>
+                          </>
+                        );
+                      })()}
                       <ChevronRight size={20} />
                     </button>
                     {visibleDepts.map(({ procType, readyCount, waitingCount, hasPendingShortage, oldestPending }) => {
