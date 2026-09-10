@@ -7430,15 +7430,20 @@ export default function StockControl() {
   async function printJobSheet(job, processes, quoteItems, deliveryNotes) {
     const { jsPDF, autoTable } = await getPdf();
     const doc = new jsPDF();
+    // Every type size on this sheet, in one place, so "make it smaller"
+    // is one edit and the whole page stays in proportion. Points.
+    const T = { title: 14, subTitle: 12, heading: 10, body: 9, table: 7.5, note: 8 };
+    // Tables are dense reference, not prose: small type and tight rows.
+    const tableStyles = { styles: { fontSize: T.table, cellPadding: 1.3 }, headStyles: { fillColor: [27, 29, 31], fontSize: T.table } };
     const company = master.companyDetails || {};
     const leftX = 14;
     const { height: logoH } = addCompanyLogo(doc, company, leftX, 10, 26, 14);
     let y = logoH ? 10 + logoH + 6 : 18;
-    doc.setFontSize(16);
+    doc.setFontSize(T.title);
     doc.setFont(undefined, "bold");
     doc.text(`Job ${job.job_number}`, leftX, y);
     y += 8;
-    doc.setFontSize(10);
+    doc.setFontSize(T.body);
     doc.setFont(undefined, "normal");
     const infoLines = [
       `Customer: ${job.customer || "—"}`,
@@ -7473,7 +7478,12 @@ export default function StockControl() {
           const invoiced = Number(it.qty_invoiced) || 0;
           const row = [it.description || "", madeOnLabel(it.made_on) || "—", qty, invoiced, Math.max(qty - invoiced, 0)];
           const parts = childLinesOf(it, quoteItems).map((c) => [
-            `   ↳ ${c.description || ""}${c.length_mm ? ` · ${Number(c.length_mm)} mm` : ""}`,
+            // A bullet, not the ↳ used on screen. The PDF's standard font
+            // has no arrow: it printed as a stray glyph AND spaced out
+            // every letter of the line it was on, so every part on the
+            // sheet read as g a p p e d   t e x t. The bullet and the
+            // middot are both in the font and print properly.
+            `   • ${c.description || ""}${c.length_mm ? ` · ${Number(c.length_mm)} mm` : ""}`,
             madeOnLabel(c.made_on) || "—",
             Number(c.qty) || 0,
             "",
@@ -7482,12 +7492,7 @@ export default function StockControl() {
           return [row, ...parts];
         }),
         theme: "grid",
-        headStyles: { fillColor: [27, 29, 31], fontSize: 8 },
-        // Left to itself autoTable sets 10pt, which is bigger than this
-        // sheet's own body text and turns a job with its parts listed
-        // into pages of very large type. 8pt with tighter rows is a
-        // fifth shorter and still easily read at a machine.
-        styles: { fontSize: 8, cellPadding: 1.4 },
+        ...tableStyles,
         // The numbers need only their own width; the description gets
         // what is left, because that is what wraps.
         columnStyles: {
@@ -7535,12 +7540,12 @@ export default function StockControl() {
         p.notes || "",
       ]),
       theme: "grid",
-      headStyles: { fillColor: [27, 29, 31] },
+      ...tableStyles,
     });
 
     if (job.buy_out_notes) {
       const finalY = (doc.lastAutoTable?.finalY || y + 20) + 8;
-      doc.setFontSize(9);
+      doc.setFontSize(T.note);
       doc.text(`Buy-out notes: ${job.buy_out_notes}`, leftX, finalY);
     }
 
@@ -7550,7 +7555,7 @@ export default function StockControl() {
     // here — just what was done.
     doc.addPage();
     let hy = 18;
-    doc.setFontSize(14);
+    doc.setFontSize(T.subTitle);
     doc.setFont(undefined, "bold");
     doc.text(`Job History — ${job.job_number}`, leftX, hy);
     hy += 10;
@@ -7562,13 +7567,13 @@ export default function StockControl() {
         return acc;
       }, {})
     );
-    doc.setFontSize(11);
+    doc.setFontSize(T.heading);
     doc.setFont(undefined, "bold");
     doc.text("Delivery notes", leftX, hy);
     doc.setFont(undefined, "normal");
     hy += 6;
     if (dnGroups.length === 0) {
-      doc.setFontSize(9);
+      doc.setFontSize(T.note);
       doc.text("None issued.", leftX, hy);
       hy += 8;
     } else {
@@ -7577,19 +7582,19 @@ export default function StockControl() {
         head: [["Number", "Direction", "Date"]],
         body: dnGroups.map((g) => [g[0].delivery_note_number, g[0].direction === "to_supplier" ? "To supplier" : "To customer", new Date(g[0].created_at).toLocaleDateString()]),
         theme: "grid",
-        headStyles: { fillColor: [27, 29, 31] },
+        ...tableStyles,
         margin: { left: leftX },
       });
       hy = doc.lastAutoTable.finalY + 8;
     }
 
     const requestsForJob = jobInvoiceRequests.filter((r) => r.job_id === job.id);
-    doc.setFontSize(11);
+    doc.setFontSize(T.heading);
     doc.setFont(undefined, "bold");
     doc.text("Invoicing", leftX, hy);
     doc.setFont(undefined, "normal");
     hy += 6;
-    doc.setFontSize(9);
+    doc.setFontSize(T.note);
     if (job.invoice_number) {
       doc.text(`Invoice #${job.invoice_number} — ${job.invoiced_at ? new Date(job.invoiced_at).toLocaleDateString() : ""}`, leftX, hy);
       hy += 6;
@@ -7603,20 +7608,20 @@ export default function StockControl() {
         head: [["Submitted", "Date"]],
         body: requestsForJob.map((r) => [r.submitted_by, new Date(r.submitted_at).toLocaleDateString()]),
         theme: "grid",
-        headStyles: { fillColor: [27, 29, 31] },
+        ...tableStyles,
         margin: { left: leftX },
       });
       hy = doc.lastAutoTable.finalY + 8;
     }
 
     const materialsUsed = (usageLog || []).filter((u) => u.direction === "use" && u.jobNumber === job.job_number);
-    doc.setFontSize(11);
+    doc.setFontSize(T.heading);
     doc.setFont(undefined, "bold");
     doc.text("Materials used", leftX, hy);
     doc.setFont(undefined, "normal");
     hy += 6;
     if (materialsUsed.length === 0) {
-      doc.setFontSize(9);
+      doc.setFontSize(T.note);
       doc.text("None logged.", leftX, hy);
       hy += 8;
     } else {
@@ -7625,7 +7630,7 @@ export default function StockControl() {
         head: [["Item", "Qty", "By", "Date"]],
         body: materialsUsed.map((u) => [u.itemName, u.qty, u.by, new Date(u.timestamp).toLocaleDateString()]),
         theme: "grid",
-        headStyles: { fillColor: [27, 29, 31] },
+        ...tableStyles,
         margin: { left: leftX },
       });
       hy = doc.lastAutoTable.finalY + 8;
@@ -7652,13 +7657,13 @@ export default function StockControl() {
       console.error("Failed to load shortages for the job sheet:", err);
     }
 
-    doc.setFontSize(11);
+    doc.setFontSize(T.heading);
     doc.setFont(undefined, "bold");
     doc.text("Shortages", leftX, hy);
     doc.setFont(undefined, "normal");
     hy += 6;
     if (jobShortages.length === 0) {
-      doc.setFontSize(9);
+      doc.setFontSize(T.note);
       doc.text("None raised.", leftX, hy);
       hy += 8;
     } else {
@@ -7681,7 +7686,7 @@ export default function StockControl() {
                 : "Waiting on nesting",
         ]),
         theme: "grid",
-        headStyles: { fillColor: [27, 29, 31] },
+        ...tableStyles,
         margin: { left: leftX },
       });
       hy = doc.lastAutoTable.finalY + 8;
