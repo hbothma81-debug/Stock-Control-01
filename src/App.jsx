@@ -3105,6 +3105,97 @@ export default function StockControl() {
   // The stages of every job not yet invoiced, for the progress bar on the
   // Jobs list. Invoiced jobs are done and get no bar, so their stages are
   // left out. Never fatal: the list is worth more than the bar.
+  // A job whose every stage is ticked is finished on the floor, and that
+  // is what Complete means to accounts: it appears under Records ->
+  // Invoicing so the invoice gets raised. Nothing used to say so. The Jobs
+  // list read "All 4 stages done" while the status stayed In Progress, and
+  // finished jobs sat unbilled until somebody happened to open one and
+  // change the dropdown.
+  //
+  // One rule, used by every place a stage gets ticked and by the list
+  // load itself, so a job that finished before this existed settles the
+  // next time anyone opens the Jobs page.
+  //
+  // Forward only. A job somebody set to Complete by hand with a stage
+  // still open is a decision, not a contradiction to be undone on every
+  // load. The one place it runs backwards is un-ticking a stage on a
+  // Complete job -- a person saying it is not done after all.
+  function jobFinishedOnFloor(stages) {
+    return (stages || []).length > 0 && stages.every((p) => p.is_complete);
+  }
+
+  // Returns true if any job changed, so the caller knows to reload.
+  async function settleFinishedJobs(stagesByJob, jobs) {
+    if (!supabase) return false;
+    const finished = (jobs || []).filter(
+      (j) => j.status === "in_progress" && jobFinishedOnFloor(stagesByJob[j.id])
+    );
+    let changed = false;
+    for (const job of finished) {
+      // The status test on the update is what stops two people loading
+      // the list at the same moment from both marking it and both telling
+      // the rep: only the one whose update returns the row says anything.
+      const { data, error } = await supabase
+        .from("jobs")
+        .update({ status: "complete" })
+        .eq("id", job.id)
+        .eq("status", "in_progress")
+        .select("id");
+      if (error) {
+        console.error("Could not mark the finished job complete:", job.job_number, error);
+        continue;
+      }
+      if (!data || data.length === 0) continue;
+      changed = true;
+      if (job.sales_rep) {
+        await sendNotifications({
+          job_id: job.id,
+          job_number: job.job_number,
+          sales_rep: job.sales_rep,
+          message: `${job.job_number} (${job.customer || "no customer"}) is finished — every stage done. It is under Invoicing now, ready to bill.`,
+        });
+      }
+    }
+    return changed;
+  }
+
+  // After one stage is ticked: was that the last one on its job? Reads
+  // the job and its stages fresh rather than trusting whatever shape the
+  // caller had -- the tick comes from Job Detail, the Production queue,
+  // the per-item count and Laser Status, and they do not all carry the
+  // same job object.
+  async function settleJobAfterTick(jobId) {
+    if (!supabase || !jobId) return;
+    try {
+      const [{ data: job, error: jobError }, { data: stages, error: stagesError }] = await Promise.all([
+        supabase.from("jobs").select("id, job_number, customer, sales_rep, status").eq("id", jobId).single(),
+        supabase.from("job_processes").select("id, is_complete").eq("job_id", jobId),
+      ]);
+      if (jobError) throw jobError;
+      if (stagesError) throw stagesError;
+      const changed = await settleFinishedJobs({ [jobId]: stages || [] }, job ? [job] : []);
+      if (changed) await fetchJobs();
+    } catch (err) {
+      console.error("Could not check whether that was the last stage:", err);
+    }
+  }
+
+  async function reopenJobAfterUntick(jobId) {
+    if (!supabase || !jobId) return;
+    try {
+      const { data, error } = await supabase
+        .from("jobs")
+        .update({ status: "in_progress" })
+        .eq("id", jobId)
+        .eq("status", "complete")
+        .select("id");
+      if (error) throw error;
+      if (data && data.length > 0) await fetchJobs();
+    } catch (err) {
+      console.error("Could not put that job back to In Progress:", err);
+    }
+  }
+
   async function refreshJobStages(jobs) {
     const ids = (jobs || jobsList || []).filter((j) => j.status !== "invoiced").map((j) => j.id);
     if (ids.length === 0) {
@@ -3120,6 +3211,10 @@ export default function StockControl() {
       const byJob = {};
       for (const r of rows) (byJob[r.job_id] = byJob[r.job_id] || []).push(r);
       setJobStagesByJob(byJob);
+      // Anything finished on the floor but still In Progress settles
+      // here. fetchJobs calls back into this, and the second pass finds
+      // nothing left to settle, so it does not loop.
+      if (await settleFinishedJobs(byJob, jobs || jobsList)) fetchJobs();
     } catch (err) {
       console.error("Failed to load stages for the Jobs list (the list still shows):", err);
     }
@@ -4101,6 +4196,7 @@ export default function StockControl() {
       // this is the moment the shortage is genuinely finished. Same rule
       // as everywhere else decides that.
       if (row.shortage) await refreshShortageStatus(row.shortage);
+      await settleJobAfterTick(row.process.job_id);
       await fetchLaserData();
       if (productionQueue !== null) fetchProductionQueue();
     } catch (err) {
@@ -4794,6 +4890,7 @@ export default function StockControl() {
             message: `${process.process_name} marked complete by ${roleLabel} on ${job.job_number} (${job.customer || "no customer"})`,
           });
         }
+        await settleJobAfterTick(job.id);
       }
       if (jobDetail?.job.id === job.id) refreshJobDetail();
       if (productionQueue !== null) fetchProductionQueue();
@@ -4948,6 +5045,8 @@ export default function StockControl() {
           message: `${process.process_name} marked complete by ${roleLabel} on ${job.job_number} (${job.customer || "no customer"})`,
         });
       }
+      if (nowComplete) await settleJobAfterTick(job.id);
+      else await reopenJobAfterUntick(job.id);
       // Refresh whichever view(s) are actually active — this can be
       // called from Job Detail, the Production queue, or both.
       if (jobDetail?.job.id === job.id) refreshJobDetail();
