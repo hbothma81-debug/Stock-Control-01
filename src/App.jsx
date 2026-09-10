@@ -71,6 +71,10 @@ import useLaserPrograms from "./laser/useLaserPrograms.js";
 import Section from "./Section.jsx";
 import RecordRow from "./RecordRow.jsx";
 import { extractPdfTextItems, parseSigmaNestQuote, browserInflate } from "./lib/sigmanestQuote.js";
+// The tube nesting report's reader, shared with the tube laser tab: the
+// job's Items tab reads the parts off the same file, without the
+// programs.
+import { parsePartInfo, findSheet, PART_INFO_SHEET, referenceFromFileName } from "./laser/nestingReport.js";
 
 // window.storage is installed in main.jsx before this component ever
 // renders — backed by Supabase. See src/lib/storage.js.
@@ -1376,6 +1380,10 @@ export default function StockControl() {
   // import writes the same rows in bulk; this is one at a time, for
   // work that never came through a report.
   const [addPartUnder, setAddPartUnder] = useState(null);
+  // The line whose parts are being read off a file, so its buttons can
+  // say so: a big report takes a moment and a second press would
+  // import it twice.
+  const [importingPartsFor, setImportingPartsFor] = useState(null);
   const [newPartForm, setNewPartForm] = useState({ description: "", qty: "", lengthMm: "", madeOn: "", linkedItemId: null });
   const [jobHistoryOpen, setJobHistoryOpen] = useState(false); // { [quoteItemId]: "3" }
   const [deliveryNoteBatchModal, setDeliveryNoteBatchModal] = useState(null);
@@ -3985,7 +3993,11 @@ export default function StockControl() {
   // it yet, so one is made from the reference. A part already under the
   // parent (same name) has its quantity and length brought up to date
   // rather than being added twice. Returns the parent line, or null.
-  async function addPartsToJob(job, parentId, parts, reference) {
+  // madeOn says which machine the parts go to. It defaults to the tube
+  // laser because the nesting report was the first caller and every
+  // part on one is tube; the Items tab passes its own, so a SigmaNest
+  // import lands as laser parts.
+  async function addPartsToJob(job, parentId, parts, reference, madeOn = "tube_laser") {
     if (!supabase || !job || !(parts || []).length) return null;
     try {
       const { data: existing, error: readError } = await supabase.from("job_quote_items").select("*").eq("job_id", job.id).order("sort_order");
@@ -4002,7 +4014,7 @@ export default function StockControl() {
             qty: 1,
             unit_price: 0,
             sort_order: nextOrder++,
-            made_on: "tube_laser",
+            made_on: madeOn,
           })
           .select()
           .single();
@@ -4028,8 +4040,9 @@ export default function StockControl() {
             description: name,
             ...fields,
             unit_price: 0,
+            linked_item_id: p.linkedItemId || null,
             sort_order: nextOrder++,
-            made_on: "tube_laser",
+            made_on: madeOn,
           });
         }
       }
@@ -4047,6 +4060,82 @@ export default function StockControl() {
           "If this mentions a missing column, setup-tube-laser-parts.sql has not been run yet."
       );
       return null;
+    }
+  }
+
+  // Parts read off a file and put under one of the job's lines. The two
+  // files the shop already works from:
+  //
+  //   sigmanest   the quote PDF, whose lines are the plate parts. No
+  //               lengths on it -- a flat part has none -- and a name
+  //               that matches one of the customer's stock codes is
+  //               linked to it, so the drawing comes with it.
+  //   tubenest    the tube software's spreadsheet export. Only its Part
+  //               Info sheet is read here: the parts and their lengths.
+  //               The programs are the tube tab's business, not the
+  //               job's, and importing there is what makes those.
+  //
+  // Both land through addPartsToJob, the same writer the tube tab uses,
+  // so a part already under that line is updated rather than doubled.
+  async function importPartsUnderLine(job, parent, file, kind) {
+    if (!supabase || !file || !parent) return;
+    setImportingPartsFor(parent.id);
+    try {
+      let parts = [];
+      let source = file.name;
+      let madeOn = "laser";
+      if (kind === "sigmanest") {
+        const quote = await parseSigmaNestQuoteFile(file);
+        source = quote.quoteNumber || file.name;
+        parts = (quote.lines || [])
+          .map((line) => {
+            const name = sigmaNestLineDescription(line);
+            return {
+              name,
+              qty: line.qty != null ? Number(line.qty) : 1,
+              length: null,
+              linkedItemId: findCustomerStockMatch(job.customer || "", name)?.id || null,
+            };
+          })
+          .filter((p) => p.name && p.qty > 0);
+      } else {
+        madeOn = "tube_laser";
+        // The spreadsheet library is big and only needed here, so it
+        // loads when the file is picked, the same as everywhere else.
+        const XLSX = await import("xlsx");
+        const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+        const sheet = findSheet(wb.SheetNames, PART_INFO_SHEET);
+        if (!sheet) {
+          throw new Error(
+            `No "${PART_INFO_SHEET}" sheet in this file (it has: ${wb.SheetNames.join(", ")}). Export the report from the tube software.`
+          );
+        }
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheet], { header: 1, blankrows: false, defval: "" });
+        const { sections } = parsePartInfo(rows);
+        parts = sections.flatMap((s) => s.parts || []).map((p) => ({ ...p, linkedItemId: null }));
+        source = referenceFromFileName(file.name) || file.name;
+      }
+      if (parts.length === 0) {
+        alert("Nothing usable was read from that file.");
+        return;
+      }
+      const already = childLinesOf(parent, jobDetail?.quoteItems).length;
+      const total = parts.reduce((n, p) => n + (Number(p.qty) || 0), 0);
+      if (
+        !window.confirm(
+          `Put ${parts.length} part${parts.length === 1 ? "" : "s"} (${total} off) from ${source} under "${parent.description}"?` +
+            `\n\nThey come in as ${madeOnLabel(madeOn)} parts.` +
+            (already ? `\n\nThe ${already} already there stay; a part with the same name is updated.` : "")
+        )
+      )
+        return;
+      const saved = await addPartsToJob(job, parent.id, parts, source, madeOn);
+      if (saved) await logJobEvent(job.id, "parts imported", `${parts.length} from ${source} under ${parent.description}`);
+    } catch (err) {
+      console.error("Failed to read the parts off that file:", err);
+      alert(typeof err === "string" ? err : `That file could not be read: ${err.message || "unknown error"}`);
+    } finally {
+      setImportingPartsFor(null);
     }
   }
 
@@ -20541,18 +20630,59 @@ export default function StockControl() {
                             </div>
                           )}
                           {canEditThisJob && addPartUnder !== it.id && (
-                            <button
-                              type="button"
-                              className="stk-btn"
-                              style={{ ...S.reqActionBtnMuted, alignSelf: "flex-start" }}
-                              onClick={() => {
-                                setNewPartForm({ description: "", qty: "", lengthMm: "", madeOn: "", linkedItemId: null });
-                                setAddPartUnder(it.id);
-                              }}
-                              title="Add a part under this line. Parts are cut and counted; this line is what gets invoiced."
-                            >
-                              <Plus size={11} /> Add part
-                            </button>
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                              <button
+                                type="button"
+                                className="stk-btn"
+                                style={S.reqActionBtnMuted}
+                                onClick={() => {
+                                  setNewPartForm({ description: "", qty: "", lengthMm: "", madeOn: "", linkedItemId: null });
+                                  setAddPartUnder(it.id);
+                                }}
+                                title="Add a part under this line. Parts are cut and counted; this line is what gets invoiced."
+                              >
+                                <Plus size={11} /> Add part
+                              </button>
+                              {/* The two files the shop already works
+                                  from. Parts land under this line, which
+                                  is what stays on the invoice. */}
+                              <label
+                                className="stk-btn"
+                                style={{ ...S.reqActionBtnMuted, cursor: importingPartsFor ? "wait" : "pointer" }}
+                                title="Read the plate parts off a SigmaNest quote and put them under this line"
+                              >
+                                <Upload size={11} /> {importingPartsFor === it.id ? "Reading…" : "SigmaNest parts"}
+                                <input
+                                  type="file"
+                                  accept=".pdf"
+                                  style={{ display: "none" }}
+                                  disabled={!!importingPartsFor}
+                                  onChange={(e) => {
+                                    const file = e.target.files[0] || null;
+                                    e.target.value = "";
+                                    if (file) importPartsUnderLine(jobDetail.job, it, file, "sigmanest");
+                                  }}
+                                />
+                              </label>
+                              <label
+                                className="stk-btn"
+                                style={{ ...S.reqActionBtnMuted, cursor: importingPartsFor ? "wait" : "pointer" }}
+                                title="Read the parts and lengths off a tube nesting report and put them under this line"
+                              >
+                                <Upload size={11} /> {importingPartsFor === it.id ? "Reading…" : "Tube nest parts"}
+                                <input
+                                  type="file"
+                                  accept=".xlsx,.xls"
+                                  style={{ display: "none" }}
+                                  disabled={!!importingPartsFor}
+                                  onChange={(e) => {
+                                    const file = e.target.files[0] || null;
+                                    e.target.value = "";
+                                    if (file) importPartsUnderLine(jobDetail.job, it, file, "tubenest");
+                                  }}
+                                />
+                              </label>
+                            </div>
                           )}
                         </div>
                       )}
