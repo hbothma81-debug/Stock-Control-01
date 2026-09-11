@@ -3564,10 +3564,17 @@ export default function StockControl() {
         const i = flow.indexOf(name);
         return i === -1 ? Number.MAX_SAFE_INTEGER : i;
       };
-      const entry = { name: processName, operator: "", assignedToId: null, trackingMode: "batch" };
-      const at = f.selectedProcesses.findIndex((p) => rank(p.name) > rank(processName));
       const next = [...f.selectedProcesses];
-      next.splice(at === -1 ? next.length : at, 0, entry);
+      // The stage asked for, then anything that always comes with it.
+      // Unticking is left alone on purpose: taking the laser off a job
+      // is not a reason to take its packing off, and quietly removing a
+      // stage somebody wanted is worse than leaving one they did not.
+      for (const name of [processName, ...stagesImpliedBy(processName)]) {
+        if (next.some((p) => p.name === name)) continue;
+        const entry = { name, operator: "", assignedToId: null, trackingMode: "batch" };
+        const at = next.findIndex((p) => rank(p.name) > rank(name));
+        next.splice(at === -1 ? next.length : at, 0, entry);
+      }
       return { ...f, selectedProcesses: next };
     });
   }
@@ -4613,6 +4620,27 @@ export default function StockControl() {
   //
   const releasesOnStart = (name) => !!processTypeSettings[name]?.releases_on_start;
   const workedInLaserStatus = (name) => !!processTypeSettings[name]?.worked_in_laser_status;
+
+  // Stages that come with another one, so nobody has to tick them.
+  //
+  // The plate laser's parts have exactly one place to go next, and that
+  // is packing. Making somebody tick it separately buys nothing and
+  // costs the job that reaches the packer's screen with no packing stage
+  // on it, where it cannot be taken and nothing after it will ever open.
+  // So ticking Nesting or Laser ticks packing too.
+  //
+  // The tube laser needs nothing here: its cutting stage is its packing
+  // stage, so ticking Tube Laser has already done it.
+  //
+  // Which stage is the plate laser's packing is a real setting, not a
+  // name: "the packing stage on Laser Status" in process type settings.
+  // If nothing carries it this does nothing at all, quietly, which is
+  // the right way round -- it is a convenience, not a rule.
+  function stagesImpliedBy(processName) {
+    if (!isPlateLaserProcess(processName)) return [];
+    const packing = (master?.jobProcessTypes || []).filter((n) => workedInLaserStatus(n) && n !== processName);
+    return packing;
+  }
   const hideFromProduction = (name) => !!processTypeSettings[name]?.hide_from_production;
   // Which tag a stage cuts; blank means every item.
   const cutsMadeOn = (name) => processTypeSettings[name]?.cuts_made_on || "";
@@ -5358,8 +5386,13 @@ export default function StockControl() {
     setEditProcessesModal((m) => {
       if (!m) return m;
       const next = new Set(m.selected);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
+      if (next.has(name)) {
+        next.delete(name);
+      } else {
+        // Same as the New Job form: a laser brings its packing with it.
+        next.add(name);
+        for (const implied of stagesImpliedBy(name)) next.add(implied);
+      }
       return { ...m, selected: next };
     });
   }
