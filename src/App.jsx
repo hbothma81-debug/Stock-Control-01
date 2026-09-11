@@ -1538,6 +1538,11 @@ export default function StockControl() {
     shortageSummary,
     refreshShortageStatus,
     reserveStock: reserveStockForProcess,
+    // Called when a program's cut count moves, so the lengths cut come
+    // off the shelf and off the job's reservation. See
+    // consumeProgramStock: positive takes, negative puts back, and it
+    // never throws, because the cut is already saved when it runs.
+    consumeStock: consumeProgramStock,
     addParts: addPartsToJob,
     itemsForStage,
   };
@@ -4296,6 +4301,140 @@ export default function StockControl() {
     } catch (err) {
       console.error("Failed to use allocation:", err);
       alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  // A tube program eating the stock that was set aside when its section
+  // was picked. Called by the laser hook whenever a program's cut count
+  // moves: `delta` lengths leave the shelf (positive), or come back
+  // (negative, when a cut is undone).
+  //
+  // One on the count is one length off the shelf. That is the tube
+  // laser's rule, settled with the laser conversation on 2026-09-11, and
+  // it is why this can be a plain count rather than a measurement.
+  //
+  // It never blocks the machine and never throws. The tube is physically
+  // cut either way; if the paperwork cannot keep up -- no reservation, a
+  // reservation too small, a shelf already at nothing -- the cut still
+  // stands and this says what did not happen. Whoever reads the warning
+  // can put it right on the job's Materials tab.
+  //
+  // Mirrors what useAllocation does by hand, and must keep mirroring it:
+  // the shelf goes down, the reservation's used count goes up, the usage
+  // log records where it went.
+  async function consumeProgramStock(program, delta) {
+    const change = Math.round(Number(delta) || 0);
+    if (!change || !supabase || !program) return;
+    const itemId = program.stock_item_id;
+    const label = program.program_number || "that program";
+    if (!itemId) {
+      // Nothing was ever set aside: an older program, or a section typed
+      // in rather than picked off the shelf.
+      alert(
+        `${label} has no stock set aside, so nothing came off the shelf for it. The cut is recorded. ` +
+          `Set the material aside on the job's Materials tab if it should be coming out of stores.`
+      );
+      return;
+    }
+    const item = (items || []).find((i) => i.id === itemId);
+    if (!item) {
+      alert(`${label} was cut, but the stock line it was set aside from no longer exists, so nothing came off the shelf.`);
+      return;
+    }
+    try {
+      const { data: links, error: linkError } = await supabase
+        .from("laser_program_jobs")
+        .select("job_id")
+        .eq("program_id", program.id);
+      if (linkError) throw linkError;
+      const jobIds = [...new Set((links || []).map((l) => l.job_id).filter(Boolean))];
+      let reservations = [];
+      if (jobIds.length) {
+        const { data, error } = await supabase
+          .from("job_allocations")
+          .select("*")
+          .eq("item_id", itemId)
+          .in("job_id", jobIds)
+          .neq("status", "released")
+          .order("created_at");
+        if (error) throw error;
+        reservations = data || [];
+      }
+
+      // Spread the change across the reservations, oldest first going
+      // out, newest first coming back.
+      let left = Math.abs(change);
+      const updates = [];
+      const order = change > 0 ? reservations : [...reservations].reverse();
+      for (const a of order) {
+        if (left <= 0) break;
+        const used = Number(a.qty_used) || 0;
+        const allocated = Number(a.qty_allocated) || 0;
+        const room = change > 0 ? Math.max(0, allocated - used) : used;
+        if (room <= 0) continue;
+        const move = Math.min(room, left);
+        const nextUsed = change > 0 ? used + move : used - move;
+        updates.push({ id: a.id, qty_used: nextUsed, status: nextUsed >= allocated && allocated > 0 ? "used" : "open" });
+        left -= move;
+      }
+      for (const u of updates) {
+        const { error } = await supabase.from("job_allocations").update({ qty_used: u.qty_used, status: u.status }).eq("id", u.id);
+        if (error) throw error;
+      }
+
+      // The shelf moves by the whole amount either way, whether or not a
+      // reservation covered it: the metal really did leave the rack.
+      const amount = Math.abs(change);
+      let shortOnShelf = 0;
+      setItems((prev) =>
+        prev.map((it) => {
+          if (it.id !== itemId) return it;
+          const before = Number(it.qty) || 0;
+          if (change > 0) {
+            shortOnShelf = Math.max(0, amount - before);
+            return { ...it, qty: Math.max(0, before - amount) };
+          }
+          return { ...it, qty: before + amount };
+        })
+      );
+      setUsageLog((prev) => [
+        ...prev,
+        {
+          id: uid(),
+          itemId: item.id,
+          itemName: item.name,
+          mainCat: item.mainCat,
+          qty: amount,
+          direction: change > 0 ? "use" : "add",
+          by: roleLabel,
+          jobNumber: reservations[0]?.job_number || "",
+          customer: "",
+          note: change > 0 ? `Cut on ${label}` : `Cut undone on ${label}`,
+          lineCost: resolveUsageLineCost(item, amount),
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+
+      fetchAllocations();
+      if (jobDetail) refreshJobDetail();
+      // Say what could not be squared, once, rather than silently
+      // disagreeing with the shelf.
+      if (left > 0 && change > 0) {
+        alert(
+          `${label}: ${amount} × ${item.name} came off the shelf, but only ${amount - left} of it was set aside for the job. ` +
+            `The other ${left} was not reserved by anyone.`
+        );
+      }
+      if (shortOnShelf > 0) {
+        alert(
+          `${label}: the shelf only had ${amount - shortOnShelf} × ${item.name} on it, so it now reads nothing rather than ` +
+            `going below. Count the rack and correct it on the stock screen.`
+        );
+      }
+    } catch (err) {
+      // Never fatal: the cut count is already saved by the time this runs.
+      console.error("Failed to move stock for a program cut:", err);
+      alert(`${label} was recorded as cut, but the stock could not be moved. Check the job's Materials tab and the rack.`);
     }
   }
 
