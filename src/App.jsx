@@ -3734,10 +3734,13 @@ export default function StockControl() {
       salesPerson: "",
     };
     setItems((prev) => [...prev, newItem]);
-    // The same small form serves two places: a line on the New Job form,
-    // or the "Add an item" box inside a job that already exists. Either
-    // way the line ends up linked to the item just made.
-    if (m.forJobDetail) {
+    // The same small form serves three places: a line on the New Job
+    // form, the "Add an item" box inside a job that already exists, and
+    // a line already saved on a job. Either way the line ends up linked
+    // to the part just made.
+    if (m.forJobLine) {
+      linkJobLineToStock(m.forJobLine, newItem);
+    } else if (m.forJobDetail) {
       setNewItemForm((f) => ({ ...f, description: newItem.name, linkedItemId: newItem.id, unitPrice: String(newItem.value) }));
     } else {
       setNewJobForm((f) => ({
@@ -3746,6 +3749,28 @@ export default function StockControl() {
       }));
     }
     setNewStockItemModal(null);
+  }
+
+  // Points a line already saved on a job at a stock part. Written
+  // straight rather than through updateJobQuoteItem, which reads every
+  // field but the description as a number and would turn an id into
+  // nothing.
+  async function linkJobLineToStock(lineId, stockItem) {
+    if (!supabase) return;
+    try {
+      const { error } = await supabase.from("job_quote_items").update({ linked_item_id: stockItem.id }).eq("id", lineId);
+      if (error) throw error;
+      if (jobDetail) {
+        await logJobEvent(jobDetail.job.id, "part added to stock", `${stockItem.partNumber} — ${stockItem.name}`);
+        await openJobDetail(jobDetail.job);
+      }
+    } catch (err) {
+      console.error("Failed to link the line to its new stock part:", err);
+      alert(
+        `${stockItem.partNumber} was added to Customer Stock, but this line could not be linked to it. ` +
+          "Type the part number into the line to link it."
+      );
+    }
   }
 
   function removeNewJobQuoteItem(idx) {
@@ -21282,6 +21307,46 @@ export default function StockControl() {
                               >
                                 <Plus size={11} /> Add part
                               </button>
+                              {/* Building a customer's parts up as the
+                                  job is worked down. Always here rather
+                                  than appearing only when something
+                                  typed matches nothing, so the row keeps
+                                  its shape the whole way down the list.
+                                  The part is made with nothing on the
+                                  shelf; it is a catalogue entry, not a
+                                  delivery. */}
+                              {(() => {
+                                const alreadyLinked = !!it.linked_item_id;
+                                const noCustomer = !jobDetail.job.customer;
+                                const off = alreadyLinked || noCustomer;
+                                return (
+                                  <button
+                                    type="button"
+                                    className="stk-btn"
+                                    style={{ ...S.reqActionBtnMuted, ...(off ? { opacity: 0.45, cursor: "not-allowed" } : {}) }}
+                                    disabled={off}
+                                    title={
+                                      alreadyLinked
+                                        ? `Already in Customer Stock${linkedItem?.partNumber ? ` as ${linkedItem.partNumber}` : ""}`
+                                        : noCustomer
+                                          ? "Customer Stock is kept per customer, and this job has none yet. Set the customer on Overview first."
+                                          : "Add this line to Customer Stock as a part, with nothing on the shelf, and link the line to it"
+                                    }
+                                    onClick={() =>
+                                      setNewStockItemModal({
+                                        forJobLine: it.id,
+                                        customer: jobDetail.job.customer,
+                                        partNumber: "",
+                                        name: (it.description || "").trim(),
+                                        value: it.unit_price ?? "",
+                                        loc: "",
+                                      })
+                                    }
+                                  >
+                                    <Plus size={11} /> Add to Customer Stock
+                                  </button>
+                                );
+                              })()}
                               {/* The two files the shop already works
                                   from. Parts land under this line, which
                                   is what stays on the invoice. */}
