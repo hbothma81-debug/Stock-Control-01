@@ -68,11 +68,33 @@ On import, for each section in the report:
    is", which is what the import already passes on as `s.material`.
 2. Find the picked job's lines whose `material_type` equals it, compared
    trimmed and ignoring case.
-3. **What a match does** is the laser half's to decide with Heinrich. The
-   obvious use: those lines stand in for the one parent the import asks
-   for today, so each section's parts go with its own lines, and a section
-   whose parts the job already carries gets no duplicate lines.
+3. **What a match does — decided by Laser production, 2026-09-11.** The
+   parts tick in the import already decides it, so there is no new
+   question:
+   - **Tick off** (its default on a job with several lines): the matched
+     lines *are* that section's parts. The section adds nothing, so no
+     duplicates. This is Heinrich's current case: "I now have a job with
+     items, so I will not use the items from the import."
+   - **Tick on** (its default on a job with no lines, or one): the matched
+     line is that section's **parent**, and the file's parts for that
+     section go under it. Each section finds its own, so two materials go
+     under two lines instead of one picked for the whole import. This is
+     his later case: "I will have a parent loaded, then when importing it
+     will load the items as child parts for that parent line."
+     - One match: used automatically, nothing asked.
+     - Several matches: pick one, from those lines only — not the whole
+       job's list, which is what the picker asks today.
+   - The screen says what matched, per section: "3 lines on JOB-0042 are
+     this material".
 4. No match: today's behaviour stands.
+
+Matching skips blank material types. The column defaults to an empty
+string, not null, so an untagged line holds `''` and must never be read
+as a match for anything.
+
+The laser half does nothing until the column exists and lines are
+tagged, so it waits for `setup-job-line-material-type.sql` to be run and
+is built then, against real tagged lines, rather than tested blind.
 
 A job with no material types set imports exactly as it does now.
 
