@@ -62,6 +62,7 @@ import UserManagement from "./UserManagement.jsx";
 import CompanyDetails from "./manager/CompanyDetails.jsx";
 import CutToSize from "./jobs/CutToSize.jsx";
 import BuyOuts from "./jobs/BuyOuts.jsx";
+import Materials from "./jobs/Materials.jsx";
 import { planBars, barsOnShelf, barsSetAside, barsOnOrder, matchingStock, materialName, offcutIsKeepable, KERF_MM, TRIM_MM, MIN_OFFCUT_MM } from "./jobs/cutToSize.js";
 import EditableName from "./EditableName.jsx";
 import TypeToFind from "./TypeToFind.jsx";
@@ -4178,16 +4179,20 @@ export default function StockControl() {
   // The reservation itself, apart from the modal, so the tube nester's
   // section picker can set stock aside for a program without opening
   // one. True when it saved.
+  // `process` is optional. No stage is a real answer, not a missing one:
+  // raw material is often reserved before anybody knows which machine
+  // takes it, which is exactly how it arrives from a purchase order. The
+  // job's Materials tab lets it be placed later.
   async function reserveStockForProcess(job, process, item, qty) {
     const amount = Number(qty);
-    if (!amount || amount <= 0 || !job || !process || !item) return false;
+    if (!amount || amount <= 0 || !job || !item) return false;
     try {
       const { error } = await supabase.from("job_allocations").insert({
         id: uid(),
         job_id: job.id,
         job_number: job.job_number || "",
-        process_id: process.id,
-        process_name: process.process_name,
+        process_id: process?.id || null,
+        process_name: process?.process_name || "",
         item_id: item.id,
         item_name: item.name || "",
         main_cat: item.mainCat || "",
@@ -19565,7 +19570,8 @@ export default function StockControl() {
           <div style={{ ...S.modal, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>
-                Allocate to {allocateModal.process.process_name} — {allocateModal.job.job_number}
+                {allocateModal.process ? `Allocate to ${allocateModal.process.process_name}` : "Reserve for the job"} —{" "}
+                {allocateModal.job.job_number}
               </span>
               <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setAllocateModal(null)}>
                 <X size={18} />
@@ -19617,8 +19623,30 @@ export default function StockControl() {
                     on order often arrives after the job is planned — but nobody will be able to book out what isn't there.
                   </div>
                 )}
+                {/* Opened from the Materials tab, where no stage has been
+                    chosen yet. Optional: leaving it blank reserves the
+                    material for the job as a whole, to be placed later. */}
+                {allocateModal.stagePickable && (
+                  <div style={{ marginTop: 10 }}>
+                    <label style={S.label}>Which stage is it for (optional)</label>
+                    <TypeToFind
+                      options={inFlowOrder(
+                        (jobDetail?.processes || []).filter((pr) => !pr.shortage_id),
+                        allocateModal.job
+                      ).map((pr) => ({ value: pr.id, label: pr.process_name }))}
+                      value={allocateModal.process?.id || ""}
+                      onChange={(v) =>
+                        setAllocateModal((m) => ({
+                          ...m,
+                          process: (jobDetail?.processes || []).find((pr) => pr.id === v) || null,
+                        }))
+                      }
+                      emptyLabel="For the job as a whole"
+                    />
+                  </div>
+                )}
                 <button type="submit" className="stk-btn" style={{ ...S.submitBtn, marginTop: 12 }} disabled={!Number(allocateQty)}>
-                  Allocate to {allocateModal.process.process_name}
+                  {allocateModal.process ? `Allocate to ${allocateModal.process.process_name}` : "Reserve for the job"}
                 </button>
               </form>
             )}
@@ -19651,7 +19679,9 @@ export default function StockControl() {
                 openUsageModal(it, "use", {
                   jobNumber: pullStockModal.job.job_number || "",
                   customer: pullStockModal.job.customer || "",
-                  note: `Used on ${pullStockModal.process.process_name}`,
+                  // Taken for the job as a whole when no stage was named,
+                  // which is how the Materials tab opens this.
+                  note: pullStockModal.process ? `Used on ${pullStockModal.process.process_name}` : `Used on ${pullStockModal.job.job_number}`,
                 });
                 setPullStockModal(null);
               }}
@@ -19939,6 +19969,14 @@ export default function StockControl() {
               {
                 key: "buyouts",
                 label: `Buy-outs${jobDetail.buyoutItems?.length ? ` (${jobDetail.buyoutItems.length})` : ""}`,
+              },
+              {
+                key: "materials",
+                label: `Materials${
+                  (jobDetail.allocations || []).filter((a) => a.status !== "released").length
+                    ? ` (${(jobDetail.allocations || []).filter((a) => a.status !== "released").length})`
+                    : ""
+                }`,
               },
               {
                 key: "files",
@@ -21286,6 +21324,30 @@ export default function StockControl() {
               }
               onAddSupplier={canEditThisJob ? (name) => addSupplierFromJob(name) : null}
               SavedCheck={SavedCheck}
+            />
+          )}
+
+          {jobDetailTab === "materials" && (
+            <Materials
+              allocations={jobDetail.allocations || []}
+              stages={inFlowOrder((jobDetail.processes || []).filter((p) => !p.shortage_id), jobDetail.job)}
+              items={items || []}
+              canEdit={canEditThisJob}
+              onReserve={() => {
+                setAllocateModal({ job: jobDetail.job, process: null, item: null, stagePickable: true });
+                setAllocateQty("");
+              }}
+              onTakeNow={() => setPullStockModal({ job: jobDetail.job, process: null, dept: null, search: "" })}
+              onUse={(a) =>
+                setUseAllocationModal({
+                  allocation: a,
+                  item: (items || []).find((i) => i.id === a.item_id),
+                  qty: String(Math.max(0, Number(a.qty_allocated) - Number(a.qty_used))),
+                  offcuts: [],
+                })
+              }
+              onRelease={releaseAllocation}
+              onAssignStage={assignAllocationToProcess}
             />
           )}
 
