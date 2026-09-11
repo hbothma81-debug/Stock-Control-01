@@ -3683,6 +3683,66 @@ export default function StockControl() {
     return byName.length === 1 ? byName[0] : null;
   }
 
+  // A job line's stock code is the code of the part it points at. The
+  // description still carries it too, stored as "CODE — description", so
+  // that every printed sheet and invoice shows the code; the screen has
+  // a column of its own for it now, so the prefix is stripped there
+  // rather than reading twice. Stripped only when it matches the linked
+  // part exactly -- a description like "Bracket — left hand" is not a
+  // code and must not be treated as one.
+  function jobLineCode(linked) {
+    return (linked?.partNumber || "").trim();
+  }
+  function jobLineDescription(line, linked) {
+    const text = String(line?.description || "");
+    const code = jobLineCode(linked);
+    const prefix = code ? `${code} — ` : "";
+    return prefix && text.startsWith(prefix) ? text.slice(prefix.length) : text;
+  }
+
+  // Typing a stock code onto a line is how a part is attached: the code
+  // finds the part, and the part's name and price come through with it.
+  // Clearing the box lets the line go again. A code that belongs to
+  // nothing says so and changes nothing -- Add to Customer Stock, right
+  // beside it, is how a code that does not exist yet becomes a part.
+  async function setJobLineStockCode(job, item, linked, typedCode) {
+    if (!supabase) return;
+    const code = (typedCode || "").trim();
+    if (code === jobLineCode(linked)) return;
+    const plain = jobLineDescription(item, linked);
+    const patch = {};
+    if (code) {
+      const match = findCustomerStockMatch(job.customer, code);
+      if (!match) {
+        alert(
+          `${job.customer || "This customer"} has no part with the code "${code}". ` +
+            "Check the code, or press Add to Customer Stock to make it one."
+        );
+        await openJobDetail(job);
+        return;
+      }
+      patch.linked_item_id = match.id;
+      patch.description = customerStockLabel(match);
+      // Only fills a price that is not there. Somebody's own figure is
+      // not overwritten by the catalogue.
+      if (!(Number(item.unit_price) > 0) && Number(match.value) > 0) patch.unit_price = Number(match.value);
+    } else {
+      patch.linked_item_id = null;
+      patch.description = plain;
+    }
+    try {
+      const { error } = await supabase.from("job_quote_items").update(patch).eq("id", item.id);
+      if (error) throw error;
+      flashSaved(`quoteitem-code-${item.id}`);
+      await logJobEvent(job.id, "item changed", code ? `${plain || patch.description} — stock code ${code}` : `${plain} — stock code cleared`);
+      await openJobDetail(job);
+      fetchJobs();
+    } catch (err) {
+      console.error("Failed to set the stock code on the line:", err);
+      alert("That didn't save — check your signal and try again.");
+    }
+  }
+
   // How many of a customer's parts carry this description. More than one
   // is the case the rule above refuses to guess at, and the screen says so.
   function countCustomerStockByName(customer, text) {
@@ -3758,7 +3818,13 @@ export default function StockControl() {
   async function linkJobLineToStock(lineId, stockItem) {
     if (!supabase) return;
     try {
-      const { error } = await supabase.from("job_quote_items").update({ linked_item_id: stockItem.id }).eq("id", lineId);
+      // The description carries the code too, "CODE — description", so
+      // every printed sheet shows it. The screen has its own column and
+      // strips the prefix there.
+      const { error } = await supabase
+        .from("job_quote_items")
+        .update({ linked_item_id: stockItem.id, description: customerStockLabel(stockItem) })
+        .eq("id", lineId);
       if (error) throw error;
       if (jobDetail) {
         await logJobEvent(jobDetail.job.id, "part added to stock", `${stockItem.partNumber} — ${stockItem.name}`);
@@ -20965,8 +21031,29 @@ export default function StockControl() {
                           <div style={{ fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
                             {canEditThisJob ? (
                               <>
-                                {/* Typed straight over. The quantity refuses to go
-                                    below what has already been invoiced. */}
+                                {/* Stock code, description, how many,
+                                    what each: the order the line is read
+                                    and entered in. Typing a code attaches
+                                    the part and brings its name and price
+                                    through; clearing it lets the line go.
+                                    Typed straight over, the lot. */}
+                                <input
+                                  key={`code-${it.id}-${it.linked_item_id || ""}`}
+                                  defaultValue={jobLineCode(linkedItem)}
+                                  onBlur={(e) => setJobLineStockCode(jobDetail.job, it, linkedItem, e.target.value)}
+                                  style={{ ...S.input, width: 110, fontSize: 14, padding: "4px 6px" }}
+                                  placeholder="Stock code"
+                                  title="The customer's stock code. Type one to attach the part and pull its description and price through."
+                                />
+                                <input
+                                  key={`desc-${it.id}-${it.linked_item_id || ""}`}
+                                  defaultValue={jobLineDescription(it, linkedItem)}
+                                  onBlur={(e) => updateJobQuoteItem(jobDetail.job, it, "description", e.target.value)}
+                                  style={{ ...S.input, flex: 1, minWidth: 90, fontSize: 14, padding: "4px 6px" }}
+                                  placeholder="Description"
+                                />
+                                {/* The quantity refuses to go below what
+                                    has already been invoiced. */}
                                 <input
                                   type="number"
                                   min={Number(it.qty_invoiced || 0)}
@@ -20980,11 +21067,6 @@ export default function StockControl() {
                                       : "Quantity"
                                   }
                                 />
-                                <input
-                                  defaultValue={it.description}
-                                  onBlur={(e) => updateJobQuoteItem(jobDetail.job, it, "description", e.target.value)}
-                                  style={{ ...S.input, flex: 1, minWidth: 90, fontSize: 14, padding: "4px 6px" }}
-                                />
                                 {/* Prices on a job sit behind the same tick
                                     as every other Rand figure in the app,
                                     "Can see Rand values" in User Manager.
@@ -20996,6 +21078,7 @@ export default function StockControl() {
                                     type="number"
                                     min="0"
                                     step="0.01"
+                                    key={`price-${it.id}-${it.unit_price}`}
                                     defaultValue={it.unit_price}
                                     onBlur={(e) => updateJobQuoteItem(jobDetail.job, it, "unit_price", e.target.value)}
                                     style={{ ...S.input, width: 84, fontSize: 14, padding: "4px 6px" }}
@@ -21005,8 +21088,11 @@ export default function StockControl() {
                               </>
                             ) : (
                               <>
-                                <span style={{ fontSize: 14, fontWeight: 600 }}>{it.qty}×</span>
-                                {it.description}
+                                {jobLineCode(linkedItem) && (
+                                  <span style={{ fontSize: 14, fontWeight: 600 }}>{jobLineCode(linkedItem)}</span>
+                                )}
+                                <span style={{ fontSize: 14 }}>{jobLineDescription(it, linkedItem)}</span>
+                                <span style={{ fontSize: 14, fontWeight: 600 }}>× {it.qty}</span>
                               </>
                             )}
                             <SavedCheck fieldKey={`quoteitem-${it.id}`} />
@@ -21337,7 +21423,7 @@ export default function StockControl() {
                                         forJobLine: it.id,
                                         customer: jobDetail.job.customer,
                                         partNumber: "",
-                                        name: (it.description || "").trim(),
+                                        name: jobLineDescription(it, linkedItem),
                                         value: it.unit_price ?? "",
                                         loc: "",
                                       })
