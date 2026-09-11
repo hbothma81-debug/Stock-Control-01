@@ -3826,10 +3826,11 @@ export default function StockControl() {
   async function linkJobLineToStock(lineId, stockItem) {
     if (!supabase) return;
     try {
-      const { error } = await supabase
-        .from("job_quote_items")
-        .update({ linked_item_id: stockItem.id, stock_code: stockItem.partNumber || "", description: stockItem.name || "" })
-        .eq("id", lineId);
+      // The part's name replaces the description only if it has one. A
+      // part saved without a name must never wipe what the line said.
+      const patch = { linked_item_id: stockItem.id, stock_code: stockItem.partNumber || "" };
+      if ((stockItem.name || "").trim()) patch.description = stockItem.name.trim();
+      const { error } = await supabase.from("job_quote_items").update(patch).eq("id", lineId);
       if (error) throw error;
       if (jobDetail) {
         await logJobEvent(jobDetail.job.id, "part added to stock", `${stockItem.partNumber} — ${stockItem.name}`);
