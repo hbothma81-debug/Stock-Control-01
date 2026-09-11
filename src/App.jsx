@@ -63,6 +63,10 @@ import CompanyDetails from "./manager/CompanyDetails.jsx";
 import CutToSize from "./jobs/CutToSize.jsx";
 import BuyOuts from "./jobs/BuyOuts.jsx";
 import Materials from "./jobs/Materials.jsx";
+// The tube laser's own wording for a material. Shared, not copied: the
+// job line's material and the nesting import's section must be the same
+// words, or the import's match finds nothing.
+import { materialText } from "./laser/stockOptions.js";
 import { planBars, barsOnShelf, barsSetAside, barsOnOrder, matchingStock, materialName, offcutIsKeepable, KERF_MM, TRIM_MM, MIN_OFFCUT_MM } from "./jobs/cutToSize.js";
 import EditableName from "./EditableName.jsx";
 import TypeToFind from "./TypeToFind.jsx";
@@ -6422,6 +6426,10 @@ export default function StockControl() {
             unit_price: it.unit_price,
             linked_item_id: it.linked_item_id,
             stock_code: it.stock_code || "",
+            // Only when there is one, so a copy still works on a
+            // database where setup-job-line-material-type.sql has not
+            // been run yet.
+            ...(it.material_type ? { material_type: it.material_type } : {}),
             sort_order: idx,
           }))
         );
@@ -6575,6 +6583,48 @@ export default function StockControl() {
           : "That didn't save — check your connection and try again."
       );
     }
+  }
+
+  // The material a tube line is cut from, as words: section and grade,
+  // e.g. "SHS 50x50x3mm 304". The tube nesting import matches each of its
+  // sections to the job lines carrying the same words, so it knows which
+  // lines a section's program is for. Words rather than a stock line's
+  // id, because a part is cut from a material and the length is the
+  // nester's choice on the day. Stored in job_quote_items.material_type,
+  // from setup-job-line-material-type.sql.
+  async function setJobLineMaterial(job, item, material) {
+    const value = (material || "").trim();
+    if (!supabase || (item.material_type || "") === value) return;
+    try {
+      const { error } = await supabase.from("job_quote_items").update({ material_type: value }).eq("id", item.id);
+      if (error) throw error;
+      flashSaved(`quoteitem-material-${item.id}`);
+      await logJobEvent(job.id, "item changed", `${item.description} — material ${value || "(cleared)"}`);
+      await openJobDetail(job);
+    } catch (err) {
+      console.error("Failed to set the material on the line:", err);
+      alert(
+        /material_type/i.test(err?.message || "")
+          ? "The database does not have the material field yet. Run setup-job-line-material-type.sql on this database, then try again."
+          : "That didn't save — check your signal and try again."
+      );
+    }
+  }
+
+  // Every section and grade on the Structural Steel shelf, once each
+  // however many lengths it comes in, in the exact words the tube
+  // nesting import uses. A plain function rather than a memo on purpose:
+  // it is called from inside the Items tab, and a hook placed below an
+  // early return breaks React's order of hooks.
+  function tubeMaterialList() {
+    return [
+      ...new Set(
+        (items || [])
+          .filter((it) => it.mainCat === "structural")
+          .map((it) => materialText(it))
+          .filter(Boolean)
+      ),
+    ].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
   }
 
   // Fills in every blank tag it can guess, and says how many it could
@@ -21313,9 +21363,32 @@ export default function StockControl() {
                                   ))}
                                 </select>
                                 <SavedCheck fieldKey={`quoteitem-madeon-${it.id}`} />
+                                {/* The material this tube line is cut from, so a
+                                    nesting import can match its sections to the
+                                    right lines. Only on tube laser lines;
+                                    nothing changes on any other. */}
+                                {it.made_on === "tube_laser" && (
+                                  <>
+                                    <TypeToFind
+                                      style={{ width: 220, marginLeft: 6 }}
+                                      inputStyle={{ fontSize: 12.5, padding: "2px 24px 2px 6px" }}
+                                      options={[...new Set([...tubeMaterialList(), it.material_type || ""].filter(Boolean))]}
+                                      value={it.material_type || ""}
+                                      onChange={(v) => setJobLineMaterial(jobDetail.job, it, v || "")}
+                                      emptyLabel="Material type…"
+                                      title="The section and grade this is cut from. The tube nesting import matches its sections to lines by this."
+                                    />
+                                    <SavedCheck fieldKey={`quoteitem-material-${it.id}`} />
+                                  </>
+                                )}
                               </>
                             ) : (
-                              it.made_on && <span style={S.roleHint}>— {madeOnLabel(it.made_on)}</span>
+                              it.made_on && (
+                                <span style={S.roleHint}>
+                                  — {madeOnLabel(it.made_on)}
+                                  {it.made_on === "tube_laser" && it.material_type ? ` · ${it.material_type}` : ""}
+                                </span>
+                              )
                             )}
                           </div>
                           {linkedItem && (
@@ -21459,6 +21532,22 @@ export default function StockControl() {
                                     ))}
                                   </select>
                                   <SavedCheck fieldKey={`quoteitem-madeon-${c.id}`} />
+                                  {/* The material a tube part is cut from, the
+                                      same box as on the line above. */}
+                                  {c.made_on === "tube_laser" && (
+                                    <>
+                                      <TypeToFind
+                                        style={{ width: 200 }}
+                                        inputStyle={{ fontSize: 12.5, padding: "2px 24px 2px 6px" }}
+                                        options={[...new Set([...tubeMaterialList(), c.material_type || ""].filter(Boolean))]}
+                                        value={c.material_type || ""}
+                                        onChange={(v) => setJobLineMaterial(jobDetail.job, c, v || "")}
+                                        emptyLabel="Material type…"
+                                        title="The section and grade this part is cut from. The tube nesting import matches its sections to parts by this."
+                                      />
+                                      <SavedCheck fieldKey={`quoteitem-material-${c.id}`} />
+                                    </>
+                                  )}
                                 </>
                               ) : (
                                 <>
@@ -21466,6 +21555,7 @@ export default function StockControl() {
                                   <span style={{ flex: 1, minWidth: 0 }}>{c.description}</span>
                                   {c.length_mm != null && c.length_mm !== "" && <span style={S.roleHint}>{Number(c.length_mm)} mm</span>}
                                   {c.made_on && <span style={S.roleHint}>{madeOnLabel(c.made_on)}</span>}
+                                  {c.made_on === "tube_laser" && c.material_type && <span style={S.roleHint}>{c.material_type}</span>}
                                 </>
                               )}
                               {canEditThisJob && (
