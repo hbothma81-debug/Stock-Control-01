@@ -120,6 +120,59 @@ conversations inherit.
 - The laser hook now reads every column of a job line (`select *`), so a
   column a database does not have yet cannot fail the plate laser.
 
+## Nesting part by part
+
+Added 2026-09-11, on the Laser production conversation. Tube work is not
+nested all in one go: a job of 8000 parts may have 4000 nested this week
+and the rest later. Until this, the nesting row offered one
+all-or-nothing tick.
+
+The open row now leads with the job's parts, each showing how many have
+been nested out of how many are wanted, with a box and a Log button. The
+job stays on the To nest list with its progress showing. The stage ticks
+itself off on its own once every part is accounted for, and the old
+"Done nesting" tick stays as an override for the job where some parts
+will never be nested.
+
+**Almost none of this is new.** The per-item progress table
+(`job_process_item_progress`), the control (`QtyProgressControl`) and
+the rule that lets a later stage work only what an earlier one has
+finished (`itemFlowLimit`) were all already built, and the laser hook
+already loaded the job's lines and their progress. The screen was the
+only missing piece. There is no database change.
+
+Two things worth knowing:
+
+- **Which lines are listed** comes from `itemsForStage`, the one rule
+  the whole app uses for what a stage handles. So the tube nester sees
+  the tube parts and not somebody else's. If the Tube Laser Nesting
+  stage carries no machine tag under Stock Manager, that rule hands back
+  the job's own lines instead of the parts.
+- **Logging a quantity switches that stage to per-item tracking**
+  (`logNestedItem` in App.jsx). It has to: `itemFlowLimit` ignores the
+  counts entirely on a batch stage and holds the whole job back until
+  nesting is signed off, which is the opposite of the point. Counts
+  already recorded still stand; only how the stage is read changes.
+
+The plate laser gets none of this. It nests whole sheets and counts
+nothing per part, so the switch is `nestPerItem` in the machine profile.
+
+### The shape of the open row
+
+Changed the same day, after Heinrich read it on the floor: the box was
+tall and its border was a hair off the background, so it ran into the
+rows above and below.
+
+- The parts come first, inside a border of their own. That is what the
+  nester opened the row to do.
+- An open row gets a visible edge and its own background.
+- Drawings are hidden on a laser that nests part by part. The plate
+  laser still shows them, because Prince uses them.
+- The form for making a program folds away behind the button that names
+  it, and closes again on the X on its heading. Right way round here:
+  parts most visits, a new program now and then. On the plate laser the
+  form is why the row was opened at all, so there it stays open.
+
 ## How it is built: one set of code, told the machine
 
 `src/constants.js` has `LASER_MACHINES`, one profile per laser, saying
@@ -216,3 +269,16 @@ with whoever else touches `next_laser_program_number`.
   at all.
 - Removing the nesting-name box from the Production card: it hides with
   the card when the stage is hidden from Production.
+
+## Asked for, not built yet
+
+- **The import's parts should be optional.** Heinrich said on
+  2026-09-11: only take items from the spreadsheet when the job has none
+  already. His current job carries its own items, and the file gives him
+  the tube quantity rather than the item quantities, so importing it
+  would add lines he does not want. The plan agreed is a tick in the
+  import dialog, off when the job already has lines and on when it has
+  none, so a future job with a parent line still gets its children.
+- **Whether drawings should be hidden on the plate laser too.** They are
+  hidden on tube only. Prince uses them on plate, so that was left alone
+  rather than assumed.
