@@ -46,6 +46,13 @@ export default function useLaserPrograms(deps) {
     // whole app uses, so the nesting row lists exactly the lines that
     // stage is responsible for and no others.
     itemsForStage,
+    // Moves stock when a cut count changes (program, delta): a positive
+    // delta takes that many lengths off the shelf and raises what the
+    // job has used of its reservation, a negative one puts them back.
+    // Owned by the Jobs conversation in App.jsx. It handles its own
+    // errors, never throws and never blocks, so a cut is never lost
+    // because the stock could not be moved.
+    consumeStock,
   } = deps;
   // The stage-name rules, under the names the code below has always used.
   const isPlateNestingProcess = machine.isNestingStage;
@@ -627,6 +634,15 @@ export default function useLaserPrograms(deps) {
           // Planned cutting time per sheet, off SigmaNest. Blank stays
           // null: "not given" must not read as "takes no time".
           cut_minutes: minutesOrNull(cut_minutes),
+          // Which stock line the lengths were set aside from, so cutting
+          // one can take one off that line. The material alone cannot
+          // say: "50x50x3 MS" is the 6m line and the 13m line both.
+          //
+          // Written only when a section was actually picked off the
+          // shelf, the same way nesting_name and parts are, so a laser
+          // that picks no stock -- and a database where the column has
+          // not been added yet -- carries on as before.
+          ...(reserve?.item?.id ? { stock_item_id: reserve.item.id } : {}),
           created_by: roleLabel,
         })
         .select("id")
@@ -930,6 +946,21 @@ export default function useLaserPrograms(deps) {
           ? `${program.program_number} — ${cut} of ${required}`
           : program.program_number
       );
+
+      // Cutting a length uses one off the rack; taking a cut back puts
+      // it there again. Only on a laser whose material is picked off
+      // real stock -- the plate laser sets nothing aside and is left
+      // alone. The change, not the new total: the count can be typed
+      // straight in or undone, so it moves by more than one and both
+      // ways.
+      //
+      // Deliberately after the count is saved and outside anything that
+      // could undo it. The cut is the fact; the stock following it is a
+      // consequence, and a rack that cannot be moved must never tell
+      // the operator his cut failed.
+      if (machine.materialFrom === "sections" && typeof consumeStock === "function") {
+        await consumeStock({ ...program, sheets_cut: cut }, cut - before);
+      }
 
       // Re-read before deciding anything: someone else may have cut the
       // other program this job is waiting on while this one was open.
