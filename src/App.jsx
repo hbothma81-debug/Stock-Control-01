@@ -12549,7 +12549,10 @@ export default function StockControl() {
             <RefreshCw size={13} strokeWidth={2.5} style={isRefreshing ? { animation: "spin 0.8s linear infinite" } : {}} />
             {isRefreshing ? "Refreshing…" : "Refresh"}
           </button>
-          {canSeeValue && grandTotalValue > 0 && (
+          {/* Admin only, by decision (2026-09-11). The values tick still shows
+              a price per item; what the whole shop is worth is a different
+              kind of number and stays with the owner. */}
+          {isAdmin && grandTotalValue > 0 && (
             <div style={S.totalValueBadge} title="Total stock value on hand across every division">
               R {grandTotalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
             </div>
