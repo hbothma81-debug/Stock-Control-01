@@ -837,9 +837,17 @@ function NestRow({
   return (
     <div
       style={{
-        padding: "8px 10px",
+        padding: expanded ? "10px 12px" : "8px 10px",
         borderRadius: 6,
-        border: r.nestNow ? `2px solid ${C.danger}` : `1px solid ${C.border}`,
+        // An open row is a page of its own, so it gets an edge you can
+        // see. The plain border is a hair's breadth off the background
+        // and the box ran into the ones above and below it.
+        border: r.nestNow
+          ? `2px solid ${C.danger}`
+          : expanded
+          ? `2px solid ${C.accentRaw}`
+          : `1px solid ${C.border}`,
+        background: expanded ? C.surface : undefined,
       }}
     >
       {/* The line. Everything else waits behind the chevron. */}
@@ -890,6 +898,49 @@ function NestRow({
             <Field label="SigmaNest job no" value={sigmanest || "Not filled in"} muted={!sigmanest} />
             {r.job?.due_date && <Field label="Due" value={new Date(r.job.due_date).toLocaleDateString()} />}
           </div>
+
+          {/* Tube work is not nested all in one go: a job of 8000 parts
+              may have 4000 nested now and the rest next week. So the
+              parts are listed with a box each, and the job stays here
+              with its progress on show. A part logged here carries on
+              through the rest of the job without waiting for the
+              others, and the stage ticks itself off once every part is
+              accounted for.
+
+              First in the box, and inside a border you can actually
+              see. This is the thing the nester came to the row to do;
+              everything below it is the program, which he only touches
+              when he is making one. */}
+          {ItemProgress && (
+            <div
+              style={{
+                border: `2px solid ${C.accentRaw}`,
+                borderRadius: 6,
+                padding: "10px 12px",
+                background: C.surface,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                <span style={{ fontSize: 15, fontWeight: 700, color: C.accentRaw }}>{w.partsLabel} nested</span>
+                {nestedCount != null && (
+                  <span style={{ fontSize: 15, fontWeight: 700, color: C.text }}>
+                    {nestedCount.done} of {nestedCount.total}
+                  </span>
+                )}
+              </div>
+              <ItemProgress
+                process={r.process}
+                job={r.job}
+                quoteItems={r.quoteItems || []}
+                itemProgress={r.itemProgress || []}
+                onSubmit={(process, job, item, qty, progress) => onLogNestedItem(r, item, qty, progress)}
+              />
+              <div style={{ ...S.roleHint, marginTop: 8 }}>
+                Type how many were nested and press Log. What is logged moves on through the job on its own;
+                the rest stays here.
+              </div>
+            </div>
+          )}
 
           {/* What this job is nested on. It used to be a run of numbers on
               one line, which is unreadable by the third one and tells you
@@ -1254,7 +1305,11 @@ function NestRow({
                 </div>
               </div>
 
-              {r.drawings && r.drawings.length > 0 && (
+              {/* Hidden on a laser that nests part by part: the parts
+                  list at the top is what the nester works off, and the
+                  drawings underneath made an already tall box taller.
+                  The plate laser still shows them -- Prince uses them. */}
+              {!ItemProgress && r.drawings && r.drawings.length > 0 && (
                 <div>
                   <label style={S.label}>Drawings</label>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
@@ -1263,35 +1318,6 @@ function NestRow({
                         <FileText size={12} /> {d.partNumber} — {d.description}
                       </button>
                     ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Tube work is not nested all in one go: a job of 8000
-                  parts may have 4000 nested now and the rest next week.
-                  So the parts are listed with a box each, and the job
-                  stays here with its progress on show. A part logged
-                  here carries on through the rest of the job without
-                  waiting for the others, and the stage ticks itself off
-                  once every part is accounted for. */}
-              {ItemProgress && (
-                <div>
-                  <label style={S.label}>
-                    {w.partsLabel || "Parts"} nested
-                    {nestedCount != null ? ` — ${nestedCount.done} of ${nestedCount.total}` : ""}
-                  </label>
-                  <div style={{ marginTop: 4 }}>
-                    <ItemProgress
-                      process={r.process}
-                      job={r.job}
-                      quoteItems={r.quoteItems || []}
-                      itemProgress={r.itemProgress || []}
-                      onSubmit={(process, job, item, qty, progress) => onLogNestedItem(r, item, qty, progress)}
-                    />
-                  </div>
-                  <div style={{ ...S.roleHint, marginTop: 4 }}>
-                    Log what has been nested. Anything logged moves on through the job on its own; the rest
-                    stays here.
                   </div>
                 </div>
               )}
