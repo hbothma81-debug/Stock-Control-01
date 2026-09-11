@@ -727,6 +727,15 @@ function NestRow({
   const [minutes, setMinutes] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // On a laser that nests part by part, the row opens on the parts and
+  // the form for making a program waits behind a button. That is the
+  // right way round there: the nester logs parts most visits and makes
+  // a program now and then. On the plate laser it is the other way
+  // about -- the form is why he opened the row -- so it stays open.
+  const foldForm = !!ItemProgress;
+  const [showForm, setShowForm] = useState(false);
+  const formOpen = !foldForm || showForm;
+
   // How much of this job has been nested, added up across its parts, for
   // the line on the heading. Null when this laser does not nest per part.
   const nestedCount = useMemo(() => {
@@ -1031,13 +1040,41 @@ function NestRow({
           {r.kind === "shortage" && r.detail && <div style={{ ...S.itemComment, color: C.danger }}>{r.detail}</div>}
 
           {/* ---- nest it, right here ---- */}
-          {canManage && (
+          {canManage && foldForm && !showForm && (
+            <button
+              type="button"
+              className="stk-btn"
+              style={{ ...S.addBtn, width: "100%" }}
+              onClick={() => setShowForm(true)}
+            >
+              <Plus size={15} strokeWidth={2.5} />
+              {hasPrograms
+                ? `Add another program — ${r.onPrograms.length} already on this job`
+                : `Nest it on ${w.name}`}
+            </button>
+          )}
+
+          {canManage && formOpen && (
             <div style={{ border: `1px solid ${C.accentRaw}`, borderRadius: 6, padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
               <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
                 <Plus size={14} />
                 {hasPrograms
                   ? `Add another program — ${r.onPrograms.length} already on this job`
                   : `Nest it on ${w.name}`}
+                {foldForm && (
+                  <>
+                    <span style={{ flex: 1 }} />
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={S.iconBtn}
+                      onClick={() => setShowForm(false)}
+                      title="Put this away"
+                    >
+                      <X size={16} />
+                    </button>
+                  </>
+                )}
               </div>
 
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
