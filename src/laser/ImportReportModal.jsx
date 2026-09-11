@@ -73,10 +73,28 @@ export default function ImportReportModal({
   // picked; asked only when the job has several lines.
   const [parent, setParent] = useState("");
   const parentPick = useMemo(() => parentChoices(jobLines, picked[0]?.job_id), [jobLines, picked]);
+  // Whether the file's parts become lines on the job.
+  //
+  // A job that already carries its own lines does not want them: the
+  // report gives lengths of section, not the job's item quantities, and
+  // adding them would put a second set of lines beside the real ones and
+  // then ask which of the real ones they hang under. A job with no lines
+  // at all is the case this was built for, so there it starts on.
+  const [useParts, setUseParts] = useState(true);
   function pickJob(c) {
     setPicked((prev) => {
       const next = [...prev, c];
-      if (prev.length === 0) setParent(parentChoices(jobLines, c.job_id).initial);
+      if (prev.length === 0) {
+        const pick = parentChoices(jobLines, c.job_id);
+        setParent(pick.initial);
+        // On when there is an obvious place for them: a job with no
+        // lines at all, or one carrying a single line for this work --
+        // that is the parent, and the parts are its children. Off when
+        // the job has several lines and the parent has to be asked for,
+        // because a job that already carries its own items does not want
+        // a second set beside them.
+        setUseParts(!!pick.initial);
+      }
       return next;
     });
     setJobQuery("");
@@ -180,7 +198,9 @@ export default function ImportReportModal({
 
   const allChosen = parsed ? parsed.sections.every((s) => !!optionOf(s.reportSection)) : false;
   const hasParts = parsed ? parsed.sections.some((s) => (s.parts || []).length > 0) : false;
-  const parentSettled = !hasParts || !!parent;
+  // What actually happens: the file has parts AND they are wanted.
+  const partsOn = hasParts && useParts;
+  const parentSettled = !partsOn || !!parent;
   const canCreate = !!parsed && allChosen && picked.length > 0 && !!reference.trim() && parentSettled && !saving;
 
   async function create() {
@@ -196,12 +216,12 @@ export default function ImportReportModal({
             material: o.material,
             item: o.item,
             lengths: s.tubes,
-            parts: s.parts || [],
+            parts: partsOn ? s.parts || [] : [],
             note: `From ${fileName}: ${nestsNote(s)}`,
           };
         }),
         jobs: picked.map((c) => ({ job_id: c.job_id, shortage_id: null, sigmanest_number: c.sigmanest || "" })),
-        parent_line_id: parent && parent !== NEW_PARENT ? parent : null,
+        parent_line_id: partsOn && parent && parent !== NEW_PARENT ? parent : null,
       });
       if (result) setMade(result);
     } finally {
@@ -336,8 +356,23 @@ export default function ImportReportModal({
                   )}
                 </div>
 
-                {/* ---- which line the parts go under ---- */}
+                {/* ---- the file's parts, and where they go ---- */}
                 {hasParts && picked.length > 0 && (
+                  <label style={{ ...S.checkRow, fontWeight: 600 }}>
+                    <input type="checkbox" checked={useParts} onChange={(e) => setUseParts(e.target.checked)} />
+                    Add the {parsed.sections.reduce((n, s) => n + (s.parts || []).length, 0)} parts in this file as
+                    lines on {picked[0].job_number}
+                  </label>
+                )}
+                {hasParts && picked.length > 0 && !useParts && (
+                  <div style={S.roleHint}>
+                    The programs come in on their own. {picked[0].job_number} keeps the lines it already has, and the
+                    parts in the file are not added to it.
+                  </div>
+                )}
+
+                {/* ---- which line the parts go under ---- */}
+                {partsOn && picked.length > 0 && (
                   <div>
                     <label style={S.label}>The parts go under</label>
                     <TypeToFind options={parentPick.options} value={parent} onChange={setParent} emptyLabel="Pick the job's line…" />
