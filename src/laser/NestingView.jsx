@@ -114,6 +114,9 @@ export default function NestingView({
   // the requisition form for a section with nothing on the shelf.
   stockItems,
   allocations,
+  // The Structural Steel master rows ({ name, type }), so the picker
+  // can narrow by the kind of section: it is not on a stock line.
+  sectionRows,
   canRequisition,
   onRequisition,
   jobLines,
@@ -182,7 +185,7 @@ export default function NestingView({
   // What is set aside "for this job" follows the first job put on the
   // program, since that is the job the stock is reserved against.
   const stockChoices = useMemo(
-    () => (w.bySections ? stockOptions(stockItems, allocations, picked[0]?.job_id) : []),
+    () => (w.bySections ? stockOptions(stockItems, allocations, picked[0]?.job_id, sectionRows) : []),
     [w.bySections, stockItems, allocations, picked]
   );
   const newParentPick = useMemo(
@@ -319,6 +322,7 @@ export default function NestingView({
           candidates={candidates}
           stockItems={stockItems || []}
           allocations={allocations || []}
+          sectionRows={sectionRows || []}
           canRequisition={canRequisition}
           onRequisition={onRequisition}
           jobLines={jobLines || []}
@@ -580,6 +584,7 @@ export default function NestingView({
                 grades={grades}
                 stockItems={stockItems}
                 allocations={allocations}
+                sectionRows={sectionRows}
                 canRequisition={canRequisition}
                 onRequisition={onRequisition}
                 jobLines={jobLines}
@@ -695,6 +700,9 @@ function NestRow({
   sheetNames,
   stockItems,
   allocations,
+  // The Structural Steel master rows ({ name, type }), so the picker
+  // can narrow by the kind of section: it is not on a stock line.
+  sectionRows,
   canRequisition,
   onRequisition,
   jobLines,
@@ -757,7 +765,7 @@ function NestRow({
   }, [ItemProgress, r.quoteItems, r.itemProgress]);
   const w = machineWords(machine);
   const stockChoices = useMemo(
-    () => (w.bySections ? stockOptions(stockItems, allocations, r.job?.id) : []),
+    () => (w.bySections ? stockOptions(stockItems, allocations, r.job?.id, sectionRows) : []),
     [w.bySections, stockItems, allocations, r.job?.id]
   );
   const parentPick = useMemo(() => (w.generated && r.job ? parentChoices(jobLines, r.job.id) : null), [w.generated, jobLines, r.job]);

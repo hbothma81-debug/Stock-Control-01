@@ -167,6 +167,7 @@ export default function LaserTab({
                     grades={(master.grades || []).map((g) => g.shortName || g.name)}
                     sheetNames={master.sheetNames || []}
                     sections={sectionNames(master)}
+                    sectionRows={master?.sections || []}
                     stockItems={items || []}
                     allocations={laserData ? laserData.allocations || [] : []}
                     jobLines={laserData ? laserData.quoteItems || [] : []}

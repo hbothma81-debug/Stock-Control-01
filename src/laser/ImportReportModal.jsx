@@ -47,6 +47,8 @@ export default function ImportReportModal({
   candidates,
   stockItems,
   allocations,
+  // The Structural Steel master rows, for the picker's kind narrower.
+  sectionRows,
   canRequisition,
   onRequisition,
   aliases,
@@ -84,8 +86,8 @@ export default function ImportReportModal({
   // follows the first job picked; the ids stay the same whichever job
   // it is, so a choice made before the job is picked still stands.
   const options = useMemo(
-    () => stockOptions(stockItems, allocations, picked[0]?.job_id),
-    [stockItems, allocations, picked]
+    () => stockOptions(stockItems, allocations, picked[0]?.job_id, sectionRows),
+    [stockItems, allocations, picked, sectionRows]
   );
   const optionOf = (reportSection) => options.find((o) => o.value === chosen[reportSection]) || null;
 

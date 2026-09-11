@@ -21,7 +21,16 @@ export function materialText(item) {
 
 const remaining = (a) => Math.max(0, Number(a.qty_allocated) - Number(a.qty_used));
 
-export function stockOptions(items, allocations, jobId) {
+// `sectionRows` is the Structural Steel master list ({ name, type }).
+// The kind of section -- square tube, round bar -- is not on the stock
+// line itself; it is looked up by name there, the same way the stock
+// screens do it. Given none, options simply carry no kind and the
+// picker drops that narrower.
+export function stockOptions(items, allocations, jobId, sectionRows) {
+  const kindOf = (name) => {
+    const hit = (sectionRows || []).find((e) => (e.name || "").toLowerCase() === (name || "").toLowerCase());
+    return hit ? hit.type || "" : "";
+  };
   const live = (allocations || []).filter((a) => a.status !== "released");
   const rows = (items || []).filter((it) => it.mainCat === "structural");
   const options = rows.map((it) => {
@@ -40,6 +49,7 @@ export function stockOptions(items, allocations, jobId) {
       label: `${bits.join(" · ")} · ${stock}`,
       hint: mine > 0 ? "set aside" : available === 0 ? "none" : "",
       item: it,
+      kind: kindOf(it.name),
       material: materialText(it),
       setAside: mine,
       available,
