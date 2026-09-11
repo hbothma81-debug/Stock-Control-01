@@ -101,6 +101,18 @@ admin flag. The two rules sit near the top of App.jsx:
   the reason in its history. Nothing is ever really deleted.
 - **A job's laser stage** closes by itself when nesting is ticked and every
   program carrying it is cut, and reopens if a program is un-cut.
+- **A job reaches Laser Status on its first sheet, not its last** (changed
+  11 September 2026, both lasers, at Heinrich's ask). A program only counts
+  as cut on its final sheet and a big one runs for days, so the packer used
+  to wait on parts that were already stacked. The ready test in
+  `laserStatusRows` is "any program complete **or** with at least one sheet
+  cut". The laser stage above is unchanged: it still needs every program.
+- **Ticking Nesting or Laser ticks the packing stage with it** on Edit
+  processes, because packing is the only next step and a job that reached
+  the packer without it could not be taken at all. Unticking the laser
+  leaves packing alone. Which stage counts as packing comes from the
+  `worked_in_laser_status` setting, not from its name. The tube laser needs
+  none of this: its cutting stage is its packing stage.
 - **Two lanes.** The plate laser (Nesting, Laser) and the tube laser (Tube
   Laser Nesting, Tube Laser) never wait for each other; everything after
   them waits for both. `isTubeLaserProcess` in App.jsx is that rule.

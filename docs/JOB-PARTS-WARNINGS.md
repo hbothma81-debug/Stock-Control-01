@@ -101,10 +101,31 @@ anything set by hand.
   and then re-imported away.** A re-import updates quantity and length
   from the file. Correct it in the file, not on the job.
 
-## 5. The database behind it
+## 5. On the printed job sheet
 
-Two setup files must both have been run, or the parts row fails on a
-missing column:
+Parts print under their line, indented, each with its cut method and the
+drawing revision it was built to. Two things about that page, both
+fixed on 11 September 2026 and both worth knowing if it is changed
+again:
+
+- **Every size on the sheet comes from one place**, a scale at the top
+  of `printJobSheet`. Change it there and the whole page stays in
+  proportion. Tables are 7.5pt; left to itself the table library uses
+  10pt, which is bigger than the sheet's own body text.
+- **A part is marked with a bullet, not the arrow used on screen.** The
+  PDF's standard font has no such arrow: it printed as a stray glyph
+  and spaced out every letter of its line, so every part read as
+  gapped text. Do not put an arrow, a dash of the long kind, or any
+  other non-Latin character into a PDF string. The bullet and the
+  middot are safe.
+
+## 6. The database behind it
+
+The first two must both have been run, or the parts row fails on a
+missing column. The welding one was run on practice and live on 11
+September 2026. To see which of these a database actually has, run
+`CHECK-which-setup-files-are-run.sql` on it; every one of them has a
+row in there.
 
 | File | What it adds |
 |---|---|
@@ -117,7 +138,7 @@ The rule itself is in `src/App.jsx`: `isChildLine`, `hasChildLines`,
 Any new screen that lists a job's lines has to decide whether it wants
 lines, parts or both, and use those helpers rather than the raw list.
 
-## 6. Deliberately not built
+## 7. Deliberately not built
 
 **An explicit hinge tick on a stage.** The column exists
 (`process_type_settings.puts_fabrications_together`) but nothing reads

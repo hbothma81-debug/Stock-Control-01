@@ -60,6 +60,14 @@ COFFEE TABLE job as the example of what the operator receives.
   fifth segment, Packing: the plate Laser Status screen fed with tube
   programs. The packing stage is the **Tube Laser stage itself**, which
   is why cutting never closes that stage on the tube laser (see below).
+- **A job is the packer's on the first length off the machine, not the
+  last** (changed 11 September 2026, both lasers, at Heinrich's ask). A
+  program only counts as cut when its final length is done and a big one
+  runs for days, so the job used to sit under "Waiting on cutting" while
+  its parts were already stacked on the floor. The ready test in
+  `laserStatusRows` is now "any program complete **or** with at least one
+  length cut". The row still reads "3 of 12 lengths", so a started job is
+  not mistaken for a finished one.
 - **Tube Laser Status under Production** is the same rows, seen by
   everyone on Production. Take job there is for the next person along,
   welding or delivery: it records who took it and opens the stages
