@@ -1775,7 +1775,6 @@ export default function StockControl() {
     markShortageNested,
     shortageSummary,
     refreshShortageStatus,
-    reserveStock: reserveStockForProcess,
     // Called when a program's cut count moves, so the lengths cut come
     // off the shelf and off the job's reservation. See
     // consumeProgramStock: positive takes, negative puts back, and it

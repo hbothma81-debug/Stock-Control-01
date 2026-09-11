@@ -455,8 +455,8 @@ export default function NestingView({
             {w.generated && (
               <div style={S.roleHint}>
                 The program number is handed out when you press Create. Save the nest under that number in the
-                machine's software. One section per program — do not mix sections. The lengths are set aside for
-                the first job on the program.
+                machine's software. One section per program — do not mix sections. Picking the section says which
+                stock line it is; set the stock aside on the job's Materials tab.
               </div>
             )}
             {!w.bySections && thicknesses.length === 0 && (
@@ -1168,8 +1168,8 @@ function NestRow({
               {w.generated && (
                 <div style={S.roleHint}>
                   The program number is handed out when you press Nest it. Save the nest under that number in the
-                  machine's software. One section per program — do not mix sections. The lengths are set aside for
-                  this job.
+                  machine's software. One section per program — do not mix sections. Picking the section says
+                  which stock line it is; set the stock aside on the job's Materials tab.
                 </div>
               )}
               {!w.bySections && thicknesses.length === 0 && (

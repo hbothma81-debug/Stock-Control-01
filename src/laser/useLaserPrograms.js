@@ -36,9 +36,6 @@ export default function useLaserPrograms(deps) {
     markShortageNested,
     shortageSummary,
     refreshShortageStatus,
-    // Sets stock aside for a job's stage (job, process, item, qty);
-    // the tube nester picks a real stock line, and that reserves it.
-    reserveStock,
     // Puts a nesting's parts on the job as lines under the job's own
     // line for that work (job, parentLineId, parts, reference).
     addParts,
@@ -559,28 +556,6 @@ export default function useLaserPrograms(deps) {
     return data;
   }
 
-  // `reserve` ({ item, qty }) sets that many of a stock line aside for the
-  // first job on the program, against its nesting stage -- the tube
-  // laser's way: picking the section is picking the stock. Not fatal if
-  // it cannot: the program is real either way, and Pull from stock is
-  // still there.
-  async function reserveForProgram(jobs, reserve) {
-    if (!reserve || !reserve.item || !(Number(reserve.qty) > 0) || typeof reserveStock !== "function") return;
-    const first = (jobs || [])[0];
-    const job = first ? (jobsList || []).find((j) => j.id === first.job_id) : null;
-    const stage = first
-      ? (laserData?.processes || []).find(
-          (pr) => pr.job_id === first.job_id && !pr.shortage_id && isPlateNestingProcess(pr.process_name)
-        )
-      : null;
-    if (!job || !stage) {
-      console.warn("No nesting stage to set the stock aside against; nothing reserved.");
-      return;
-    }
-    const ok = await reserveStock(job, stage, reserve.item, Number(reserve.qty));
-    if (!ok) alert("The program was made, but the stock could not be set aside for it. Use Pull from stock on the job.");
-  }
-
   // The parts on the program, put on the first job as lines under its
   // parent line. `parentId` null makes the parent from the reference.
   async function partsOntoJob(jobs, parts, parentId, reference) {
@@ -634,9 +609,13 @@ export default function useLaserPrograms(deps) {
           // Planned cutting time per sheet, off SigmaNest. Blank stays
           // null: "not given" must not read as "takes no time".
           cut_minutes: minutesOrNull(cut_minutes),
-          // Which stock line the lengths were set aside from, so cutting
-          // one can take one off that line. The material alone cannot
-          // say: "50x50x3 MS" is the 6m line and the 13m line both.
+          // Which stock line this section is, so cutting one can take
+          // one off that line. The material alone cannot say: "50x50x3
+          // MS" is the 6m line and the 13m line both.
+          //
+          // Picking it does NOT set any stock aside. That is done on the
+          // job's Materials tab, which is the one door into the
+          // cupboard -- reserving here as well double-booked the rack.
           //
           // Written only when a section was actually picked off the
           // shelf, the same way nesting_name and parts are, so a laser
@@ -667,7 +646,6 @@ export default function useLaserPrograms(deps) {
         const sh = (laserData?.shortages || []).find((x) => x.id === j.shortage_id);
         if (sh && sh.status === "flagged") await markShortageNested(sh);
       }
-      await reserveForProgram(jobs, reserve);
       await partsOntoJob(jobs, parts, parent_line_id, nesting_name);
       await fetchLaserData();
       // Truthy for the screens that only ask "did it work"; the number

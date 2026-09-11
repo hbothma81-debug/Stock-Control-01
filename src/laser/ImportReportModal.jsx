@@ -169,6 +169,13 @@ export default function ImportReportModal({
     );
   };
 
+  // Whether the job has any of this section set aside already. Only a
+  // note; the import never waits for it.
+  const shortOfStock = (reportSection) => {
+    const o = optionOf(reportSection);
+    return !!o && !(Number(o.setAside) > 0);
+  };
+
   const allChosen = parsed ? parsed.sections.every((s) => !!optionOf(s.reportSection)) : false;
   const hasParts = parsed ? parsed.sections.some((s) => (s.parts || []).length > 0) : false;
   const parentSettled = !hasParts || !!parent;
@@ -379,6 +386,18 @@ export default function ImportReportModal({
                         {remembered(s.reportSection) && chosen[s.reportSection] === remembered(s.reportSection).value && (
                           <div style={S.roleHint}>Remembered from last time.</div>
                         )}
+                        {/* Picking a section says which material it is, not
+                            that the stock is spoken for. Worth saying when
+                            none is set aside, because the operator finds out
+                            otherwise only when he goes to cut. Said, never a
+                            block: the nester is often not the one who sets
+                            stock aside. */}
+                        {shortOfStock(s.reportSection) && (
+                          <div style={{ ...S.roleHint, color: C.accentRaw }}>
+                            Nothing set aside for this section on this job yet. Do it on the job's Materials tab —
+                            the nesting still imports.
+                          </div>
+                        )}
                         {alreadyThere(s.reportSection) && (
                           <div style={{ ...S.roleHint, color: C.danger }}>
                             A live program for {reference.trim()} on this section already exists. Carry on only if this is
@@ -389,7 +408,8 @@ export default function ImportReportModal({
                     ))}
                   </div>
                   <div style={{ ...S.roleHint, marginTop: 6 }}>
-                    Each section's lengths are set aside for the first job picked, against its nesting stage.
+                    Picking a section says which stock line it is, so the operator's cut can come off that line.
+                    It sets nothing aside on its own — stock is set aside on the job's Materials tab.
                   </div>
                 </div>
 
