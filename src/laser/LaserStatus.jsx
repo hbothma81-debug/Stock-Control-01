@@ -78,6 +78,15 @@ export default function LaserStatus({
   // this screen and that card can never count differently.
   onLogItem,
   ItemProgress,
+  // An admin can close a stage that counts per item, whatever the counts
+  // say. Nothing else can: a per-item stage finishes itself when every
+  // line is packed in full, and that check only runs at the moment a
+  // quantity is logged. A job whose lines changed after the last one --
+  // work done before the app, or a line retagged since -- can reach full
+  // and still never close, with no button anywhere to close it. This is
+  // the way out, and the way to clear an old job that will never be
+  // logged at all.
+  isAdmin,
   busyId,
 }) {
   const [query, setQuery] = useState("");
@@ -121,6 +130,7 @@ export default function LaserStatus({
       onFlagShortage={onFlagShortage}
       onLogItem={onLogItem}
       ItemProgress={ItemProgress}
+      isAdmin={isAdmin}
     />
   );
 
@@ -173,11 +183,29 @@ function StatusRow({
   onFlagShortage,
   onLogItem,
   ItemProgress,
+  isAdmin,
 }) {
   const laser = laserState(r);
   // A job can reach here with no packing stage at all, when nobody ticked
   // Packer as the job was built.
   const taken = !!r.process?.started_at;
+
+  // How much of this stage's work is logged, for the admin's close
+  // button: what it says, and whether it asks before closing.
+  const packedSoFar = (r.quoteItems || []).reduce(
+    (n, it) => {
+      const got = (r.itemProgress || []).find((ip) => ip.job_quote_item_id === it.id);
+      const want = Number(it.qty) || 0;
+      return {
+        done: n.done + Math.min(want, Math.max(0, Number(got?.qty_complete) || 0)),
+        total: n.total + want,
+      };
+    },
+    { done: 0, total: 0 }
+  );
+  // Nothing listed is not "all done" -- an old job with no lines at all
+  // must still ask, or the button would read as if the work were logged.
+  const itemsFull = packedSoFar.total > 0 && packedSoFar.done >= packedSoFar.total;
   const busy = !!r.process && busyId === r.process.id;
   // Packed item by item rather than as one tick. A re-cut is never: its
   // parts are the shortage's, not lines on the job.
@@ -335,6 +363,39 @@ function StatusRow({
                         by the tube operator under the Tube Laser stage,
                         so on a mixed job this tick is the plate half. */}
                     <Check size={14} strokeWidth={2.5} /> {busy ? "Saving…" : `${partsLabel} packed & checked`}
+                  </button>
+                )}
+
+                {/* The admin's way out of a per-item stage. Always here,
+                    whatever the counts read: the jobs that need it most
+                    are the old ones whose parts were done before the app
+                    and will never be logged at all. It says how far the
+                    counts got, and asks first when they are short, so
+                    closing one early is a decision rather than a slip. */}
+                {isAdmin && perItem && r.process && (
+                  <button
+                    type="button"
+                    className="stk-btn"
+                    style={itemsFull ? S.reqActionBtn : S.reqActionBtnMuted}
+                    disabled={busy}
+                    onClick={() => {
+                      if (
+                        itemsFull ||
+                        window.confirm(
+                          `${r.job?.job_number || "This job"}: ${packedSoFar.done} of ${packedSoFar.total} packed.\n\n` +
+                            `Close this stage anyway? Everything after it opens, and the counts stay as they are.`
+                        )
+                      ) {
+                        onFinishPacking(r);
+                      }
+                    }}
+                  >
+                    <Check size={14} strokeWidth={2.5} />{" "}
+                    {busy
+                      ? "Saving…"
+                      : itemsFull
+                        ? `All ${packedSoFar.total} packed — close this stage`
+                        : `Close this stage (${packedSoFar.done} of ${packedSoFar.total})`}
                   </button>
                 )}
 

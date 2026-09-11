@@ -231,6 +231,7 @@ export default function LaserTab({
                     onFlagShortage={packing.onFlagShortage}
                     onLogItem={packing.onLogItem}
                     ItemProgress={packing.ItemProgress}
+                    isAdmin={packing.isAdmin}
                     busyId={programBusyId}
                   />
                 ) : (

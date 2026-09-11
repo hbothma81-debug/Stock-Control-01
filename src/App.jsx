@@ -5102,6 +5102,7 @@ export default function StockControl() {
       onFlagShortage: (row) => openShortageFlagModal(row.job, row.process),
       onLogItem: (row, item, qty, progress) => logPackingItem(row, item, qty, progress, tubeLaser),
       ItemProgress: QtyProgressControl,
+      isAdmin,
     };
   }
 
@@ -14580,6 +14581,7 @@ export default function StockControl() {
               <LaserStatus
                 rows={laserStatusRows().filter((r) => !productionFiltering || productionJobMatches(r.job))}
                 canPack={isAdmin || !!profile?.allowedProcessTypes?.some(workedInLaserStatus)}
+                isAdmin={isAdmin}
                 meName={roleLabel}
                 onTakeJob={takePackingJob}
                 onFinishPacking={finishPacking}
@@ -14621,6 +14623,7 @@ export default function StockControl() {
                     onFlagShortage={p.onFlagShortage}
                     onLogItem={p.onLogItem}
                     ItemProgress={p.ItemProgress}
+                    isAdmin={p.isAdmin}
                     busyId={tubeLaser.programBusyId}
                   />
                 );
@@ -15015,14 +15018,40 @@ export default function StockControl() {
                             )}
                             <div style={{ marginTop: 6 }}>
                               {process.tracking_mode === "each" && !stageHasNothingToCut(process.process_name, quoteItems) ? (
-                                <QtyProgressControl
-                                  process={process}
-                                  job={job}
-                                  quoteItems={itemsForStage(process.process_name, quoteItems)}
-                                  itemProgress={itemProgress}
-                                  limitFor={(item) => itemFlowLimit(process, stagesOnJob, progressOnJob, item, quoteItems)}
-                                  onSubmit={submitProcessItemProgress}
-                                />
+                                <>
+                                  <QtyProgressControl
+                                    process={process}
+                                    job={job}
+                                    quoteItems={itemsForStage(process.process_name, quoteItems)}
+                                    itemProgress={itemProgress}
+                                    limitFor={(item) => itemFlowLimit(process, stagesOnJob, progressOnJob, item, quoteItems)}
+                                    onSubmit={submitProcessItemProgress}
+                                  />
+                                  {/* An admin's way out. A stage counting
+                                      per item finishes itself only at the
+                                      moment a quantity is logged, so one
+                                      whose lines changed since -- or an
+                                      old job whose work was done before
+                                      the app and will never be logged --
+                                      has no way to close at all. */}
+                                  {isAdmin && (
+                                    <button
+                                      type="button"
+                                      className="stk-btn"
+                                      style={{ ...S.reqActionBtnMuted, marginTop: 6 }}
+                                      onClick={() => {
+                                        const ok = window.confirm(
+                                          `${job.job_number || "This job"} — ${process.process_name}: close this stage?\n\n` +
+                                            `It counts per item, so it normally closes itself once every line is logged. ` +
+                                            `Closing it here opens everything after it and leaves the counts as they are.`
+                                        );
+                                        if (ok) toggleJobProcessComplete(process, job);
+                                      }}
+                                    >
+                                      <Check size={13} /> Close this stage
+                                    </button>
+                                  )}
+                                </>
                               ) : (
                                 <label style={{ ...S.checkRow, fontWeight: 600 }}>
                                   <input
