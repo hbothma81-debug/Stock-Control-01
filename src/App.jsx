@@ -1070,25 +1070,86 @@ function ReqFlag({ req, onClick }) {
 //
 // Module level, not inside StockControl: a component redefined on every
 // render remounts, and the search box would lose focus on each keystroke.
-function StockPicker({ items, allowedDepts, onPick, emptyMessage }) {
+// Finding a thing on the shelf, for reserving it or taking it.
+//
+// Two windows use this and nothing else does: Reserve stock for a job,
+// and Take from stock now. Assets are deliberately not offered -- putting
+// a grinder on a job is not stock coming off a shelf.
+//
+// What a row shows is what somebody standing at the rack needs: what is
+// FREE, which is the shelf count less everything reserved for other
+// jobs, then what is put by and for whom, then where it is. The count on
+// its own used to read as available when half of it was spoken for.
+//
+// Filtering is a search box that reads the whole row -- grade, size,
+// thickness, length, part number, customer, supplier, location -- so
+// "304 50x50" narrows in one go, plus the few dropdowns typing cannot
+// reach. Several can be used at once.
+function StockPicker({ items, allowedDepts, onPick, emptyMessage, allocations, jobsList, sectionTypeOf }) {
   const [dept, setDept] = useState(null);
   const [search, setSearch] = useState("");
+  const [filters, setFilters] = useState({});
+  const [reservedFor, setReservedFor] = useState("");
+  // Nothing in stock is hidden unless asked for: this window is for
+  // finding material to use. It stays reachable, because reserving
+  // something that is on order is a real thing to want -- the reserve
+  // window says so when you pick it.
+  const [showEmpty, setShowEmpty] = useState(false);
 
-  if (allowedDepts.length === 0) return <div style={S.empty}>{emptyMessage}</div>;
+  // What is spoken for, per stock line, and by whom. Released
+  // reservations and fully-used ones count for nothing.
+  const reservedByItem = useMemo(() => {
+    const map = {};
+    for (const a of allocations || []) {
+      if (a.status === "released") continue;
+      const left = Math.max(0, Number(a.qty_allocated) - Number(a.qty_used));
+      if (left <= 0) continue;
+      if (!map[a.item_id]) map[a.item_id] = { qty: 0, rows: [] };
+      map[a.item_id].qty += left;
+      map[a.item_id].rows.push(a);
+    }
+    return map;
+  }, [allocations]);
+
+  const customerOfJob = useMemo(() => {
+    const map = {};
+    for (const j of jobsList || []) map[j.id] = j.customer || "";
+    return map;
+  }, [jobsList]);
+
+  // Every customer that has something put by anywhere, for the filter
+  // that finds it again.
+  const reservedCustomers = useMemo(() => {
+    const set = new Set();
+    for (const a of allocations || []) {
+      if (a.status === "released") continue;
+      if (Math.max(0, Number(a.qty_allocated) - Number(a.qty_used)) <= 0) continue;
+      const c = customerOfJob[a.job_id];
+      if (c) set.add(c);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [allocations, customerOfJob]);
+
+  function pickDept(key) {
+    setDept(key);
+    setSearch("");
+    setFilters({});
+    setReservedFor("");
+    setShowEmpty(false);
+  }
+
+  // Assets are not stock coming off a shelf, so they are not offered
+  // here even to someone who may see them.
+  const depts = (allowedDepts || []).filter((t) => t.key !== "assets");
+  if (depts.length === 0) return <div style={S.empty}>{emptyMessage}</div>;
 
   if (dept === null) {
     return (
       <>
         <div style={S.roleHint}>Which department is the material in?</div>
         <div style={S.managerListFullPage}>
-          {allowedDepts.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              className="stk-btn"
-              style={S.managerMenuRow}
-              onClick={() => { setDept(t.key); setSearch(""); }}
-            >
+          {depts.map((t) => (
+            <button key={t.key} type="button" className="stk-btn" style={S.managerMenuRow} onClick={() => pickDept(t.key)}>
               {t.label}
               <ChevronRight size={16} />
             </button>
@@ -1099,14 +1160,102 @@ function StockPicker({ items, allowedDepts, onPick, emptyMessage }) {
   }
 
   const deptLabel = TABS.find((t) => t.key === dept)?.label || dept;
-  const q = search.trim().toLowerCase();
-  const matches = (items || [])
-    .filter((it) => it.mainCat === dept)
-    .filter((it) => !q || (it.name || "").toLowerCase().includes(q) || (it.loc || "").toLowerCase().includes(q))
+  const inDept = (items || []).filter((it) => it.mainCat === dept);
+
+  // The "customer" column carries a customer on Customer Stock and a
+  // category on Stores and Fasteners -- the same field, named for what
+  // it holds in each division, exactly as the Add form labels it.
+  const filterDefs = {
+    plate: [
+      ["grade", "Grade", (it) => it.grade],
+      ["thickness", "Thickness", (it) => it.thickness],
+      ["size", "Size", (it) => it.size],
+    ],
+    structural: [
+      ["grade", "Grade", (it) => it.grade],
+      ["sectionType", "Section type", (it) => (sectionTypeOf ? sectionTypeOf(it.name) : "")],
+      ["length", "Length", (it) => (it.length ? `${it.length}m` : "")],
+    ],
+    cncBar: [
+      ["grade", "Grade", (it) => it.grade],
+      ["diameter", "Diameter", (it) => it.diameter],
+    ],
+    custom: [["customer", "Customer", (it) => it.customer]],
+    buyouts: [["supplier", "Supplier", (it) => it.supplier]],
+    stores: [["customer", "Category", (it) => it.customer]],
+    fasteners: [["customer", "Category", (it) => it.customer]],
+  };
+  const defs = filterDefs[dept] || [];
+
+  const freeOf = (it) => Math.max(0, Number(it.qty || 0) - (reservedByItem[it.id]?.qty || 0));
+  const reservedCustomersOf = (it) =>
+    (reservedByItem[it.id]?.rows || []).map((a) => customerOfJob[a.job_id]).filter(Boolean);
+
+  // Everything on the row, as one string to search. This is what lets one
+  // box do the work of several dropdowns.
+  const haystack = (it) =>
+    [
+      it.name,
+      it.grade,
+      it.size,
+      it.thickness,
+      it.length ? `${it.length}m` : "",
+      it.diameter,
+      it.partNumber,
+      it.customer,
+      it.supplier,
+      it.loc,
+      it.comment,
+      dept === "structural" && sectionTypeOf ? sectionTypeOf(it.name) : "",
+      ...reservedCustomersOf(it),
+    ]
+      .map((v) => String(v ?? "").toLowerCase())
+      .join(" ");
+
+  // Every word has to appear somewhere on the row, so "304 50x50" works
+  // whichever order the two are typed in.
+  const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+
+  const matches = inDept
+    .filter((it) => showEmpty || Number(it.qty || 0) > 0)
+    .filter((it) => defs.every(([key, , read]) => !filters[key] || String(read(it) ?? "") === filters[key]))
+    .filter((it) => !reservedFor || reservedCustomersOf(it).includes(reservedFor))
+    .filter((it) => {
+      if (words.length === 0) return true;
+      const hay = haystack(it);
+      return words.every((w) => hay.includes(w));
+    })
     .sort(byName);
+  const hiddenEmpties = showEmpty ? 0 : inDept.filter((it) => !(Number(it.qty || 0) > 0)).length;
   // Capped rather than paged: this is a "find the thing in front of you"
   // list, so if it is still hundreds long the answer is to type more.
   const shown = matches.slice(0, 60);
+
+  function valuesFor(read) {
+    return [...new Set(inDept.map((it) => String(read(it) ?? "").trim()).filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+    );
+  }
+
+  // What the row says about itself, after its name: the things that tell
+  // two similar lines apart in this division.
+  function detailsOf(it) {
+    return [
+      it.grade,
+      it.thickness ? `${it.thickness}mm` : "",
+      it.size,
+      it.diameter ? `${it.diameter} dia` : "",
+      it.length ? `${it.length}m` : "",
+      it.partNumber,
+      dept === "custom" || dept === "stores" || dept === "fasteners" ? it.customer : "",
+      dept === "buyouts" ? it.supplier : "",
+      dept === "structural" && sectionTypeOf ? sectionTypeOf(it.name) : "",
+      it.stockType === "offcut" ? "offcut" : "",
+    ]
+      .map((v) => String(v ?? "").trim())
+      .filter(Boolean)
+      .join(" · ");
+  }
 
   return (
     <>
@@ -1114,7 +1263,7 @@ function StockPicker({ items, allowedDepts, onPick, emptyMessage }) {
         type="button"
         className="stk-btn"
         style={{ ...S.prominentBackBtn, marginBottom: 8 }}
-        onClick={() => { setDept(null); setSearch(""); }}
+        onClick={() => { setDept(null); setSearch(""); setFilters({}); setReservedFor(""); }}
       >
         <ChevronLeft size={18} strokeWidth={2.5} /> All departments
       </button>
@@ -1123,24 +1272,82 @@ function StockPicker({ items, allowedDepts, onPick, emptyMessage }) {
         style={S.input}
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder={`Search ${deptLabel.toLowerCase()}…`}
+        placeholder={`Search ${deptLabel.toLowerCase()} — size, grade, part number, where it is…`}
       />
+
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+        {defs.map(([key, label, read]) => {
+          const options = valuesFor(read);
+          if (options.length < 2) return null;
+          return (
+            <TypeToFind
+              key={key}
+              style={{ flex: "1 1 120px", minWidth: 110 }}
+              inputStyle={{ fontSize: 14, padding: "5px 26px 5px 8px" }}
+              options={options}
+              value={filters[key] || ""}
+              onChange={(v) => setFilters((f) => ({ ...f, [key]: v || "" }))}
+              emptyLabel={`Any ${label.toLowerCase()}`}
+            />
+          );
+        })}
+        {/* Material bought for a customer and already put by for one of
+            their jobs. This is how it is found again, to be moved onto
+            the job that actually needs it. */}
+        {reservedCustomers.length > 0 && (
+          <TypeToFind
+            style={{ flex: "1 1 150px", minWidth: 130 }}
+            inputStyle={{ fontSize: 14, padding: "5px 26px 5px 8px" }}
+            options={reservedCustomers}
+            value={reservedFor}
+            onChange={(v) => setReservedFor(v || "")}
+            emptyLabel="Put by for anyone"
+          />
+        )}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+        <span style={S.roleHint}>
+          {matches.length} line{matches.length === 1 ? "" : "s"}
+          {hiddenEmpties > 0 ? ` · ${hiddenEmpties} with nothing in stock hidden` : ""}
+        </span>
+        <label style={{ ...S.roleHint, display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+          <input type="checkbox" checked={showEmpty} onChange={(e) => setShowEmpty(e.target.checked)} />
+          Show nothing in stock
+        </label>
+      </div>
+
       <div style={S.managerListFullPage}>
         {matches.length === 0 && <div style={S.empty}>Nothing in {deptLabel} matches that.</div>}
-        {shown.map((it) => (
-          <button
-            key={it.id}
-            type="button"
-            className="stk-btn"
-            style={S.managerMenuRow}
-            onClick={() => onPick(it)}
-          >
-            <span style={{ flex: 1, textAlign: "left" }}>{it.name}</span>
-            <span style={{ fontFamily: F.mono, fontSize: 12.5, color: Number(it.qty) > 0 ? C.muted : C.danger }}>
-              {it.qty}{it.loc ? ` · ${it.loc}` : ""}
-            </span>
-          </button>
-        ))}
+        {shown.map((it) => {
+          const reserved = reservedByItem[it.id]?.qty || 0;
+          const free = freeOf(it);
+          const forWhom = [...new Set(reservedCustomersOf(it))];
+          return (
+            <button
+              key={it.id}
+              type="button"
+              className="stk-btn"
+              style={{ ...S.managerMenuRow, alignItems: "flex-start" }}
+              onClick={() => onPick(it)}
+            >
+              <span style={{ flex: 1, textAlign: "left", minWidth: 0 }}>
+                <span style={{ display: "block" }}>{it.name}</span>
+                {detailsOf(it) && <span style={S.roleHint}>{detailsOf(it)}</span>}
+                {reserved > 0 && (
+                  <span style={{ ...S.roleHint, display: "block", color: C.accentRaw }}>
+                    {reserved} put by{forWhom.length ? ` for ${forWhom.join(", ")}` : ""}
+                  </span>
+                )}
+              </span>
+              <span style={{ fontFamily: F.mono, fontSize: 12.5, textAlign: "right", flexShrink: 0 }}>
+                <span style={{ color: free > 0 ? C.muted : C.danger }}>{free} free</span>
+                {reserved > 0 && <span style={{ color: C.muted, display: "block" }}>of {it.qty}</span>}
+                {it.loc && <span style={{ color: C.muted, display: "block" }}>{it.loc}</span>}
+              </span>
+            </button>
+          );
+        })}
         {matches.length > shown.length && (
           <div style={S.empty}>{matches.length - shown.length} more — keep typing to narrow it down.</div>
         )}
@@ -19724,6 +19931,9 @@ export default function StockControl() {
                 // department, not the right to reduce it. The permission
                 // that matters is checked when the material is booked out.
                 allowedDepts={TABS.filter((t) => canView(t.key))}
+                allocations={allocationsList || []}
+                jobsList={jobsList || []}
+                sectionTypeOf={findSectionType}
                 emptyMessage="You can't see any stock departments, so there's nothing to allocate from."
                 onPick={(it) => { setAllocateModal((m) => ({ ...m, item: it })); setAllocateQty(""); }}
               />
@@ -19811,6 +20021,9 @@ export default function StockControl() {
               // from, so the same permission applies here as on the stock
               // screens — this must not become a way around it.
               allowedDepts={TABS.filter((t) => canEditQty(t.key))}
+              allocations={allocationsList || []}
+              jobsList={jobsList || []}
+              sectionTypeOf={findSectionType}
               emptyMessage={`You don't have permission to take stock out of any department, so there's nothing to pull from. ${
                 isAdmin ? "Set this" : "Ask an admin to set it"
               } under Stock Manager → User Management → your name → Edit qty.`}
