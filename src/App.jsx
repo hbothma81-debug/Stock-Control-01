@@ -4444,6 +4444,18 @@ export default function StockControl() {
     const d = source || { programs: [], links: [], processes: [] };
     const jobs = jobsList || [];
     const live = d.programs.filter((pg) => !pg.is_cancelled);
+
+    // Something off the machine, not everything. A program is only "cut"
+    // once its last sheet or length is done, and a big one runs for days
+    // -- so waiting for that kept the packer off parts that had been
+    // stacked up since Tuesday. One sheet or one length is enough: there
+    // is something to pack, so it is his.
+    //
+    // Jobs and re-cuts both ask this one question. They used to ask it
+    // differently, and a re-cut -- parts somebody is already short of --
+    // reached the packer later than ordinary work did.
+    const somethingCut = (pg) => pg.is_complete || Number(pg.sheets_cut) > 0;
+
     const rows = [];
     for (const job of jobs.filter((j) => j.status === "in_progress")) {
       const packing = d.processes.find(
@@ -4457,15 +4469,9 @@ export default function StockControl() {
       const programs = live.filter((pg) =>
         d.links.some((l) => l.program_id === pg.id && l.job_id === job.id)
       );
-      // Something off the machine, not everything. A program is only
-      // "cut" once its last sheet or length is done, and a big one runs
-      // for days -- so waiting for that kept the packer off parts that
-      // had been stacked up since Tuesday. One sheet or one length is
-      // enough: there is something to pack, so the job is his.
-      //
       // The row still says how far along it is, "3 of 12 lengths", so
       // nobody mistakes a started job for a finished one.
-      const anyCut = programs.some((pg) => pg.is_complete || Number(pg.sheets_cut) > 0);
+      const anyCut = programs.some(somethingCut);
       // Nothing off the machine yet is nothing for the packer to look for.
       let waiting = null;
       if (!anyCut) {
@@ -4523,7 +4529,7 @@ export default function StockControl() {
       if (!packing) continue;
       // Nothing off the machine yet is nothing to come and collect.
       const programs = live.filter((pg) => d.links.some((l) => l.program_id === pg.id && l.shortage_id === sh.id));
-      if (!programs.some((pg) => pg.is_complete)) continue;
+      if (!programs.some(somethingCut)) continue;
       const job = jobs.find((j) => j.id === sh.job_id);
       rows.push({
         key: "recut:" + sh.id,
@@ -4627,6 +4633,18 @@ export default function StockControl() {
   // Marks a program cut, then brings every job on it into line.
   //
   const releasesOnStart = (name) => !!processTypeSettings[name]?.releases_on_start;
+
+  // When a stage stops holding the ones after it back. Finished always
+  // counts; a stage set to release on start counts the moment somebody
+  // takes it. That is the packer: a big job is cut over several days and
+  // bending should not wait for the last program.
+  //
+  // One rule, asked in two places -- blockingStages, which opens a card
+  // on Production, and itemFlowLimit, which caps the count on that card.
+  // They used to disagree: itemFlowLimit accepted only "finished", so a
+  // per-item stage after the packer would have read as open with every
+  // item stuck on nought.
+  const stageIsCleared = (p) => p.is_complete || (releasesOnStart(p.process_name) && !!p.started_at);
   const workedInLaserStatus = (name) => !!processTypeSettings[name]?.worked_in_laser_status;
 
   // Stages that come with another one, so nobody has to tick them.
@@ -4727,16 +4745,14 @@ export default function StockControl() {
     // change to the flow gates every job by it straight away — including
     // jobs already on the floor.
     const mine = flowRank(process.process_name);
-    // A stage set to release on start counts as cleared once someone has
-    // taken it, not when it is finished. That is the packer: a big job is
-    // cut over several days and bending should not wait for the last
-    // program. Every other stage still has to be complete.
+    // What counts as cleared is stageIsCleared above, shared with the
+    // per-item cap so the two cannot drift apart.
     return jobProcesses
       .filter(sameRun)
       .filter((p) => flowRank(p.process_name) < mine)
       // The other laser is a separate lane, not an earlier stage.
       .filter((p) => !inOtherLaserLane(process.process_name, p.process_name))
-      .filter((p) => !(p.is_complete || (releasesOnStart(p.process_name) && !!p.started_at)))
+      .filter((p) => !stageIsCleared(p))
       .sort((a, b) => flowRank(a.process_name) - flowRank(b.process_name));
   }
 
@@ -4764,7 +4780,9 @@ export default function StockControl() {
     let allowed = Number(quoteItem.qty) || 0;
     let waitingOn = null;
     for (const p of jobProcesses || []) {
-      if (!sameRun(p) || p.is_complete) continue;
+      // Cleared, not merely finished: the same test that opens the card
+      // on Production, so an open card cannot show a nought count.
+      if (!sameRun(p) || stageIsCleared(p)) continue;
       if (flowRank(p.process_name) >= mine) continue;
       // The other laser is a separate lane, not an earlier stage.
       if (inOtherLaserLane(process.process_name, p.process_name)) continue;
