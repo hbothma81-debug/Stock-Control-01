@@ -4457,7 +4457,15 @@ export default function StockControl() {
       const programs = live.filter((pg) =>
         d.links.some((l) => l.program_id === pg.id && l.job_id === job.id)
       );
-      const anyCut = programs.some((pg) => pg.is_complete);
+      // Something off the machine, not everything. A program is only
+      // "cut" once its last sheet or length is done, and a big one runs
+      // for days -- so waiting for that kept the packer off parts that
+      // had been stacked up since Tuesday. One sheet or one length is
+      // enough: there is something to pack, so the job is his.
+      //
+      // The row still says how far along it is, "3 of 12 lengths", so
+      // nobody mistakes a started job for a finished one.
+      const anyCut = programs.some((pg) => pg.is_complete || Number(pg.sheets_cut) > 0);
       // Nothing off the machine yet is nothing for the packer to look for.
       let waiting = null;
       if (!anyCut) {
