@@ -138,6 +138,13 @@ export const LASER_MACHINES = {
     // of typing programs by hand: one program per section in the file.
     importsReport: true,
     shiftFlag: "cuts_tube_laser",
+    // Tube work is not nested all in one go. A job of 8000 parts may
+    // have 4000 nested this week and the rest later, so the nesting row
+    // lists the job's parts and takes a quantity against each. The job
+    // stays on the list with its progress showing, and the parts that
+    // have been nested carry on through the rest of the job without it.
+    // The plate laser nests whole sheets and counts nothing per part.
+    nestPerItem: true,
     cutStageIsPacking: true,
     hasPacking: true,
     partsLabel: "Tube parts",

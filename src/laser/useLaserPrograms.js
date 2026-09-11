@@ -42,6 +42,10 @@ export default function useLaserPrograms(deps) {
     // Puts a nesting's parts on the job as lines under the job's own
     // line for that work (job, parentLineId, parts, reference).
     addParts,
+    // Which of a job's lines a given stage handles. The one rule the
+    // whole app uses, so the nesting row lists exactly the lines that
+    // stage is responsible for and no others.
+    itemsForStage,
   } = deps;
   // The stage-name rules, under the names the code below has always used.
   const isPlateNestingProcess = machine.isNestingStage;
@@ -347,6 +351,14 @@ export default function useLaserPrograms(deps) {
         job,
         process,
         onPrograms: programsByJob[job.id] || [],
+        // The lines this nesting stage handles, and how many of each have
+        // been nested so far. Only used by a laser that nests part by
+        // part; the plate laser never reads them.
+        quoteItems:
+          typeof itemsForStage === "function"
+            ? itemsForStage(process.process_name, (d.quoteItems || []).filter((it) => it.job_id === job.id))
+            : [],
+        itemProgress: (d.itemProgress || []).filter((ip) => ip.job_process_id === process.id),
         documents: d.documents.filter((doc) => doc.job_id === job.id && doc.process_name === process.process_name),
         allocations: d.allocations.filter((a) => a.process_id === process.id && a.status !== "released"),
         drawings: (d.quoteItems || [])

@@ -1538,6 +1538,7 @@ export default function StockControl() {
     refreshShortageStatus,
     reserveStock: reserveStockForProcess,
     addParts: addPartsToJob,
+    itemsForStage,
   };
   const laser = useLaserPrograms({ ...laserDeps, machine: PLATE_LASER });
   const tubeLaser = useLaserPrograms({ ...laserDeps, machine: TUBE_LASER });
@@ -4611,6 +4612,32 @@ export default function StockControl() {
     await lz.fetchLaserData();
   }
 
+  // A part logged as nested on the tube nesting screen.
+  //
+  // Recording a quantity here is what makes this a per-item stage, so it
+  // is switched over the first time rather than asked for. Until it is
+  // one, the rule that lets a later stage work only what has been nested
+  // ignores the counts completely and holds the whole job back until
+  // nesting is signed off -- which is the opposite of the point. Every
+  // count already recorded still stands; only how the stage is read
+  // changes.
+  async function logNestedItem(row, item, qty, progress, lz) {
+    if (row.process && (row.process.tracking_mode || "batch") !== "each") {
+      const { error } = await supabase
+        .from("job_processes")
+        .update({ tracking_mode: "each" })
+        .eq("id", row.process.id);
+      if (error) {
+        console.error("Failed to switch nesting to per item:", error);
+        alert("That didn't save — check your connection and try again.");
+        return;
+      }
+    }
+    await submitProcessItemProgress(row.process, row.job, item, qty, progress, row.quoteItems || [], row.itemProgress || []);
+    await lz.fetchLaserData();
+    if (productionQueue !== null) fetchProductionQueue();
+  }
+
   // The Packing screen on the Tube Laser tab and Tube Laser Status under
   // Production are the same rows and the same buttons; only who may press
   // Take job differs. Built here because the rows and the packing
@@ -4669,7 +4696,14 @@ export default function StockControl() {
   }
   const hideFromProduction = (name) => !!processTypeSettings[name]?.hide_from_production;
   // Which tag a stage cuts; blank means every item.
-  const cutsMadeOn = (name) => processTypeSettings[name]?.cuts_made_on || "";
+  //
+  // A declaration, not a const arrow, so it can be called from anywhere
+  // in this component -- the laser hook is built hundreds of lines above
+  // and asks which lines a stage handles. A const here is not readable
+  // until the body reaches it, and reading one early throws.
+  function cutsMadeOn(name) {
+    return processTypeSettings[name]?.cuts_made_on || "";
+  }
 
   // Whether a stage handles a given line. A stage that cuts a machine's
   // items takes the lines tagged for that machine, and lines with no tag
@@ -4696,8 +4730,11 @@ export default function StockControl() {
     if (!tag) return true;
     return !made || made === tag;
   }
-  const itemsForStage = (processName, quoteItems) =>
-    (quoteItems || []).filter((it) => stageTakesItem(processName, it, quoteItems));
+  // Declared, not a const arrow, for the same reason as cutsMadeOn: the
+  // laser hook is handed this a long way above where it sits.
+  function itemsForStage(processName, quoteItems) {
+    return (quoteItems || []).filter((it) => stageTakesItem(processName, it, quoteItems));
+  }
 
   // A cutting stage on a job whose lines are all tagged for other
   // machines has nothing to do. It must not finish itself -- a wrongly
@@ -13888,6 +13925,8 @@ export default function StockControl() {
           canRequisition={canRequisition}
           openRequisition={openRequisition}
           packing={tubePackingProps({ canTake: false })}
+          ItemProgress={QtyProgressControl}
+          onLogNestedItem={(row, item, qty, progress) => logNestedItem(row, item, qty, progress, tubeLaser)}
         />
       ) : tab === "production" ? (
         productionSelectedDept === null ? (

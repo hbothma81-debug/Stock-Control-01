@@ -93,6 +93,9 @@ function machineWords(machine) {
     hasTime: m.hasCutTime !== false,
     unit: m.unit || "sheet",
     units: m.units || "sheets",
+    // What this laser calls the lines it nests, for the heading on the
+    // per-part list. "Tube parts" on the tube laser.
+    partsLabel: m.partsLabel || "Parts",
   };
 }
 
@@ -127,6 +130,11 @@ export default function NestingView({
   onRemoveJobFromProgram,
   onSetNestingDone,
   onUpdateProgram,
+  // Only on a laser that nests part by part (machine.nestPerItem): the
+  // per-item control, and where a logged quantity goes. Null on the
+  // plate laser, which nests whole sheets and counts nothing per part.
+  ItemProgress,
+  onLogNestedItem,
 }) {
   const [openRow, setOpenRow] = useState(null);
   // The operator hunts for the sheet on the rack, so he needs its name,
@@ -581,6 +589,8 @@ export default function NestingView({
                 onCreateProgram={onCreateProgram}
                 onSetNestingDone={onSetNestingDone}
                 onRemoveJobFromProgram={onRemoveJobFromProgram}
+                ItemProgress={ItemProgress}
+                onLogNestedItem={onLogNestedItem}
                 actions={actions}
                 SavedCheck={SavedCheck}
                 Notes={Notes}
@@ -695,6 +705,8 @@ function NestRow({
   onCreateProgram,
   onSetNestingDone,
   onRemoveJobFromProgram,
+  ItemProgress,
+  onLogNestedItem,
   actions,
   SavedCheck,
   Notes,
@@ -714,6 +726,26 @@ function NestRow({
   const [repeats, setRepeats] = useState("1");
   const [minutes, setMinutes] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // How much of this job has been nested, added up across its parts, for
+  // the line on the heading. Null when this laser does not nest per part.
+  const nestedCount = useMemo(() => {
+    if (!ItemProgress) return null;
+    const lines = r.quoteItems || [];
+    if (lines.length === 0) return null;
+    const progress = r.itemProgress || [];
+    return lines.reduce(
+      (n, it) => {
+        const got = progress.find((ip) => ip.job_quote_item_id === it.id);
+        const want = Number(it.qty) || 0;
+        return {
+          done: n.done + Math.min(want, Math.max(0, Number(got?.qty_complete) || 0)),
+          total: n.total + want,
+        };
+      },
+      { done: 0, total: 0 }
+    );
+  }, [ItemProgress, r.quoteItems, r.itemProgress]);
   const w = machineWords(machine);
   const stockChoices = useMemo(
     () => (w.bySections ? stockOptions(stockItems, allocations, r.job?.id) : []),
@@ -1231,6 +1263,35 @@ function NestRow({
                         <FileText size={12} /> {d.partNumber} — {d.description}
                       </button>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Tube work is not nested all in one go: a job of 8000
+                  parts may have 4000 nested now and the rest next week.
+                  So the parts are listed with a box each, and the job
+                  stays here with its progress on show. A part logged
+                  here carries on through the rest of the job without
+                  waiting for the others, and the stage ticks itself off
+                  once every part is accounted for. */}
+              {ItemProgress && (
+                <div>
+                  <label style={S.label}>
+                    {w.partsLabel || "Parts"} nested
+                    {nestedCount != null ? ` — ${nestedCount.done} of ${nestedCount.total}` : ""}
+                  </label>
+                  <div style={{ marginTop: 4 }}>
+                    <ItemProgress
+                      process={r.process}
+                      job={r.job}
+                      quoteItems={r.quoteItems || []}
+                      itemProgress={r.itemProgress || []}
+                      onSubmit={(process, job, item, qty, progress) => onLogNestedItem(r, item, qty, progress)}
+                    />
+                  </div>
+                  <div style={{ ...S.roleHint, marginTop: 4 }}>
+                    Log what has been nested. Anything logged moves on through the job on its own; the rest
+                    stays here.
                   </div>
                 </div>
               )}

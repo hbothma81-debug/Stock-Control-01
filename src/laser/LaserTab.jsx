@@ -53,6 +53,10 @@ export default function LaserTab({
   items,
   canRequisition,
   openRequisition,
+  // Only on a laser that nests part by part: the per-item control, and
+  // where a logged quantity goes. See machine.nestPerItem.
+  ItemProgress,
+  onLogNestedItem,
 }) {
   const {
     laserData,
@@ -177,6 +181,8 @@ export default function LaserTab({
                     onAddJobToProgram={addJobToLaserProgram}
                     onRemoveJobFromProgram={removeJobFromLaserProgram}
                     onSetNestingDone={setJobNestingDone}
+                    ItemProgress={machine.nestPerItem ? ItemProgress : null}
+                    onLogNestedItem={onLogNestedItem}
                     onUpdateProgram={updateLaserProgram}
                     SavedCheck={SavedCheck}
                     Notes={ExpandableProcessNotes}
