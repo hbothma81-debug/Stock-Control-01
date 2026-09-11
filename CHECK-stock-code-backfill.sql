@@ -45,5 +45,5 @@ select s.part_number as code_it_would_get,
 from job_quote_items q
 join stock_items s on s.id = q.linked_item_id
 where coalesce(s.part_number, '') <> ''
-order by q.created_at desc nulls last
+order by q.job_id, q.sort_order
 limit 20;
