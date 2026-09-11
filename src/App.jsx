@@ -903,7 +903,10 @@ const emptyForm = {
 // "" for nothing, or CUSTOM with the new name in customValue. The box shows
 // whichever applies and hands back the same three shapes, so the save code
 // never learns the picker changed from a dropdown to type-to-find.
-function LibraryField({ label, options, value, onChange, customValue, onCustomChange, placeholder, showComment, comment, onCommentChange, allowNone }) {
+// pickOnly: the value must come from `options`; nothing typed can join the
+// list. An older record whose value is not on the list still loads, is
+// named under the box, and is kept as it was until something is picked.
+function LibraryField({ label, options, value, onChange, customValue, onCustomChange, placeholder, showComment, comment, onCommentChange, allowNone, pickOnly, missingHint }) {
   const isNew = value === CUSTOM;
   // A brand-new name needs two changes on the form: value -> CUSTOM and
   // customValue -> the name. The callers build each change from the form
@@ -924,17 +927,28 @@ function LibraryField({ label, options, value, onChange, customValue, onCustomCh
       <TypeToFind
         options={options}
         value={isNew ? customValue || "" : value || ""}
-        allowNew
-        emptyLabel={allowNone ? "None — type to find or add…" : "Type to find or add…"}
+        allowNew={!pickOnly}
+        emptyLabel={
+          pickOnly
+            ? allowNone ? "None — type to find…" : "Type to find…"
+            : allowNone ? "None — type to find or add…" : "Type to find or add…"
+        }
         onChange={(v) => {
           if (!v) return onChange("");
           if (options.includes(v)) return onChange(v);
+          if (pickOnly) return;
           if (isNew) return onCustomChange(v);
           pendingNew.current = v;
           onChange(CUSTOM);
         }}
       />
-      {isNew && (
+      {pickOnly && isNew && customValue && (
+        <div style={{ ...S.roleHint, marginTop: 6, color: C.danger }}>
+          This line says "{customValue}", which is not on the list. It stays as it is until you pick one from the list.
+        </div>
+      )}
+      {pickOnly && missingHint && <div style={{ ...S.roleHint, marginTop: 6 }}>{missingHint}</div>}
+      {isNew && !pickOnly && (
         <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
           <div style={S.roleHint}>New — goes onto the {String(label).toLowerCase()} list when this is saved.</div>
           {showComment && (
@@ -11840,14 +11854,21 @@ export default function StockControl() {
     e.preventDefault();
     if (matchedExisting && !allowDuplicate) return;
 
-    if (form.grade === CUSTOM && effectiveGrade) {
+    // Structural stock picks its section type, section and material from
+    // Stock Manager's lists and never adds to them: typing them here is
+    // how the same size came to be on the list three ways. A value that is
+    // not on a list can only have been loaded from an older line. Editing
+    // that line keeps it as it was; a new line cannot be saved with one.
+    const structuralPickOnly = form.mainCat === "structural";
+    if (structuralPickOnly && !editingId && [form.grade, form.section, form.sectionType].includes(CUSTOM)) {
+      alert("Pick the section type, section and material from the lists. A new one is added in Stock Manager first.");
+      return;
+    }
+
+    if (form.grade === CUSTOM && effectiveGrade && !structuralPickOnly) {
       ensureFactorEntry(form.mainCat === "cncBar" ? "cncGrades" : "grades", effectiveGrade, 7.85);
     }
     if (form.size === CUSTOM && effectiveSize) ensureStringEntry("sizes", effectiveSize);
-    if (form.sectionType === CUSTOM && effectiveSectionType) ensureStringEntry("sectionTypes", effectiveSectionType);
-    if (form.section === CUSTOM && effectiveSection) {
-      ensureFactorEntry("sections", effectiveSection, 0, effectiveSectionType, effectiveGrade);
-    }
     if (form.customer === CUSTOM && effectiveCustomer) ensureStringEntry("customers", effectiveCustomer);
     if (form.fastenerType === CUSTOM && effectiveFastenerType) ensureStringEntry("fastenerCategories", effectiveFastenerType);
     if (form.salesPerson === CUSTOM && effectiveSalesPerson) ensureStringEntry("salesPeople", effectiveSalesPerson);
@@ -17453,6 +17474,7 @@ export default function StockControl() {
                 {form.mainCat === "structural" && (
                   <LibraryField
                     label="Section type"
+                    pickOnly
                     options={master.sectionTypes}
                     value={form.sectionType}
                     onChange={(v) => setForm({ ...form, sectionType: v, customSectionType: "", section: "", customSection: "" })}
@@ -17466,6 +17488,7 @@ export default function StockControl() {
                   <div style={{ marginTop: form.mainCat === "structural" ? 10 : 0 }}>
                     <LibraryField
                       label="Material grade"
+                      pickOnly={form.mainCat === "structural"}
                       options={master.grades.map((g) => g.shortName || g.name)}
                       value={form.grade}
                       onChange={(v) => setForm({ ...form, grade: v })}
@@ -17716,6 +17739,8 @@ export default function StockControl() {
                   <div style={{ marginTop: 10 }}>
                     <LibraryField
                       label={`Section (${effectiveSectionType})`}
+                      pickOnly
+                      missingHint="Not on the list? Sizes, section types and materials are added in Stock Manager."
                       options={sectionOptionsForType}
                       value={form.section}
                       onChange={(v) => setForm({ ...form, section: v })}
@@ -17748,6 +17773,16 @@ export default function StockControl() {
                           </div>
                         </div>
                         {(() => {
+                          // Setting a price creates the section row when there is
+                          // none, so a value that is not on the lists would slip
+                          // back onto them through here.
+                          if (form.section === CUSTOM || form.grade === CUSTOM) {
+                            return (
+                              <div style={S.roleHint}>
+                                Pick the section and material from the lists to see or set the price.
+                              </div>
+                            );
+                          }
                           const kgPerM = findSectionFactor(effectiveSection, effectiveGrade);
                           const currentPerM = findSectionPrice(effectiveSection, effectiveGrade);
                           const currentPerKg = kgPerM ? currentPerM / kgPerM : 0;
