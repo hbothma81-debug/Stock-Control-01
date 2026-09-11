@@ -396,6 +396,32 @@ async function fetchAllRows(table, { select = "*", orderBy = "id", ascending = t
   return allRows;
 }
 
+// How many rows a table holds, without fetching any of them. head: true
+// sends the count in a header and no body at all, which is what makes it
+// cheap enough to ask on every refresh.
+async function countRows(table) {
+  const { count, error } = await supabase.from(table).select("id", { count: "exact", head: true });
+  if (error) throw error;
+  return typeof count === "number" ? count : null;
+}
+
+// The newest updated_at in a batch of rows, as the mark to ask from next
+// time. Taken from the rows themselves rather than the browser clock, so
+// a machine whose time is a few minutes out does not skip changes or ask
+// for the same ones forever.
+function newestUpdatedAt(rows, fallback) {
+  let best = fallback ? Date.parse(fallback) : 0;
+  let bestRaw = fallback || null;
+  for (const r of rows || []) {
+    const t = Date.parse(r?.updated_at || "");
+    if (t && t > best) {
+      best = t;
+      bestRaw = r.updated_at;
+    }
+  }
+  return bestRaw;
+}
+
 // The one ordering rule for every name list in the app. Case does not
 // matter ("acme" sits next to "Acme"), and numbers inside the text sort
 // as numbers ("M8" before "M10", "2500 x 1250" before "3000 x 1500"), so
@@ -1557,6 +1583,11 @@ export default function StockControl() {
   // ordinary job document tagged Invoicing rather than a table of its own,
   // so it also turns up on the job's Files tab where anyone looking at the
   // job would expect to find it.
+  // What the last refresh of stock_items saw, so the next one can ask for
+  // only what has changed since. Refs, not state: nothing on screen reads
+  // them and a change to them must never cause a render.
+  const lastItemsSyncRef = useRef(null); // newest updated_at already held
+  const lastItemsCountRef = useRef(null); // rows held, to notice a deletion
   const [invoiceDocs, setInvoiceDocs] = useState([]);
   // Accounts asking what is missing, and the answers. A thread per job,
   // read by everyone, added to by anyone, edited by nobody.
@@ -1905,7 +1936,16 @@ export default function StockControl() {
   // reason (a misconfigured deploy, a transient hiccup) — since saves are
   // immediate, that fake/empty state would get written straight back over
   // whatever was actually there.
-  async function loadAllData(isInitialLoad) {
+  // incremental: ask stock_items only for rows changed since the last
+  // refresh instead of pulling the whole table down again. The full table
+  // is about 1.4 MB; the usual answer to "what changed in the last
+  // minute" is nothing at all, which costs a few hundred bytes.
+  //
+  // It needs setup-stock-items-updated-at.sql to have been run -- without
+  // that trigger an edit leaves updated_at alone and would be invisible
+  // here. Until the first full load has happened there is no mark to ask
+  // from, so the first pass is always a full one.
+  async function loadAllData(isInitialLoad, { incremental = false } = {}) {
     let loadedItems = null; // shared across the items/master blocks below, so
     // the Stock Codes → real item migration (further down) can see both.
     let hadError = false; // tracked locally rather than read back from
@@ -1913,8 +1953,50 @@ export default function StockControl() {
     // haven't flushed yet by the time this function returns — a caller
     // checking loadError immediately after awaiting this would race it.
     try {
-      const itemRows = await fetchAllRows("stock_items");
-      if (itemRows && itemRows.length > 0) {
+      // A row is only ever removed by an admin deleting it, and a delete
+      // leaves nothing behind for a "what changed" query to find. The row
+      // count catches it: if it does not match what is held, take the
+      // whole table again rather than carry a ghost.
+      let itemRows = null;
+      let isDelta = false;
+      if (incremental && lastItemsSyncRef.current) {
+        const since = lastItemsSyncRef.current;
+        const [changedRows, count] = await Promise.all([
+          // gte, not gt: a row written in the same instant as the mark
+          // would otherwise be stepped over and never seen again. It
+          // costs re-reading the newest row or two each time.
+          fetchAllRows("stock_items", { filter: (q) => q.gte("updated_at", since) }),
+          countRows("stock_items"),
+        ]);
+        if (count !== null && count === lastItemsCountRef.current) {
+          itemRows = changedRows;
+          isDelta = true;
+        }
+      }
+      if (itemRows === null) {
+        itemRows = await fetchAllRows("stock_items");
+        lastItemsCountRef.current = itemRows.length;
+      }
+      lastItemsSyncRef.current = newestUpdatedAt(itemRows, lastItemsSyncRef.current);
+
+      if (isDelta) {
+        // Nothing changed is the normal answer, and the cheapest.
+        if (itemRows.length > 0) {
+          const changed = itemRows.map(dbRowToItem);
+          setItems((prev) => {
+            const byId = new Map((prev || []).map((it) => [it.id, it]));
+            for (const it of changed) byId.set(it.id, it);
+            const merged = [...byId.values()];
+            // The autosave writes back whatever differs from this ref, so
+            // without moving it too, every row that just arrived from the
+            // database would be posted straight back to it as though
+            // somebody here had edited it.
+            lastSavedItemsRef.current = merged;
+            return merged;
+          });
+        }
+        setLoadError((prev) => ({ ...prev, items: false }));
+      } else if (itemRows && itemRows.length > 0) {
         loadedItems = itemRows.map(dbRowToItem);
         // Migration: Tools used to live in Stores as a "storesKind" — they
         // now have their own Assets category with different fields
@@ -2117,13 +2199,49 @@ export default function StockControl() {
   //
   // The unread badge is refreshed on the same beat. A badge that only
   // counts what was there when you signed in is not a badge.
+  //
+  // It also stops after ten minutes with nobody touching the machine. A
+  // workshop PC with the tab in front and the monitor off still counts as
+  // visible, so four of them left on over a weekend refreshed all weekend
+  // for nobody -- which is most of how a month's data allowance went. The
+  // first click or keypress starts it again and refreshes straight away,
+  // and because the refresh asks "what changed since" rather than "how
+  // are things now", a pause of two days costs no more than a pause of
+  // two minutes.
+  const lastActivityRef = useRef(Date.now());
+  const backgroundRefreshRef = useRef(null);
   useEffect(() => {
+    backgroundRefreshRef.current = () => {
+      loadAllData(false, { incremental: true });
+      fetchNotifications();
+    };
+  });
+  useEffect(() => {
+    const PAUSE_AFTER_MS = 10 * 60000;
+    const idleFor = () => Date.now() - lastActivityRef.current;
     const interval = setInterval(() => {
       if (document.visibilityState !== "visible") return;
-      loadAllData(false);
-      fetchNotifications();
+      if (idleFor() > PAUSE_AFTER_MS) return;
+      backgroundRefreshRef.current?.();
     }, 60000);
-    return () => clearInterval(interval);
+    // Coming back to a paused screen should show the truth immediately,
+    // not up to a minute later.
+    const touch = () => {
+      const wasPaused = idleFor() > PAUSE_AFTER_MS;
+      lastActivityRef.current = Date.now();
+      if (wasPaused) backgroundRefreshRef.current?.();
+    };
+    const events = ["pointerdown", "keydown", "wheel", "touchstart"];
+    for (const e of events) window.addEventListener(e, touch, { passive: true });
+    const onVisible = () => {
+      if (document.visibilityState === "visible") touch();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(interval);
+      for (const e of events) window.removeEventListener(e, touch);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   // Real sign-in via Supabase Auth, replacing the old shared-PIN system.

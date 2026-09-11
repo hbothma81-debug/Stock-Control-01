@@ -18,6 +18,7 @@ ORDER=(
 
   # --- core data
   setup-stock-items-table.sql
+  setup-stock-items-updated-at.sql
   setup-master-data-tables.sql
   setup-master-factor-short-name.sql
   setup-string-list-order.sql
