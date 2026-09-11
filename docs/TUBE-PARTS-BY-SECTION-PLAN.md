@@ -1,9 +1,10 @@
-# Tube parts: say which section each one is cut from
+# Tube parts: say which material each one is cut from
 
 Planned 2026-09-11 by the Laser production conversation, from Heinrich's
-ask. **Nothing is built.** Two halves: one on the job's Items tab (the
-Jobs conversation), one in the nesting import (Laser production). The
-Jobs half has to land first, because the laser half reads what it writes.
+ask. **Revised the same day** with Heinrich and the Jobs conversation, and
+simplified: the first draft tagged each part with one stock line's id,
+which would not have matched (see "Dropped" below). **The Jobs half is
+built. The laser half is not.**
 
 ## What Heinrich asked for
 
@@ -11,95 +12,100 @@ Jobs half has to land first, because the laser half reads what it writes.
 > so later the nesting will automatically pull those parts to the
 > selected program/nesting.
 
-In plain terms: a tube job's items are listed on the job with the section
-each is cut from. When a nesting report is imported, each section's
-programs pick up the job's items that are cut from that section, on their
-own. Nobody is asked which line the parts hang under, and no duplicate
-lines are created.
+And after the first draft, in his words:
 
-## Why it is worth doing
+> All I want is to give an identifier to the tube item line when loaded,
+> so when I need to nest the program knows what material type to match to
+> the excel import.
 
-A tube nesting report is one section per program. The job's items are
-already on the job. Today those two never meet:
+## The design, as agreed
 
-- The import can only create **new child lines** from the file's own part
-  list, under **one parent line chosen by hand** for the whole import.
-- On a job with several lines that question has no good answer, which is
-  why the parts tick now defaults off there (`ImportReportModal`,
-  commit 697194e). That is a way round the problem, not a fix.
-- A job with two sections gets both sections' parts under one line, even
-  though they are cut off different material.
+**One field on each job line: its material type, as words.** Section and
+grade, e.g. `SHS 50x50x3mm 304`. Column `job_quote_items.material_type`,
+text, blank by default, which reads as "not said".
 
-Tagging each item with its section makes the match automatic and the
-duplicate lines unnecessary.
+**Words, not a stock line's id.** A part is cut from a material. Which
+length the nester takes it from is his decision on the day. An id names
+one shelf row of one length, so a part tagged with the 6 m line would not
+match a program cut from the 13 m line of the same section. The words
+match whatever length is used.
 
-## The Jobs half (the Jobs conversation)
+**One source for the words.** `materialText(item)` in
+`src/laser/stockOptions.js` joins a stock line's section name and grade.
+It already writes `laser_programs.material` and
+`tube_section_aliases.section_name`. The job line's material now comes
+from the same function, so all three are the same words by construction.
+Change that function and everything moves together.
 
-**One column.** On `job_quote_items`, which stock line this item is cut
-from. Suggested name `cut_from_item_id text`, matching the shape of the
-`linked_item_id` already there. Null on everything that exists, which
-reads correctly as "not said".
+The program still keeps `laser_programs.stock_item_id` for which bar it
+takes off the rack. That is a different question, "which bar was eaten",
+and the id is right for it. Material type answers "what is this part made
+of".
 
-Do **not** reuse `linked_item_id`. That says "this line *is* this stock
-item" and feeds the drawing lookup. A tube part is not the section it is
-cut from, so it needs its own field.
+## The Jobs half (Jobs conversation) — built
 
-**One control on the Items tab.** On a line whose `made_on` is
-`tube_laser`, a picker for the section it is cut from. Hidden on every
-other line, so nothing changes for plate, CNC or bought-out work.
+- **The column**, from `setup-job-line-material-type.sql`. Adds the column
+  and an index; changes no row. Needs running on practice, then live.
+- **A box on the Items tab**, only on a line or a part whose made-on is
+  Tube laser. Type-to-find over every section and grade on the Structural
+  Steel shelf, once each however many lengths it comes in, in
+  `materialText` words. Saved as the words.
+- **Shown read-only** beside the made-on label for anyone who cannot edit
+  the job.
+- **Copying a job** carries it across.
 
-**Use the laser's own picker, please.** `src/laser/StockSectionPicker.jsx`
-with options from `stockOptions(items, allocations, jobId, master.sections)`
-— the same box the nester uses, already filtered to structural stock and
-already narrowable by kind, grade and length. If both screens build their
-own list they will drift, and the match below is exactly where that would
-show up. It takes `options`, `value` (the stock line's id), `onChange`
-(the option, or null) and optional `canRequisition` / `onRequisition`.
+It uses `TypeToFind`, not `StockSectionPicker`. That picker lists shelf
+rows with their lengths and what is available, which is the right question
+when picking what to cut from and the wrong one when saying what a part is
+made of. What the first draft wanted from sharing the picker, the same
+words on both screens, comes from sharing `materialText` instead.
 
-**What it stores** is the stock line's id, not its name. The name cannot
-tell a 6m line from a 13m one, and the program stores an id too
-(`laser_programs.stock_item_id`), so ids on both sides make the match
-exact.
+## The laser half (Laser production) — to build
 
-Worth having but not essential: setting it on a parent line offers to set
-the same on its children, since parts under one line are usually one
-section.
+On import, for each section in the report:
 
-## The laser half (Laser production, mine)
+1. Its material is `materialText` of the stock line chosen in "In stock it
+   is", which is what the import already passes on as `s.material`.
+2. Find the picked job's lines whose `material_type` equals it, compared
+   trimmed and ignoring case.
+3. **What a match does** is the laser half's to decide with Heinrich. The
+   obvious use: those lines stand in for the one parent the import asks
+   for today, so each section's parts go with its own lines, and a section
+   whose parts the job already carries gets no duplicate lines.
+4. No match: today's behaviour stands.
 
-Once the column exists, on import, for each section in the report:
+A job with no material types set imports exactly as it does now.
 
-1. Find the picked job's lines whose `cut_from_item_id` is the stock line
-   chosen for that section.
-2. If any are found, they are that program's parts. No new lines, no
-   parent question, and the section shows what it matched: "3 lines on
-   JOB-0042 are cut from this section".
-3. If none are found, today's behaviour stands: the parts tick, and the
-   parent picker when it is on.
+## Dropped from the first draft, and why
 
-So a properly tagged job imports with no questions at all, and an
-untagged one behaves exactly as it does now.
+- **`cut_from_item_id`, a stock line's id.** Replaced by material words,
+  for the length reason above. It would also have drifted: offcuts put
+  back into stock appear as their own lines, and the import's remembered
+  section resolves to whichever length sorts first.
+- **"They are that program's parts."** Nothing in the database links a
+  program to a job line: `laser_program_jobs` links a program to whole
+  jobs, and `laser_programs.parts` is a copy of the spreadsheet's list.
+  So what a match does has to be decided, as in step 3.
+- **Using `StockSectionPicker` on the Items tab.** See the Jobs half.
 
-## What we have to agree before either half starts
+## Watch for
 
-- **The column name.** `cut_from_item_id` unless the Jobs conversation
-  has a better one. Both halves must use the same.
-- **Who writes it.** The Jobs conversation owns `job_quote_items` and the
-  Items tab. The laser only reads this column.
-- **The picker is shared.** If it needs changing for the Items tab, change
-  it in `src/laser/StockSectionPicker.jsx` so both screens move together,
-  and tell Laser production.
-- **Announce the column to Heinrich** so the SQL runs on practice and then
-  live before either half ships. See CLAUDE.md on database changes.
+- **Spelling in stock.** The match is only as good as the stock list. If
+  two stock lines of the same real material are spelt differently, their
+  words differ and will not match. `CHECK-sections-and-materials.sql`
+  finds exactly that (checks 2, 10 and 11). Fixing the spelling in stock
+  fixes the match.
+- **A section renamed** in Stock Manager leaves material types already set
+  on job lines in the old words. The program's material and the import's
+  remembered aliases go stale the same way, so all three stay in step.
 
-## Open questions for Heinrich, not for us to decide
+## Open questions for Heinrich
 
-- **When the job says one section and the file says another**, which
-  wins? My suggestion: the file wins for the program's material, because
-  that is what was actually nested, and the mismatch is said on screen
-  rather than silently ignored.
-- **Part-way tagged jobs.** Some lines tagged, some not. My suggestion:
-  the tagged ones attach, the rest fall back to the tick, and the import
-  says how many of each.
-- **The plate laser.** Same idea would work there, thickness and grade
-  instead of a section. Not now.
+- **When the job says one material and the file another**, which wins?
+  Laser production's earlier suggestion: the file wins for the program's
+  material, because that is what was nested, and the mismatch is said on
+  screen rather than ignored.
+- **Part-way tagged jobs.** Suggestion: tagged lines match, the rest fall
+  back to today's behaviour, and the import says how many of each.
+- **The plate laser.** The same idea works with thickness and grade. Not
+  now.
