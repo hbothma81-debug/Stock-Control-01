@@ -3645,7 +3645,7 @@ export default function StockControl() {
     setNewJobForm((f) => ({
       ...f,
       quoteItems: f.quoteItems.map((it, i) =>
-        i === idx ? { ...it, description: customerStockLabel(stockItem), linkedItemId: stockItem.id, unitPrice: String(stockItem.value ?? "") } : it
+        i === idx ? { ...it, description: stockItem.name || "", linkedItemId: stockItem.id, unitPrice: String(stockItem.value ?? "") } : it
       ),
     }));
     setNewJobItemSuggestOpen(null);
@@ -3683,19 +3683,29 @@ export default function StockControl() {
     return byName.length === 1 ? byName[0] : null;
   }
 
-  // A job line's stock code is the code of the part it points at. The
-  // description still carries it too, stored as "CODE — description", so
-  // that every printed sheet and invoice shows the code; the screen has
-  // a column of its own for it now, so the prefix is stripped there
-  // rather than reading twice. Stripped only when it matches the linked
-  // part exactly -- a description like "Bracket — left hand" is not a
-  // code and must not be treated as one.
-  function jobLineCode(linked) {
-    return (linked?.partNumber || "").trim();
+  // The code is what identifies a part, so a job line keeps it in a
+  // field of its own (job_quote_items.stock_code, from
+  // setup-job-line-stock-code.sql). A line can carry a code for a part
+  // that has not been entered into Customer Stock yet, which is the
+  // whole point of the code being the master rather than the link.
+  //
+  // The fallback to the linked part covers the moment before that
+  // script has been run, and nothing else.
+  function jobLineCode(line, linked) {
+    return (line?.stock_code || linked?.partNumber || "").trim();
   }
+  // The code to write on a line being created from a stock part.
+  function stockCodeOf(linkedItemId) {
+    if (!linkedItemId) return "";
+    return ((items || []).find((i) => i.id === linkedItemId)?.partNumber || "").trim();
+  }
+  // The description is only a description now. The strip is a safety
+  // net for rows written before the code had a field, and it fires only
+  // where the text begins with that exact code -- never on a
+  // description that merely contains a dash, like "Bracket — left hand".
   function jobLineDescription(line, linked) {
     const text = String(line?.description || "");
-    const code = jobLineCode(linked);
+    const code = jobLineCode(line, linked);
     const prefix = code ? `${code} — ` : "";
     return prefix && text.startsWith(prefix) ? text.slice(prefix.length) : text;
   }
@@ -3708,27 +3718,25 @@ export default function StockControl() {
   async function setJobLineStockCode(job, item, linked, typedCode) {
     if (!supabase) return;
     const code = (typedCode || "").trim();
-    if (code === jobLineCode(linked)) return;
+    if (code === jobLineCode(item, linked)) return;
     const plain = jobLineDescription(item, linked);
-    const patch = {};
+    // The code is kept whatever happens. A code for a part nobody has
+    // entered yet is still the right code, and Add to Customer Stock
+    // beside it is how it becomes a part.
+    const patch = { stock_code: code, description: plain };
     if (code) {
       const match = findCustomerStockMatch(job.customer, code);
-      if (!match) {
-        alert(
-          `${job.customer || "This customer"} has no part with the code "${code}". ` +
-            "Check the code, or press Add to Customer Stock to make it one."
-        );
-        await openJobDetail(job);
-        return;
+      if (match) {
+        patch.linked_item_id = match.id;
+        patch.description = match.name || plain;
+        // Only fills a price that is not there. Somebody's own figure is
+        // not overwritten by the catalogue.
+        if (!(Number(item.unit_price) > 0) && Number(match.value) > 0) patch.unit_price = Number(match.value);
+      } else {
+        patch.linked_item_id = null;
       }
-      patch.linked_item_id = match.id;
-      patch.description = customerStockLabel(match);
-      // Only fills a price that is not there. Somebody's own figure is
-      // not overwritten by the catalogue.
-      if (!(Number(item.unit_price) > 0) && Number(match.value) > 0) patch.unit_price = Number(match.value);
     } else {
       patch.linked_item_id = null;
-      patch.description = plain;
     }
     try {
       const { error } = await supabase.from("job_quote_items").update(patch).eq("id", item.id);
@@ -3818,12 +3826,9 @@ export default function StockControl() {
   async function linkJobLineToStock(lineId, stockItem) {
     if (!supabase) return;
     try {
-      // The description carries the code too, "CODE — description", so
-      // every printed sheet shows it. The screen has its own column and
-      // strips the prefix there.
       const { error } = await supabase
         .from("job_quote_items")
-        .update({ linked_item_id: stockItem.id, description: customerStockLabel(stockItem) })
+        .update({ linked_item_id: stockItem.id, stock_code: stockItem.partNumber || "", description: stockItem.name || "" })
         .eq("id", lineId);
       if (error) throw error;
       if (jobDetail) {
@@ -4166,6 +4171,7 @@ export default function StockControl() {
             qty: Number(it.qty),
             unit_price: Number(it.unitPrice) || 0,
             linked_item_id: it.linkedItemId || null,
+            stock_code: stockCodeOf(it.linkedItemId),
             // A line picked from the customer's parts comes in tagged
             // with where that part is made, if the part remembers.
             made_on: (it.linkedItemId && (items || []).find((i) => i.id === it.linkedItemId)?.madeOn) || "",
@@ -6136,8 +6142,8 @@ export default function StockControl() {
       // leaving the column looking broken.
       const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
       lines.push({
-        partNumber: linkedItem?.partNumber || "",
-        description: it.description,
+        partNumber: jobLineCode(it, linkedItem),
+        description: jobLineDescription(it, linkedItem),
         qty,
         unitPrice: Number(it.unit_price),
       });
@@ -6296,6 +6302,7 @@ export default function StockControl() {
             qty: it.qty,
             unit_price: it.unit_price,
             linked_item_id: it.linked_item_id,
+            stock_code: it.stock_code || "",
             sort_order: idx,
           }))
         );
@@ -6343,6 +6350,7 @@ export default function StockControl() {
         qty: Number(qty),
         unit_price: Number(unitPrice) || 0,
         linked_item_id: linkedItemId || null,
+        stock_code: stockCodeOf(linkedItemId),
         made_on: linkedItem?.madeOn || "",
         sort_order: nextOrder,
       });
@@ -6377,6 +6385,7 @@ export default function StockControl() {
         qty: Number(qty),
         unit_price: 0,
         linked_item_id: linkedItemId || null,
+        stock_code: stockCodeOf(linkedItemId),
         made_on: madeOn || "",
         length_mm: Number.isFinite(length) ? length : null,
         sort_order: nextOrder,
@@ -6676,6 +6685,7 @@ export default function StockControl() {
         qty: l.qty,
         unit_price: l.unitPrice || 0,
         linked_item_id: l.linkedItemId,
+        stock_code: stockCodeOf(l.linkedItemId),
         // A line matched to the customer's parts comes in tagged with
         // where that part is made, the same as the New Job form does.
         made_on: (l.linkedItemId && (items || []).find((i) => i.id === l.linkedItemId)?.madeOn) || "",
@@ -7641,7 +7651,10 @@ export default function StockControl() {
       }
       await buildDeliveryNoteDoc(
         { delivery_note_number: noteNumber, direction: m.direction, recipient_name: m.recipientName.trim(), recipient_address: recipientAddress, created_at: new Date().toISOString() },
-        m.itemsWithQty.map(({ item, qty }) => ({ description: item.description, qty })),
+        m.itemsWithQty.map(({ item, qty }) => {
+          const linked = item.linked_item_id ? (items || []).find((i) => i.id === item.linked_item_id) : null;
+          return { code: jobLineCode(item, linked), description: jobLineDescription(item, linked), qty };
+        }),
         m.job
       );
       setInvoiceQtyInputs({});
@@ -7790,8 +7803,8 @@ export default function StockControl() {
       y += 5;
       autoTable(doc, {
         startY: y,
-        head: [["Description", "Qty"]],
-        body: lineItems.map((li) => [li.description, String(li.qty)]),
+        head: [["Code", "Description", "Qty"]],
+        body: lineItems.map((li) => [li.code || "—", li.description, String(li.qty)]),
         theme: "grid",
         headStyles: { fillColor: [27, 29, 31] },
         margin: { left: leftX, right: leftX },
@@ -8008,20 +8021,33 @@ export default function StockControl() {
         startY: y,
         // Made on: which machine each line goes to, so the paper matches
         // what each cutting stage on screen will list.
-        head: [["Item", "Made on", "Qty", "Invoiced", "Outstanding"]],
+        // The code leads, because that is what identifies the part on
+        // the floor and in the customer's own system.
+        head: [["Code", "Item", "Made on", "Qty", "Invoiced", "Outstanding"]],
         // Parents carry the money columns; their parts follow, indented,
         // with the length, so the paper is also the shop's parts list.
         body: billableLines(quoteItems).flatMap((it) => {
           const qty = Number(it.qty) || 0;
           const invoiced = Number(it.qty_invoiced) || 0;
-          const row = [it.description || "", madeOnLabel(it.made_on) || "—", qty, invoiced, Math.max(qty - invoiced, 0)];
+          const linked = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
+          const row = [
+            jobLineCode(it, linked) || "—",
+            jobLineDescription(it, linked),
+            madeOnLabel(it.made_on) || "—",
+            qty,
+            invoiced,
+            Math.max(qty - invoiced, 0),
+          ];
           const parts = childLinesOf(it, quoteItems).map((c) => [
+            jobLineCode(c, c.linked_item_id ? (items || []).find((i) => i.id === c.linked_item_id) : null) || "",
             // A bullet, not the ↳ used on screen. The PDF's standard font
             // has no arrow: it printed as a stray glyph AND spaced out
             // every letter of the line it was on, so every part on the
             // sheet read as g a p p e d   t e x t. The bullet and the
             // middot are both in the font and print properly.
-            `   • ${c.description || ""}${c.length_mm ? ` · ${Number(c.length_mm)} mm` : ""}`,
+            `   • ${jobLineDescription(c, c.linked_item_id ? (items || []).find((i) => i.id === c.linked_item_id) : null)}${
+              c.length_mm ? ` · ${Number(c.length_mm)} mm` : ""
+            }`,
             madeOnLabel(c.made_on) || "—",
             Number(c.qty) || 0,
             "",
@@ -8034,10 +8060,11 @@ export default function StockControl() {
         // The numbers need only their own width; the description gets
         // what is left, because that is what wraps.
         columnStyles: {
-          1: { cellWidth: 22 },
-          2: { cellWidth: 16, halign: "right" },
-          3: { cellWidth: 18, halign: "right" },
-          4: { cellWidth: 22, halign: "right" },
+          0: { cellWidth: 26 },
+          2: { cellWidth: 22 },
+          3: { cellWidth: 16, halign: "right" },
+          4: { cellWidth: 18, halign: "right" },
+          5: { cellWidth: 22, halign: "right" },
         },
         margin: { left: leftX },
       });
@@ -21038,15 +21065,15 @@ export default function StockControl() {
                                     through; clearing it lets the line go.
                                     Typed straight over, the lot. */}
                                 <input
-                                  key={`code-${it.id}-${it.linked_item_id || ""}`}
-                                  defaultValue={jobLineCode(linkedItem)}
+                                  key={`code-${it.id}-${it.stock_code || ""}-${it.linked_item_id || ""}`}
+                                  defaultValue={jobLineCode(it, linkedItem)}
                                   onBlur={(e) => setJobLineStockCode(jobDetail.job, it, linkedItem, e.target.value)}
                                   style={{ ...S.input, width: 110, fontSize: 14, padding: "4px 6px" }}
                                   placeholder="Stock code"
                                   title="The customer's stock code. Type one to attach the part and pull its description and price through."
                                 />
                                 <input
-                                  key={`desc-${it.id}-${it.linked_item_id || ""}`}
+                                  key={`desc-${it.id}-${it.stock_code || ""}-${it.linked_item_id || ""}`}
                                   defaultValue={jobLineDescription(it, linkedItem)}
                                   onBlur={(e) => updateJobQuoteItem(jobDetail.job, it, "description", e.target.value)}
                                   style={{ ...S.input, flex: 1, minWidth: 90, fontSize: 14, padding: "4px 6px" }}
@@ -21088,8 +21115,8 @@ export default function StockControl() {
                               </>
                             ) : (
                               <>
-                                {jobLineCode(linkedItem) && (
-                                  <span style={{ fontSize: 14, fontWeight: 600 }}>{jobLineCode(linkedItem)}</span>
+                                {jobLineCode(it, linkedItem) && (
+                                  <span style={{ fontSize: 14, fontWeight: 600 }}>{jobLineCode(it, linkedItem)}</span>
                                 )}
                                 <span style={{ fontSize: 14 }}>{jobLineDescription(it, linkedItem)}</span>
                                 <span style={{ fontSize: 14, fontWeight: 600 }}>× {it.qty}</span>
@@ -21219,8 +21246,33 @@ export default function StockControl() {
                               {canEditThisJob ? (
                                 <>
                                   {/* Typed straight over, the same as the
-                                      line above it. A part has no price:
-                                      the parent is what gets invoiced. */}
+                                      line above it, and read in the same
+                                      order: code, description, how many.
+                                      A part has no price -- the parent is
+                                      what gets invoiced. */}
+                                  {(() => {
+                                    const childLinked = c.linked_item_id ? (items || []).find((i) => i.id === c.linked_item_id) : null;
+                                    return (
+                                      <>
+                                        <input
+                                          key={`ccode-${c.id}-${c.stock_code || ""}-${c.linked_item_id || ""}`}
+                                          defaultValue={jobLineCode(c, childLinked)}
+                                          onBlur={(e) => setJobLineStockCode(jobDetail.job, c, childLinked, e.target.value)}
+                                          style={{ ...S.input, width: 96, fontSize: 13, padding: "3px 5px" }}
+                                          placeholder="Stock code"
+                                          title="The part's stock code. Type one to attach the part and pull its description through."
+                                        />
+                                        <input
+                                          key={`cdesc-${c.id}-${c.stock_code || ""}-${c.linked_item_id || ""}`}
+                                          defaultValue={jobLineDescription(c, childLinked)}
+                                          onBlur={(e) => updateJobQuoteItem(jobDetail.job, c, "description", e.target.value)}
+                                          style={{ ...S.input, flex: "1 1 140px", minWidth: 90, fontSize: 13, padding: "3px 5px" }}
+                                          title="What the part is"
+                                          placeholder="Description"
+                                        />
+                                      </>
+                                    );
+                                  })()}
                                   <input
                                     type="number"
                                     min="0"
@@ -21229,12 +21281,6 @@ export default function StockControl() {
                                     onBlur={(e) => updateJobQuoteItem(jobDetail.job, c, "qty", e.target.value)}
                                     style={{ ...S.input, width: 58, fontSize: 13, padding: "3px 5px" }}
                                     title="How many of this part"
-                                  />
-                                  <input
-                                    defaultValue={c.description}
-                                    onBlur={(e) => updateJobQuoteItem(jobDetail.job, c, "description", e.target.value)}
-                                    style={{ ...S.input, flex: "1 1 140px", minWidth: 90, fontSize: 13, padding: "3px 5px" }}
-                                    title="What the part is"
                                   />
                                   <input
                                     type="number"
@@ -21327,7 +21373,7 @@ export default function StockControl() {
                                   const si = customerParts.find((s) => s.id === v);
                                   setNewPartForm((f) =>
                                     si
-                                      ? { ...f, linkedItemId: si.id, description: customerStockLabel(si), madeOn: f.madeOn || si.madeOn || "" }
+                                      ? { ...f, linkedItemId: si.id, description: si.name || "", madeOn: f.madeOn || si.madeOn || "" }
                                       : { ...f, linkedItemId: null, description: v }
                                   );
                                 }}
@@ -21422,7 +21468,12 @@ export default function StockControl() {
                                       setNewStockItemModal({
                                         forJobLine: it.id,
                                         customer: jobDetail.job.customer,
-                                        partNumber: "",
+                                        // A code already typed on the line
+                                        // is the code this part should
+                                        // have: that is the whole point of
+                                        // being able to type one before
+                                        // the part exists.
+                                        partNumber: jobLineCode(it, linkedItem),
                                         name: jobLineDescription(it, linkedItem),
                                         value: it.unit_price ?? "",
                                         loc: "",
@@ -21555,7 +21606,9 @@ export default function StockControl() {
                           : [];
                       const linked = newItemForm.linkedItemId ? customerStock.find((si) => si.id === newItemForm.linkedItemId) : null;
                       const pick = (si) => {
-                        setNewItemForm((f) => ({ ...f, description: customerStockLabel(si), linkedItemId: si.id, unitPrice: String(si.value ?? "") }));
+                        // The description is only a description now: the
+                        // code goes in the line's own stock_code field.
+                        setNewItemForm((f) => ({ ...f, description: si.name || "", linkedItemId: si.id, unitPrice: String(si.value ?? "") }));
                         setJobItemSuggestOpen(false);
                       };
                       return (
