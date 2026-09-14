@@ -25,14 +25,8 @@ export const isOpen = (req) => req?.status === "open";
 const isRecentlyClosed = (req, now) => !isOpen(req) && Date.parse(req?.closed_at || "") >= now - RECENT_DAYS * DAY_MS;
 const sameName = (a, b) => (a || "").trim().toLowerCase() === (b || "").trim().toLowerCase();
 
-// How long the job has been standing, in words for a card: minutes, then
-// hours and minutes, then days. No colour change with age, by decision --
-// the time itself is the warning.
-export function standingFor(req, now = Date.now()) {
-  const t = Date.parse(req?.created_at || "");
-  if (!t) return "";
-  const mins = Math.max(0, Math.floor((now - t) / 60000));
-  if (mins < 1) return "just now";
+// Minutes in words: minutes, then hours and minutes, then days.
+function minutesInWords(mins) {
   if (mins < 60) return `${mins} min`;
   if (mins < 1440) {
     const h = Math.floor(mins / 60);
@@ -41,6 +35,28 @@ export function standingFor(req, now = Date.now()) {
   }
   const d = Math.floor(mins / 1440);
   return d === 1 ? "1 day" : `${d} days`;
+}
+
+// How long the job has been standing, in words for a card. No colour
+// change with age, by decision -- the time itself is the warning.
+export function standingFor(req, now = Date.now()) {
+  const t = Date.parse(req?.created_at || "");
+  if (!t) return "";
+  const mins = Math.max(0, Math.floor((now - t) / 60000));
+  return mins < 1 ? "just now" : minutesInWords(mins);
+}
+
+// Every request on a job added up, asking to answer, and up to now for any
+// still open: the total on the printed Job History.
+export function stoodTotal(list, now = Date.now()) {
+  let mins = 0;
+  for (const r of list || []) {
+    const start = Date.parse(r?.created_at || "");
+    if (!start) continue;
+    const end = isOpen(r) ? now : Date.parse(r.closed_at || "") || now;
+    mins += Math.max(0, Math.floor((end - start) / 60000));
+  }
+  return mins < 1 ? "under a minute" : minutesInWords(mins);
 }
 
 // How long a closed request held the job up, from asking to answer or

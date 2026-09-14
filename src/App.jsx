@@ -75,7 +75,7 @@ import LaserTab from "./laser/LaserTab.jsx";
 import useLaserPrograms from "./laser/useLaserPrograms.js";
 import InfoRequestModal, { InfoAnswerModal } from "./InfoRequestModal.jsx";
 import {
-  isOpen, openRequestsByProcess, recentAnswersByProcess, requestsForOffice, mergeInfoRequests, standingFor, stoodFor, infoRequestRecipients,
+  isOpen, openRequestsByProcess, recentAnswersByProcess, requestsForOffice, mergeInfoRequests, standingFor, stoodFor, stoodTotal, infoRequestRecipients,
   loadInfoRequests, loadJobInfoRequests, raiseInfoRequest, clearInfoRequest, answerInfoRequest, loadRecipientProfiles, uploadInfoRequestPhoto,
 } from "./lib/infoRequests.js";
 import Section from "./Section.jsx";
@@ -8540,6 +8540,63 @@ export default function StockControl() {
         margin: { left: leftX },
       });
       hy = doc.lastAutoTable.finalY + 8;
+    }
+
+    // Info Requests: every time the job stood waiting on the office, what
+    // was asked, how it ended and for how long -- the report asked for on
+    // 14 Sep 2026. Fetched here like the shortages above, and never fatal.
+    let jobInfoRequests = [];
+    try {
+      jobInfoRequests = await loadJobInfoRequests(supabase, job.id);
+    } catch (err) {
+      console.error("Failed to load info requests for the job sheet:", err);
+    }
+
+    // The tables above break across pages by themselves; a heading does
+    // not, and would be printed off the bottom of a full page.
+    if (hy > 270) {
+      doc.addPage();
+      hy = 18;
+    }
+    doc.setFontSize(T.heading);
+    doc.setFont(undefined, "bold");
+    doc.text("Info Requests", leftX, hy);
+    doc.setFont(undefined, "normal");
+    hy += 6;
+    if (jobInfoRequests.length === 0) {
+      doc.setFontSize(T.note);
+      doc.text("None raised.", leftX, hy);
+      hy += 8;
+    } else {
+      const when = (iso) =>
+        iso ? new Date(iso).toLocaleString("en-ZA", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+      autoTable(doc, {
+        startY: hy,
+        head: [["Asked", "Stage", "Request", "Answer", "Stood"]],
+        body: jobInfoRequests.map((r) => [
+          `${r.raised_by || "Someone"}\n${when(r.created_at)}`,
+          r.stage_name || "—",
+          `${r.kind}: ${r.note}${r.photo_path ? " (photo)" : ""}`,
+          r.status === "answered"
+            ? `${r.closed_by || "Someone"}, ${when(r.closed_at)}:\n${r.answer}`
+            : r.status === "cleared"
+              ? `Cleared on the floor by ${r.closed_by || "someone"}, ${when(r.closed_at)}`
+              : "Still waiting",
+          isOpen(r) ? `${standingFor(r)} so far` : stoodFor(r),
+        ]),
+        theme: "grid",
+        ...tableStyles,
+        columnStyles: { 2: { cellWidth: 50 }, 3: { cellWidth: 55 } },
+        margin: { left: leftX },
+      });
+      hy = doc.lastAutoTable.finalY + 6;
+      doc.setFontSize(T.note);
+      doc.text(
+        `${jobInfoRequests.length} request${jobInfoRequests.length === 1 ? "" : "s"}, ${stoodTotal(jobInfoRequests)} standing in all.`,
+        leftX,
+        hy
+      );
+      hy += 8;
     }
 
     await generateAndStoreDocument({

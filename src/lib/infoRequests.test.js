@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  standingFor, stoodFor, infoRequestRecipients, mergeInfoRequests, openRequestsByProcess,
+  standingFor, stoodFor, stoodTotal, infoRequestRecipients, mergeInfoRequests, openRequestsByProcess,
   recentAnswersByProcess, requestsForOffice,
 } from "./infoRequests.js";
 
@@ -33,6 +33,15 @@ test("how long a closed request held the job up, asking to answer", () => {
 
 test("an open request has not stood for anything yet", () => {
   assert.equal(stoodFor({ created_at: "2026-09-14T08:00:00Z", closed_at: null }), "");
+});
+
+test("the printout's total adds every request, an open one up to now", () => {
+  const list = [
+    { status: "answered", created_at: "2026-09-14T08:00:00Z", closed_at: "2026-09-14T09:35:00Z" },
+    { status: "open", created_at: "2026-09-14T10:00:00Z", closed_at: null },
+  ];
+  assert.equal(stoodTotal(list, NOW), "3 h 35 min");
+  assert.equal(stoodTotal([], NOW), "under a minute");
 });
 
 const profiles = [
