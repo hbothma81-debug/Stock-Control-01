@@ -75,8 +75,8 @@ import LaserTab from "./laser/LaserTab.jsx";
 import useLaserPrograms from "./laser/useLaserPrograms.js";
 import InfoRequestModal, { InfoAnswerModal } from "./InfoRequestModal.jsx";
 import {
-  openRequestsByProcess, recentAnswersByProcess, requestsForOffice, mergeInfoRequests, standingFor, infoRequestRecipients,
-  loadInfoRequests, raiseInfoRequest, clearInfoRequest, answerInfoRequest, loadRecipientProfiles, uploadInfoRequestPhoto,
+  isOpen, openRequestsByProcess, recentAnswersByProcess, requestsForOffice, mergeInfoRequests, standingFor, stoodFor, infoRequestRecipients,
+  loadInfoRequests, loadJobInfoRequests, raiseInfoRequest, clearInfoRequest, answerInfoRequest, loadRecipientProfiles, uploadInfoRequestPhoto,
 } from "./lib/infoRequests.js";
 import Section from "./Section.jsx";
 import RecordRow from "./RecordRow.jsx";
@@ -4476,7 +4476,7 @@ export default function StockControl() {
     if (sameJob) {
       setJobDetail((d) => (d ? { ...d, job } : d));
     } else {
-      setJobDetail({ job, processes: [], documents: [], quoteItems: [], deliveryNotes: [], allocations: [], events: [], cutItems: [], buyoutItems: [] });
+      setJobDetail({ job, processes: [], documents: [], quoteItems: [], deliveryNotes: [], allocations: [], events: [], cutItems: [], buyoutItems: [], infoRequests: [] });
       setJobDetailTab("overview");
     }
     setJobDetailLoading(true);
@@ -4486,7 +4486,7 @@ export default function StockControl() {
       // the nesting side does not reach it, so opening the job showed an
       // empty box for a number that was already on the job -- and typing it
       // again was the obvious thing to do. Read the row itself.
-      const [jobResult, { data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }, allocResult, eventsResult, generatedResult, cutResult, buyoutResult] = await Promise.all([
+      const [jobResult, { data: processes, error: procError }, { data: documents, error: docError }, { data: quoteItems, error: qiError }, { data: deliveryNotes, error: dnError }, allocResult, eventsResult, generatedResult, cutResult, buyoutResult, infoResult] = await Promise.all([
         supabase.from("jobs").select("*").eq("id", job.id).single(),
         supabase.from("job_processes").select("*").eq("job_id", job.id).order("sort_order"),
         supabase.from("job_documents").select("*").eq("job_id", job.id).order("created_at", { ascending: false }),
@@ -4505,6 +4505,9 @@ export default function StockControl() {
         supabase.from("job_cut_items").select("*").eq("job_id", job.id).order("sort_order"),
         // The buy-outs. Not fatal either.
         supabase.from("job_buyout_items").select("*").eq("job_id", job.id).order("sort_order"),
+        // Every Info Request on the job, open and closed. Not fatal: the
+        // helper throws, so the failure is caught into the result here.
+        loadJobInfoRequests(supabase, job.id).then((data) => ({ data }), (error) => ({ error })),
       ]);
       if (procError) throw procError;
       if (docError) throw docError;
@@ -4530,9 +4533,11 @@ export default function StockControl() {
         generated: generatedResult.data || [],
         cutItems: cutResult.data || [],
         buyoutItems: buyoutResult.data || [],
+        infoRequests: infoResult.data || [],
       });
       if (cutResult.error) console.error("Failed to load the cut list (job detail still shown):", cutResult.error);
       if (buyoutResult.error) console.error("Failed to load the buy-outs (job detail still shown):", buyoutResult.error);
+      if (infoResult.error) console.error("Failed to load the info requests (job detail still shown):", infoResult.error);
     } catch (err) {
       console.error("Failed to load job detail:", err);
       // Without this the modal simply never opens. Somebody taps a job,
@@ -8810,6 +8815,8 @@ export default function StockControl() {
       if (!row) alert("Somebody else has already answered or cleared this one.");
       setInfoRequestsList((prev) => mergeInfoRequests(prev, [row || { ...req, status: "cleared", closed_at: new Date().toISOString() }]));
       setInfoAnswerModal(null);
+      // Answered from the job page: show it there as answered straight away.
+      if (jobDetail?.job?.id === req.job_id) refreshJobDetail();
       if (!row) {
         fetchInfoRequests({ incremental: true });
         return true;
@@ -21053,6 +21060,78 @@ export default function StockControl() {
             {jobDetail.job.quote_reference && <span>Quote: {jobDetail.job.quote_reference}</span>}
             {jobDetail.job.customer_po && <span>Customer PO: {jobDetail.job.customer_po}</span>}
           </div>
+
+          {/* Info Requests on this job (src/lib/infoRequests.js). Open ones
+              in red with Answer, on every tab; closed ones behind a shut
+              pill, one line each, newest first, so the job keeps the whole
+              story -- including a request whose stage was since taken off. */}
+          {(() => {
+            const all = jobDetail.infoRequests || [];
+            if (all.length === 0) return null;
+            const open = all.filter(isOpen);
+            const closed = all.filter((r) => !isOpen(r)).reverse();
+            const when = (iso) =>
+              iso ? new Date(iso).toLocaleString("en-ZA", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+            const photoBtn = (r) =>
+              r.photo_path && (
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={{ background: "none", border: "none", padding: 0, marginLeft: 6, color: C.accentRaw, cursor: "pointer" }}
+                  title="See the photo"
+                  onClick={() => viewShortagePhoto(r.photo_path, r.photo_name || "Info request photo")}
+                >
+                  <ImageIcon size={13} />
+                </button>
+              );
+            return (
+              <>
+                {open.length > 0 && (
+                  <div style={{ border: `2px solid ${C.danger}`, borderRadius: 6, background: C.dangerTint, padding: 8, marginTop: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, color: C.danger, fontWeight: 700 }}>
+                      <AlertTriangle size={15} strokeWidth={2.5} />
+                      {open.length === 1 ? "Standing: waiting on office" : `${open.length} requests standing, waiting on office`}
+                    </div>
+                    {open.map((r) => (
+                      <div key={r.id} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 6 }}>
+                        <span style={{ flex: "1 1 240px", minWidth: 0, color: C.text }}>
+                          <strong>{r.stage_name || "A stage no longer on the job"}</strong> · {r.kind}: {r.note}
+                          {photoBtn(r)} · asked by {r.raised_by || "someone"}{" "}
+                          <span style={{ color: C.danger, fontWeight: 600, whiteSpace: "nowrap" }}>· {standingFor(r)}</span>
+                        </span>
+                        <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => setInfoAnswerModal(r)}>
+                          Answer
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {closed.length > 0 && (
+                  <Section title="Info Requests" count={closed.length} defaultOpen={false} quiet>
+                    {closed.map((r) => (
+                      <RecordRow
+                        key={r.id}
+                        title={`${r.kind} at ${r.stage_name || "a stage no longer on the job"}`}
+                        summary={`${r.status === "answered" ? "Answered" : "Cleared"} by ${r.closed_by || "someone"} · stood ${stoodFor(r)}`}
+                      >
+                        <div style={S.itemComment}>
+                          {r.note}
+                          {photoBtn(r)}
+                        </div>
+                        {r.answer && <div style={{ ...S.itemComment, marginTop: 4, whiteSpace: "pre-wrap", color: C.text }}>{r.answer}</div>}
+                        <div className="stk-meta-row" style={S.rowMeta}>
+                          <span>Asked by {r.raised_by || "someone"}, {when(r.created_at)}</span>
+                          <span>
+                            {r.status === "answered" ? "Answered" : "Cleared"} {when(r.closed_at)}
+                          </span>
+                        </div>
+                      </RecordRow>
+                    ))}
+                  </Section>
+                )}
+              </>
+            );
+          })()}
 
           <div style={S.segRow}>
             {[

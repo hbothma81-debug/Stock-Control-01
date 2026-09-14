@@ -43,6 +43,15 @@ export function standingFor(req, now = Date.now()) {
   return d === 1 ? "1 day" : `${d} days`;
 }
 
+// How long a closed request held the job up, from asking to answer or
+// clear: for the job page's list and the printed Job History.
+export function stoodFor(req) {
+  const end = Date.parse(req?.closed_at || "");
+  if (!end) return "";
+  const s = standingFor(req, end);
+  return s === "just now" ? "under a minute" : s;
+}
+
 // Open requests by the stage they were raised on. A request whose stage
 // was later taken off the job keeps no process_id, so it shows on the job
 // rather than on any Production card.
@@ -113,6 +122,14 @@ export async function loadInfoRequests(db, since, now = Date.now()) {
   if (open.error) throw open.error;
   if (closed.error) throw closed.error;
   return [...(open.data || []), ...(closed.data || [])];
+}
+
+// Every request on one job, open and closed, oldest first: the job page
+// shows the whole story, not just the last few days.
+export async function loadJobInfoRequests(db, jobId) {
+  const { data, error } = await db.from("job_info_requests").select(SELECT).eq("job_id", jobId).order("created_at");
+  if (error) throw error;
+  return data || [];
 }
 
 export async function raiseInfoRequest(db, { job, process, kind, note, photoPath, photoName, by, byId }) {
