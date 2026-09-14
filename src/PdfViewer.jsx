@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ZoomIn, ZoomOut } from "lucide-react";
 import { F, C, S } from "./theme.js";
+import { tooOldForPdfjs, browserVersion } from "./lib/pdfSupport.js";
 // Only the worker's address, not the worker: `?url` puts a file name in the
 // bundle and the file itself is fetched when PDF.js starts.
 import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
@@ -16,13 +17,15 @@ import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 // device -- it only stops the easy and the accidental copies. Who may keep
 // a copy is decided by the buttons under this, in App.jsx.
 //
-// PDF.js is about 1.8 MB (roughly 500 KB over the wire) and is fetched the
-// first time somebody opens a PDF, never before -- the same rule as the
-// Excel and PDF builders in App.jsx. If it cannot load, this falls back to
-// the frame, so nobody is left looking at nothing.
+// PDF.js is fetched the first time somebody opens a PDF, never before --
+// the same rule as the Excel and PDF builders in App.jsx. It is PDF.js
+// 4.10.38, pinned (package.json has no ^), for the Huawei tablet at
+// Bending; a browser older than even that release supports gets the frame,
+// as before. Which browsers, and why not the newest PDF.js, is in
+// src/lib/pdfSupport.js. Do not upgrade PDF.js without trying that tablet.
 //
-// The "legacy" build on purpose: the standard one runs only on this year's
-// browsers, and not every phone in the workshop is this year's.
+// If a PDF still cannot be drawn, this says so and falls back to the frame,
+// with the browser's version on screen, so a photo of the message says why.
 
 let pdfjs = null;
 async function getPdfjs() {
@@ -34,60 +37,91 @@ async function getPdfjs() {
   return pdfjs;
 }
 
-// One whole download, like the frame did, rather than PDF.js asking for the
-// file in pieces. A blob: or data: address (a document that was made but not
-// filed, a stock item's attachment) is read here and handed over as bytes.
-async function openDocument(lib, url) {
-  const options = { isEvalSupported: false, disableRange: true, disableStream: true };
-  if (/^(blob|data):/i.test(url)) {
-    const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
-    return lib.getDocument({ ...options, data: bytes });
-  }
-  return lib.getDocument({ ...options, url });
+// The whole file is downloaded here first, as the frame did, and only then
+// handed to PDF.js. So the time limit below measures PDF.js, never a slow
+// connection, and a blob: or data: address (a document made but not filed,
+// a stock item's attachment) works the same as a stored file.
+async function fetchBytes(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`the file did not download (${res.status})`);
+  return new Uint8Array(await res.arrayBuffer());
 }
 
 const ZOOMS = [1, 1.5, 2, 3];
 // An iPhone draws a canvas bigger than this blank, with no error. A large
 // drawing zoomed in stops getting sharper here rather than disappearing.
 const MAX_CANVAS_PIXELS = 16_000_000;
+// A browser PDF.js cannot run on can leave it waiting for ever instead of
+// failing, which looks exactly like a blank box. The file is already
+// downloaded when this starts counting.
+const GIVE_UP_SECONDS = 20;
+
+// Counts only while the page is on screen. A page behind another app, or on
+// a locked phone, stops drawing until it is looked at again, and that is not
+// a failure: the clock starts again for as long as it stays hidden.
+function whileVisible(seconds, onTimeUp) {
+  let timer = null;
+  const arm = () => {
+    timer = setTimeout(() => (document.hidden ? arm() : onTimeUp()), seconds * 1000);
+  };
+  arm();
+  return () => clearTimeout(timer);
+}
+
+const frameOnly = () => tooOldForPdfjs(navigator.userAgent);
 
 export default function PdfViewer({ url, title }) {
   const boxRef = useRef(null);
   const pagesRef = useRef(null);
   const pdfRef = useRef(null);
-  const [status, setStatus] = useState("loading"); // loading | ready | failed
+  // loading | ready | failed (PDF.js gave up) | frame (browser too old for it)
+  const [status, setStatus] = useState(() => (frameOnly() ? "frame" : "loading"));
+  const [problem, setProblem] = useState("");
   const [pageCount, setPageCount] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [width, setWidth] = useState(0);
 
+  function fail(why) {
+    setProblem(why);
+    setStatus("failed");
+  }
+
   useEffect(() => {
+    if (frameOnly()) return;
     let cancelled = false;
     let task = null;
+    let stopTimer = () => {};
     setStatus("loading");
+    setProblem("");
     setPageCount(0);
     setZoom(1);
     (async () => {
       try {
-        const lib = await getPdfjs();
+        const [lib, bytes] = await Promise.all([getPdfjs(), fetchBytes(url)]);
         if (cancelled) return;
-        task = await openDocument(lib, url);
-        if (cancelled) {
-          task.destroy();
-          return;
-        }
+        stopTimer = whileVisible(GIVE_UP_SECONDS, () => {
+          if (cancelled) return;
+          cancelled = true;
+          if (task) task.destroy();
+          fail(`PDF.js did not open it within ${GIVE_UP_SECONDS} seconds`);
+        });
+        task = lib.getDocument({ data: bytes, isEvalSupported: false });
         const pdf = await task.promise;
+        stopTimer();
         if (cancelled) return;
         pdfRef.current = pdf;
         setPageCount(pdf.numPages);
         setStatus("ready");
       } catch (err) {
+        stopTimer();
         if (cancelled) return;
-        console.error("PDF.js could not show this PDF; showing it in a frame instead:", err);
-        setStatus("failed");
+        console.error("PDF.js could not open this PDF:", err);
+        fail(err?.message || String(err));
       }
     })();
     return () => {
       cancelled = true;
+      stopTimer();
       pdfRef.current = null;
       if (task) task.destroy();
     };
@@ -119,13 +153,22 @@ export default function PdfViewer({ url, title }) {
   useEffect(() => {
     const pdf = pdfRef.current;
     const holder = pagesRef.current;
-    if (status !== "ready" || !pdf || !holder || !width) return;
+    const box = boxRef.current;
+    if (status !== "ready" || !pdf || !holder || !box || !width) return;
     let stopped = false;
     let drawing = null;
+    let drawn = 0;
     holder.replaceChildren();
     // Read now rather than trusting `width`, which ignores small changes.
-    const cssWidth = Math.floor((boxRef.current.clientWidth - 16) * zoom);
+    const cssWidth = Math.floor((box.clientWidth - 16) * zoom);
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    // Page 1 is where a browser PDF.js cannot run on fails, if it does.
+    const stopTimer = whileVisible(GIVE_UP_SECONDS, () => {
+      if (stopped || drawn > 0) return;
+      stopped = true;
+      if (drawing) drawing.cancel();
+      fail(`page 1 was not drawn within ${GIVE_UP_SECONDS} seconds`);
+    });
     (async () => {
       for (let n = 1; n <= pdf.numPages; n++) {
         const page = await pdf.getPage(n);
@@ -143,24 +186,47 @@ export default function PdfViewer({ url, title }) {
         canvas.setAttribute("role", "img");
         canvas.setAttribute("aria-label", `${title || "PDF"}, page ${n} of ${pdf.numPages}`);
         holder.appendChild(canvas);
-        drawing = page.render({ canvas, viewport });
+        // PDF.js 4 takes the canvas's context; 5 and later take the canvas.
+        drawing = page.render({ canvasContext: canvas.getContext("2d"), viewport });
         try {
           await drawing.promise;
         } catch (err) {
-          if (err?.name !== "RenderingCancelledException") console.error(`Could not draw page ${n}:`, err);
-          return;
+          if (stopped || err?.name === "RenderingCancelledException") return;
+          throw err;
         }
+        drawn += 1;
         if (stopped) return;
       }
-    })().catch((err) => console.error("Could not draw this PDF:", err));
+    })().catch((err) => {
+      if (stopped) return;
+      console.error("Could not draw this PDF:", err);
+      // A later page failing leaves the pages already drawn where they are.
+      if (drawn === 0) fail(err?.message || String(err));
+    });
     return () => {
       stopped = true;
+      stopTimer();
       if (drawing) drawing.cancel();
     };
   }, [status, width, zoom, title]);
 
-  if (status === "failed") {
+  if (status === "frame") {
     return <iframe src={url} title={title || "PDF"} style={S.previewPdf} />;
+  }
+
+  if (status === "failed") {
+    return (
+      <>
+        <div style={{ ...S.roleHint, marginTop: 8, color: C.danger }}>
+          This PDF could not be drawn on this device, so it is shown the old way below. If that is blank too, take a
+          photo of this message for the office.
+        </div>
+        <div style={{ ...S.roleHint, marginTop: 2, wordBreak: "break-word" }}>
+          {problem} · {browserVersion(navigator.userAgent)}
+        </div>
+        <iframe src={url} title={title || "PDF"} style={S.previewPdf} />
+      </>
+    );
   }
 
   const step = ZOOMS.indexOf(zoom);

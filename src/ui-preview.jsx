@@ -64,12 +64,57 @@ function makeSamplePdf() {
   return doc.output("bloburl");
 }
 
+// What this browser is, and every error it reports, written on the page. A
+// tablet on the floor has no console anybody can open; this is how to see
+// why a PDF does not draw on it. Hooked before the viewer loads anything.
+const DEVICE_ERRORS = [];
+const deviceErrorListeners = new Set();
+function noteDeviceError(text) {
+  DEVICE_ERRORS.push(`${new Date().toLocaleTimeString()}  ${text}`);
+  deviceErrorListeners.forEach((f) => f());
+}
+const originalConsoleError = console.error;
+console.error = (...args) => {
+  noteDeviceError(args.map((a) => (a instanceof Error ? `${a.name}: ${a.message}` : String(a))).join(" "));
+  originalConsoleError(...args);
+};
+window.addEventListener("error", (e) => noteDeviceError(`error: ${e.message} (${e.filename || ""}:${e.lineno || ""})`));
+window.addEventListener("unhandledrejection", (e) => noteDeviceError(`unhandled: ${e.reason?.message || e.reason}`));
+
+function DeviceReport() {
+  const [, redraw] = React.useState(0);
+  React.useEffect(() => {
+    const f = () => redraw((n) => n + 1);
+    deviceErrorListeners.add(f);
+    return () => deviceErrorListeners.delete(f);
+  }, []);
+  const facts = [
+    ["Browser", navigator.userAgent],
+    ["Screen", `${window.innerWidth} x ${window.innerHeight}, pixel ratio ${window.devicePixelRatio}`],
+    ["ResizeObserver", typeof window.ResizeObserver],
+    ["OffscreenCanvas", typeof window.OffscreenCanvas],
+    ["Promise.withResolvers", typeof Promise.withResolvers],
+    ["structuredClone", typeof window.structuredClone],
+  ];
+  return (
+    <div style={{ ...S.roleHint, whiteSpace: "pre-wrap", wordBreak: "break-word", marginTop: 8 }} data-testid="device-report">
+      {facts.map(([k, v]) => `${k}: ${v}`).join("\n")}
+      {"\n\nErrors: " + (DEVICE_ERRORS.length ? "\n" + DEVICE_ERRORS.join("\n") : "none")}
+    </div>
+  );
+}
+
 function PdfViewerDemo() {
   const [url] = React.useState(makeSamplePdf);
+  // Not a PDF at all, to see the message a device gets when one cannot be drawn.
+  const [broken] = React.useState(() => URL.createObjectURL(new Blob(["not a pdf"], { type: "application/pdf" })));
   return (
-    <Section title="PDF viewer" count={3}>
+    <Section title="PDF viewer" count={4}>
       <div style={S.roleHint}>A made-up PDF drawn by PDF.js: portrait, landscape and an A1 sheet.</div>
       <PdfViewer url={url} title="Sample.pdf" />
+      <DeviceReport />
+      <div style={{ ...S.roleHint, marginTop: 14 }}>A file that is not a PDF: this is what a failure looks like.</div>
+      <PdfViewer url={broken} title="Broken.pdf" />
     </Section>
   );
 }
