@@ -562,3 +562,95 @@ by him:
 3. If the tube import stops picking the parent line on its own once lines
    with parts are left blank, have it recognise a line with parts rather
    than one tagged Tube laser.
+
+## 14 Sep 2026 — Laser production (cutting, nesting, packing and the tube import)
+
+This conversation owns the plate laser and, as the Tube Laser entry above
+hands over, now the tube tab too.
+
+### Done and live
+
+- **Cutting screen.** Cards side by side; a count of programs cut this
+  shift, on ticked laser shifts only, and between shifts the shift that
+  just ended; minutes of cutting still on the list.
+- **Cutting time.** Planned minutes per sheet; the operator's actual time
+  asked on the last sheet, skippable for now; a Shifts report segment.
+- **Stops and deletes.** A stopped program leaves the cut list, sits at
+  the top of To nest, opens to be edited, and Sorted returns it. Delete
+  asks why and cancels, never removes.
+- **Laser 4kw tab lifted out of App.jsx** into `useLaserPrograms.js` and
+  `LaserTab.jsx`.
+- **Packing.** A re-cut reaches the packer on its first sheet like any
+  job; one rule, `stageIsCleared`, for when a stage stops holding the
+  next one back.
+- **Tube, 11 Sep.** Nesting part by part, with the parts first in the
+  open row, the program form folded and drawings hidden on tube only.
+  Picking a section says which stock line it is and never reserves, in
+  the import and New program alike. The section box narrows by kind,
+  grade and length. A change in cut count moves lengths on or off the
+  shelf (the laser half of the Jobs feature).
+- **The import's parts tick is built (697194e).** This is item 1 of the
+  Tube Laser entry's "Pick up next": done. It starts on when the parent
+  is obvious (no lines, one line, or one tube-tagged line) and off on a
+  job with several lines, where the "parts go under" picker no longer
+  appears.
+- **Admin "Close this stage"** on any per-item stage, for JOB-0021 and old
+  jobs that will never be logged.
+- **Tests:** `npm test`. **Docs:** `LASER-4KW-HOW-IT-WORKS.md`,
+  `TUBE-PARTS-BY-SECTION-PLAN.md` (with Jobs), `FLOOR-NESTING-PRINTOUT-PLAN.md`.
+
+### SQL this conversation wrote
+
+- `setup-laser-cutting-time.sql` (laser_programs.cut_minutes,
+  actual_minutes): live yes, 200 on 14 Sep; practice yes, Heinrich's
+  check on 8 Sep.
+- `setup-shift-laser-flag.sql` (shifts.cuts_laser): live yes, 200 on
+  14 Sep; practice yes, same check.
+- Both are in `CHECK-which-setup-files-are-run.sql`. Like every laser
+  and shift file they are deliberately not in `build-test-database.sh`.
+- Columns my code relies on that others wrote, all 200 on live 14 Sep:
+  laser_programs.stock_item_id, job_quote_items.material_type,
+  shifts.cuts_tube_laser.
+
+### Built but not yet tested by Heinrich
+
+1. **Close this stage.** JOB-0021 on the tube Packing screen should read
+   "All 39 packed — close this stage".
+2. **Nesting part by part.** Log part of a tube job, then check a logged
+   part reaches the next stage without the rest. Not shown on practice.
+3. **Import parts tick.** A real report with a Part Info sheet onto a job
+   with several lines: the tick starts off and no parent picker shows.
+   This replaces the Tube Laser entry's multi-line "which line" test.
+4. **Section narrowers on live.** Kind should read Channel, Equal Angle,
+   Rectangular Tube and so on; a blank Kind means that section has no type
+   in the Structural Steel list.
+5. **No double booking.** Import onto a job whose stock is already set
+   aside on Materials: the rack drops once, not twice.
+6. **Cut takes a length.** A tube program with a section picked, stock set
+   aside on Materials, Cut one: one length off and the reservation's used
+   count up one; Undo one puts it back.
+7. **Stop and delete on the plate laser** (8 Sep): not confirmed tried on
+   the floor.
+
+### Waiting on Heinrich
+
+- The five questions in `FLOOR-NESTING-PRINTOUT-PLAN.md`.
+- Hide drawings on the plate laser too? Kept for now; Prince uses them.
+- How SigmaNest shows cutting time on Prince's screen: day-shift programs
+  carry 1 minute, so the day shift reads 0% efficiency.
+- Tag some tube job lines with their material type on the Items tab.
+
+### Practice data left by testing
+
+- Program STOCK-CHECK (00006) on JOB-0011; TIME-TEST-2 cancelled;
+  JOB-0004's tube stage closed; JOB-0004 has nested counts logged
+  (40 of 100, 10 of 50). Delete or ignore.
+
+### Pick up next
+
+1. The laser half of parts-by-section, once real lines are tagged. The
+   parts tick decides what a match does (plan, commit 63750eb).
+2. The floor printout once the questions are answered: keep the nests on
+   import (SQL), then the tube PDF, then plate.
+3. Make a per-item stage re-check itself when its lines change, the cause
+   behind JOB-0021.
