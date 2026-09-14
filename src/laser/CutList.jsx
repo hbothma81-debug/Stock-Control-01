@@ -22,6 +22,10 @@ import { programTitle } from "./programTitle.js";
 // alphabetically: 10mm would otherwise sort next to 1.2mm, and the point
 // of grouping is to cut everything of one thickness together.
 //
+// The tube laser groups by job instead (`cutListBy` in its profile): a
+// heading per job, oldest first, with its customer, sales rep, parts and
+// lengths still to cut, and that job's programs inside.
+//
 // No database calls in here. The parent owns those.
 
 // Cards sit side by side on a wide screen rather than one under the
@@ -59,6 +63,8 @@ export default function CutList({
   const [askTimeFor, setAskTimeFor] = useState(null);
   const askProgram = askTimeFor ? (programs || []).find((p) => p.id === askTimeFor) : null;
 
+  const byJob = machine.cutListBy === "job";
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return programs;
@@ -71,10 +77,14 @@ export default function CutList({
         (p.jobs || []).some(
           (l) =>
             (l.job_number || "").toLowerCase().includes(q) ||
-            (l.sigmanest_number || "").toLowerCase().includes(q)
+            (l.sigmanest_number || "").toLowerCase().includes(q) ||
+            // Grouped by job, the heading shows customer and rep, so
+            // those can be searched for too.
+            (byJob &&
+              ((l.customer || "").toLowerCase().includes(q) || (l.sales_rep || "").toLowerCase().includes(q)))
         )
     );
-  }, [programs, query]);
+  }, [programs, query, byJob]);
 
   // A stopped program is back with whoever nests, not the operator's to
   // cut, so it comes off his list. It is kept in its own shut section
@@ -102,6 +112,61 @@ export default function CutList({
       .filter((g) => g.items.length > 0);
   }, [toCut, thicknesses]);
 
+  // Grouped by job, on the tube laser. A program on two jobs sits under
+  // both -- rare, and cutting it from either counts once, because it is
+  // the one program. A program with no job still shows, under a heading
+  // of its own at the end, rather than vanishing.
+  const jobGroups = useMemo(() => {
+    if (!byJob) return [];
+    const byKey = new Map();
+    for (const p of toCut) {
+      const links = (p.jobs || []).length ? p.jobs : [{ job_id: null }];
+      const seen = new Set();
+      for (const l of links) {
+        const key = l.job_id || "none";
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (!byKey.has(key)) {
+          byKey.set(key, {
+            key,
+            jobNumber: l.job_number || "",
+            customer: l.customer || "",
+            salesRep: l.sales_rep || "",
+            items: [],
+          });
+        }
+        byKey.get(key).items.push(p);
+      }
+    }
+    const num = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+    const list = [...byKey.values()];
+    for (const g of list) g.items.sort((a, b) => num(a.program_number || "", b.program_number || ""));
+    list.sort((a, b) => (a.key === "none") - (b.key === "none") || num(a.jobNumber, b.jobNumber));
+    return list;
+  }, [byJob, toCut]);
+  // Job headings start shut. A search that leaves a single job opens it
+  // (the key changes, so the heading is rebuilt open), and so does a list
+  // with only one job on it.
+  const searchOpensOne = !!query.trim() && jobGroups.length === 1;
+
+  // A plain function, not a component, so a card is never rebuilt just
+  // because the list around it re-rendered.
+  const row = (p) => (
+    <ProgramRow
+      key={p.id}
+      program={p}
+      notes={(events || []).filter((e) => e.program_id === p.id && (e.action === "note" || e.action === "stopped"))}
+      canCut={canCut}
+      machine={machine}
+      onToggleCut={onToggleCut}
+      onSetCutCount={onSetCutCount}
+      onAskTime={hasTime ? (pr) => setAskTimeFor(pr.id) : () => {}}
+      onReport={onReport}
+      onAddNote={onAddNote}
+      busy={busyId === p.id}
+    />
+  );
+
   return (
     <div style={S.list}>
       <input
@@ -109,7 +174,9 @@ export default function CutList({
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder={
-          machine.numbering === "generated"
+          byJob
+            ? "Search program, nesting name, job number, customer or rep…"
+            : machine.numbering === "generated"
             ? "Search program, nesting name, or job number…"
             : "Search program, job number, or SigmaNest number…"
         }
@@ -121,6 +188,16 @@ export default function CutList({
         <div style={S.empty}>
           {query.trim() ? "Nothing waiting matches that." : "Nothing waiting to be cut."}
         </div>
+      ) : byJob ? (
+        jobGroups.map((g) => (
+          <Section
+            key={`${g.key}-${searchOpensOne ? "found" : "list"}`}
+            title={jobHeading(g, machine)}
+            defaultOpen={searchOpensOne || jobGroups.length === 1}
+          >
+            <div style={grid}>{g.items.map((p) => row(p))}</div>
+          </Section>
+        ))
       ) : (
         groups.map((g) => (
           <Section key={g.material} title={g.material} count={g.items.length}>
@@ -203,6 +280,37 @@ export default function CutList({
         />
       )}
     </div>
+  );
+}
+
+// A job's heading on the tube Cutting screen: job number and customer,
+// then the sales rep and what is on the job's programs. Parts are the
+// count from the nesting file; a program typed in by hand often has none,
+// and the heading says so rather than let the total look complete.
+function jobHeading(g, machine = {}) {
+  const programs = g.items.length;
+  const parts = g.items.reduce((n, p) => n + (Number(p.part_count) > 0 ? Number(p.part_count) : 0), 0);
+  const noParts = g.items.filter((p) => !(Number(p.part_count) > 0)).length;
+  const left = g.items.reduce((n, p) => n + (outstandingUnits(p) || 0), 0);
+  const units = left === 1 ? machine.unit || "length" : machine.units || "lengths";
+  const partsText =
+    parts === 0
+      ? "parts not given"
+      : `${parts} parts${noParts ? ` (${noParts} ${noParts === 1 ? "program" : "programs"} without a count)` : ""}`;
+  return (
+    <span style={{ display: "block" }}>
+      <span style={{ display: "block", fontSize: 17 }}>
+        {g.jobNumber || (g.key === "none" ? "No job" : "Unknown job")}
+        {g.customer ? <span style={{ fontWeight: 600 }}> · {g.customer}</span> : null}
+      </span>
+      <span style={{ display: "block", fontSize: 13, fontWeight: 400, marginTop: 2 }}>
+        Rep: {g.salesRep || "none"} · {programs} {programs === 1 ? "program" : "programs"} · {partsText} ·{" "}
+        <b>
+          {left} {units}
+        </b>{" "}
+        still to cut
+      </span>
+    </span>
   );
 }
 
@@ -344,6 +452,28 @@ function ProgramRow({ program, notes, canCut, machine = {}, onToggleCut, onSetCu
   const done = Math.min(Math.max(0, Number(p.sheets_cut) || 0), repeats);
   const [countDraft, setCountDraft] = useState(String(done));
   useEffect(() => setCountDraft(String(done)), [done]);
+  // The tube laser's box: how many were just cut, not the total so far
+  // (`cutAmount` in the profile). The count moves by that many, and so
+  // does the shelf, through the same save as Cut one.
+  const byAmount = !!machine.cutAmount;
+  const [amount, setAmount] = useState("");
+  const left = repeats - done;
+  const typed = Math.round(Number(amount));
+  const amountOk = amount.trim() !== "" && Number.isFinite(typed) && typed > 0;
+  async function cutTyped() {
+    if (!amountOk || typed > left) return;
+    const next = done + typed;
+    if (await onSetCutCount(p, next)) {
+      setAmount("");
+      if (next >= repeats) openTime();
+    }
+  }
+  // Undo takes the typed number back off, or one when the box is empty.
+  async function undoTyped() {
+    const back = amountOk ? typed : 1;
+    if (back > done) return;
+    if (await onSetCutCount(p, done - back)) setAmount("");
+  }
   // Asked once the last sheet is marked cut: how long did it really take.
   // The popup itself belongs to the list (see CutList), because this card
   // moves into Already cut at that very moment and is rebuilt on the way.
@@ -492,7 +622,15 @@ function ProgramRow({ program, notes, canCut, machine = {}, onToggleCut, onSetCu
               {done} of {repeats} cut
             </span>
             {done < repeats && (
-              <span style={{ ...S.roleHint, color: C.accentRaw }}>{repeats - done} still to cut</span>
+              <span
+                style={
+                  byAmount
+                    ? { fontSize: 15, fontWeight: 700, color: C.accentRaw }
+                    : { ...S.roleHint, color: C.accentRaw }
+                }
+              >
+                {repeats - done} still to cut
+              </span>
             )}
           </div>
           <div
@@ -534,6 +672,61 @@ function ProgramRow({ program, notes, canCut, machine = {}, onToggleCut, onSetCu
                 </button>
               )}
 
+              {byAmount ? (
+                <>
+                  {/* He cuts several lengths, then comes to the screen:
+                      he types how many he just cut and sees how many are
+                      left, rather than working out a new total. */}
+                  {left > 0 && (
+                    <>
+                      <input
+                        type="number"
+                        min="1"
+                        max={left}
+                        inputMode="numeric"
+                        style={{ ...S.input, width: 84, textAlign: "center" }}
+                        value={amount}
+                        onChange={(e) => setAmount(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") cutTyped();
+                        }}
+                        placeholder="How many"
+                        title={`How many ${machine.units || "lengths"} you have just cut`}
+                      />
+                      <span style={{ fontSize: 14, fontWeight: 600, color: amountOk && typed > left ? C.danger : C.muted }}>
+                        {amountOk && typed > left ? `only ${left} left` : `of ${left} left`}
+                      </span>
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={{ ...S.reqActionBtn, background: C.accentRaw }}
+                        disabled={busy || !amountOk || typed > left}
+                        onClick={cutTyped}
+                        title={`Add that many ${machine.units || "lengths"} to the count, and take them off the shelf`}
+                      >
+                        <Check size={14} strokeWidth={2.5} /> {busy ? "Saving…" : amountOk ? `Cut ${typed}` : "Cut"}
+                      </button>
+                    </>
+                  )}
+                  {done > 0 && (
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={S.reqActionBtnMuted}
+                      disabled={busy || (amountOk && typed > done)}
+                      onClick={undoTyped}
+                      title={
+                        amountOk && typed > done
+                          ? `Only ${done} cut so far`
+                          : "Take them back off the count, and back onto the shelf"
+                      }
+                    >
+                      <Undo2 size={13} /> {amountOk ? `Undo ${typed}` : "Undo one"}
+                    </button>
+                  )}
+                </>
+              ) : (
+              <>
               {/* For a program that repeats twenty times, pressing a button
                   twenty times is silly. Type the number instead. */}
               <input
@@ -565,6 +758,8 @@ function ProgramRow({ program, notes, canCut, machine = {}, onToggleCut, onSetCu
                 >
                   <Undo2 size={13} /> Undo one
                 </button>
+              )}
+              </>
               )}
             </>
           ) : p.is_complete ? (

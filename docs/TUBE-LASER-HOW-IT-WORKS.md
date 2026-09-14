@@ -173,6 +173,30 @@ rows above and below.
   parts most visits, a new program now and then. On the plate laser the
   form is why the row was opened at all, so there it stays open.
 
+## The Cutting screen, grouped by job
+
+Asked for by Heinrich on 14 Sep 2026. The tube operator works job by
+job, so the tube Cutting screen is a heading per job, oldest job number
+first, shut until tapped. A search that leaves one job opens it, and so
+does a list with only one job on it. The heading reads the job number
+and customer, then the sales rep, how many programs, the parts (the
+nesting file's counts; a program typed in by hand often has none, and
+the heading says how many), and the lengths still to cut. Inside are
+that job's program cards, by program number. A program on two jobs
+shows under both; cutting it from either counts once, because it is the
+one program. Stopped and Already cut stay below, as before.
+
+A card with more than one length has a box for how many were just cut:
+"Cut 5" adds five to the count and takes five lengths off the shelf,
+"Undo 5" puts them back ("Undo one" when the box is empty). The box
+says how many are left and refuses more than that. Stock moves only
+when the program's section was picked off stock; otherwise the warning
+that nothing came off the shelf appears, as it always has.
+
+Both are switches in the tube profile (`cutListBy: "job"`,
+`cutAmount: true`). The plate laser has neither and is unchanged: its
+thickness groups and its running-total box.
+
 ## How it is built: one set of code, told the machine
 
 `src/constants.js` has `LASER_MACHINES`, one profile per laser, saying

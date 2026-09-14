@@ -303,9 +303,13 @@ export default function useLaserPrograms(deps) {
     const linksByProgram = {};
     for (const l of d.links) {
       if (!linksByProgram[l.program_id]) linksByProgram[l.program_id] = [];
+      const job = jobById.get(l.job_id);
       linksByProgram[l.program_id].push({
         ...l,
-        job_number: jobById.get(l.job_id)?.job_number || "",
+        job_number: job?.job_number || "",
+        // The tube Cutting screen heads each job with these.
+        customer: job?.customer || "",
+        sales_rep: job?.sales_rep || "",
         is_recut: !!l.shortage_id,
       });
     }

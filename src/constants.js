@@ -97,6 +97,11 @@ export const LASER_MACHINE = "Laser 4kw";
 //                 so that stage is never closed by cutting: it closes when
 //                 he ticks the parts packed, on the tab's Packing screen.
 //   hasPacking    whether the tab gets a Packing screen of its own
+//   cutListBy     how the Cutting screen groups its cards: by material,
+//                 in thickness order (the default, the plate laser), or
+//                 "job" -- a heading per job with its programs inside
+//   cutAmount     the cut box takes how many were just cut ("Cut 5")
+//                 and says how many are left, instead of a running total
 //
 // The two stage-name rules (which stage is this laser's nesting, which is
 // its cutting) are functions and live in App.jsx beside the other
@@ -145,6 +150,14 @@ export const LASER_MACHINES = {
     // have been nested carry on through the rest of the job without it.
     // The plate laser nests whole sheets and counts nothing per part.
     nestPerItem: true,
+    // Heinrich, 14 Sep 2026: the tube operator works job by job, so his
+    // Cutting screen is a heading per job with its programs inside; and
+    // he cuts several lengths before coming back to the screen, so the
+    // box takes how many he just cut. The plate laser keeps its
+    // thickness groups and its total box -- not to be changed unless
+    // Heinrich asks for the plate laser by name.
+    cutListBy: "job",
+    cutAmount: true,
     cutStageIsPacking: true,
     hasPacking: true,
     partsLabel: "Tube parts",
