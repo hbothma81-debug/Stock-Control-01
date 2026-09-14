@@ -301,6 +301,24 @@ const shortageFlaggedLabel = (shortage) => {
   return `Flagged by ${shortage.flagged_by || "someone"} (${shortage.flagged_department || "?"}) · ${age}, ${when}`;
 };
 const shortageIsOverdue = (shortage) => (shortageAgeDays(shortage) ?? 0) >= SHORTAGE_AGE_WARNING_DAYS;
+// Why a shortage was raised, in words. The flag form stores one of these
+// codes, and it used to be shown as the bare code ("Reason: short"). The
+// flagger's own words (reason_note, setup-shortage-reason-and-cancel.sql)
+// say what actually happened, so whoever nests can tell a real shortage
+// from parts still waiting to be cut. Blank until that SQL has run, and
+// on every shortage flagged before it.
+const SHORTAGE_REASONS = [
+  ["short", "Short (not enough cut)"],
+  ["damaged", "Damaged"],
+  ["lost", "Lost / misplaced"],
+  ["other", "Other"],
+];
+const shortageReasonText = (shortage) => {
+  const code = shortage?.reason || "";
+  const label = (SHORTAGE_REASONS.find(([c]) => c === code) || [])[1] || code || "No reason given";
+  const note = (shortage?.reason_note || "").trim();
+  return note ? `${label} — ${note}` : label;
+};
 
 // Where an item is made. Stored as a fixed code, shown as a label, so
 // nobody can end up with "Tube Laser" and "tube laser" as two different
@@ -1825,6 +1843,9 @@ export default function StockControl() {
     flashSaved,
     markShortageNested,
     shortageSummary,
+    shortageFlaggedLabel,
+    shortageIsOverdue,
+    shortageReasonText,
     refreshShortageStatus,
     // Called when a program's cut count moves, so the lengths cut come
     // off the shelf and off the job's reservation. See
@@ -8537,7 +8558,7 @@ export default function StockControl() {
           shortageLines(s)
             .map((l) => `${l.description} × ${l.qty}${l.photo ? " (photo)" : ""}`)
             .join("\n"),
-          `${s.reason}${s.is_priority === false ? "" : " · priority"}`,
+          `${shortageReasonText(s)}${s.is_priority === false ? "" : " · priority"}`,
           `${s.flagged_by}\n${s.flagged_department}`,
           s.board_number || "—",
           s.status === "cut"
@@ -14910,6 +14931,7 @@ export default function StockControl() {
           jobsList={jobsList}
           master={master}
           shortageSummary={shortageSummary}
+          shortageReasonText={shortageReasonText}
           SavedCheck={SavedCheck}
           ExpandableProcessNotes={ExpandableProcessNotes}
           saveJobSigmaNestNumber={saveJobSigmaNestNumber}
@@ -14930,6 +14952,7 @@ export default function StockControl() {
           jobsList={jobsList}
           master={master}
           shortageSummary={shortageSummary}
+          shortageReasonText={shortageReasonText}
           SavedCheck={SavedCheck}
           ExpandableProcessNotes={ExpandableProcessNotes}
           saveJobSigmaNestNumber={saveJobSigmaNestNumber}
@@ -15312,7 +15335,7 @@ export default function StockControl() {
                                   {s.board_number && `— SigmaNest ${s.board_number}`}
                                 </div>
                                 <div className="stk-meta-row" style={S.rowMeta}>
-                                  <span>Reason: {s.reason}</span>
+                                  <span>Reason: {shortageReasonText(s)}</span>
                                   <span style={shortageIsOverdue(s) ? { color: C.danger, fontWeight: 600 } : undefined}>{shortageFlaggedLabel(s)}</span>
                                   {!s.lane && <span style={{ color: C.muted }}>Laser not set — flagged before that was asked; shows on both nesters</span>}
                                 </div>
@@ -15508,7 +15531,7 @@ export default function StockControl() {
                                   {shortage.board_number ? ` — SigmaNest ${shortage.board_number}` : ""}
                                 </div>
                                 <div className="stk-meta-row" style={S.rowMeta}>
-                                  <span>Reason: {shortage.reason}</span>
+                                  <span>Reason: {shortageReasonText(shortage)}</span>
                                   <span style={shortageIsOverdue(shortage) ? { color: C.danger, fontWeight: 600 } : undefined}>{shortageFlaggedLabel(shortage)}</span>
                                   {shortage.lane && <span>{laneLabel(shortage.lane)}</span>}
                                 </div>
@@ -22977,10 +23000,11 @@ export default function StockControl() {
                   value={shortageModal.reason}
                   onChange={(e) => setShortageModal((m) => ({ ...m, reason: e.target.value }))}
                 >
-                  <option value="short">Short (not enough cut)</option>
-                  <option value="damaged">Damaged</option>
-                  <option value="lost">Lost / misplaced</option>
-                  <option value="other">Other</option>
+                  {SHORTAGE_REASONS.map(([code, label]) => (
+                    <option key={code} value={code}>
+                      {label}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>

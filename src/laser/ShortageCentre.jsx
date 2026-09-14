@@ -14,7 +14,7 @@ import Section from "../Section.jsx";
 // -- putting it on a program -- lives on the Nesting screen, so the two
 // are now one tab apart rather than one tab away.
 
-export default function ShortageCentre({ shortages, summarise, onGoToNesting }) {
+export default function ShortageCentre({ shortages, summarise, reasonText, onGoToNesting }) {
   const [query, setQuery] = useState("");
 
   const { open, resolved } = useMemo(() => {
@@ -69,7 +69,7 @@ export default function ShortageCentre({ shortages, summarise, onGoToNesting }) 
                 {summarise(s)} {s.board_number && `— SigmaNest ${s.board_number}`}
               </div>
               <div className="stk-meta-row" style={S.rowMeta}>
-                <span>Reason: {s.reason}</span>
+                <span>Reason: {reasonText ? reasonText(s) : s.reason}</span>
                 <span>
                   Flagged by {s.flagged_by} ({s.flagged_department})
                 </span>

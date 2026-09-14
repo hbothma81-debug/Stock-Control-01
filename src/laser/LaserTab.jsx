@@ -35,6 +35,7 @@ export default function LaserTab({
   jobsList,
   master,
   shortageSummary,
+  shortageReasonText,
   SavedCheck,
   ExpandableProcessNotes,
   saveJobSigmaNestNumber,
@@ -251,6 +252,7 @@ export default function LaserTab({
                         : null
                     }
                     summarise={shortageSummary}
+                    reasonText={shortageReasonText}
                     onGoToNesting={canNest ? () => setLaserView("nesting") : null}
                   />
                 )}

@@ -1049,6 +1049,15 @@ function NestRow({
           </div>
 
           {r.kind === "shortage" && r.detail && <div style={{ ...S.itemComment, color: C.danger }}>{r.detail}</div>}
+          {/* Who raised it, when and why. A shortage flagged for parts that
+              were only waiting to be cut gets re-cut for nothing, so the
+              nester checks this before putting it on a program. */}
+          {r.kind === "shortage" && r.flagged && (
+            <div className="stk-meta-row" style={S.rowMeta}>
+              <span style={r.flaggedOverdue ? { color: C.danger, fontWeight: 600 } : undefined}>{r.flagged}</span>
+              <span>Reason: {r.reasonText}</span>
+            </div>
+          )}
 
           {/* ---- nest it, right here ---- */}
           {canManage && foldForm && !showForm && (

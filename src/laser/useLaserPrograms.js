@@ -35,6 +35,12 @@ export default function useLaserPrograms(deps) {
     flashSaved,
     markShortageNested,
     shortageSummary,
+    // Who flagged a shortage and when, whether that is over a day ago, and
+    // why, in words. App.jsx's helpers, the same ones the Production card
+    // and the Shortages screen use, so the wording is one copy.
+    shortageFlaggedLabel,
+    shortageIsOverdue,
+    shortageReasonText,
     refreshShortageStatus,
     // Puts a nesting's parts on the job as lines under the job's own
     // line for that work (job, parentLineId, parts, reference).
@@ -406,6 +412,11 @@ export default function useLaserPrograms(deps) {
         process: null,
         shortage: sh,
         detail: shortageSummary(sh),
+        // So the nester can check it is a real shortage, and not parts
+        // still waiting to be cut, before re-cutting anything.
+        flagged: shortageFlaggedLabel ? shortageFlaggedLabel(sh) : "",
+        flaggedOverdue: shortageIsOverdue ? shortageIsOverdue(sh) : false,
+        reasonText: shortageReasonText ? shortageReasonText(sh) : sh.reason || "",
         onPrograms: [],
       });
     }

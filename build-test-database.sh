@@ -55,6 +55,7 @@ ORDER=(
   setup-shortage-rework.sql
   setup-shortage-items.sql
   setup-shortage-lane.sql
+  setup-shortage-reason-and-cancel.sql
   setup-info-requests.sql
   setup-requisitions-table.sql
   setup-purchase-orders-table.sql
