@@ -426,6 +426,17 @@ function newestUpdatedAt(rows, fallback) {
   return bestRaw;
 }
 
+// How often the app refreshes itself in the background. Five minutes from
+// 14 Sep 2026, to get through a month that went over the Supabase data
+// allowance -- it was one minute. Put it back to 60000 once the allowance
+// has reset and the new usage is known; everything else here keeps
+// working at either speed. The Refresh button is always immediate.
+const BACKGROUND_REFRESH_MS = 5 * 60000;
+// Customers, suppliers, the catalogue: they change rarely, and they were
+// about half of what every refresh downloaded. Taken every ten minutes,
+// and at once on Refresh or on coming back to a paused screen.
+const MASTER_REFRESH_MS = 10 * 60000;
+
 // The one ordering rule for every name list in the app. Case does not
 // matter ("acme" sits next to "Acme"), and numbers inside the text sort
 // as numbers ("M8" before "M10", "2500 x 1250" before "3000 x 1500"), so
@@ -1606,6 +1617,13 @@ export default function StockControl() {
   // them and a change to them must never cause a render.
   const lastItemsSyncRef = useRef(null); // newest updated_at already held
   const lastItemsCountRef = useRef(null); // rows held, to notice a deletion
+  // The same two marks for requisitions, purchase orders and the usage
+  // log, keyed by table. See loadTableRows.
+  const tableSyncRef = useRef({});
+  const lastMasterLoadRef = useRef(0);
+  // Notifications: the newest updated_at held, and whose they are, so a
+  // different person signing in on the same screen starts from scratch.
+  const notificationsSyncRef = useRef({ who: null, since: null });
   const [invoiceDocs, setInvoiceDocs] = useState([]);
   // Accounts asking what is missing, and the answers. A thread per job,
   // read by everyone, added to by anyone, edited by nobody.
@@ -1953,6 +1971,52 @@ export default function StockControl() {
   // reason (a misconfigured deploy, a transient hiccup) — since saves are
   // immediate, that fake/empty state would get written straight back over
   // whatever was actually there.
+  // Requisitions, purchase orders and the usage log, loaded the way stock
+  // is: the whole table the first time, then only rows changed since the
+  // newest one already held, plus a head-only count that catches a
+  // deletion. Each has the same diff autosave as stock, so the merge moves
+  // the saved ref too, or every row that arrived would be written back.
+  //
+  // Needs setup-updated-at-everywhere.sql. Until it has run these tables
+  // have no updated_at, so there is never a mark to ask from and every
+  // refresh stays a full one -- slower, but never wrong.
+  async function loadTableRows(table, { incremental, mapRow, setList, savedRef }) {
+    const mark = tableSyncRef.current[table] || { since: null, count: null };
+    let rows = null;
+    let isDelta = false;
+    if (incremental && mark.since) {
+      const [changedRows, count] = await Promise.all([
+        fetchAllRows(table, { filter: (q) => q.gte("updated_at", mark.since) }),
+        countRows(table),
+      ]);
+      if (count !== null && count === mark.count) {
+        rows = changedRows;
+        isDelta = true;
+      }
+    }
+    if (rows === null) {
+      rows = await fetchAllRows(table);
+      mark.count = rows.length;
+    }
+    mark.since = newestUpdatedAt(rows, mark.since);
+    tableSyncRef.current[table] = mark;
+    if (isDelta) {
+      if (rows.length === 0) return;
+      const changed = rows.map(mapRow);
+      setList((prev) => {
+        const byId = new Map((prev || []).map((x) => [x.id, x]));
+        for (const x of changed) byId.set(x.id, x);
+        const merged = [...byId.values()];
+        savedRef.current = merged;
+        return merged;
+      });
+      return;
+    }
+    const loaded = (rows || []).map(mapRow);
+    setList(loaded);
+    savedRef.current = loaded;
+  }
+
   // incremental: ask stock_items only for rows changed since the last
   // refresh instead of pulling the whole table down again. The full table
   // is about 1.4 MB; the usual answer to "what changed in the last
@@ -2062,11 +2126,16 @@ export default function StockControl() {
       if (isInitialLoad) hadError = true;
     }
     try {
-      const { master: loadedMaster } = await loadMasterFromTables();
-      // Same reasoning as items above — a real set of tables now, so an
-      // empty result is trustworthy on its own, not something to refuse.
-      setMaster(loadedMaster);
-      lastSavedMasterRef.current = loadedMaster;
+      // A background refresh takes the master lists only every ten
+      // minutes. First load and the Refresh button always take them.
+      if (!incremental || Date.now() - lastMasterLoadRef.current >= MASTER_REFRESH_MS) {
+        const { master: loadedMaster } = await loadMasterFromTables();
+        // Same reasoning as items above — a real set of tables now, so an
+        // empty result is trustworthy on its own, not something to refuse.
+        setMaster(loadedMaster);
+        lastSavedMasterRef.current = loadedMaster;
+        lastMasterLoadRef.current = Date.now();
+      }
       setLoadError((prev) => ({ ...prev, master: false }));
     } catch (err) {
       console.error("Failed to load master data:", err);
@@ -2078,10 +2147,12 @@ export default function StockControl() {
       if (isInitialLoad) hadError = true;
     }
     try {
-      const reqRows = await fetchAllRows("requisitions");
-      const loadedReqs = (reqRows || []).map(dbRowToRequisition);
-      setRequisitions(loadedReqs);
-      lastSavedRequisitionsRef.current = loadedReqs;
+      await loadTableRows("requisitions", {
+        incremental,
+        mapRow: dbRowToRequisition,
+        setList: setRequisitions,
+        savedRef: lastSavedRequisitionsRef,
+      });
       setLoadError((prev) => ({ ...prev, requisitions: false }));
     } catch (err) {
       console.error("Failed to load requisitions:", err);
@@ -2093,10 +2164,12 @@ export default function StockControl() {
       if (isInitialLoad) hadError = true;
     }
     try {
-      const poRows = await fetchAllRows("purchase_orders");
-      const loadedPos = (poRows || []).map(dbRowToPo);
-      setPurchaseOrders(loadedPos);
-      lastSavedPurchaseOrdersRef.current = loadedPos;
+      await loadTableRows("purchase_orders", {
+        incremental,
+        mapRow: dbRowToPo,
+        setList: setPurchaseOrders,
+        savedRef: lastSavedPurchaseOrdersRef,
+      });
       setLoadError((prev) => ({ ...prev, purchaseOrders: false }));
     } catch (err) {
       console.error("Failed to load purchase orders:", err);
@@ -2108,10 +2181,12 @@ export default function StockControl() {
       if (isInitialLoad) hadError = true;
     }
     try {
-      const usageRows = await fetchAllRows("usage_log");
-      const loadedUsage = (usageRows || []).map(dbRowToUsageLogEntry);
-      setUsageLog(loadedUsage);
-      lastSavedUsageLogRef.current = loadedUsage;
+      await loadTableRows("usage_log", {
+        incremental,
+        mapRow: dbRowToUsageLogEntry,
+        setList: setUsageLog,
+        savedRef: lastSavedUsageLogRef,
+      });
       setLoadError((prev) => ({ ...prev, usageLog: false }));
     } catch (err) {
       console.error("Failed to load usage log:", err);
@@ -2210,7 +2285,8 @@ export default function StockControl() {
     };
   }, [session]);
 
-  // Automatic background refresh — every 60 seconds, only while the tab is
+  // Automatic background refresh — every BACKGROUND_REFRESH_MS (five
+  // minutes from 14 Sep 2026; it was 60 seconds), only while the tab is
   // actually visible, so a phone with the app backgrounded isn't quietly
   // burning battery/data on a screen nobody's looking at.
   //
@@ -2230,7 +2306,7 @@ export default function StockControl() {
   useEffect(() => {
     backgroundRefreshRef.current = () => {
       loadAllData(false, { incremental: true });
-      fetchNotifications();
+      fetchNotifications({ incremental: true });
     };
   });
   useEffect(() => {
@@ -2240,9 +2316,9 @@ export default function StockControl() {
       if (document.visibilityState !== "visible") return;
       if (idleFor() > PAUSE_AFTER_MS) return;
       backgroundRefreshRef.current?.();
-    }, 60000);
+    }, BACKGROUND_REFRESH_MS);
     // Coming back to a paused screen should show the truth immediately,
-    // not up to a minute later.
+    // not up to five minutes later.
     const touch = () => {
       const wasPaused = idleFor() > PAUSE_AFTER_MS;
       lastActivityRef.current = Date.now();
@@ -2392,7 +2468,9 @@ export default function StockControl() {
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", load);
-    const timer = setInterval(load, 120000);
+    // On the same beat as the background refresh. Coming back to the tab
+    // still checks at once, which is when a change is most likely.
+    const timer = setInterval(load, BACKGROUND_REFRESH_MS);
 
     return () => {
       cancelled = true;
@@ -8520,22 +8598,45 @@ export default function StockControl() {
 
   // ---- Notifications ----
 
-  async function fetchNotifications() {
+  // incremental: only notifications changed since the newest already
+  // held -- a new one, or one read on another screen, since reading one
+  // is an update (setup-updated-at-everywhere.sql). Nothing ever deletes
+  // a notification, so there is no count to check. Before that SQL has
+  // run there is no updated_at to ask from, and this stays a full fetch.
+  async function fetchNotifications({ incremental = false } = {}) {
     if (!supabase || !profile) return;
     try {
+      const mark = notificationsSyncRef.current;
+      const since = incremental && mark.who === profile.id ? mark.since : null;
+      const narrow = (q) => (since ? q.gte("updated_at", since) : q);
       // Two separate, properly-parameterized queries rather than a single
       // .or() built from a string-interpolated name — a name containing a
       // comma or other special character could otherwise break that
       // filter syntax outright.
       const [{ data: bySalesRep, error: err1 }, { data: byRecipient, error: err2 }] = await Promise.all([
-        supabase.from("job_notifications").select("*").eq("sales_rep", roleLabel),
-        supabase.from("job_notifications").select("*").eq("recipient_id", profile.id),
+        narrow(supabase.from("job_notifications").select("*").eq("sales_rep", roleLabel)),
+        narrow(supabase.from("job_notifications").select("*").eq("recipient_id", profile.id)),
       ]);
       if (err1) throw err1;
       if (err2) throw err2;
+      const arrived = [...(bySalesRep || []), ...(byRecipient || [])];
+      notificationsSyncRef.current = {
+        who: profile.id,
+        since: newestUpdatedAt(arrived, since),
+      };
+      const newestFirst = (a, b) => new Date(b.created_at) - new Date(a.created_at);
+      if (since) {
+        if (arrived.length === 0) return;
+        setNotificationsList((prev) => {
+          const byId = new Map((prev || []).map((n) => [n.id, n]));
+          for (const n of arrived) byId.set(n.id, n);
+          return [...byId.values()].sort(newestFirst);
+        });
+        return;
+      }
       const byId = new Map();
-      for (const n of [...(bySalesRep || []), ...(byRecipient || [])]) byId.set(n.id, n);
-      const merged = [...byId.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      for (const n of arrived) byId.set(n.id, n);
+      const merged = [...byId.values()].sort(newestFirst);
       setNotificationsList(merged);
     } catch (err) {
       console.error("Failed to load notifications:", err);
