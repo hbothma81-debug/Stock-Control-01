@@ -297,3 +297,76 @@ and cut one length. Still for him to try:
    already has lines) — asked for on 11 Sep, not built.
 2. Practice still holds test programs TL-0001, TL-0002, 00003, 00004,
    00005 and the parts under JOB-0004; delete when in the way.
+
+---
+
+## 14 Sep 2026 — Laser production / Production tab conversation
+
+### Done and live
+
+- **Two laser lanes.** Tube stages and plate stages no longer wait for
+  each other on the Production tab; everything after them waits for
+  both. JOB-0014 was stuck saying "Waiting on Nesting" with two tube
+  items nested; that was the cause.
+- **Per-item packing on Laser Status.** A Packer stage set to Each is
+  packed line by line once the job is taken and finishes itself when
+  every line is packed in full. Batch and re-cuts keep the single tick.
+  Wording says "Laser parts packed" because tube parts are packed under
+  Tube Laser.
+- **The "made on" tag, steps one to seven.** Tag per job line, stage
+  dropdown under Job Process Types, Items tab dropdown with Guess the
+  rest, remembered on the stock part, cutting stages filtered, Edit
+  processes warning, catalogue "replace" import keeps a part's row.
+  Plan: `docs/MADE-ON-TAG-PLAN.md`.
+- **Production tab filters**: search, All customers, All sales reps,
+  driving pill counts, lists, the nesting shortage block and Laser
+  Status together.
+- **Job files by stage.** Files tab grouped as pills (Whole job, each
+  stage, Made by the app), Upload on each pill, several files at once,
+  "Move to..." on each file. Every stage's Production card shows its own
+  documents. Heinrich confirmed Move works on live after the SQL below.
+
+### SQL this conversation wrote
+
+- `setup-made-on-tag.sql` — three columns. Practice: confirmed by
+  Heinrich. Live: confirmed; all three columns answer 200 on the live
+  REST API (checked 14 Sep).
+- `setup-job-documents-move.sql` — an UPDATE rule on `job_documents`,
+  rules only. Live: confirmed (Heinrich pasted the four-rule result from
+  live). Practice: NOT confirmed; he only reported live. Run it on
+  practice too, or Move on practice says "the database refused".
+  Both files are registered in `build-test-database.sh`.
+
+### Built but not yet tested by Heinrich
+
+- The made-on tag on live is switched off: every stage under Job Process
+  Types was still on "Every item" when checked on live on 9 Sep, and no
+  live line is tagged. Switch-on order is at the top of
+  `docs/MADE-ON-TAG-PLAN.md`: set the dropdowns, then Items tab, Guess
+  the rest on JOB-0021, 0014, 0019, 0022, then untick the plate stages
+  JOB-0014 no longer needs.
+- Catalogue "replace" import keeping tags and job links: checked by
+  reading only; needs one real import on practice.
+- Several files at once, from the Files tab and from a Production card:
+  not exercised from the practice browser (file picker); the single-file
+  code runs in a loop.
+- Production tab filters: tested on practice by me, not by Heinrich.
+
+### Waiting on Heinrich
+
+- `setup-job-documents-move.sql` on practice.
+- The switch-on above.
+- The BOM questions. The Quoting conversation merged that plan into
+  `docs/QUOTING-AND-BOM-PLAN.md` (section 15 carries the decisions);
+  `docs/BOM-PLAN.md` is a pointer. The copy-paste handoff brief Heinrich
+  asked for was given in chat on 9 Sep and is not in the repo.
+
+### Pick up next
+
+1. Get the practice SQL run, then walk Heinrich through the switch-on.
+2. Once tags are on, retire the name-based lane rule (`inOtherLaserLane`)
+   in favour of `cuts_made_on`; two copies of one idea will drift. Not
+   before, because the lane rule is what protects mixed jobs today. Note
+   the Production readiness rule has since moved to `blockingStages`
+   (another conversation); check the lane rule still sits inside it.
+3. BOM work belongs to whoever owns `docs/QUOTING-AND-BOM-PLAN.md`.

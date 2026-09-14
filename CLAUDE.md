@@ -86,6 +86,7 @@ after asking me.
 - `node CHECK-live-table.cjs table` — whether a table answers on live. A column can be checked the same way without signing in: selecting it answers 200 if it exists, 400 if not.
 - `node CHECK-undefined-names.cjs` after every change — a missing name blanks the whole app even though the build passes.
 - Run `git log --oneline origin/main..HEAD` as its own step and read the answer before pushing. Never chain the check and the push in one command.
+- `npm test` runs Node's own test runner over `src/**/*.test.js`: the shift-window and cutting-time sums and the nesting-report parser. No database, a second to run.
 
 ## Loading data (Supabase egress)
 
@@ -103,6 +104,8 @@ after asking me.
 - Who sees money: the header total stock value — admins only. Prices per item — "Can see Rand values". Purchase Orders totals — "Can see spend totals".
 - Every new shortage must say plate or tube laser (`shortages.lane`). It shows only on that laser's nesting screen and turns red after one day outstanding. The tube laser tab should read `shortages.lane`.
 - Buy-outs are cost only; the sell price column exists but nothing writes it. A buy-out's supplier must be on the supplier list. No importer ever reads quantity on hand from a file.
+- Picking a tube section, in the nesting import or the New program form, says which stock line it is and never sets stock aside. Stock is reserved only on the job's Materials tab. The program keeps `stock_item_id`, and a change in its cut count moves that many lengths off or back onto the shelf.
+- A stage that counts per item closes itself only at the moment a quantity is logged, so a job whose lines changed afterwards can reach full and never close. Admins always get a "Close this stage" button for it, on the packing screen and the Production card; nobody else does.
 - Every job line carries a "made on" tag (`job_quote_items.made_on`: laser, tube_laser, cnc, cut_to_size, assembly, blank). Each stage says which tag it cuts (`process_type_settings.cuts_made_on`, set under Job Process Types). A cutting stage lists only its own machine's lines plus untagged ones, never an assembly, and never finishes itself when it has nothing to cut — it warns and keeps a single tick. The tag is remembered on the stock part (`stock_items.made_on`) and comes back on the next job; the catalogue "replace" import keeps a part's row and id so tags and job links survive it. Helpers: `cutsMadeOn`, `stageTakesItem`, `itemsForStage`, `stageHasNothingToCut`.
 - The plate laser and the tube laser are separate lanes on the Production tab (`inOtherLaserLane`): neither waits for the other; everything after them waits for both. Tube parts are packed by the tube operator under the Tube Laser stage; Laser Status is the plate packer's screen and says "laser parts packed".
 - A file uploaded onto a job is filed against a stage or the whole job (`job_documents.process_name`) and shows only on that stage's Production card. Every stage's card has its own documents block; the Files tab groups files by stage as pills with Upload on each and "Move to…" on each file.
@@ -126,6 +129,8 @@ after asking me.
 - A helper handed to something declared higher up in the file must be a `function` declaration, not a `const`.
 - Counting inside a state updater and reading the count on the next line gives 0.
 - The PDF's standard fonts cannot print arrows such as `↳`; the whole line comes out letter-spaced.
+- `stageIsCleared` is the one test for "this stage no longer holds the next one back", shared by `blockingStages` and `itemFlowLimit`. They used to disagree. Never write the condition out a second time.
+- The packing screen passes no `limitFor` on purpose. Capping the packer by `itemFlowLimit` would zero his counts for jobs whose sheets are still being cut, which the first-sheet rule exists to give him. Change the two together or not at all.
 - Two `setForm({ ...form, x })` calls in one handler keep only the last: both spread the same stale `form`. Use `setForm((f) => ...)`, or queue the second change through an effect as `LibraryField` does.
 - A suggestion list positioned inside its parent is cut off by any scrolling pop-up around it (`S.modal` scrolls). `TypeToFind` pins its list to the viewport for this reason; do not hand-roll another one.
 - Tapping a suggestion fires mousedown, then the input blurs. The blur handler must not act on the typed text again, or the tap is overwritten.
