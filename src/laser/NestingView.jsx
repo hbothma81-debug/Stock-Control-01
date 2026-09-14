@@ -1296,7 +1296,7 @@ function NestRow({
                 <button
                   type="button"
                   className="stk-btn"
-                  style={r.process.is_urgent ? { ...S.reqActionBtnMuted, color: C.danger, borderColor: C.danger } : S.reqActionBtnMuted}
+                  style={r.process.is_urgent ? S.reqActionBtnAlertOn : S.reqActionBtnAlert}
                   onClick={() => actions.onToggleUrgent(r.process)}
                 >
                   {r.process.is_urgent ? "Unmark urgent" : "Mark urgent"}
@@ -1304,7 +1304,7 @@ function NestRow({
                 <button
                   type="button"
                   className="stk-btn"
-                  style={{ ...S.reqActionBtnMuted, color: C.danger, borderColor: C.danger }}
+                  style={S.reqActionBtnAlert}
                   onClick={() => actions.onFlagShortage(r.job, r.process)}
                 >
                   <AlertTriangle size={13} /> Flag shortage

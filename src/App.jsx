@@ -15537,13 +15537,13 @@ export default function StockControl() {
                               {process.is_urgent && <span style={{ color: C.danger, fontWeight: 600 }}>Urgent</span>}
                             </div>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-                              <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => toggleProcessUrgent(process)}>
+                              <button type="button" className="stk-btn" style={{ ...(process.is_urgent ? S.reqActionBtnAlertOn : S.reqActionBtnAlert), flex: 1 }} onClick={() => toggleProcessUrgent(process)}>
                                 {process.is_urgent ? "Unmark urgent" : "Mark urgent"}
                               </button>
-                              <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => openShortageFlagModal(job, process)}>
+                              <button type="button" className="stk-btn" style={{ ...S.reqActionBtnAlert, flex: 1 }} onClick={() => openShortageFlagModal(job, process)}>
                                 Flag shortage
                               </button>
-                              <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => setInfoRequestModal({ job, process })}>
+                              <button type="button" className="stk-btn" style={{ ...S.reqActionBtnAlert, flex: 1 }} onClick={() => setInfoRequestModal({ job, process })}>
                                 Info Request
                               </button>
                             </div>

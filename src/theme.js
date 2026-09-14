@@ -1074,6 +1074,36 @@ export const S = {
     fontSize: 14,
     cursor: "pointer",
   },
+  // Mark urgent, Flag shortage and Info Request -- the buttons that raise
+  // the alarm on a job -- in the app's amber, so they stand out from the
+  // grey ones beside them. Not green: green means done in this app.
+  reqActionBtnAlert: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    background: C.accentTint,
+    color: C.accentRaw,
+    border: `1px solid ${C.accentRaw}`,
+    borderRadius: 6,
+    padding: "6px 10px",
+    fontSize: 14,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  // The same, switched on: "Unmark urgent" on a job already urgent.
+  reqActionBtnAlertOn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    background: C.accentRaw,
+    color: "#1B1D1F",
+    border: `1px solid ${C.accentRaw}`,
+    borderRadius: 6,
+    padding: "6px 10px",
+    fontSize: 14,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
 
   // The invoicing thread: accounts asking what is missing, and the
   // answer coming back. Set apart from the card's own meta lines so a

@@ -407,7 +407,7 @@ function StatusRow({
                   <button
                     type="button"
                     className="stk-btn"
-                    style={{ ...S.reqActionBtnMuted, color: C.danger, border: `1px solid ${C.danger}` }}
+                    style={S.reqActionBtnAlert}
                     onClick={() => onFlagShortage(r)}
                   >
                     <AlertTriangle size={13} /> Flag shortage
