@@ -121,6 +121,9 @@ after asking me.
 - Supplier logos are gone from the app and the Purchase Order PDF. The `master_suppliers.logo` column is left in place and nothing reads it.
 - Structural stock picks its section type, section and material from Stock Manager's lists (`LibraryField` with `pickOnly`); the add-stock form never adds to them. Anyone who can open Stock Manager adds new ones there.
 - Section names are shop shorthand with no "mm" (SHS 50x50x3, CHS 38.1x2), to be written by the app from fixed boxes per section type, and every existing name is to be converted. One material per real material: MS and Mild Steel are one row. Only the pick-only stock form is built so far.
+- A job line's stock code is its identity (`job_quote_items.stock_code`), not its description. Matching goes code first, description only when exactly one part carries it (`findCustomerStockMatch`); a typed code not in Customer Stock stays on the line, unlinked. Never read a code back out of a description.
+- New Job asks only customer, description and due date, then opens the job. Stages, lines, cut list, materials and buy-outs are all set on the job itself.
+- A tube job line says what it is cut from in `job_quote_items.material_type`, in the words `materialText` (`src/laser/stockOptions.js`) makes, e.g. "SHS 50x50x3mm 304". The tube import is to match on those exact words, so any rename of a section or material must rewrite this column in the same pass.
 
 ## Gotchas in App.jsx (each one passed a clean build)
 
@@ -135,6 +138,8 @@ after asking me.
 - A suggestion list positioned inside its parent is cut off by any scrolling pop-up around it (`S.modal` scrolls). `TypeToFind` pins its list to the viewport for this reason; do not hand-roll another one.
 - Tapping a suggestion fires mousedown, then the input blurs. The blur handler must not act on the typed text again, or the tap is overwritten.
 - Mixing `padding` from `S.input` with a `paddingRight` override makes React drop one of them with a console warning. Override the whole `padding`.
+- `consumeProgramStock` (a tube cut moving stock) repeats `useAllocation`'s steps: the shelf, the reservation, the usage log. Change one, change the other.
+- When a form's fields move to another screen, move its checks with them. New Job kept "select at least one process" after the stage ticks left it, and blocked every new job on live.
 
 ## Checking a screen without signing in
 

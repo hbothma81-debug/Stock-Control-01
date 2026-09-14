@@ -370,3 +370,106 @@ and cut one length. Still for him to try:
    the Production readiness rule has since moved to `blockingStages`
    (another conversation); check the lane rule still sits inside it.
 3. BOM work belongs to whoever owns `docs/QUOTING-AND-BOM-PLAN.md`.
+
+---
+
+## 14 Sep 2026 — Jobs page conversation
+
+### Done and live (8 to 14 Sep)
+
+- **Cut to size tab** on a job: cut lines, bars needed, cutting order,
+  Set aside / Requisition, a printed cutting list with Materials used
+  (floor, set aside, on order, to order). Production's Cut To Size
+  stage has a per-line counter and Book out per bar.
+- **Jobs list:** progress chips with stage names under each row; search
+  also finds the SigmaNest number.
+- **Job editor:** New Job is now a doorway (customer, description, due
+  date) that opens the job; stages are ticked on the job. SigmaNest and
+  Excel quote imports on the Items tab. Item prices behind "Can see
+  Rand values".
+- **Buy-outs tab:** one PO per supplier through the normal PO numbers,
+  add a supplier from the tab, arrivals reserved to the job. The old
+  Buy-out notes box is retired.
+- **Materials tab:** reserve or take from stock, aimed at a stage or
+  not. The stock picker shows free and reserved, has filters including
+  "reserved for this customer", hides empties and assets. Cutting a
+  tube program takes lengths off the job's reservation (`consumeProgramStock`;
+  the Laser conversation calls it, ca63aed).
+- **Stock code is its own field** (`job_quote_items.stock_code`). A line
+  reads code, description, quantity, price; the code is matched first.
+  Code column on the job sheet, delivery note and invoice request. An
+  Add to Customer Stock button on every line. On live: 743 lines, 46
+  given a code by the backfill, none still carrying it in the text.
+- **Tube material type:** a Material type box on lines and parts made on
+  the tube laser, saved in `materialText` words. Went live on 14 Sep in
+  the Planning conversation's push, not mine, before Heinrich tried it.
+
+### Every setup file this conversation wrote
+
+Checked 14 Sep by selecting each table or column over the REST API
+(200 = it exists) on practice and on live:
+
+| File | Adds | Practice | Live |
+| --- | --- | --- | --- |
+| `setup-job-cut-items.sql` | table `job_cut_items` | yes | yes |
+| `setup-job-buyout-items.sql` | table `job_buyout_items` | yes | yes |
+| `setup-laser-program-stock-link.sql` | `laser_programs.stock_item_id` | yes | yes |
+| `setup-job-line-stock-code.sql` | `job_quote_items.stock_code`, plus a one-off backfill | yes | yes |
+| `setup-job-line-material-type.sql` | `job_quote_items.material_type` | yes | yes |
+| `setup-copy-description-into-stock-code.sql` | data only: copies the description into the stock code on the jobs named in it; ships with an empty job list | not confirmed | not confirmed |
+
+The Planning entry above says `setup-job-line-material-type.sql` has not
+run. It has since: the column answers on both databases.
+
+Registered today: stock code and material type in
+`build-test-database.sh` (`setup-ALL.sql` regenerated), all five schema
+files in `CHECK-which-setup-files-are-run.sql`. The stock link stays out
+of `setup-ALL.sql` like every laser file, because `laser_programs` is not
+created there. The copy script is a one-off and stays out too.
+
+### Built but not confirmed tested by Heinrich
+
+1. **Material type:** set a line's made-on to Tube laser, pick a
+   material, reload, it stays. Copy the job; it comes across.
+2. **Stock code:** type a known code on a line, the description and
+   price fill. Type an unknown code, it stays and the line is unlinked;
+   Add to Customer Stock then makes the part with that code. Two parts
+   with the same name and different codes: the right one is picked.
+3. **Printouts:** the Code column on the job sheet, delivery note and
+   invoice request.
+4. **Materials tab:** Reserve against a stage, Take from stock now,
+   release. The picker's filters and "reserved for this customer".
+5. **Tube drawdown:** Cut one on a tube program whose job has that bar
+   reserved; shelf and reservation drop by one, Undo one puts it back.
+   With no reservation it warns and carries on.
+6. **Buy-outs:** raise a PO from the tab, receive it on Receiving, it
+   lands reserved on the job.
+7. **Cut to size:** Book out per bar from the Production tab.
+8. **Jobs list:** search by a SigmaNest number.
+
+### Waiting on Heinrich
+
+- `setup-copy-description-into-stock-code.sql`: fill in the job list and
+  run it on live. Suggested: 'JOB-0090','JOB-0089','JOB-0087','JOB-0086',
+  'JOB-0085','JOB-0084','JOB-0075','JOB-0073','JOB-0069','JOB-0068',
+  'JOB-0066','JOB-0065','JOB-0063','JOB-0062','JOB-0059','JOB-0057',
+  'JOB-0055','JOB-0049','JOB-0047','JOB-0046','JOB-0044','JOB-0041',
+  'JOB-0040','JOB-0037','JOB-0036','JOB-0018','JOB-0013'.
+- `CHECK-imported-parts-intact.sql`: results 2 and 3 (both should be 0)
+  were never sent back.
+- Tag a few tube lines with a material on a real job. The Laser
+  conversation builds the import matching only against real tagged lines.
+- The open questions at the end of `docs/TUBE-PARTS-BY-SECTION-PLAN.md`:
+  which wins when the job says one material and the file another, and
+  part-way tagged jobs.
+
+### Pick up next
+
+1. When Stock Manager converts section names (its step 5), the same pass
+   must rewrite `job_quote_items.material_type`. Its plan already says
+   so; hold it to that.
+2. Tidy-up: the old New Job pop-up code (quote imports, quote lines, cut
+   lines, stage ticks) is unreachable in App.jsx. Remove it once the
+   doorway has settled.
+3. The customer and sales rep filters on Jobs are type-to-find now (the
+   dropdowns conversation did it); nothing to do unless they misbehave.

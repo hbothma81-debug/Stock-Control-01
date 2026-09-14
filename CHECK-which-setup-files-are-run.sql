@@ -1,4 +1,4 @@
--- Which of the laser, shift, buy-out, invoicing and job-file setup files have been run on THIS database.
+-- Which of the laser, shift, buy-out, invoicing, job-file and job-line setup files have been run on THIS database.
 --
 -- Each setup file adds a table, a column or a function. This looks for
 -- one thing each file adds and says whether it is there. It changes
@@ -91,6 +91,16 @@ with checks (setup_file, looks_for, found) as (
       exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'laser_programs_machine_number_live_idx')),
     ('setup-tube-laser-import.sql',     'table tube_section_aliases',
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'tube_section_aliases')),
+    ('setup-job-cut-items.sql',         'table job_cut_items',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'job_cut_items')),
+    ('setup-job-buyout-items.sql',      'table job_buyout_items',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'job_buyout_items')),
+    ('setup-laser-program-stock-link.sql', 'column laser_programs.stock_item_id',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'laser_programs' and column_name = 'stock_item_id')),
+    ('setup-job-line-stock-code.sql',   'column job_quote_items.stock_code',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'job_quote_items' and column_name = 'stock_code')),
+    ('setup-job-line-material-type.sql', 'column job_quote_items.material_type',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'job_quote_items' and column_name = 'material_type')),
     ('setup-made-on-welding.sql',       'cut method Welding allowed',
       exists (select 1 from pg_constraint where conname = 'job_quote_items_made_on_check' and pg_get_constraintdef(oid) like '%welding%'))
 )
