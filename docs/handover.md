@@ -39,10 +39,9 @@ session ended: what is done, what is half-done, what to pick up next.
 - **`BACKGROUND_REFRESH_MS` is 5 minutes temporarily.** Decide after the
   25 Sep reset whether to put it back to 1 minute (60000). A reminder for
   26 Sep was offered and not yet answered.
-- **Tube line material.** The box is live but `setup-job-line-material-type.sql`
-  (adds `job_quote_items.material_type`) has not been run on either
-  database. Until it runs, the box explains that it cannot save yet. This
-  is the Jobs / Laser conversations' feature.
+- **Tube line material.** Done since this entry was written:
+  `setup-job-line-material-type.sql` has run on both databases (the
+  column answers on practice and live, checked 14 Sep).
 - **Old shortage on live** flagged before lanes existed: it has catch-up
   stages for both lasers. Delete the wrong-lane nesting stage on that
   job by hand.
@@ -64,8 +63,7 @@ session ended: what is done, what is half-done, what to pick up next.
 
 1. Look at the egress chart with Heinrich; decide on the 1-minute
    refresh after 25 Sep.
-2. Get `setup-job-line-material-type.sql` run on practice and live.
-3. If egress is still high: take master lists off the timer entirely
+2. If egress is still high: take master lists off the timer entirely
    and fetch them only when they change.
 
 ---
