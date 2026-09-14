@@ -74,6 +74,7 @@ ORDER=(
   setup-profiles-sales-department.sql
   add-purchase-order-permission.sql
   add-usage-log-permission.sql
+  setup-pdf-print-permission.sql
   setup-theme-preference.sql
 )
 

@@ -10,6 +10,8 @@ import { C, S, THEME_CSS } from "./theme.js";
 import Section from "./Section.jsx";
 import RecordRow from "./RecordRow.jsx";
 import TypeToFind from "./TypeToFind.jsx";
+import PdfViewer from "./PdfViewer.jsx";
+import { jsPDF } from "jspdf";
 import { FileText } from "lucide-react";
 
 const PREVIEW_CUSTOMERS = ["Acme Steel", "acme fabrication", "Bell Equipment", "Greenzone", "HPE", "Zulu Engineering"];
@@ -40,6 +42,38 @@ function TypeToFindDemo() {
   );
 }
 
+// A made-up three-page PDF: portrait A4, landscape A4, and a sheet the size
+// of an A1 drawing, which is what tests the big-canvas ceiling on a phone.
+function makeSamplePdf() {
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  doc.setFontSize(22);
+  doc.text("Page 1 of 3 - portrait A4", 15, 25);
+  doc.setFontSize(11);
+  for (let i = 0; i < 30; i++) doc.text(`Line ${i + 1}: 10 off 3mm MS bracket, bend 90 deg`, 15, 40 + i * 8);
+  doc.addPage("a4", "landscape");
+  doc.setFontSize(22);
+  doc.text("Page 2 of 3 - landscape A4", 15, 25);
+  doc.rect(15, 35, 267, 160);
+  doc.addPage([841, 594], "landscape");
+  doc.setFontSize(60);
+  doc.text("Page 3 of 3 - A1 drawing size", 30, 80);
+  doc.setLineWidth(1);
+  doc.rect(20, 20, 801, 554);
+  doc.setFontSize(12);
+  doc.text("Small print in the corner, to check zoom", 700, 580);
+  return doc.output("bloburl");
+}
+
+function PdfViewerDemo() {
+  const [url] = React.useState(makeSamplePdf);
+  return (
+    <Section title="PDF viewer" count={3}>
+      <div style={S.roleHint}>A made-up PDF drawn by PDF.js: portrait, landscape and an A1 sheet.</div>
+      <PdfViewer url={url} title="Sample.pdf" />
+    </Section>
+  );
+}
+
 function Preview() {
   // The colours live on a data-stk-theme attribute, same as the app.
   React.useEffect(() => {
@@ -57,6 +91,8 @@ function Preview() {
         <div style={S.roleHint}>Made-up data. No database, no login.</div>
 
         <TypeToFindDemo />
+
+        <PdfViewerDemo />
 
         <Section title="Open by default" count={3}>
           <RecordRow title="DN-0042" summary="JOB-0014 — Greenzone" right={<span style={S.roleHint}>To customer</span>}>

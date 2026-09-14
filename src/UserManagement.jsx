@@ -156,6 +156,17 @@ export default function UserManagement({
                     />
                     Can see spend totals (Purchase Orders)
                   </label>
+                  {/* Who may keep a copy: the Open / Print and Download PDF
+                      buttons under every PDF except delivery notes, which
+                      everyone may print. Looking at a PDF needs no tick. */}
+                  <label style={S.deptToggleItem}>
+                    <input
+                      type="checkbox"
+                      checked={!!p.canPrintPdfs}
+                      onChange={(e) => updatePersonField(p.id, "canPrintPdfs", e.target.checked)}
+                    />
+                    Can print and download PDFs
+                  </label>
                   <label style={S.deptToggleItem}>
                     <input
                       type="checkbox"

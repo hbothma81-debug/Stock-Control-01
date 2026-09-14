@@ -69,6 +69,8 @@ with checks (setup_file, looks_for, found) as (
       exists (select 1 from pg_trigger where tgname = 'job_notifications_set_updated_at' and not tgisinternal)),
     ('setup-shortage-lane.sql',           'column shortages.lane',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'shortages' and column_name = 'lane')),
+    ('setup-pdf-print-permission.sql',  'column profiles.can_print_pdfs',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'can_print_pdfs')),
     ('setup-job-documents-move.sql',    'rule: job_documents rows can be changed (Move to...)',
       exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'job_documents' and cmd = 'UPDATE')),
     ('setup-quoting-and-bom.sql',       'table quotes',

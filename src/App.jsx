@@ -75,6 +75,7 @@ import LaserTab from "./laser/LaserTab.jsx";
 import useLaserPrograms from "./laser/useLaserPrograms.js";
 import Section from "./Section.jsx";
 import RecordRow from "./RecordRow.jsx";
+import PdfViewer from "./PdfViewer.jsx";
 import { extractPdfTextItems, parseSigmaNestQuote, browserInflate } from "./lib/sigmanestQuote.js";
 // The tube nesting report's reader, shared with the tube laser tab: the
 // job's Items tab reads the parts off the same file, without the
@@ -2429,6 +2430,7 @@ export default function StockControl() {
                 canMarkReceived: !!data.can_mark_received,
                 canSeeValue: !!data.can_see_value,
                 canSeeSpendTotals: !!data.can_see_spend_totals,
+                canPrintPdfs: !!data.can_print_pdfs,
                 canAccessStockManager: !!data.can_access_stock_manager,
                 canManageRequisitions: !!data.can_manage_requisitions,
                 canRaisePO: !!data.can_raise_po,
@@ -7970,7 +7972,7 @@ export default function StockControl() {
   async function generateAndStoreDocument({ doc, documentType, bucket, path, fileName, jobId, relatedId, showPreview = true }) {
     if (showPreview) {
       setPreviewLoading(true);
-      setPreviewItem({ attachmentType: "pdf", attachmentName: fileName });
+      setPreviewItem({ attachmentType: "pdf", attachmentName: fileName, openToEveryone: documentType === "delivery_note" });
       setPreviewData(null);
       setPreviewNotFiled(false);
     }
@@ -8105,7 +8107,7 @@ export default function StockControl() {
       const path = `${job.id}/delivery-note-${note.delivery_note_number}.pdf`;
       const { data, error } = await supabase.storage.from("job-documents").createSignedUrl(path, 3600);
       if (error) throw error;
-      setPreviewItem({ attachmentType: "pdf", attachmentName: `${note.delivery_note_number}.pdf` });
+      setPreviewItem({ attachmentType: "pdf", attachmentName: `${note.delivery_note_number}.pdf`, openToEveryone: true });
       setPreviewData(data.signedUrl);
       setPreviewLoading(false);
     } catch (err) {
@@ -8121,7 +8123,7 @@ export default function StockControl() {
     try {
       const { data, error } = await supabase.storage.from(record.bucket).createSignedUrl(record.storage_path, 3600);
       if (error) throw error;
-      setPreviewItem({ attachmentType: "pdf", attachmentName: record.file_name });
+      setPreviewItem({ attachmentType: "pdf", attachmentName: record.file_name, openToEveryone: record.document_type === "delivery_note" });
       setPreviewData(data.signedUrl);
       setPreviewLoading(false);
     } catch (err) {
@@ -9368,6 +9370,7 @@ export default function StockControl() {
         canMarkReceived: !!d.can_mark_received,
         canSeeValue: !!d.can_see_value,
         canSeeSpendTotals: !!d.can_see_spend_totals,
+        canPrintPdfs: !!d.can_print_pdfs,
         canAccessStockManager: !!d.can_access_stock_manager,
         canManageRequisitions: !!d.can_manage_requisitions,
         canRaisePO: !!d.can_raise_po,
@@ -9391,6 +9394,7 @@ export default function StockControl() {
     canMarkReceived: "can_mark_received",
     canSeeValue: "can_see_value",
     canSeeSpendTotals: "can_see_spend_totals",
+    canPrintPdfs: "can_print_pdfs",
     canAccessStockManager: "can_access_stock_manager",
     canManageRequisitions: "can_manage_requisitions",
     canRaisePO: "can_raise_po",
@@ -9474,6 +9478,7 @@ export default function StockControl() {
               canMarkReceived: false,
               canSeeValue: false,
               canSeeSpendTotals: false,
+              canPrintPdfs: false,
               canAccessStockManager: false,
               canManageRequisitions: false,
               canRaisePO: false,
@@ -9626,6 +9631,11 @@ export default function StockControl() {
   // somebody can need to price a purchase order without being shown what
   // the shop has spent this month.
   const canSeeSpendTotals = isAdmin || !!profile?.canSeeSpendTotals;
+  // The Open / Print and Download PDF buttons under a PDF. Anyone who can
+  // open a PDF can look at it; keeping a copy is this tick. Delivery notes
+  // are the exception (`openToEveryone`): whoever hands the goods over
+  // prints them.
+  const canPrintPdfs = isAdmin || !!profile?.canPrintPdfs;
   const canRequisition = isAdmin || !!profile?.canRequisition;
   const canMarkReceivedPerm = isAdmin || !!profile?.canMarkReceived;
   const canManageRequisitions = isAdmin || !!profile?.canManageRequisitions;
@@ -19709,7 +19719,7 @@ export default function StockControl() {
         // while Job Detail (or another modal) is already open behind it,
         // same fix as the New Stock Item modal needed for the same reason.
         <div style={{ ...S.modalOverlay, zIndex: 30 }}>
-          <div style={{ ...S.modal, maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ ...S.modal, maxWidth: previewItem.attachmentType === "pdf" ? 900 : 520 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>{previewItem.attachmentName || "Attachment"}</span>
               <button type="button" className="stk-btn" style={S.iconBtn} onClick={closePreview}>
@@ -19739,25 +19749,26 @@ export default function StockControl() {
             )}
             {!previewLoading && previewData && previewItem.attachmentType === "pdf" && (
               <>
-                {/* iframe, not embed — most mobile browsers don't support
-                    <embed type="application/pdf"> and were falling back to
-                    downloading the file instead of showing it inline. */}
-                <iframe src={previewData} title={previewItem.attachmentName || "Attachment"} style={S.previewPdf} />
-                <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 8 }}>
-                  {(!previewItem.restrictDownload || isAdmin) && (
-                    <>
-                      <a href={previewData} target="_blank" rel="noreferrer" style={S.previewDownload}>
-                        Open / Print
-                      </a>
-                      <a href={previewData} download={previewItem.attachmentName || "drawing.pdf"} style={S.previewDownload}>
-                        Download PDF
-                      </a>
-                    </>
-                  )}
-                </div>
-                {previewItem.restrictDownload && !isAdmin && (
+                {/* Drawn page by page by PDF.js, not handed to the phone's
+                    own viewer in a frame: phones and tablets showed a blank
+                    box, the first page only, or saved the file to Downloads.
+                    See PdfViewer.jsx. */}
+                <PdfViewer url={previewData} title={previewItem.attachmentName || "Attachment"} />
+                {/* A document that was made but not filed is lost unless it
+                    is printed now, so the buttons show for it whatever the
+                    tick says. */}
+                {canPrintPdfs || previewItem.openToEveryone || previewNotFiled ? (
+                  <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 8 }}>
+                    <a href={previewData} target="_blank" rel="noreferrer" style={S.previewDownload}>
+                      Open / Print
+                    </a>
+                    <a href={previewData} download={previewItem.attachmentName || "document.pdf"} style={S.previewDownload}>
+                      Download PDF
+                    </a>
+                  </div>
+                ) : (
                   <div style={{ ...S.roleHint, textAlign: "center", marginTop: 8 }}>
-                    Downloading this drawing is restricted to Admin.
+                    Printing and downloading PDFs is not ticked for you. Ask an admin if you need a copy.
                   </div>
                 )}
               </>
