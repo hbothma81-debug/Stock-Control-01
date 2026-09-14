@@ -669,3 +669,33 @@ hands over, now the tube tab too.
 - **Check results.** Heinrich pastes a read-only check's result into the
   main conversation, which writes it into this file under the area that
   asked for it, so that conversation finds it with `/monday`.
+
+---
+
+## 14 Sep 2026 — Check results for Stock Manager: sections and materials
+
+`CHECK-sections-and-materials.sql`, run on **live** by Heinrich and pasted
+into the main conversation. The full result, exactly as it came back, is in
+`docs/check-results/2026-09-14-sections-and-materials.md`.
+
+- **Live holds** 71 sections, 10 section kinds, 12 materials and 75 structural stock lines.
+- **Clean (no rows):** checks 2, 5, 7, 8, 10 — no size spelled two ways by the check's rule, no kind or material off the lists, no look-alike materials.
+- **3. Sections with no material:** 59 of 71. The large one; it is what sections step 3 onward exists for.
+- **1. Entered twice:** SHS 38.1x38.1x1.6, both with no material.
+- **4. Sections with no kind:** 2 — "RHS 76x50x1.9mm / Mild Steel" and "SHS 25X25X1.9".
+- **6. A section's material off the Material Types list:** SS304.
+- **11. Stock lines saying SS304** where Sections uses the full name: 9.
+- **9 and 12, the same 6 stock lines:** each sits on a section that is not in Sections, so it finds no price row: 254x146x37 / S355, RHS 100x50x2mm / SS304, Round Tube 88.9 X 2.5mm wall / Mild Steel, Seamless Pipe NB20 SCH160 (26.7 x 5.56mm) / Mild Steel, SHS 50x50x1.5mm / SS304, SHS 50x50x2mm / SS304.
+
+Seen in the list by the main conversation, not flagged by the check — for
+the conversion step to judge, not decided:
+
+- Probably one section under two names: "I-Beam 254x146x37KG" (section) and
+  "254x146x37" (stock line); "Seamless Pipe NB20 SCH160 26.7 x 5.56" and the
+  stock line's "(26.7 x 5.56mm)".
+- Imperial sizes written two ways, which the check's rule treats as different
+  numbers: "SHS 76x76x2mm" and "SHS 76.2x76.2x2mm"; round tube 19mm and
+  19.05mm. Heinrich to say whether each pair is one real size.
+- "Round Bar: 48.4x3.5" is a tube size filed under Round Bar; "Round Tube
+  48.4 X 3.5mm wall" also exists.
+- "Round Tube 42mm x 1." is cut off.
