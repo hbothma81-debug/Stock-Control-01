@@ -26,6 +26,10 @@ import { C, S } from "./theme.js";
 // `titleSize` lets the heading carry more weight than the pill around it,
 // which is what a supplier name wants: it is the thing being looked for,
 // and the pill is only its container.
+//
+// `danger` makes the pill red, open or shut, for something that is holding
+// work up -- a Production department's jobs standing on an Info Request.
+// Shut and red still says "look in here", which is the point.
 
 export default function Section({
   title,
@@ -34,13 +38,16 @@ export default function Section({
   defaultOpen = true,
   right,
   quiet = false,
+  danger = false,
   titleSize = 15,
   children,
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const shown = collapsible ? open : true;
 
-  const activeStyle = shown
+  const activeStyle = danger
+    ? { border: `1px solid ${C.danger}`, background: C.dangerTint, color: C.danger }
+    : shown
     ? quiet
       ? { border: `1px solid ${C.border}` }
       : { border: `1px solid ${C.accentRaw}`, background: C.accentTint, color: C.accentRaw }

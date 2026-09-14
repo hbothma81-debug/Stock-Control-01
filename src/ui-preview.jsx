@@ -11,6 +11,7 @@ import Section from "./Section.jsx";
 import RecordRow from "./RecordRow.jsx";
 import TypeToFind from "./TypeToFind.jsx";
 import PdfViewer from "./PdfViewer.jsx";
+import InfoRequestModal from "./InfoRequestModal.jsx";
 import { jsPDF } from "jspdf";
 import { FileText } from "lucide-react";
 
@@ -119,6 +120,34 @@ function PdfViewerDemo() {
   );
 }
 
+// The Info Request pop-up with a made-up job. Nothing is saved: the photo
+// "uploads" to a pretend path and Send just shows what would be stored.
+function InfoRequestDemo() {
+  const [open, setOpen] = React.useState(false);
+  const [sent, setSent] = React.useState(null);
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => setOpen(true)}>
+        Info Request
+      </button>
+      {sent && <pre style={{ ...S.roleHint, whiteSpace: "pre-wrap" }}>{JSON.stringify(sent, null, 2)}</pre>}
+      {open && (
+        <InfoRequestModal
+          job={{ job_number: "JOB-0042", customer: "Greenzone" }}
+          process={{ process_name: "Welding" }}
+          onUploadPhoto={async (file) => `demo/${file.name}`}
+          onSubmit={async (req) => {
+            setSent(req);
+            setOpen(false);
+            return true;
+          }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
 function Preview() {
   // The colours live on a data-stk-theme attribute, same as the app.
   React.useEffect(() => {
@@ -170,6 +199,11 @@ function Preview() {
 
         <Section title="Shut by default" defaultOpen={false} count={0}>
           <div style={S.empty}>Nothing here yet.</div>
+        </Section>
+
+        <Section title="Standing — waiting on office" count={1} danger>
+          <div style={S.roleHint}>A danger pill: red whether open or shut. Tap the heading to check it stays red.</div>
+          <InfoRequestDemo />
         </Section>
 
         <Section

@@ -73,6 +73,11 @@ import TypeToFind from "./TypeToFind.jsx";
 import LaserStatus from "./laser/LaserStatus.jsx";
 import LaserTab from "./laser/LaserTab.jsx";
 import useLaserPrograms from "./laser/useLaserPrograms.js";
+import InfoRequestModal from "./InfoRequestModal.jsx";
+import {
+  openRequestsByProcess, mergeInfoRequests, standingFor, infoRequestRecipients,
+  loadInfoRequests, raiseInfoRequest, clearInfoRequest, loadRecipientProfiles, uploadInfoRequestPhoto,
+} from "./lib/infoRequests.js";
 import Section from "./Section.jsx";
 import RecordRow from "./RecordRow.jsx";
 import PdfViewer from "./PdfViewer.jsx";
@@ -1691,6 +1696,12 @@ export default function StockControl() {
   const [newJobItemSuggestOpen, setNewJobItemSuggestOpen] = useState(null); // which quote item row index has its suggestion dropdown open
   const [notificationsList, setNotificationsList] = useState(null);
   const [shortagesList, setShortagesList] = useState(null);
+  // Open Info Requests: a job standing until the office answers
+  // (src/lib/infoRequests.js). The ref is the newest updated_at held, so
+  // a refresh asks only for what changed.
+  const [infoRequestsList, setInfoRequestsList] = useState(null);
+  const infoRequestsSyncRef = useRef(null);
+  const [infoRequestModal, setInfoRequestModal] = useState(null);
   // Every allocation still outstanding, across all jobs — so a stock item
   // can show what of it is already spoken for, not just the job screen.
   const [allocationsList, setAllocationsList] = useState(null);
@@ -2250,7 +2261,7 @@ export default function StockControl() {
     // only after closing and opening the app. Refresh is exactly when
     // someone wants to know, and the shortages and reservations beside
     // them were loaded the same way and had the same problem.
-    await Promise.all([loadAllData(false), fetchNotifications(), fetchShortages(), fetchAllocations()]);
+    await Promise.all([loadAllData(false), fetchNotifications(), fetchShortages(), fetchAllocations(), fetchInfoRequests({ incremental: true })]);
     setIsRefreshing(false);
   }
 
@@ -2308,6 +2319,7 @@ export default function StockControl() {
     backgroundRefreshRef.current = () => {
       loadAllData(false, { incremental: true });
       fetchNotifications({ incremental: true });
+      fetchInfoRequests({ incremental: true });
     };
   });
   useEffect(() => {
@@ -2973,7 +2985,7 @@ export default function StockControl() {
   // directly fixes the actual complaint (leaving the app), not a polish
   // detail on top of it.
   const anyModalOpen = !!(
-    usageModal || assetRemoveModal || shortageModal || jobDetail || newStockItemModal ||
+    usageModal || assetRemoveModal || shortageModal || infoRequestModal || jobDetail || newStockItemModal ||
     markInvoicedModal || deliveryNoteBatchModal || copyJobModal || previewItem ||
     showAddStockItemModal || showStockImportModal || showBuyoutImportModal || editProcessesModal || productionSelectedDept ||
     productionSelectedProcessId || showManager || requisitionTarget || showRequisitionPicker ||
@@ -2987,6 +2999,7 @@ export default function StockControl() {
     setUsageModal(null);
     setAssetRemoveModal(null);
     setShortageModal(null);
+    setInfoRequestModal(null);
     setJobDetail(null);
     setNewStockItemModal(null);
     setMarkInvoicedModal(null);
@@ -3047,6 +3060,7 @@ export default function StockControl() {
   useEffect(() => {
     if (profile && shortagesList === null) fetchShortages();
     if (profile && allocationsList === null) fetchAllocations();
+    if (profile && infoRequestsList === null) fetchInfoRequests();
   }, [profile]);
 
   // Belt-and-suspenders on top of the immediate saves above: the moment this
@@ -8698,6 +8712,84 @@ export default function StockControl() {
     } catch (err) {
       console.error("Failed to load shortages:", err);
       setShortagesList([]);
+    }
+  }
+
+  // ---- Info Requests (rules and database calls: src/lib/infoRequests.js) ----
+
+  // First call: the open ones. Every call after: only rows changed since
+  // the newest held, so an answer or a clear on another screen drops it.
+  async function fetchInfoRequests({ incremental = false } = {}) {
+    if (!supabase) return;
+    try {
+      const since = incremental ? infoRequestsSyncRef.current : null;
+      const arrived = await loadInfoRequests(supabase, since);
+      infoRequestsSyncRef.current = newestUpdatedAt(arrived, since);
+      if (since && arrived.length === 0) return;
+      setInfoRequestsList((prev) => mergeInfoRequests(since ? prev : [], arrived));
+    } catch (err) {
+      console.error("Failed to load info requests:", err);
+      setInfoRequestsList((prev) => prev || []);
+    }
+  }
+
+  // Resolves true when saved, so the pop-up closes; false keeps it open
+  // with everything typed still in it.
+  async function submitInfoRequest({ kind, note, photoPath, photoName }) {
+    const { job, process } = infoRequestModal;
+    try {
+      const row = await raiseInfoRequest(supabase, { job, process, kind, note, photoPath, photoName, by: roleLabel, byId: currentUser?.id });
+      setInfoRequestsList((prev) => mergeInfoRequests(prev, [row]));
+      setInfoRequestModal(null);
+    } catch (err) {
+      console.error("Failed to raise info request:", err);
+      alert("That didn't save — check your connection and try again.");
+      return false;
+    }
+    // Told after the save, and a failure here does not undo it: the card
+    // is already red for everyone. sales_rep stays blank on purpose -- set,
+    // the rep would also get every copy addressed to the admins.
+    try {
+      const recipients = infoRequestRecipients(job.sales_rep, await loadRecipientProfiles(supabase));
+      if (recipients.length) {
+        await sendNotifications(
+          recipients.map((recipientId) => ({
+            job_id: job.id,
+            job_number: job.job_number,
+            sales_rep: "",
+            recipient_id: recipientId,
+            message: `Info Request on ${job.job_number} (${job.customer || "no customer"}) at ${process.process_name}, from ${roleLabel}: ${kind} — ${note}`,
+          }))
+        );
+      }
+    } catch (err) {
+      console.error("Info request saved, but nobody could be told:", err);
+    }
+    return true;
+  }
+
+  // The operator's "Got it / sorted". Anyone who can see the card may.
+  async function clearInfoRequestFromCard(req) {
+    try {
+      const row = await clearInfoRequest(supabase, req, { by: roleLabel, byId: currentUser?.id });
+      if (!row) alert("Somebody else has already answered or cleared this one.");
+      // Not open any more either way. The refresh brings back whatever
+      // the other person did.
+      setInfoRequestsList((prev) => mergeInfoRequests(prev, [row || { ...req, status: "cleared" }]));
+      fetchInfoRequests({ incremental: true });
+    } catch (err) {
+      console.error("Failed to clear info request:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  async function uploadInfoRequestPhotoFor(jobId, file) {
+    try {
+      return await uploadInfoRequestPhoto(supabase, jobId, file);
+    } catch (err) {
+      console.error("Failed to upload info request photo:", err);
+      alert("Couldn't upload that photo — check your connection and try again.");
+      return null;
     }
   }
 
@@ -14721,15 +14813,18 @@ export default function StockControl() {
             {(() => {
               const q = productionFiltering;
               const matchesJob = ({ job }) => productionJobMatches(job);
+              const standingHere = openRequestsByProcess(infoRequestsList);
               const visibleDepts = Object.entries(productionQueue || {})
                 .map(([procType, allEntries]) => {
                   // Counts what the department can actually see now that
                   // nothing is hidden, so the numbers on the card and the
-                  // two pills behind it agree. Ready is what can start;
-                  // waiting is the workload on its way.
+                  // pills behind it agree. Ready is what can start;
+                  // waiting is the workload on its way; standing is held
+                  // up on an Info Request and counted in neither.
                   const shown = q ? allEntries.filter(matchesJob) : allEntries;
-                  const readyCount = shown.filter((e) => e.isReady || e.partlyReady).length;
-                  const waitingCount = shown.length - readyCount;
+                  const standingCount = shown.filter((e) => standingHere[e.process.id]).length;
+                  const readyCount = shown.filter((e) => (e.isReady || e.partlyReady) && !standingHere[e.process.id]).length;
+                  const waitingCount = shown.length - readyCount - standingCount;
                   // Only nesting gets the marker now. A shortage past that
                   // point is carried by its own run, which shows up in the
                   // department's normal list like any other work — a second
@@ -14739,7 +14834,7 @@ export default function StockControl() {
                     : [];
                   const hasPendingShortage = pendingHere.length > 0;
                   const oldestPending = pendingHere.reduce((worst, s) => (shortageAgeDays(s) > (shortageAgeDays(worst) ?? -1) ? s : worst), pendingHere[0] || null);
-                  return { procType, readyCount, waitingCount, hasPendingShortage, oldestPending };
+                  return { procType, readyCount, waitingCount, standingCount, hasPendingShortage, oldestPending };
                 })
                 // A department with nothing ready and no shortage needing
                 // attention has nothing to actually do right now — hide it
@@ -14752,7 +14847,7 @@ export default function StockControl() {
                 // Only departments with work in them. A station with
                 // nothing at it is noise on a screen someone is using to
                 // decide what to do next.
-                .filter(({ readyCount, waitingCount, hasPendingShortage }) => readyCount > 0 || waitingCount > 0 || hasPendingShortage)
+                .filter(({ readyCount, waitingCount, standingCount, hasPendingShortage }) => readyCount > 0 || waitingCount > 0 || standingCount > 0 || hasPendingShortage)
                 // In factory-flow order, the order set in Stock Manager,
                 // so the list reads the way work moves through the shop.
                 // Anything no longer in that list sorts last rather than
@@ -14826,11 +14921,12 @@ export default function StockControl() {
                       })()}
                       <ChevronRight size={20} />
                     </button>
-                    {visibleDepts.map(({ procType, readyCount, waitingCount, hasPendingShortage, oldestPending }) => {
+                    {visibleDepts.map(({ procType, readyCount, waitingCount, standingCount, hasPendingShortage, oldestPending }) => {
                 // A department with work on the way but nothing that can
                 // start stays on the list, dimmed: it should know what is
-                // coming, but nobody should walk over to it.
-                const idle = readyCount === 0 && !hasPendingShortage;
+                // coming, but nobody should walk over to it. Standing work
+                // is never dimmed -- somebody has to chase it.
+                const idle = readyCount === 0 && !hasPendingShortage && standingCount === 0;
                 return (
                   <button
                     key={procType}
@@ -14850,6 +14946,9 @@ export default function StockControl() {
                       <span style={{ fontSize: 12, fontWeight: 600, color: C.danger, whiteSpace: "nowrap" }}>
                         {(() => { const d = shortageAgeDays(oldestPending); return d === 0 ? "shortage today" : `shortage ${d} day${d === 1 ? "" : "s"}`; })()}
                       </span>
+                    )}
+                    {standingCount > 0 && (
+                      <span style={{ fontSize: 12, fontWeight: 600, color: C.danger, whiteSpace: "nowrap" }}>{standingCount} standing</span>
                     )}
                     {waitingCount > 0 && (
                       <span style={{ fontSize: 13, fontWeight: 500, color: C.muted, whiteSpace: "nowrap" }}>{waitingCount} waiting</span>
@@ -14976,8 +15075,14 @@ export default function StockControl() {
                 if (rank(a) !== rank(b)) return rank(a) - rank(b);
                 return new Date(a.job.due_date || "2999-01-01") - new Date(b.job.due_date || "2999-01-01");
               };
-              const readyEntries = entries.filter((e) => e.isReady || e.partlyReady).sort(orderWithinGroup);
-              const waitingEntries = entries.filter((e) => !(e.isReady || e.partlyReady)).sort(orderWithinGroup);
+              // Standing work (an open Info Request on this stage) gets
+              // its own red pill on top and leaves the other two, so the
+              // card numbers still match the pills.
+              const standingByProcess = openRequestsByProcess(infoRequestsList);
+              const isStanding = (e) => !!standingByProcess[e.process.id];
+              const standingEntries = entries.filter(isStanding).sort(orderWithinGroup);
+              const readyEntries = entries.filter((e) => !isStanding(e) && (e.isReady || e.partlyReady)).sort(orderWithinGroup);
+              const waitingEntries = entries.filter((e) => !isStanding(e) && !(e.isReady || e.partlyReady)).sort(orderWithinGroup);
               return (
                 <div style={{ ...S.gradeItems, marginTop: 8 }}>
                   {/* Only the not-yet-nested ones. Once nesting has set a
@@ -15136,6 +15241,53 @@ export default function StockControl() {
                                 {isReady ? "Ready" : "Waiting"}
                               </span>
                             </div>
+                            {/* An open Info Request on this stage: what was
+                                asked, and "Got it / sorted" for when the
+                                operator has the answer another way. */}
+                            {(standingByProcess[process.id] || []).map((r) => (
+                              <div
+                                key={r.id}
+                                style={{
+                                  border: `2px solid ${C.danger}`,
+                                  borderRadius: 6,
+                                  padding: 8,
+                                  marginBottom: 8,
+                                  background: C.dangerTint,
+                                }}
+                              >
+                                <div style={{ color: C.danger, fontWeight: 700 }}>
+                                  Standing: waiting on office · {standingFor(r)}
+                                </div>
+                                <div style={{ ...S.itemComment, marginTop: 2 }}>
+                                  <strong>{r.kind}:</strong> {r.note}
+                                  {r.photo_path && (
+                                    <button
+                                      type="button"
+                                      className="stk-btn"
+                                      style={{ background: "none", border: "none", padding: 0, marginLeft: 6, color: C.accentRaw, cursor: "pointer" }}
+                                      title="See the photo"
+                                      onClick={() => viewShortagePhoto(r.photo_path, r.photo_name || "Info request photo")}
+                                    >
+                                      <ImageIcon size={13} />
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="stk-meta-row" style={S.rowMeta}>
+                                  <span>Asked by {r.raised_by || "someone"}</span>
+                                  <span>
+                                    {new Date(r.created_at).toLocaleString("en-ZA", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="stk-btn"
+                                  style={{ ...S.reqActionBtnMuted, marginTop: 6 }}
+                                  onClick={() => clearInfoRequestFromCard(r)}
+                                >
+                                  <Check size={13} /> Got it / sorted
+                                </button>
+                              </div>
+                            ))}
                             {/* The list card says this is a re-cut, but the
                                 operator works from this screen — without it
                                 here they are making a replacement part with
@@ -15201,12 +15353,15 @@ export default function StockControl() {
                               {job.due_date && <span>Due {new Date(job.due_date).toLocaleDateString()}</span>}
                               {process.is_urgent && <span style={{ color: C.danger, fontWeight: 600 }}>Urgent</span>}
                             </div>
-                            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                               <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => toggleProcessUrgent(process)}>
                                 {process.is_urgent ? "Unmark urgent" : "Mark urgent"}
                               </button>
                               <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => openShortageFlagModal(job, process)}>
                                 Flag shortage
+                              </button>
+                              <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1 }} onClick={() => setInfoRequestModal({ job, process })}>
+                                Info Request
                               </button>
                             </div>
                             {/* Material already set aside for this stage,
@@ -15451,6 +15606,7 @@ export default function StockControl() {
                     (() => {
                     const renderCard = ({ job, process, isReady, partlyReady, readyQty, totalQty: partTotal, waitingOn, quoteItems, shortage }) => {
                       const totalQty = itemsForStage(process.process_name, quoteItems).reduce((sum, it) => sum + Number(it.qty || 0), 0);
+                      const standing = standingByProcess[process.id];
                       return (
                         <button
                           key={process.id}
@@ -15465,7 +15621,7 @@ export default function StockControl() {
                             // very differently from new work, and the
                             // operator needs to know which this is before
                             // they open it.
-                            ...(shortage ? { borderColor: C.danger, borderWidth: 2 } : {}),
+                            ...(shortage || standing ? { borderColor: C.danger, borderWidth: 2 } : {}),
                           }}
                           onClick={() => setProductionSelectedProcessId(process.id)}
                         >
@@ -15485,6 +15641,12 @@ export default function StockControl() {
                                     : "Waiting"}
                             </span>
                           </div>
+                          {standing && (
+                            <div style={{ ...S.itemComment, color: C.danger, fontWeight: 600, marginTop: 2 }}>
+                              Standing: waiting on office · {standing[0].kind} · {standingFor(standing[0])}
+                              {standing.length > 1 ? ` (+${standing.length - 1} more)` : ""}
+                            </div>
+                          )}
                           {shortage && (
                             <div style={{ ...S.itemComment, color: C.danger, fontWeight: 600, marginTop: 2 }}>
                               ⚠ Shortage re-cut{shortage.is_priority === false ? "" : " · Priority"} — {shortageSummary(shortage)}
@@ -15518,10 +15680,19 @@ export default function StockControl() {
                     };
                     return (
                       <>
+                        {standingEntries.length > 0 && (
+                          <Section title="Standing — waiting on office" count={standingEntries.length} danger>
+                            {standingEntries.map(renderCard)}
+                          </Section>
+                        )}
                         {entries.length > 0 && (
                           <Section title="Ready now" count={readyEntries.length}>
                             {readyEntries.length === 0 ? (
-                              <div style={S.empty}>Nothing can start yet — everything here is waiting on an earlier stage.</div>
+                              <div style={S.empty}>
+                                {waitingEntries.length === 0
+                                  ? "Nothing else can start right now."
+                                  : "Nothing can start yet — everything here is waiting on an earlier stage."}
+                              </div>
                             ) : (
                               readyEntries.map(renderCard)
                             )}
@@ -22611,6 +22782,17 @@ export default function StockControl() {
             </button>
           </div>
         </div>
+      )}
+
+      {infoRequestModal && (
+        <InfoRequestModal
+          key={infoRequestModal.process.id}
+          job={infoRequestModal.job}
+          process={infoRequestModal.process}
+          onUploadPhoto={(file) => uploadInfoRequestPhotoFor(infoRequestModal.job.id, file)}
+          onSubmit={submitInfoRequest}
+          onClose={() => setInfoRequestModal(null)}
+        />
       )}
 
       {copyJobModal && (
