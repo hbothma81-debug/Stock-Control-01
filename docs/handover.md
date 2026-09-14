@@ -699,3 +699,9 @@ the conversion step to judge, not decided:
 - "Round Bar: 48.4x3.5" is a tube size filed under Round Bar; "Round Tube
   48.4 X 3.5mm wall" also exists.
 - "Round Tube 42mm x 1." is cut off.
+
+**Heinrich answered, 14 Sep:**
+
+- Imperial pairs are one real size each (SHS 76x76x2 = 76.2x76.2x2; round tube 19 = 19.05). The difference is hand-typing, so the conversion should merge them to one name.
+- "Round Bar: 48.4x3.5" is a mistake; it is the round tube.
+- "I-Beam 254x146x37KG" and the stock line "254x146x37" are the same beam.
