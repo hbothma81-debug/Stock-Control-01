@@ -652,3 +652,20 @@ hands over, now the tube tab too.
    import (SQL), then the tube PDF, then plate.
 3. Make a per-item stage re-check itself when its lines change, the cause
    behind JOB-0021.
+
+---
+
+## 14 Sep 2026 — Planning (main conversation), after the wrap-ups
+
+- **Pushes now go through the main conversation only** (rule in
+  `CLAUDE.md`). The others commit their own work and stop; Heinrich
+  brings the push to the main conversation, which reviews the queue with
+  him first.
+- **Ownership list updated** in `CLAUDE.md`: Laser production owns the
+  Tube Laser tab; the dropdowns and Production tab conversation is listed.
+- **`setup-job-documents-move.sql` has now run on practice too**
+  (Heinrich, 14 Sep). The Laser production entry's waiting item for it
+  is done: it is on both databases.
+- **Check results.** Heinrich pastes a read-only check's result into the
+  main conversation, which writes it into this file under the area that
+  asked for it, so that conversation finds it with `/monday`.

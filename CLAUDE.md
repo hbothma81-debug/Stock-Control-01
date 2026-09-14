@@ -32,6 +32,13 @@ at for five minutes.
 - **Never `git add -A` or `git add .`** Stage only the files you changed
   yourself, by name. Another conversation's half-finished work sitting in this
   folder is not yours to commit.
+- **Only the Planning conversation (the main one) pushes.** Every other
+  conversation commits its own work, staged by name, says in the commit
+  message what still has to be run or tested, and stops. I bring the push
+  to the main conversation, which goes through everything queued with me
+  first. For every other conversation this overrides the low-risk push rule
+  under "Working on this app". (Decided 14 Sep 2026: untested work kept
+  going live whenever any conversation pushed.)
 - **Before pushing, run `git log --oneline origin/main..HEAD`.** If there is a
   commit you did not make, stop and tell me what it is and what it does. Do not
   push somebody else's work live on my say-so about yours — I may not know it
@@ -58,11 +65,11 @@ at for five minutes.
 Which conversation owns what, so far:
 
 - **Jobs page** — the jobs list, job detail, quotes, invoicing
-- **Laser production** — the cutting screen, nesting, shortages
-- **Tube Laser production** — the Tube Laser tab, its nesting-report import, Tube Laser Status; the parts-under-a-line rule is shared with Jobs
-- **Planning** — shifts, the time lockout, and whatever we are designing next
+- **Laser production** — the cutting screen, nesting, shortages, for both lasers: the Laser 4kw tab and the Tube Laser tab, its nesting-report import and Tube Laser Status. (The Tube Laser conversation that built that tab was cleared on 14 Sep 2026; the parts-under-a-line rule is shared with Jobs.)
+- **Planning (the main conversation)** — shifts, the time lockout, keeping the app's downloads down, every push, and whatever we are designing next
 - **Quoting** — the quoting module and the bill of materials, one plan in `docs/QUOTING-AND-BOM-PLAN.md`; also built the Items tab's part controls (add, edit, import, move)
 - **Stock Manager** — the Stock Manager settings: suppliers, sections, materials, fasteners and the other master lists
+- **Dropdowns and the Production tab** — the shared `TypeToFind` box, keeping lists alphabetical, and the Production tab's ready and waiting pills
 
 `src/App.jsx` is the one file all of you have to touch, because it wires
 everything together. That is the collision point. When your work naturally
