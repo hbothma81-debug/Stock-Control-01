@@ -728,3 +728,22 @@ the main conversation. Full result: `docs/check-results/2026-09-14-imported-part
 - No part has a stock code; several part descriptions are really codes
   ("BRLG-RANG- BRKT-01 P-001 LH", "Tressel P-001.1 950mm"). The same story as
   `setup-copy-description-into-stock-code.sql`, for parts. Not urgent.
+
+---
+
+## 14 Sep 2026 — Check results for Stock Manager: fasteners
+
+`CHECK-fasteners.sql`, run on **live** by Heinrich and pasted into the main
+conversation. Full result: `docs/check-results/2026-09-14-fasteners.md`.
+
+- **Live has only 4 fastener stock lines**, against lists of 10 types, 5
+  grades and 3 finishes. Converting existing lines is a small job.
+- **Clean (no rows):** 1 (nothing entered twice), 2 (no type spelled two
+  ways), 4 and 5 (every grade and finish is on its list), 7 (every diameter
+  is a whole metric size), 8 (nothing filed under Stores as "Fasteners").
+- **3. Type not on the list:** "Bolts" (1 line). "Hex Bolts" (1) is on it;
+  "Bolts" is probably the same thing typed loosely.
+- **6. Missing a detail:** 2 lines with no grade, 1 with no material.
+- **In use:** types Bolts 1, Hex Bolts 1, Screws 2; grade 4.6 on 2, blank on 2;
+  finish ZP on all 4; material MS on 3, blank on 1; diameters M10 and M4, 2 each.
+- The five fastener questions in the Stock Manager entry are still open.
