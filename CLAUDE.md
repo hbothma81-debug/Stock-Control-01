@@ -46,11 +46,20 @@ at for five minutes.
   redoes what the database already decides, say so in a comment at the top of
   the file, naming what it mirrors. Then whoever changes one knows to change
   the other.
+- **If `App.jsx` holds another conversation's uncommitted work when you are
+  ready to commit, stage only your own hunks.** `git diff src/App.jsx` into a
+  patch, keep the hunks that carry your names, `git apply --cached` that
+  patch, and check `git diff --cached --stat` before committing. Never
+  `git add src/App.jsx` whole in that state, and never stash their work.
+- **Another conversation may push your queued commit** together with its own.
+  Say in the commit message what still has to be run or tested, because the
+  commit can go live before you have reported it.
 
 Which conversation owns what, so far:
 
 - **Jobs page** — the jobs list, job detail, quotes, invoicing
 - **Laser production** — the cutting screen, nesting, shortages
+- **Tube Laser production** — the Tube Laser tab, its nesting-report import, Tube Laser Status; the parts-under-a-line rule is shared with Jobs
 - **Planning** — shifts, the time lockout, and whatever we are designing next
 - **Quoting** — the new quoting module
 
@@ -68,6 +77,7 @@ after asking me.
 - Register every new setup file in `build-test-database.sh` and `CHECK-which-setup-files-are-run.sql`, then run `build-test-database.sh` to regenerate `setup-ALL.sql`.
 - If app code needs a new column, either the SQL is on both databases before the push, or the code must still work without the column. A field in `PO_DB_FIELDS` or the stock field map without its column breaks every save of that table.
 - The database caches its table list for about a minute after a paste. A "could not find the table" error straight afterwards is not proof the SQL failed.
+- A table set up with read, add and delete rules and no update rule silently refuses every update: no error, zero rows changed, the screen looks frozen. Before the app's first update to any table, check `pg_policies` for an UPDATE rule (job_documents lacked one until `setup-job-documents-move.sql`). Ask for the changed row back with `.select()` and say so when none comes.
 
 ## Checking what is live
 
@@ -92,8 +102,6 @@ after asking me.
 - Who sees money: the header total stock value — admins only. Prices per item — "Can see Rand values". Purchase Orders totals — "Can see spend totals".
 - Every new shortage must say plate or tube laser (`shortages.lane`). It shows only on that laser's nesting screen and turns red after one day outstanding. The tube laser tab should read `shortages.lane`.
 - Buy-outs are cost only; the sell price column exists but nothing writes it. A buy-out's supplier must be on the supplier list. No importer ever reads quantity on hand from a file.
-
-## Gotchas in App.jsx (each one passed a clean build)
 - Every job line carries a "made on" tag (`job_quote_items.made_on`: laser, tube_laser, cnc, cut_to_size, assembly, blank). Each stage says which tag it cuts (`process_type_settings.cuts_made_on`, set under Job Process Types). A cutting stage lists only its own machine's lines plus untagged ones, never an assembly, and never finishes itself when it has nothing to cut — it warns and keeps a single tick. The tag is remembered on the stock part (`stock_items.made_on`) and comes back on the next job; the catalogue "replace" import keeps a part's row and id so tags and job links survive it. Helpers: `cutsMadeOn`, `stageTakesItem`, `itemsForStage`, `stageHasNothingToCut`.
 - The plate laser and the tube laser are separate lanes on the Production tab (`inOtherLaserLane`): neither waits for the other; everything after them waits for both. Tube parts are packed by the tube operator under the Tube Laser stage; Laser Status is the plate packer's screen and says "laser parts packed".
 - A file uploaded onto a job is filed against a stage or the whole job (`job_documents.process_name`) and shows only on that stage's Production card. Every stage's card has its own documents block; the Files tab groups files by stage as pills with Upload on each and "Move to…" on each file.
@@ -106,6 +114,8 @@ after asking me.
 - Master lists and the people list are held alphabetical in memory (`sortMaster`, and the `setMaster` / `setPeople` wrappers), case ignored, numbers read as numbers. Job Process Types and Laser Thicknesses keep their stored order; both have reorder controls in the Manager. Nothing may assume "the last entry is the newest".
 - Production tab: each department shows a "Ready now" pill (open) and a "Waiting on earlier stages" pill (shut). `blockingStages(process, jobProcesses)` is the one rule for whether a stage may start and what it waits for; `isProcessActionable` sits on it. A per-item stage with pieces already let through counts as ready ("Partly ready: x of y"). The overview card number is the ready count.
 - On the New stock item form for Customer Stock, the Part number and Description boxes both search the same known parts (stock for that customer, then drawings) and fill each other in.
+
+## Gotchas in App.jsx (each one passed a clean build)
 
 - A component declared inside `App()` remounts on every render and throws the cursor out of text boxes. Render with a plain function instead.
 - `isAdmin || cond && <x/>` shows nothing to admins. Bracket it: `(isAdmin || cond) && <x/>`.
