@@ -705,3 +705,26 @@ the conversion step to judge, not decided:
 - Imperial pairs are one real size each (SHS 76x76x2 = 76.2x76.2x2; round tube 19 = 19.05). The difference is hand-typing, so the conversion should merge them to one name.
 - "Round Bar: 48.4x3.5" is a mistake; it is the round tube.
 - "I-Beam 254x146x37KG" and the stock line "254x146x37" are the same beam.
+
+---
+
+## 14 Sep 2026 — Check results for Jobs page: imported parts intact
+
+`CHECK-imported-parts-intact.sql`, run on **live** by Heinrich and pasted into
+the main conversation. Full result: `docs/check-results/2026-09-14-imported-parts-intact.md`.
+
+- **The parts are whole.** Result 2 (lines with no description) is **0** and
+  result 3 (parts whose parent is missing) is **0** — the two the Jobs entry
+  was waiting on. `setup-job-line-stock-code.sql` damaged nothing.
+- Live has 763 job lines: 735 own lines and 28 parts. No part has a zero
+  quantity; 3 carry a length. All 28 parts were listed and read.
+- **The check shows only its last result in the Supabase editor**, because it
+  is five separate queries. Results 1 to 4 were re-run as one table (query in
+  the results file). Worth folding the check into one table so it cannot
+  happen again — the Jobs conversation's file, so not changed here.
+- **Question for Heinrich, not yet answered:** JOB-0079 has "03.163.99.38.9"
+  and "03.163.99.38.9 Copy", both 22 off at 80.79, under a line called just
+  "parent". Real second part, or the same part imported twice?
+- No part has a stock code; several part descriptions are really codes
+  ("BRLG-RANG- BRKT-01 P-001 LH", "Tressel P-001.1 950mm"). The same story as
+  `setup-copy-description-into-stock-code.sql`, for parts. Not urgent.
