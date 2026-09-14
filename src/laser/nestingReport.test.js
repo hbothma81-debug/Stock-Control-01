@@ -16,8 +16,8 @@ test("the parts: name, total quantity and length, per section", () => {
   assert.equal(sections.length, 1);
   assert.equal(sections[0].partCount, 150);
   assert.deepEqual(sections[0].parts, [
-    { name: "SSD-5-HOLE-POST THRU", qty: 100, length: 1000 },
-    { name: "SSD-7-HOLE-POST THRU", qty: 50, length: 1000 },
+    { id: 1, name: "SSD-5-HOLE-POST THRU", qty: 100, length: 1000 },
+    { id: 2, name: "SSD-7-HOLE-POST THRU", qty: 50, length: 1000 },
   ]);
 });
 
@@ -134,6 +134,16 @@ test("no header count: the nests decide", () => {
 test("a sheet with no sections is refused in plain words", () => {
   assert.throws(() => parseNestingList([["Part Info"], ["ID", "Part Name"]]), /No sections found/);
   assert.throws(() => parseNestingList([]), /No sections found/);
+});
+
+test("each nest keeps its tube length, offcut, and the parts off each tube with their ids", () => {
+  const n = parseNestingList(MARCH).sections[0].nests[1];
+  assert.equal(n.tubeLength, 6010);
+  assert.equal(n.remnant, 7);
+  assert.deepEqual(n.parts, [
+    { id: 1, name: "SSD-5-HOLE-POST THRU", qty: 4, length: 1000 },
+    { id: 2, name: "SSD-7-HOLE-POST THRU", qty: 2, length: 1000 },
+  ]);
 });
 
 test("the note reads Nest 1 × 8 tubes, Nest 2 × 1 tube", () => {

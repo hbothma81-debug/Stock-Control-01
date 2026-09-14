@@ -217,6 +217,9 @@ export default function LaserTab({
                     onReport={reportProgram}
                     onAddNote={addProgramNote}
                     busyId={programBusyId}
+                    // The floor printout matches a part to its job line
+                    // for the stock code.
+                    jobLines={laserData ? laserData.quoteItems || [] : []}
                   />
                 ) : view === "shifts" ? (
                   <ShiftReport machine={machine} programs={programs} shifts={laserData ? laserData.shifts : []} />

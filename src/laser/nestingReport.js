@@ -101,7 +101,9 @@ export function parsePartInfo(rows) {
       if (placed !== needed) {
         throw new Error(`"${b}" is ${placed} of ${needed} nested. Finish the nesting in the software before importing.`);
       }
-      section.parts.push({ name: b, qty: needed, length: num(r[3]) });
+      // id: the software's own number for the part, printed as its mark
+      // so the floor and the software name it the same way.
+      section.parts.push({ id: num(a), name: b, qty: needed, length: num(r[3]) });
     }
   }
   if (sections.length === 0) throw new Error("No parts found on the Part Info sheet.");
@@ -179,6 +181,10 @@ export function parseNestingList(rows) {
         name: a,
         qty: Math.max(0, Math.round(num(b))),
         partsPerTube: num(r[2]),
+        // Kept for the floor printout: the length each tube is, and the
+        // offcut left on it once the nest is cut.
+        tubeLength: num(r[3]),
+        remnant: num(r[4]),
         parts: [],
       };
       section.nests.push(nest);
@@ -186,9 +192,10 @@ export function parseNestingList(rows) {
       continue;
     }
 
-    // A part row under the nest: id, name, qty on this nest.
+    // A part row under the nest: id, name, how many come off each tube
+    // of it ("Qty" and "Identical parts per tube" read the same).
     if (inParts && nest && b && num(a) != null) {
-      nest.parts.push({ name: b, qty: num(r[2]) ?? 0, length: num(r[4]) });
+      nest.parts.push({ id: num(a), name: b, qty: num(r[2]) ?? 0, length: num(r[4]) });
       continue;
     }
   }

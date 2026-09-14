@@ -217,6 +217,9 @@ export default function ImportReportModal({
             item: o.item,
             lengths: s.tubes,
             parts: partsOn ? s.parts || [] : [],
+            // Every nest in full, for the floor printout. Kept whether or
+            // not the parts go on the job: the printout is the program's.
+            nests: s.nests || [],
             note: `From ${fileName}: ${nestsNote(s)}`,
           };
         }),

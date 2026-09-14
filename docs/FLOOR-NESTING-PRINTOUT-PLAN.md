@@ -1,7 +1,16 @@
 # Floor nesting printout
 
-Planned 2026-09-12 by the Laser production conversation. **A draft for
-discussion with Heinrich. Nothing is built.**
+Planned 2026-09-12 by the Laser production conversation.
+
+**14 Sep 2026: the tube printout is built** (steps 1 and 2 below), not
+yet tried by Heinrich. His answers: two nests to a page when they fit;
+a Print button on the program on Nesting and Cutting, the job's
+print-all later as its own piece of work; the drawing number (the
+software's part name) and the job line's code on every part; the tube
+software's own part number as the mark; portrait and landscape both
+offered until the floor has tried them. Plate is untouched (question 3
+still open). How it works: `docs/TUBE-LASER-HOW-IT-WORKS.md`, "The floor
+printout".
 
 ## What Heinrich asked for
 

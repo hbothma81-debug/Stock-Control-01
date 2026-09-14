@@ -197,6 +197,35 @@ Both are switches in the tube profile (`cutListBy: "job"`,
 `cutAmount: true`). The plate laser has neither and is unchanged: its
 thickness groups and its running-total box.
 
+## The floor printout
+
+Built 14 Sep 2026 from `docs/FLOOR-NESTING-PRINTOUT-PLAN.md`. A Print
+button on each tube program, on the Cutting card and in the opened
+program on Nesting, asks Portrait or Landscape and opens a PDF in a new
+tab (saved instead where the browser blocks the tab).
+
+- **Page 1:** the program number in 40pt, reference, jobs and customers,
+  a boxed "Draw from stores: 25 lengths of CHS 19.05x1.5 304, 6 010 mm
+  each", then every part: mark, drawing / description, code, length,
+  qty, a Job column when the program is on more than one job, a tick box
+  and notes.
+- **A page per nest,** two to a page when both fit: "NEST 1 — cut 8
+  tubes", the section, tube length and offcut per tube, a numbered box
+  per tube, then what comes off each tube and what the nest makes.
+- **The mark** is the tube software's own part ID, so a problem is found
+  in the software by the same number. It repeats between programs; the
+  program number is on every page.
+- **The drawing** is the software's part name. The code is the job
+  line's stock code when the part matches a line on the program's jobs
+  by name (a part line first); never guessed between two.
+- **Where it comes from:** the import keeps every nest on the program
+  (`laser_programs.nests`). A program imported before that, or typed by
+  hand, prints page 1 only, from its parts list. With the parts tick off,
+  page 1 is added up from the nests.
+- One switch, `printsNests` in the tube profile; the plate laser has no
+  button. Code: `src/laser/nestingPrint.js` (`printModel` is pure and
+  tested, `printNestingSheet` draws it), `src/laser/PrintNestsButton.jsx`.
+
 ## How it is built: one set of code, told the machine
 
 `src/constants.js` has `LASER_MACHINES`, one profile per laser, saying
@@ -268,6 +297,11 @@ Stage rules, in App.jsx beside the plate ones:
 digits with no prefix, and `tube_section_aliases` remembers what the
 software's section wording means. Announce both: the function is shared
 with whoever else touches `next_laser_program_number`.
+
+`setup-tube-laser-nests.sql` (14 Sep 2026): `laser_programs.nests`, a
+list, empty by default, holding each nest off the report for the floor
+printout. The import still saves a program on a database without it,
+leaving the nests off.
 
 ## Switching it on
 

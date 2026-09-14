@@ -5,6 +5,7 @@ import Section from "../Section.jsx";
 import { pickShift, currentAndPreviousWindow, lastEndedShift, fmtTime } from "../lib/shiftWindow.js";
 import { plannedMinutes, outstandingMinutes, fmtMinutes, laserShifts, outstandingUnits } from "../lib/cuttingTime.js";
 import { programTitle } from "./programTitle.js";
+import PrintNestsButton from "./PrintNestsButton.jsx";
 
 // The laser operator's screen. A to-do list of programs to cut.
 //
@@ -52,6 +53,8 @@ export default function CutList({
   onReport,
   onAddNote,
   busyId,
+  // Every job line, for the printout's stock codes.
+  jobLines,
 }) {
   const [query, setQuery] = useState("");
   const hasTime = machine.hasCutTime !== false;
@@ -163,7 +166,7 @@ export default function CutList({
       onAskTime={hasTime ? (pr) => setAskTimeFor(pr.id) : () => {}}
       onReport={onReport}
       onAddNote={onAddNote}
-      busy={busyId === p.id}
+      busy={busyId === p.id} jobLines={jobLines}
     />
   );
 
@@ -216,7 +219,7 @@ export default function CutList({
                   onAskTime={hasTime ? (pr) => setAskTimeFor(pr.id) : () => {}}
                   onReport={onReport}
                   onAddNote={onAddNote}
-                  busy={busyId === p.id}
+                  busy={busyId === p.id} jobLines={jobLines}
                 />
               ))}
             </div>
@@ -241,7 +244,7 @@ export default function CutList({
                 onAskTime={hasTime ? (pr) => setAskTimeFor(pr.id) : () => {}}
                 onReport={onReport}
                 onAddNote={onAddNote}
-                busy={busyId === p.id}
+                busy={busyId === p.id} jobLines={jobLines}
               />
             ))}
           </div>
@@ -265,7 +268,7 @@ export default function CutList({
                 onAskTime={hasTime ? (pr) => setAskTimeFor(pr.id) : () => {}}
                 onReport={onReport}
                 onAddNote={onAddNote}
-                busy={busyId === p.id}
+                busy={busyId === p.id} jobLines={jobLines}
               />
             ))}
           </div>
@@ -443,7 +446,7 @@ function ShiftCounter({ programs, shifts, myShiftId, machine = {} }) {
   );
 }
 
-function ProgramRow({ program, notes, canCut, machine = {}, onToggleCut, onSetCutCount, onAskTime, onReport, onAddNote, busy }) {
+function ProgramRow({ program, notes, canCut, machine = {}, onToggleCut, onSetCutCount, onAskTime, onReport, onAddNote, busy, jobLines }) {
   const p = program;
   const hasTime = machine.hasCutTime !== false;
   const unit = machine.unit || "sheet";
@@ -816,6 +819,8 @@ function ProgramRow({ program, notes, canCut, machine = {}, onToggleCut, onSetCu
               Parts ({parts.length})
             </button>
           )}
+
+          {machine.printsNests && <PrintNestsButton program={p} jobLines={jobLines} />}
 
           {/* Skipped at the time, or got wrong: the time can be put in
               or changed afterwards from the card. */}

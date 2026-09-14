@@ -95,6 +95,8 @@ with checks (setup_file, looks_for, found) as (
       exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'laser_programs_machine_number_live_idx')),
     ('setup-tube-laser-import.sql',     'table tube_section_aliases',
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'tube_section_aliases')),
+    ('setup-tube-laser-nests.sql',      'column laser_programs.nests',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'laser_programs' and column_name = 'nests')),
     ('setup-job-cut-items.sql',         'table job_cut_items',
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'job_cut_items')),
     ('setup-job-buyout-items.sql',      'table job_buyout_items',

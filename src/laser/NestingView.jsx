@@ -10,6 +10,7 @@ import StockSectionPicker from "./StockSectionPicker.jsx";
 import { stockOptions } from "./stockOptions.js";
 import { parseTypedParts } from "./nestingReport.js";
 import { parentChoices, NEW_PARENT } from "./ImportReportModal.jsx";
+import PrintNestsButton from "./PrintNestsButton.jsx";
 
 // The parts box on a hand-typed tube program: one part per line.
 function TypedPartsBox({ value, onChange, parentPick, parent, setParent }) {
@@ -621,6 +622,7 @@ export default function NestingView({
         title="Programs waiting to be cut"
         programs={openPrograms}
         emptyText="Nothing waiting to be cut."
+        jobLines={jobLines}
         canManage={canManage}
         onClearReport={onClearReport}
         machine={machine}
@@ -649,6 +651,7 @@ export default function NestingView({
           programs={cutPrograms}
           emptyText=""
           collapsible
+          jobLines={jobLines}
           canManage={canManage}
           onClearReport={onClearReport}
           machine={machine}
@@ -1464,6 +1467,7 @@ function ProgramList({
   onCancelProgram,
   onUpdateProgram,
   SavedCheck,
+  jobLines,
 }) {
   const [openId, setOpenId] = useState(null);
   const w = machineWords(machine);
@@ -1664,6 +1668,12 @@ function ProgramList({
                         )}
                       </div>
                     </div>
+
+                    {machine?.printsNests && (
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        <PrintNestsButton program={p} jobLines={jobLines} />
+                      </div>
+                    )}
 
                     {isAdding && (
                       <div style={{ position: "relative" }}>

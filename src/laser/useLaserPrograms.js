@@ -585,6 +585,9 @@ export default function useLaserPrograms(deps) {
     // are left alone.
     parts,
     parent_line_id,
+    // Every nest off the tube software's report, for the floor printout.
+    // Only the import sends these.
+    nests,
   }) {
     if (!supabase) return false;
     try {
@@ -592,9 +595,7 @@ export default function useLaserPrograms(deps) {
       // database and is shown on the program the moment it exists, so the
       // nest can be saved under it in the machine's software.
       const number = machine.numbering === "generated" ? await nextProgramNumber() : program_number;
-      const { data, error } = await supabase
-        .from("laser_programs")
-        .insert({
+      const row = {
           program_number: number,
           // Only a laser that names its nests writes the column, so the
           // plate laser keeps working on a database where
@@ -627,9 +628,18 @@ export default function useLaserPrograms(deps) {
           // not been added yet -- carries on as before.
           ...(reserve?.item?.id ? { stock_item_id: reserve.item.id } : {}),
           created_by: roleLabel,
-        })
-        .select("id")
-        .single();
+          // The nests, for the floor printout (setup-tube-laser-nests.sql).
+          ...(Array.isArray(nests) && nests.length ? { nests } : {}),
+      };
+      const insertRow = (r) => supabase.from("laser_programs").insert(r).select("id").single();
+      let { data, error } = await insertRow(row);
+      // A database without the nests column yet still makes the program:
+      // it prints its first page only, like a program made before it.
+      if (error && row.nests && /nests/i.test(error.message || "")) {
+        console.error("Program saved without its nests (run setup-tube-laser-nests.sql):", error);
+        delete row.nests;
+        ({ data, error } = await insertRow(row));
+      }
       if (error) throw error;
       if (jobs.length) {
         const { error: linkError } = await supabase.from("laser_program_jobs").insert(
@@ -689,6 +699,7 @@ export default function useLaserPrograms(deps) {
         jobs,
         reserve: s.item ? { item: s.item, qty: s.lengths } : null,
         parts: s.parts || [],
+        nests: s.nests || [],
         parent_line_id,
       });
       if (!result) {

@@ -102,6 +102,7 @@ export const LASER_MACHINE = "Laser 4kw";
 //                 "job" -- a heading per job with its programs inside
 //   cutAmount     the cut box takes how many were just cut ("Cut 5")
 //                 and says how many are left, instead of a running total
+//   printsNests   each program has a Print button for the floor sheet
 //
 // The two stage-name rules (which stage is this laser's nesting, which is
 // its cutting) are functions and live in App.jsx beside the other
@@ -158,6 +159,10 @@ export const LASER_MACHINES = {
     // Heinrich asks for the plate laser by name.
     cutListBy: "job",
     cutAmount: true,
+    // A Print button on each program: the floor's own sheet, a page for
+    // the parts and a page per nest (src/laser/nestingPrint.js). Tube
+    // only until the plate laser is asked for by name.
+    printsNests: true,
     cutStageIsPacking: true,
     hasPacking: true,
     partsLabel: "Tube parts",
