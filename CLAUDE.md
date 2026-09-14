@@ -62,6 +62,7 @@ Which conversation owns what, so far:
 - **Tube Laser production** — the Tube Laser tab, its nesting-report import, Tube Laser Status; the parts-under-a-line rule is shared with Jobs
 - **Planning** — shifts, the time lockout, and whatever we are designing next
 - **Quoting** — the new quoting module
+- **Stock Manager** — the Stock Manager settings: suppliers, sections, materials, fasteners and the other master lists
 
 `src/App.jsx` is the one file all of you have to touch, because it wires
 everything together. That is the collision point. When your work naturally
@@ -114,6 +115,9 @@ after asking me.
 - Master lists and the people list are held alphabetical in memory (`sortMaster`, and the `setMaster` / `setPeople` wrappers), case ignored, numbers read as numbers. Job Process Types and Laser Thicknesses keep their stored order; both have reorder controls in the Manager. Nothing may assume "the last entry is the newest".
 - Production tab: each department shows a "Ready now" pill (open) and a "Waiting on earlier stages" pill (shut). `blockingStages(process, jobProcesses)` is the one rule for whether a stage may start and what it waits for; `isProcessActionable` sits on it. A per-item stage with pieces already let through counts as ready ("Partly ready: x of y"). The overview card number is the ready count.
 - On the New stock item form for Customer Stock, the Part number and Description boxes both search the same known parts (stock for that customer, then drawings) and fill each other in.
+- Supplier logos are gone from the app and the Purchase Order PDF. The `master_suppliers.logo` column is left in place and nothing reads it.
+- Structural stock picks its section type, section and material from Stock Manager's lists (`LibraryField` with `pickOnly`); the add-stock form never adds to them. Anyone who can open Stock Manager adds new ones there.
+- Section names are shop shorthand with no "mm" (SHS 50x50x3, CHS 38.1x2), to be written by the app from fixed boxes per section type, and every existing name is to be converted. One material per real material: MS and Mild Steel are one row. Only the pick-only stock form is built so far.
 
 ## Gotchas in App.jsx (each one passed a clean build)
 
