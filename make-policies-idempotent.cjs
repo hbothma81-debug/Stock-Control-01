@@ -21,19 +21,24 @@ if (!file) {
 
 const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
 const out = [];
-let inDoBlock = false;
+// The tag between the dollars of the do-block we are inside ("" for a
+// bare $$, "read" for $read$), or null when outside one. CLAUDE.md asks
+// for named dollar quotes, so both forms must count as already guarded;
+// a named block wrapped a second time is broken SQL.
+let doTag = null;
 let wrapped = 0;
 let alreadyGuarded = 0;
 
 for (let i = 0; i < lines.length; i++) {
   const line = lines[i];
 
-  // Track do $$ ... end $$; blocks — statements inside are already guarded.
-  if (/do\s+\$\$/.test(line)) inDoBlock = true;
-  if (inDoBlock) {
+  // Track do $tag$ ... end $tag$; blocks — statements inside are already guarded.
+  const opens = doTag === null && line.match(/do\s+\$(\w*)\$/);
+  if (opens) doTag = opens[1];
+  if (doTag !== null) {
     if (/^\s*create\s+policy/i.test(line)) alreadyGuarded++;
     out.push(line);
-    if (/end\s+\$\$\s*;/.test(line)) inDoBlock = false;
+    if (new RegExp("end\\s+\\$" + doTag + "\\$\\s*;").test(line)) doTag = null;
     continue;
   }
 

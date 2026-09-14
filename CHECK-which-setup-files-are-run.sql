@@ -73,6 +73,8 @@ with checks (setup_file, looks_for, found) as (
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'can_print_pdfs')),
     ('setup-job-documents-move.sql',    'rule: job_documents rows can be changed (Move to...)',
       exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'job_documents' and cmd = 'UPDATE')),
+    ('setup-info-requests.sql',         'table job_info_requests',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'job_info_requests')),
     ('setup-quoting-and-bom.sql',       'table quotes',
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'quotes')),
     ('setup-quoting-and-bom.sql',       'table bom_parts',
