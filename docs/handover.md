@@ -747,3 +747,42 @@ conversation. Full result: `docs/check-results/2026-09-14-fasteners.md`.
 - **In use:** types Bolts 1, Hex Bolts 1, Screws 2; grade 4.6 on 2, blank on 2;
   finish ZP on all 4; material MS on 3, blank on 1; diameters M10 and M4, 2 each.
 - The five fastener questions in the Stock Manager entry are still open.
+
+---
+
+## 14 Sep 2026 — Jobs page: JOB-0078 "stuck on packing", and two gaps for Laser production
+
+`CHECK-job-stuck-on-packing.sql` (new, read-only, one result table; change
+the job number on its third line for any other job), run on **live** by
+Heinrich.
+
+- **It was not packing.** Packer is done (Patric), all 17 parts packed in
+  full. The Laser stage is open because program **10418** (16mm Mild Steel)
+  is 0 of 1 cut; 10415, 10417 and 10420 are cut. `syncLaserStagesFor`
+  closes Laser only when Nesting is ticked and every program is cut.
+- **Why everything after packing waits:** Bending onwards work the three
+  bumper parents. `itemFlowLimit` holds a parent at 0 while a stage that
+  cuts its parts is not cleared, so every later stage waits on Laser.
+- **The floor fix, Heinrich or Prince to choose:** if 10418 was cut, tick it
+  cut and Laser closes itself. If it was never needed, cancel it and tick
+  Laser by hand on the job (see gap 2).
+
+**Two gaps, for Laser production. Not built, not decided:**
+
+1. **All packed, a program still uncut, and nothing says so.** A job reaches
+   packing on its first sheet cut (`laserStatusRows`), so the packer can
+   finish while a program is untouched; the job then leaves Laser Status
+   and sits on Laser with no sign why. Suggestion: say it where someone
+   will act, e.g. on the program in Cutting or on the job's Production
+   card: "all packed, program 10418 not ticked cut".
+2. **Cancelling a program does not re-check the laser stage.**
+   `syncLaserStagesFor` runs only after a cut count changes
+   (`useLaserPrograms.js`, near line 951) and after Nesting is ticked (near
+   1028). A job whose last uncut program is cancelled keeps Laser open until
+   someone ticks it by hand. Suggestion: the cancel path runs the same sync
+   for that program's jobs; decide what un-cancelling does.
+
+Ruled out on this job but true in general: a packing stage with no machine
+set (`cuts_made_on` blank) counts every plain line, tube lines included, so
+it could never fill on a job with tube lines. Packer is tagged laser on
+live, so this is not biting today; it would if that tag were cleared.
