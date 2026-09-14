@@ -73,10 +73,10 @@ import TypeToFind from "./TypeToFind.jsx";
 import LaserStatus from "./laser/LaserStatus.jsx";
 import LaserTab from "./laser/LaserTab.jsx";
 import useLaserPrograms from "./laser/useLaserPrograms.js";
-import InfoRequestModal from "./InfoRequestModal.jsx";
+import InfoRequestModal, { InfoAnswerModal } from "./InfoRequestModal.jsx";
 import {
-  openRequestsByProcess, mergeInfoRequests, standingFor, infoRequestRecipients,
-  loadInfoRequests, raiseInfoRequest, clearInfoRequest, loadRecipientProfiles, uploadInfoRequestPhoto,
+  openRequestsByProcess, recentAnswersByProcess, requestsForOffice, mergeInfoRequests, standingFor, infoRequestRecipients,
+  loadInfoRequests, raiseInfoRequest, clearInfoRequest, answerInfoRequest, loadRecipientProfiles, uploadInfoRequestPhoto,
 } from "./lib/infoRequests.js";
 import Section from "./Section.jsx";
 import RecordRow from "./RecordRow.jsx";
@@ -1702,6 +1702,8 @@ export default function StockControl() {
   const [infoRequestsList, setInfoRequestsList] = useState(null);
   const infoRequestsSyncRef = useRef(null);
   const [infoRequestModal, setInfoRequestModal] = useState(null);
+  const [infoAnswerModal, setInfoAnswerModal] = useState(null);
+  const [infoBannerShowAll, setInfoBannerShowAll] = useState(false);
   // Every allocation still outstanding, across all jobs — so a stock item
   // can show what of it is already spoken for, not just the job screen.
   const [allocationsList, setAllocationsList] = useState(null);
@@ -2985,7 +2987,7 @@ export default function StockControl() {
   // directly fixes the actual complaint (leaving the app), not a polish
   // detail on top of it.
   const anyModalOpen = !!(
-    usageModal || assetRemoveModal || shortageModal || infoRequestModal || jobDetail || newStockItemModal ||
+    usageModal || assetRemoveModal || shortageModal || infoRequestModal || infoAnswerModal || jobDetail || newStockItemModal ||
     markInvoicedModal || deliveryNoteBatchModal || copyJobModal || previewItem ||
     showAddStockItemModal || showStockImportModal || showBuyoutImportModal || editProcessesModal || productionSelectedDept ||
     productionSelectedProcessId || showManager || requisitionTarget || showRequisitionPicker ||
@@ -3000,6 +3002,7 @@ export default function StockControl() {
     setAssetRemoveModal(null);
     setShortageModal(null);
     setInfoRequestModal(null);
+    setInfoAnswerModal(null);
     setJobDetail(null);
     setNewStockItemModal(null);
     setMarkInvoicedModal(null);
@@ -8775,7 +8778,7 @@ export default function StockControl() {
       if (!row) alert("Somebody else has already answered or cleared this one.");
       // Not open any more either way. The refresh brings back whatever
       // the other person did.
-      setInfoRequestsList((prev) => mergeInfoRequests(prev, [row || { ...req, status: "cleared" }]));
+      setInfoRequestsList((prev) => mergeInfoRequests(prev, [row || { ...req, status: "cleared", closed_at: new Date().toISOString() }]));
       fetchInfoRequests({ incremental: true });
     } catch (err) {
       console.error("Failed to clear info request:", err);
@@ -8791,6 +8794,41 @@ export default function StockControl() {
       alert("Couldn't upload that photo — check your connection and try again.");
       return null;
     }
+  }
+
+  // The office's Answer, from the red banner. Files are filed on the stage
+  // the request came from first (uploadJobDocuments says itself if one
+  // fails), and their names go into the answer so the operator knows to
+  // look on the card. Resolves true when saved.
+  async function submitInfoAnswer({ answer, files }) {
+    const req = infoAnswerModal;
+    const names = (files || []).map((f) => f.name);
+    try {
+      if (names.length) await uploadJobDocuments(req.job_id, files, req.stage_name || null);
+      const text = names.length ? `${answer}\n(On the ${req.stage_name || "job"} card: ${names.join(", ")})` : answer;
+      const row = await answerInfoRequest(supabase, req, { answer: text, by: roleLabel, byId: currentUser?.id });
+      if (!row) alert("Somebody else has already answered or cleared this one.");
+      setInfoRequestsList((prev) => mergeInfoRequests(prev, [row || { ...req, status: "cleared", closed_at: new Date().toISOString() }]));
+      setInfoAnswerModal(null);
+      if (!row) {
+        fetchInfoRequests({ incremental: true });
+        return true;
+      }
+    } catch (err) {
+      console.error("Failed to answer info request:", err);
+      alert("That didn't save — check your connection and try again.");
+      return false;
+    }
+    if (req.raised_by_id) {
+      await sendNotifications({
+        job_id: req.job_id,
+        job_number: req.job_number,
+        sales_rep: "",
+        recipient_id: req.raised_by_id,
+        message: `Answer on ${req.job_number} at ${req.stage_name || "your stage"}, from ${roleLabel}: ${answer}${names.length ? ` (file${names.length === 1 ? "" : "s"} on the card)` : ""}`,
+      });
+    }
+    return true;
   }
 
   async function markNotificationRead(id) {
@@ -13502,6 +13540,45 @@ export default function StockControl() {
         </div>
       )}
 
+      {/* Info Requests waiting on the office: the rep's own jobs, and every
+          one for an admin. On every screen and not dismissable -- it goes
+          when the request is answered or the floor clears it. */}
+      {session && profile && (() => {
+        const mine = requestsForOffice(infoRequestsList, { isAdmin, me: roleLabel });
+        if (mine.length === 0) return null;
+        const shown = infoBannerShowAll ? mine : mine.slice(0, 3);
+        return (
+          <div style={{ background: C.dangerTint, borderBottom: `2px solid ${C.danger}`, padding: "8px 16px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, color: C.danger, fontWeight: 700 }}>
+              <AlertTriangle size={15} strokeWidth={2.5} />
+              {mine.length === 1 ? "A job is standing, waiting on the office" : `${mine.length} jobs standing, waiting on the office`}
+            </div>
+            {shown.map((r) => (
+              <div key={r.id} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 6 }}>
+                <span style={{ flex: "1 1 240px", minWidth: 0, color: C.text }}>
+                  <strong>{r.job_number}</strong>
+                  {r.job?.customer ? ` (${r.job.customer})` : ""} at {r.stage_name || "a stage"} · {r.kind}: {r.note}{" "}
+                  <span style={{ color: C.danger, fontWeight: 600, whiteSpace: "nowrap" }}>· {standingFor(r)}</span>
+                </span>
+                <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => setInfoAnswerModal(r)}>
+                  Answer
+                </button>
+              </div>
+            ))}
+            {mine.length > 3 && (
+              <button
+                type="button"
+                className="stk-btn"
+                style={{ ...S.reqActionBtnMuted, marginTop: 6 }}
+                onClick={() => setInfoBannerShowAll((v) => !v)}
+              >
+                {infoBannerShowAll ? "Show fewer" : `Show all ${mine.length}`}
+              </button>
+            )}
+          </div>
+        );
+      })()}
+
       {authLoading ? (
         <div style={S.loginPrompt}>
           <div style={S.loginPromptText}>Checking your session…</div>
@@ -15079,6 +15156,7 @@ export default function StockControl() {
               // its own red pill on top and leaves the other two, so the
               // card numbers still match the pills.
               const standingByProcess = openRequestsByProcess(infoRequestsList);
+              const answersByProcess = recentAnswersByProcess(infoRequestsList);
               const isStanding = (e) => !!standingByProcess[e.process.id];
               const standingEntries = entries.filter(isStanding).sort(orderWithinGroup);
               const readyEntries = entries.filter((e) => !isStanding(e) && (e.isReady || e.partlyReady)).sort(orderWithinGroup);
@@ -15286,6 +15364,34 @@ export default function StockControl() {
                                 >
                                   <Check size={13} /> Got it / sorted
                                 </button>
+                              </div>
+                            ))}
+                            {/* Answered or cleared in the last few days: the
+                                answer stays here to read after the red goes. */}
+                            {(answersByProcess[process.id] || []).map((r) => (
+                              <div
+                                key={r.id}
+                                style={{
+                                  border: `1px solid ${C.accentRaw}`,
+                                  borderRadius: 6,
+                                  padding: 8,
+                                  marginBottom: 8,
+                                  background: C.accentTint,
+                                }}
+                              >
+                                <div style={{ color: C.accentRaw, fontWeight: 700 }}>
+                                  {r.status === "answered" ? `Office answered · ${r.closed_by || "someone"}` : `Cleared by ${r.closed_by || "someone"}`}
+                                </div>
+                                <div style={{ ...S.itemComment, marginTop: 2 }}>
+                                  <strong>{r.kind}:</strong> {r.note}
+                                </div>
+                                {r.answer && <div style={{ ...S.itemComment, marginTop: 4, whiteSpace: "pre-wrap", color: C.text }}>{r.answer}</div>}
+                                <div className="stk-meta-row" style={S.rowMeta}>
+                                  <span>Asked by {r.raised_by || "someone"}</span>
+                                  <span>
+                                    {new Date(r.closed_at).toLocaleString("en-ZA", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                                  </span>
+                                </div>
                               </div>
                             ))}
                             {/* The list card says this is a re-cut, but the
@@ -15645,6 +15751,11 @@ export default function StockControl() {
                             <div style={{ ...S.itemComment, color: C.danger, fontWeight: 600, marginTop: 2 }}>
                               Standing: waiting on office · {standing[0].kind} · {standingFor(standing[0])}
                               {standing.length > 1 ? ` (+${standing.length - 1} more)` : ""}
+                            </div>
+                          )}
+                          {!standing && answersByProcess[process.id]?.[0]?.status === "answered" && (
+                            <div style={{ ...S.itemComment, color: C.accentRaw, fontWeight: 600, marginTop: 2 }}>
+                              Office answered · {answersByProcess[process.id][0].kind} — open to read
                             </div>
                           )}
                           {shortage && (
@@ -22792,6 +22903,16 @@ export default function StockControl() {
           onUploadPhoto={(file) => uploadInfoRequestPhotoFor(infoRequestModal.job.id, file)}
           onSubmit={submitInfoRequest}
           onClose={() => setInfoRequestModal(null)}
+        />
+      )}
+
+      {infoAnswerModal && (
+        <InfoAnswerModal
+          key={infoAnswerModal.id}
+          req={infoAnswerModal}
+          onViewPhoto={viewShortagePhoto}
+          onSubmit={submitInfoAnswer}
+          onClose={() => setInfoAnswerModal(null)}
         />
       )}
 

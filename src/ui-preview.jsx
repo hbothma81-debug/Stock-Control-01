@@ -11,7 +11,7 @@ import Section from "./Section.jsx";
 import RecordRow from "./RecordRow.jsx";
 import TypeToFind from "./TypeToFind.jsx";
 import PdfViewer from "./PdfViewer.jsx";
-import InfoRequestModal from "./InfoRequestModal.jsx";
+import InfoRequestModal, { InfoAnswerModal } from "./InfoRequestModal.jsx";
 import { jsPDF } from "jspdf";
 import { FileText } from "lucide-react";
 
@@ -148,6 +148,41 @@ function InfoRequestDemo() {
   );
 }
 
+// The office's Answer pop-up on a made-up request, 45 minutes old.
+function InfoAnswerDemo() {
+  const [open, setOpen] = React.useState(false);
+  const [sent, setSent] = React.useState(null);
+  const req = {
+    job_number: "JOB-0042",
+    job: { customer: "Greenzone", sales_rep: "Johan" },
+    stage_name: "Welding",
+    kind: "Drawing",
+    note: "Need rev B of the base plate",
+    raised_by: "Prince",
+    created_at: new Date(Date.now() - 45 * 60000).toISOString(),
+  };
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => setOpen(true)}>
+        Answer
+      </button>
+      {sent && <pre style={{ ...S.roleHint, whiteSpace: "pre-wrap" }}>{JSON.stringify(sent, null, 2)}</pre>}
+      {open && (
+        <InfoAnswerModal
+          req={req}
+          onViewPhoto={() => {}}
+          onSubmit={async ({ answer, files }) => {
+            setSent({ answer, files: files.map((f) => f.name) });
+            setOpen(false);
+            return true;
+          }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
 function Preview() {
   // The colours live on a data-stk-theme attribute, same as the app.
   React.useEffect(() => {
@@ -204,6 +239,7 @@ function Preview() {
         <Section title="Standing — waiting on office" count={1} danger>
           <div style={S.roleHint}>A danger pill: red whether open or shut. Tap the heading to check it stays red.</div>
           <InfoRequestDemo />
+          <InfoAnswerDemo />
         </Section>
 
         <Section

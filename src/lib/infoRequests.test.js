@@ -1,9 +1,12 @@
-// Info Request rules: how long a job has stood, who is told, and what
-// stays on the list after a refresh. Run with:   npm test
+// Info Request rules: how long a job has stood, who is told, who sees the
+// banner, and what stays on the list after a refresh. Run with:   npm test
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { standingFor, infoRequestRecipients, mergeInfoRequests, openRequestsByProcess } from "./infoRequests.js";
+import {
+  standingFor, infoRequestRecipients, mergeInfoRequests, openRequestsByProcess,
+  recentAnswersByProcess, requestsForOffice,
+} from "./infoRequests.js";
 
 const at = (iso) => ({ created_at: iso });
 const NOW = Date.parse("2026-09-14T12:00:00Z");
@@ -42,16 +45,19 @@ test("no rep, or a rep who does not sign in, tells every admin", () => {
   assert.deepEqual(infoRequestRecipients("Sipho", profiles), ["a1", "a2"]);
 });
 
-test("a refresh drops what was answered or cleared elsewhere, oldest stays first", () => {
+test("a refresh keeps open ones and recent answers, drops old answers, oldest first", () => {
   const held = [
     { id: "1", status: "open", created_at: "2026-09-14T08:00:00Z" },
     { id: "2", status: "open", created_at: "2026-09-14T09:00:00Z" },
+    { id: "old", status: "answered", created_at: "2026-09-01T09:00:00Z", closed_at: "2026-09-02T09:00:00Z" },
   ];
   const arrived = [
-    { id: "1", status: "answered", created_at: "2026-09-14T08:00:00Z" },
+    { id: "1", status: "answered", created_at: "2026-09-14T08:00:00Z", closed_at: "2026-09-14T11:00:00Z" },
     { id: "3", status: "open", created_at: "2026-09-14T07:00:00Z" },
   ];
-  assert.deepEqual(mergeInfoRequests(held, arrived).map((r) => r.id), ["3", "2"]);
+  const merged = mergeInfoRequests(held, arrived, NOW);
+  assert.deepEqual(merged.map((r) => r.id), ["3", "1", "2"]);
+  assert.equal(merged.find((r) => r.id === "1").status, "answered");
 });
 
 test("open requests are grouped by stage; closed ones and ones with no stage are left out", () => {
@@ -63,4 +69,41 @@ test("open requests are grouped by stage; closed ones and ones with no stage are
   ]);
   assert.deepEqual(Object.keys(map), ["p1"]);
   assert.deepEqual(map.p1.map((r) => r.id), ["1", "2"]);
+});
+
+test("recent answers are grouped by stage, newest first; open and old ones are not", () => {
+  const map = recentAnswersByProcess(
+    [
+      { id: "a", status: "answered", process_id: "p1", closed_at: "2026-09-14T08:00:00Z" },
+      { id: "b", status: "cleared", process_id: "p1", closed_at: "2026-09-14T10:00:00Z" },
+      { id: "c", status: "open", process_id: "p1" },
+      { id: "d", status: "answered", process_id: "p1", closed_at: "2026-09-01T10:00:00Z" },
+    ],
+    NOW
+  );
+  assert.deepEqual(map.p1.map((r) => r.id), ["b", "a"]);
+});
+
+test("the banner shows a rep the open requests on their own jobs", () => {
+  const list = [
+    { id: "1", status: "open", job: { sales_rep: "Johan" } },
+    { id: "2", status: "open", job: { sales_rep: "Sipho" } },
+    { id: "3", status: "answered", job: { sales_rep: "Johan" } },
+    { id: "4", status: "open", job: { sales_rep: "" } },
+  ];
+  assert.deepEqual(requestsForOffice(list, { isAdmin: false, me: " johan" }).map((r) => r.id), ["1"]);
+});
+
+test("an admin's banner shows every open request, a job with no rep included", () => {
+  const list = [
+    { id: "1", status: "open", job: { sales_rep: "Johan" } },
+    { id: "2", status: "cleared", job: { sales_rep: "Johan" } },
+    { id: "4", status: "open", job: null },
+  ];
+  assert.deepEqual(requestsForOffice(list, { isAdmin: true, me: "Heinrich" }).map((r) => r.id), ["1", "4"]);
+});
+
+test("somebody who sells nothing sees no banner", () => {
+  const list = [{ id: "1", status: "open", job: { sales_rep: "" } }];
+  assert.deepEqual(requestsForOffice(list, { isAdmin: false, me: "Prince" }), []);
 });
