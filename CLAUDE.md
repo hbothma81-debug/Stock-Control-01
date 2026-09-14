@@ -58,6 +58,12 @@ at for five minutes.
   patch, keep the hunks that carry your names, `git apply --cached` that
   patch, and check `git diff --cached --stat` before committing. Never
   `git add src/App.jsx` whole in that state, and never stash their work.
+- **If anything is already staged when you start** (`git diff --cached
+  --name-only`), it is somebody's commit in progress: wait for it, because
+  `git commit` takes the whole index. An undo takes back only what you
+  staged (`git reset HEAD -- <your files>`, `git apply --cached -R` your
+  patch), never `git restore --staged` on a shared file, which unstages
+  their hunks too. Stage, check and commit in one command.
 - **Another conversation may push your queued commit** together with its own.
   Say in the commit message what still has to be run or tested, because the
   commit can go live before you have reported it.
@@ -86,6 +92,7 @@ after asking me.
 - If app code needs a new column, either the SQL is on both databases before the push, or the code must still work without the column. A field in `PO_DB_FIELDS` or the stock field map without its column breaks every save of that table.
 - The database caches its table list for about a minute after a paste. A "could not find the table" error straight afterwards is not proof the SQL failed.
 - A table set up with read, add and delete rules and no update rule silently refuses every update: no error, zero rows changed, the screen looks frozen. Before the app's first update to any table, check `pg_policies` for an UPDATE rule (job_documents lacked one until `setup-job-documents-move.sql`). Ask for the changed row back with `.select()` and say so when none comes.
+- A read-only `CHECK-*.sql` returns one table (`union all` with a label column): the Supabase editor shows only the last result of several. To prove one on pglite, load the files listed in `build-test-database.sh` and then the laser files it leaves out (`setup-laser-programs.sql`, `setup-program-repeats.sql`, `setup-laser-status.sql`, `setup-made-on-tag.sql`).
 
 ## Checking what is live
 
@@ -93,7 +100,8 @@ after asking me.
 - `node CHECK-live-table.cjs table` — whether a table answers on live. A column can be checked the same way without signing in: selecting it answers 200 if it exists, 400 if not.
 - `node CHECK-undefined-names.cjs` after every change — a missing name blanks the whole app even though the build passes.
 - Run `git log --oneline origin/main..HEAD` as its own step and read the answer before pushing. Never chain the check and the push in one command.
-- `npm test` runs Node's own test runner over `src/**/*.test.js`: the shift-window and cutting-time sums and the nesting-report parser. No database, a second to run.
+- `npm test` runs Node's own test runner over `src/**/*.test.js`: the shift-window and cutting-time sums, the nesting-report parser, the job sheet's stock grouping and more. No database, a second to run.
+- `CHECK-job-stuck-on-packing.sql` (change the job number on its third line) shows a stuck job's stages, each line with whether the packing stage counts it and how many are packed, and its laser programs. A job with every part packed can still be held by one program never ticked cut: the Laser stage closes only when Nesting is ticked and every program is cut, and every stage after it waits.
 
 ## Loading data (Supabase egress)
 
@@ -135,6 +143,7 @@ after asking me.
 - A job line's stock code is its identity (`job_quote_items.stock_code`), not its description. Matching goes code first, description only when exactly one part carries it (`findCustomerStockMatch`); a typed code not in Customer Stock stays on the line, unlinked. Never read a code back out of a description.
 - New Job asks only customer, description and due date, then opens the job. Stages, lines, cut list, materials and buy-outs are all set on the job itself.
 - A tube job line says what it is cut from in `job_quote_items.material_type`, in the words `materialText` (`src/laser/stockOptions.js`) makes, e.g. "SHS 50x50x3mm 304". The tube import is to match on those exact words, so any rename of a section or material must rewrite this column in the same pass.
+- The printed job sheet lists the job's reservations as "Stock from stores": Reserved, Taken, Outstanding and an empty Pulled box, grouped as the Materials tab groups them (no stage yet, stages in flow order, a stage since removed). Handed-back ones are left off. Drawn by `src/jobs/stockFromStores.js`, which mirrors `Materials.jsx`. The stock item's shelf location (`loc`) is left off by decision, for now.
 
 ## Gotchas in App.jsx (each one passed a clean build)
 
@@ -158,3 +167,4 @@ after asking me.
 
 - `http://localhost:5173/ui-preview.html` on the dev server shows the shared pieces (`Section`, `RecordRow`, `TypeToFind`) with made-up data and no login. Add a demo there when a shared piece changes.
 - The Browser pane's clicks and key presses can stop reaching the page while the pane is hidden; typing still arrives. A script-dispatched `mousedown` on a suggestion, or `.focus()` on a box, exercises the same handlers. Its `type` action does not replace selected text the way a keyboard does.
+- A PDF is checked by looking at it. Draw it with `jspdf` from a node script (keep a new PDF piece in its own module so the script draws the real code), turn page 1 into a PNG in the scratchpad with `pdfjs-dist` and `@napi-rs/canvas`, and read the PNG. The Read tool cannot open a PDF here (no `pdftoppm`), and the Browser pane cannot screenshot a local file.

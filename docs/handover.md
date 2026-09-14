@@ -818,3 +818,66 @@ button is proven. Not started. What it needs:
   `nestingPrint.js`), since both buttons share it.
 - Ask Heinrich: portrait or landscape by then (he is trying both now), and
   whether cut programs are included.
+
+---
+
+## 14 Sep 2026 — Jobs page conversation (afternoon): stock pull list, JOB-0078
+
+### Done and live
+
+- **Stock from stores on the job sheet** (cff2729). Page 1 lists every
+  reservation from the job's Materials tab: Reserved, Taken, Outstanding
+  and an empty Pulled box, grouped "For the job, no stage yet", then
+  stage by stage in flow order, then "Against a stage no longer on this
+  job". Handed-back ones are left off; fully used ones show 0. The Code
+  column prints only when an item has one; nothing prints when nothing
+  is reserved. Heinrich chose: everything reserved with the outstanding
+  amount, grouped by stage, no shelf location for now, the old job-level
+  Materials block left alone. Code in `src/jobs/stockFromStores.js` with
+  `stockFromStores.test.js`; mirrors `Materials.jsx`, and both say so.
+  **Went live in another conversation's push before Heinrich tried it**
+  (`CHECK-what-is-live.cjs` finds both new strings on live).
+- **`CHECK-job-stuck-on-packing.sql`** (d65ef44), one result table, any job.
+  JOB-0078's result and the two Laser gaps are in the entry above.
+
+### Every setup file this conversation wrote
+
+None this session; no database change. The morning Jobs entry's table
+stands. `setup-copy-description-into-stock-code.sql` is still not run.
+
+### Built but not yet tested by Heinrich
+
+1. **Stock from stores (new, live).** Open a job with a few reservations,
+   one with no stage and one handed back, and print the job sheet. The
+   groups, the numbers against the Materials tab, the handed-back one
+   absent, no Code column unless an item has a code.
+2. Still untested from the morning entry: tube material type on a line;
+   stock code matching and Add to Customer Stock; the Code column on the
+   job sheet, delivery note and invoice request; the Materials tab
+   (reserve, take now, release, the picker's filters); the tube
+   drawdown (Cut one / Undo one); a buy-out PO received onto the job;
+   Book out per bar on Cut To Size; Jobs search by SigmaNest number.
+
+### Waiting on Heinrich
+
+- **JOB-0078:** tick program 10418 cut if it was cut, or cancel it and
+  tick the Laser stage by hand.
+- **JOB-0079:** "03.163.99.38.9" and its "Copy", both 22 off: a real
+  second part, or imported twice?
+- `setup-copy-description-into-stock-code.sql`: confirm the job list, run
+  on live.
+- Tag a few tube lines with a material on a real job; the two open
+  questions in `docs/TUBE-PARTS-BY-SECTION-PLAN.md`.
+- Whether to add the shelf location (`loc`) to Stock from stores: one
+  column, no database change.
+
+### Pick up next
+
+1. Whatever Heinrich's test of Stock from stores turns up.
+2. Laser production's request in the entry above: a Print on the job for
+   every tube program, once the program button is proven. Ask portrait or
+   landscape, and whether cut programs are included.
+3. Tidy-up: the dead New Job pop-up code in App.jsx; fold
+   `CHECK-imported-parts-intact.sql` into one result table.
+4. When Stock Manager converts section names, the same pass rewrites
+   `job_quote_items.material_type`.
