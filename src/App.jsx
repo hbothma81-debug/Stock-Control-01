@@ -63,6 +63,7 @@ import CompanyDetails from "./manager/CompanyDetails.jsx";
 import CutToSize from "./jobs/CutToSize.jsx";
 import BuyOuts from "./jobs/BuyOuts.jsx";
 import Materials from "./jobs/Materials.jsx";
+import { addStockFromStores } from "./jobs/stockFromStores.js";
 // The tube laser's own wording for a material. Shared, not copied: the
 // job line's material and the nesting import's section must be the same
 // words, or the import's match finds nothing.
@@ -8263,7 +8264,7 @@ export default function StockControl() {
   // created it, so the PDF viewer's own built-in "open in new tab" button
   // was failing silently on it. A real signed URL works exactly like any
   // other attached document, including that button.
-  async function printJobSheet(job, processes, quoteItems, deliveryNotes) {
+  async function printJobSheet(job, processes, quoteItems, deliveryNotes, allocations) {
     const { jsPDF, autoTable } = await getPdf();
     const doc = new jsPDF();
     // Every type size on this sheet, in one place, so "make it smaller"
@@ -8355,6 +8356,18 @@ export default function StockControl() {
       });
       y = doc.lastAutoTable.finalY + 5;
     }
+
+    // What the storeman pulls: the Materials tab's reservations, by stage.
+    // Drawn in src/jobs/stockFromStores.js.
+    y = addStockFromStores(doc, autoTable, {
+      allocations,
+      stages: inFlowOrder((processes || []).filter((p) => !p.shortage_id), job),
+      items,
+      y,
+      leftX,
+      T,
+      tableStyles,
+    });
 
     const materials = [1, 2, 3]
       .map((n) => ({ grade: job[`material_${n}_grade`], qty: job[`material_${n}_qty`] }))
@@ -21100,7 +21113,7 @@ export default function StockControl() {
                 type="button"
                 className="stk-btn"
                 style={S.iconBtn}
-                onClick={() => printJobSheet(jobDetail.job, jobDetail.processes, jobDetail.quoteItems, jobDetail.deliveryNotes)}
+                onClick={() => printJobSheet(jobDetail.job, jobDetail.processes, jobDetail.quoteItems, jobDetail.deliveryNotes, jobDetail.allocations)}
                 title="Print job sheet"
               >
                 <FileText size={18} />

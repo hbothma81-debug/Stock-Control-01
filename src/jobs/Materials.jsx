@@ -24,6 +24,10 @@ import TypeToFind from "../TypeToFind.jsx";
 // the only way to consume it is through its own reservation, which books
 // it out against this job. That is what keeps the shelf and the job
 // agreeing with each other.
+//
+// The printed job sheet lists the same reservations the same way, in
+// src/jobs/stockFromStores.js: its groups and its outstanding sum copy
+// this screen's. Change one, change the other.
 
 const num = (v) => Number(v) || 0;
 
