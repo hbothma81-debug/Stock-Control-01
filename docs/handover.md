@@ -786,3 +786,35 @@ Ruled out on this job but true in general: a packing stage with no machine
 set (`cuts_made_on` blank) counts every plain line, tube lines included, so
 it could never fill on a job with tube lines. Packer is tagged laser on
 live, so this is not biting today; it would if that tag were cleared.
+
+---
+
+## 14 Sep 2026 — Laser production: tube floor printout, and a job for Jobs page
+
+**Built and committed, not pushed (2de848d).** A Print button on each tube
+program, on Cutting and in the opened program on Nesting: page 1 with the
+program number, what to draw from stores and every part; then a page per
+nest. `setup-tube-laser-nests.sql` (`laser_programs.nests`) **has run on
+practice and live** (Heinrich, 14 Sep). Heinrich still to try it on
+practice before push: import a report, Print from both screens, portrait
+and landscape. How it works: `docs/TUBE-LASER-HOW-IT-WORKS.md`, "The floor
+printout".
+
+**For Jobs page: a Print on the job that prints every tube program for it.**
+Decided by Heinrich 14 Sep as its own piece of work, after the program
+button is proven. Not started. What it needs:
+
+- A button on the job page (Jobs owns the page; nothing in `src/laser`
+  needs to change for it).
+- The programs for the job are the tube laser's `laser_programs` rows
+  (machine "Tube Laser", not cancelled) linked through
+  `laser_program_jobs`, each carrying `jobs` as the laser hook builds
+  them (`job_id`, `job_number`, `customer`).
+- Print each with `printNestingSheet(program, jobLines, { orientation })`
+  from `src/laser/nestingPrint.js`, where `jobLines` is the job's
+  `job_quote_items`. It opens one tab per program today; one PDF for the
+  whole job would need `printNestingSheet` to draw into a document it is
+  handed. Ask Laser production (or change it and say so in
+  `nestingPrint.js`), since both buttons share it.
+- Ask Heinrich: portrait or landscape by then (he is trying both now), and
+  whether cut programs are included.
