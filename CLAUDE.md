@@ -61,7 +61,7 @@ Which conversation owns what, so far:
 - **Laser production** — the cutting screen, nesting, shortages
 - **Tube Laser production** — the Tube Laser tab, its nesting-report import, Tube Laser Status; the parts-under-a-line rule is shared with Jobs
 - **Planning** — shifts, the time lockout, and whatever we are designing next
-- **Quoting** — the new quoting module
+- **Quoting** — the quoting module and the bill of materials, one plan in `docs/QUOTING-AND-BOM-PLAN.md`; also built the Items tab's part controls (add, edit, import, move)
 - **Stock Manager** — the Stock Manager settings: suppliers, sections, materials, fasteners and the other master lists
 
 `src/App.jsx` is the one file all of you have to touch, because it wires
@@ -121,6 +121,10 @@ after asking me.
 - Supplier logos are gone from the app and the Purchase Order PDF. The `master_suppliers.logo` column is left in place and nothing reads it.
 - Structural stock picks its section type, section and material from Stock Manager's lists (`LibraryField` with `pickOnly`); the add-stock form never adds to them. Anyone who can open Stock Manager adds new ones there.
 - Section names are shop shorthand with no "mm" (SHS 50x50x3, CHS 38.1x2), to be written by the app from fixed boxes per section type, and every existing name is to be converted. One material per real material: MS and Mild Steel are one row. Only the pick-only stock form is built so far.
+- Parts merge back into their line at the first stage left on Every item, usually Welding. There is no hinge tick: it was proposed and turned down, because a practice job's invented stage order had misled the analysis. Never set a machine on that stage: a stage with a machine stops listing the job's own lines. A line that has parts is never asked for a cut method (`wantsCutMethod`).
+- Ticking Nesting or Laser on a job ticks its packing stage too, found by `worked_in_laser_status`, not by name (`stagesImpliedBy`). Unticking the laser leaves packing on. The tube laser needs nothing: its cutting stage is its packing stage.
+- On both lasers a job reaches the packing screen on its first sheet or length cut, not when a whole program is finished (`laserStatusRows`).
+- A SigmaNest quote is always one set, by standing instruction to sales, so its quantities are per set.
 - A job line's stock code is its identity (`job_quote_items.stock_code`), not its description. Matching goes code first, description only when exactly one part carries it (`findCustomerStockMatch`); a typed code not in Customer Stock stays on the line, unlinked. Never read a code back out of a description.
 - New Job asks only customer, description and due date, then opens the job. Stages, lines, cut list, materials and buy-outs are all set on the job itself.
 - A tube job line says what it is cut from in `job_quote_items.material_type`, in the words `materialText` (`src/laser/stockOptions.js`) makes, e.g. "SHS 50x50x3mm 304". The tube import is to match on those exact words, so any rename of a section or material must rewrite this column in the same pass.
@@ -138,6 +142,8 @@ after asking me.
 - A suggestion list positioned inside its parent is cut off by any scrolling pop-up around it (`S.modal` scrolls). `TypeToFind` pins its list to the viewport for this reason; do not hand-roll another one.
 - Tapping a suggestion fires mousedown, then the input blurs. The blur handler must not act on the typed text again, or the tap is overwritten.
 - Mixing `padding` from `S.input` with a `paddingRight` override makes React drop one of them with a console warning. Override the whole `padding`.
+- A PDF table with no `styles` prints at 10pt, bigger than the sheet's body text. Take every size from one scale at the top of the function, as `printJobSheet` does.
+- A script that patches App.jsx must demand exactly one match per edit and refuse to write otherwise. A shorter indent is a substring of a longer one, so a loose pattern edits the wrong place.
 - `consumeProgramStock` (a tube cut moving stock) repeats `useAllocation`'s steps: the shelf, the reservation, the usage log. Change one, change the other.
 - When a form's fields move to another screen, move its checks with them. New Job kept "select at least one process" after the stage ticks left it, and blocked every new job on live.
 

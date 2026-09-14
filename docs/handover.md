@@ -473,3 +473,92 @@ created there. The copy script is a one-off and stays out too.
    doorway has settled.
 3. The customer and sales rep filters on Jobs are type-to-find now (the
    dropdowns conversation did it); nothing to do unless they misbehave.
+
+---
+
+## 14 Sep 2026 — Quoting conversation (quoting, bill of materials, parts under a job line)
+
+### Done and live (9 to 11 Sep)
+
+- **Parts under a job line, by hand.** Every line on a job's Items tab
+  has Add part: quantity, the part typed to find against that customer's
+  stock codes, length in millimetres, cut method. Parts already there
+  are typed over in place. Commit 23f4d6b.
+- **Parts from a file.** SigmaNest parts and Tube nest parts under any
+  line. SigmaNest lands as Laser, linked to a stock code where the name
+  matches. A tube nest lands as Tube laser with lengths, reading only the
+  Part Info sheet. Both ask first and update a part of the same name
+  rather than doubling it. Commit 9e5a06b.
+- **Move a line under another, and back out.** Refused for a line that
+  has parts of its own, is invoiced, or has a delivery note. Commit
+  ee8f34f.
+- **Welding as a cut method.** Commit b11f983. Importing also fills in a
+  blank cut method on a part already under the line.
+- **A line with parts is never asked for a cut method.** Not counted as
+  untagged, skipped by Guess the rest, no orange outline. Commit db5c8bc.
+- **Job sheet.** One type scale at the top of the function, tables at
+  7.5pt. Parts are marked with a bullet: the arrow used before printed a
+  stray glyph and letter-spaced every part line. Commit 507ee76.
+- **Ticking Nesting or Laser ticks packing.** Commit 534964f.
+- **Both lasers: a job reaches packing on the first sheet or length
+  cut.** Commit e64d783.
+- **Docs.** `docs/JOB-PARTS-WARNINGS.md` holds every warning about parts.
+  The two laser write-ups carry the packing changes. The one plan for
+  quoting and the bill of materials is `docs/QUOTING-AND-BOM-PLAN.md`;
+  the older BOM and quoting plans now point to it.
+
+### SQL written by this conversation
+
+- **`setup-quoting-and-bom.sql`** — confirmed on practice and live on
+  14 Sep. All 11 tables answer 200 on both, and so do the new columns on
+  `job_quote_items`, `stock_items`, `jobs`, `job_cut_items`,
+  `process_type_settings` and `profiles`. Not checkable from here: the
+  `quotes` storage bucket, the `nextQuoteNumber` counter and the check
+  rules. `CHECK-which-setup-files-are-run.sql` covers them. Nothing reads
+  the quote tables yet.
+- **`setup-made-on-welding.sql`** — check rules only, which the REST API
+  cannot see. Heinrich confirmed it run on both on 11 Sep. Saving Welding
+  on a line was verified on practice.
+- Not a setup file: `CHECK-bom-starting-point.sql`, read-only, never run.
+
+### Built but not yet tested by Heinrich
+
+He confirmed Add part by hand, and the job sheet sample. Still untested
+by him:
+
+1. SigmaNest parts and Tube nest parts under a line. The file pick cannot
+   be driven from the browser pane; the parsing was checked against every
+   sample tube report and three real SigmaNest quotes.
+2. Move under, and the arrow that takes a part back out.
+3. Welding on a line. It saves now; nothing is tagged Welding yet.
+4. A line with parts: no untagged count, no orange outline, Guess skips
+   it.
+5. Ticking Nesting or Laser on Edit processes bringing Packer with it.
+6. A job reaching the packing screen on its first sheet or length.
+7. The printed job sheet from a real job, rather than the sample.
+
+### Half-done or waiting on Heinrich
+
+- **The quoting module itself.** Plan agreed; step one, the database, is
+  on both; step two onward not started. Open decision: whether the
+  add-only Stock Codes import gets an Apply-differences option for price
+  changes.
+- **Owed to Laser production:** that ticking Nesting or Laser now ticks
+  the packing stage. The first-sheet rule has reached them already;
+  their own CLAUDE.md notes build on it.
+- **Stock Manager lock** (plan section 6): decided, not built.
+- **Noticed, not touched:** the untagged count never includes parts, so
+  a part left untagged is not nagged about.
+- **Memory note clash:** `bom-plan.md` is the 8–9 Sep planning
+  conversation's note, and it rewrote the file on 14 Sep. The quoting
+  state now lives in its own note, `quoting-module.md`. Where the two
+  disagree, section 15 of the merged plan wins.
+
+### Pick up next
+
+1. Heinrich tests the list above on live.
+2. Quoting step two: a quote you can send (list, detail, items with a
+   typed price, PDF) in `src/quoting/`, behind `can_quote`.
+3. If the tube import stops picking the parent line on its own once lines
+   with parts are left blank, have it recognise a line with parts rather
+   than one tagged Tube laser.
