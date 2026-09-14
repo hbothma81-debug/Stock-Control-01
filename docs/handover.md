@@ -67,3 +67,63 @@ session ended: what is done, what is half-done, what to pick up next.
 2. Get `setup-job-line-material-type.sql` run on practice and live.
 3. If egress is still high: take master lists off the timer entirely
    and fetch them only when they change.
+
+
+---
+
+## 14 Sep 2026 — Dropdowns and the Production tab (a fifth conversation)
+
+### Done and live (9 to 14 Sep)
+
+- **Every list picker is type-to-find.** `src/TypeToFind.jsx`, used on
+  about 60 boxes: item form, stock filters, procurement, Manager, Jobs,
+  Production, nesting, user management. Fixed short choices and the
+  numeric size filters stay plain dropdowns on purpose. Fixes since:
+  a tapped name sticks on fields that allow new names; the list is
+  pinned to the screen so scrolling pop-ups cannot hide it; options can
+  carry a hint (a description beside a part number).
+- **Alphabetical everywhere.** Master lists and people are sorted once
+  in memory. Job Process Types and Laser Thicknesses keep their hand
+  order.
+- **Production tab, ready work first.** Two pills per department, ready
+  on top, waiting shut, "Waiting: <stage>" on each waiting row, partly
+  ready per-item stages count as ready with "x of y", overview cards
+  show the ready count. Plan: `docs/PRODUCTION-READY-FIRST-PLAN.md`.
+- **Customer Stock, New stock item.** Part number and Description both
+  find known parts (stock for that customer, then drawings) and fill
+  each other in.
+
+### SQL written by this conversation
+
+None. No database change in any of it.
+
+### Built but not yet tested by Heinrich
+
+He has confirmed: New Job customer box (type, tap, sticks), Add Item on
+Customer Stock (list now appears). Still untested by him:
+
+1. Production tab: ready/waiting pills, the "Waiting: <stage>" label,
+   a partly ready per-item job showing "x of y", card numbers matching
+   the pills.
+2. Type-to-find on: stock filters (material, fastener type/grade/finish,
+   Drawings customer), procurement (requisition rows and form, PO filter,
+   report and builder, delivery note recipient, buyouts, stores
+   catalogue rows), Manager (Customer Stock rows, Sections rows and add
+   row), Jobs and Production filters, assignee on a stage, "put against
+   a stage", usage pop-up job picker, nesting thickness and grade, user
+   management shift and department.
+3. Part number and Description suggestions on the Customer Stock item
+   form, including picking from Description filling the part number.
+4. Manager screens now list everything alphabetically.
+
+### Pick up next
+
+- If anything above misbehaves, each is one commit to revert; the
+  commits are named by screen.
+- The single-stage detail header still says plain Ready or Waiting
+  without the stage name. Small, if wanted.
+- The customer and sales rep filters on Jobs and Production were the
+  Jobs conversation's; they are type-to-find now, tell that conversation.
+
+---
+

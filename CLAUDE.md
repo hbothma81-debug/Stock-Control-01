@@ -94,9 +94,30 @@ after asking me.
 - Buy-outs are cost only; the sell price column exists but nothing writes it. A buy-out's supplier must be on the supplier list. No importer ever reads quantity on hand from a file.
 
 ## Gotchas in App.jsx (each one passed a clean build)
+- Every job line carries a "made on" tag (`job_quote_items.made_on`: laser, tube_laser, cnc, cut_to_size, assembly, blank). Each stage says which tag it cuts (`process_type_settings.cuts_made_on`, set under Job Process Types). A cutting stage lists only its own machine's lines plus untagged ones, never an assembly, and never finishes itself when it has nothing to cut — it warns and keeps a single tick. The tag is remembered on the stock part (`stock_items.made_on`) and comes back on the next job; the catalogue "replace" import keeps a part's row and id so tags and job links survive it. Helpers: `cutsMadeOn`, `stageTakesItem`, `itemsForStage`, `stageHasNothingToCut`.
+- The plate laser and the tube laser are separate lanes on the Production tab (`inOtherLaserLane`): neither waits for the other; everything after them waits for both. Tube parts are packed by the tube operator under the Tube Laser stage; Laser Status is the plate packer's screen and says "laser parts packed".
+- A file uploaded onto a job is filed against a stage or the whole job (`job_documents.process_name`) and shows only on that stage's Production card. Every stage's card has its own documents block; the Files tab groups files by stage as pills with Upload on each and "Move to…" on each file.
+- The Production tab carries the Jobs page's search, customer and sales rep filters; one matcher (`productionJobMatches`) drives the pill counts, the department lists, the nesting shortage block and Laser Status.
+- Both lasers run one set of code (`src/laser`, `useLaserPrograms`). Anything that differs between them lives in `LASER_MACHINES` in `src/constants.js` — never an if-tube inside a screen. The hook is called once per laser and reads only its own machine's programs and its own lane's shortages.
+- A tube program is one section, several jobs, numbered by the database (five digits, no prefix); the nester types that number when exporting the cut file. Programs come from the tube software's spreadsheet through Import nesting report; typing one by hand is the exception.
+- Three stage settings — `hide_from_production`, `releases_on_start`, `worked_in_laser_status` — have no tick box in the app. They are set by SQL only (`setup-hide-from-production.sql`, `setup-laser-status.sql`, `setup-tube-laser-stages.sql`). The tube stages are shown on Production again (`UNDO-tube-laser-stages-hide.sql`) until the jobs started the old way are through.
+- Job lines can be parent and child. Money sees parents only; a stage with a machine sees the children; see `docs/JOB-PARTS-WARNINGS.md` before touching anything that lists job lines.
+- Every picker over a list of names (customers, suppliers, materials, sections, people, jobs, shifts, departments) is the shared `src/TypeToFind.jsx` box, never a `<select>`. Options are strings or `{ value, label, hint }`; `allowNew` on form fields only, never on filters. Plain `<select>` stays for a fixed handful of choices (status, theme, batch/each, direction, shortage reason, made-on) and the numeric size filters.
+- Master lists and the people list are held alphabetical in memory (`sortMaster`, and the `setMaster` / `setPeople` wrappers), case ignored, numbers read as numbers. Job Process Types and Laser Thicknesses keep their stored order; both have reorder controls in the Manager. Nothing may assume "the last entry is the newest".
+- Production tab: each department shows a "Ready now" pill (open) and a "Waiting on earlier stages" pill (shut). `blockingStages(process, jobProcesses)` is the one rule for whether a stage may start and what it waits for; `isProcessActionable` sits on it. A per-item stage with pieces already let through counts as ready ("Partly ready: x of y"). The overview card number is the ready count.
+- On the New stock item form for Customer Stock, the Part number and Description boxes both search the same known parts (stock for that customer, then drawings) and fill each other in.
 
 - A component declared inside `App()` remounts on every render and throws the cursor out of text boxes. Render with a plain function instead.
 - `isAdmin || cond && <x/>` shows nothing to admins. Bracket it: `(isAdmin || cond) && <x/>`.
 - A helper handed to something declared higher up in the file must be a `function` declaration, not a `const`.
 - Counting inside a state updater and reading the count on the next line gives 0.
 - The PDF's standard fonts cannot print arrows such as `↳`; the whole line comes out letter-spaced.
+- Two `setForm({ ...form, x })` calls in one handler keep only the last: both spread the same stale `form`. Use `setForm((f) => ...)`, or queue the second change through an effect as `LibraryField` does.
+- A suggestion list positioned inside its parent is cut off by any scrolling pop-up around it (`S.modal` scrolls). `TypeToFind` pins its list to the viewport for this reason; do not hand-roll another one.
+- Tapping a suggestion fires mousedown, then the input blurs. The blur handler must not act on the typed text again, or the tap is overwritten.
+- Mixing `padding` from `S.input` with a `paddingRight` override makes React drop one of them with a console warning. Override the whole `padding`.
+
+## Checking a screen without signing in
+
+- `http://localhost:5173/ui-preview.html` on the dev server shows the shared pieces (`Section`, `RecordRow`, `TypeToFind`) with made-up data and no login. Add a demo there when a shared piece changes.
+- The Browser pane's clicks and key presses can stop reaching the page while the pane is hidden; typing still arrives. A script-dispatched `mousedown` on a suggestion, or `.focus()` on a box, exercises the same handlers. Its `type` action does not replace selected text the way a keyboard does.
