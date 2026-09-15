@@ -1212,3 +1212,104 @@ instead: navigate the Browser pane to that server.)
    step 5 warning.
 3. A per-item stage re-checking itself when its lines change (JOB-0021),
    from the 14 Sep Laser production entry.
+
+---
+
+## 15 Sep 2026 — Jobs page: extra stages per line, and the external cut methods (JOB-0068)
+
+Heinrich: Bending listed all 20 lines of a job when 5 needed bending; and
+JOB-0068's Bending was held by Laser - External (handed over from the
+Production tab conversation). Planned with him, then "plan and test all
+steps as far as possible". Rules in `CLAUDE.md` under Decisions.
+
+### Committed (this conversation pushes nothing)
+
+- `669b13a` `CHECK-extra-stages-before.sql`, read-only; its live result
+  is in this conversation (the made-on tags are switched on on live;
+  nothing carried Welding).
+- `6c02395` `setup-made-on-external.sql`: **on practice and live**
+  (Heinrich, 15 Sep).
+- `7a39a90` Made-on list: Laser - external, Machining - external, CNC
+  shown as "CNC Lathe", Welding retired (kept and shown where already
+  set, `madeOnChoices`). A stage rename now also rewrites
+  `job_allocations.process_name`, `job_info_requests.stage_name` and
+  `bom_stages.process_name`. **Safe to push now.**
+- `ae8c652` `setup-extra-stages.sql`: **not yet run on either database.**
+- `3cd0817` The rules: `src/jobs/extraStages.js` (11 tests) behind
+  `stageTakesItem`, `itemFlowLimit` (the line's own order wins,
+  `comesBeforeForLine`), `blockingStages` (two extra stages never block
+  each other whole), `stageHasNothingToCut`; the Job Process Types
+  switch "Extra stage: marked lines only"; an extra stage is added to a
+  job as Each. Safe to push before the SQL: nothing changes until a
+  stage is switched on, and the switch refuses to save without it.
+- `97b0653` The Then box (`src/jobs/ExtraStagesBox.jsx`) on every line
+  and part, remembered on the stock part, carried onto every new line
+  (New Job, Add item, Add part, both part imports, quote import, a typed
+  stock code, Copy job); "Nothing extra on the rest"; the job sheet's
+  "Made on, then" column ("Laser > Bending"); a rename rewrites the
+  lists. **Must not go live before `setup-extra-stages.sql` is on both
+  databases**: the stock field map saves `extra_stages` on every stock
+  save.
+
+Checked: names, build, 93 tests after every step; both SQL files proven
+on pglite (twice, and with tagged rows); the Then box driven on
+`ui-preview.html` (add by typing, swap, remove, None, read only), where
+it overlapped its None button by 32px until fixed. Not tried signed in;
+the job sheet not drawn.
+
+### Database changes (announce to the others)
+
+- `job_quote_items.extra_stages` and `stock_items.extra_stages` (text[];
+  null = never set, `{}` = nothing extra); `process_type_settings.only_marked`
+  (boolean, default false).
+- The three made-on check rules now allow `laser_external` and
+  `machining_external`. `setup-made-on-tag.sql` and
+  `setup-made-on-welding.sql` write shorter lists: if either is re-run,
+  run `setup-made-on-external.sql` after it.
+
+### Built but not yet tested by Heinrich (practice, signed in)
+
+1. JOB-0068's path: a line tagged Laser - external; Laser - External set
+   to "Cuts: Laser - external"; the Bending card reads "Partly ready".
+2. Welding gone from the dropdowns; CNC reads CNC Lathe.
+3. Rename a practice stage that has a reservation aimed at it.
+4. After the SQL: Bending and Drilling set to Extra stage; on a job, the
+   Then box (add, order, None, Nothing extra on the rest); Bending lists
+   only its lines; one part cut, machine, bend and another cut, bend,
+   machine each wait for their own previous step; the job sheet column.
+5. The part remembers: the next job with it comes in with its list; a
+   stage taken off does not come back.
+
+### Waiting on Heinrich
+
+- Paste `setup-extra-stages.sql` on practice, then live.
+- Once `7a39a90` is live, in one sitting: Laser - External to "Cuts:
+  Laser - external"; Machining - External to "Cuts: Machining -
+  external" **and** Extra stage (it is a first step for a part from the
+  supplier and a later step after an in-house cut); tag **every** line
+  on JOB-0068; tick the packer for both external departments.
+- Rename "Machine/Drilling/CNC" to "CNC Lathe" (after `7a39a90` is
+  live); add Drilling; set Bending and Drilling to Extra stage; tick who
+  drills. Keep every extra stage above Welding in Job Process Types.
+- Still open: Assembly (keep, or relabel "No machine (assembly /
+  bought in)"; it is the only way to say a plain line is cut on no
+  machine); whether any of the 7 open jobs on Machine/Drilling/CNC is
+  drilling work to move to Drilling.
+
+### Noticed, not changed
+
+- Copy job has never copied a line's made-on.
+- The tube material box on a line uses the same input padding the Then
+  box had, so it probably spills over its neighbour the same way.
+- `CHECK-job-stuck-on-packing.sql` repeats `stageTakesItem` in SQL and
+  does not know `only_marked` (matters only if a packing stage were made
+  an extra stage).
+- The preview tool reads the `.claude/launch.json` one folder up; a
+  `stock-control-5175` entry was added there for when another chat holds
+  5173. That folder is not in git.
+
+### Pick up next
+
+1. Whatever Heinrich's practice test turns up.
+2. JOB-0068 after setup: its Bending card "Partly ready: x of y" under
+   Ready now.
