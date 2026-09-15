@@ -881,3 +881,93 @@ stands. `setup-copy-description-into-stock-code.sql` is still not run.
    `CHECK-imported-parts-intact.sql` into one result table.
 4. When Stock Manager converts section names, the same pass rewrites
    `job_quote_items.material_type`.
+
+---
+
+## 15 Sep 2026 — Dropdowns and the Production tab: Info Request
+
+### Done, and live before Heinrich tried it
+
+**Info Request**: a floor operator flags from a Production card that the
+job is standing until the office answers. Steps 2 to 5 went live on
+14 Sep in another conversation's push; `CHECK-what-is-live.cjs` finds
+"Send Info Request", "Standing: waiting on office", "Office answered"
+and "standing in all" on live. The rules are in `CLAUDE.md` (Decisions)
+and `src/lib/infoRequests.js`, with tests.
+
+1. **Table** (cef0068): `job_info_requests`, one row per request, open
+   then answered or cleared, never deleted.
+2. **Floor** (6d5c6ed): an Info Request button beside Mark urgent and
+   Flag shortage (orange since a74d058, another conversation's styling).
+   Pop-up: what's needed, what exactly, optional photo. The stage goes
+   into a red "Standing — waiting on office" pill on top of the
+   department, with a red card and, when opened, a red box with
+   "Got it / sorted". "n standing" on the overview card. A bell message
+   to the job's sales rep, or every admin when there is none.
+3. **Office** (d3a5558): a red banner under the header on every screen,
+   the rep's own jobs and every one for admins, not dismissable. Answer
+   takes a reply and optional files, filed on that stage's card; the
+   operator gets a bell message; the answer stays on the card 3 days.
+4. **Job page** (bcd1068): a red strip with Answer; past requests in a
+   shut "Info Requests" pill, each with how long the job stood.
+5. **Printout** (a33f7ae): an "Info Requests" section on the job sheet's
+   Job History page, with the total time stood.
+
+Also fixed in cef0068: `make-policies-idempotent.cjs` wrapped policies in
+named dollar-quote blocks a second time, so `setup-ALL.sql` had two
+broken invoice-notes policies. It now matches `setup-invoice-notes.sql`.
+
+### Every setup file this conversation wrote
+
+| File | Adds | Practice | Live |
+| --- | --- | --- | --- |
+| `setup-info-requests.sql` | table `job_info_requests`, `updated_at` trigger, read/add/update rules, no delete rule | yes, 200 with the job embed (checked 15 Sep) | yes, 200 (checked 15 Sep) |
+
+The trigger and rules cannot be seen over REST. Heinrich reported
+"ready on both" on 14 Sep, and that result line checks the UPDATE rule
+and the trigger. Registered in `build-test-database.sh` and
+`CHECK-which-setup-files-are-run.sql`.
+
+### Built but not yet tested by Heinrich (all of it live)
+
+1. **Raise one:** Production, a department, open a stage, Info Request.
+   Pick what's needed, type, add a photo, send. The red card, the
+   Standing pill, "1 standing" on the overview card.
+2. **Who is told:** the job's sales rep gets a bell message; on a job
+   with no rep, every admin does.
+3. **The banner:** as the rep and as an admin (Refresh skips the
+   5-minute wait). Answer with a drawing attached: the drawing in that
+   stage's documents on the card, the answer on the operator's card, the
+   operator's bell message.
+4. **Got it / sorted** on the card clears it, and the banner goes.
+5. **Job page:** the red strip with Answer; afterwards the request in the
+   shut Info Requests pill with the time it stood.
+6. **Printout:** print the job sheet of a job with an answered and an
+   open request; the section and the total.
+7. Still untested from this conversation's 14 Sep entry: the ready and
+   waiting pills and "x of y", type-to-find on the boxes listed there,
+   Customer Stock part number and description, Manager lists sorted.
+
+### Waiting on Heinrich
+
+- The tests above. No SQL to run, no permission ticks.
+- My call, not asked: Answer on the job page is open to anyone who can
+  open the job, not only the rep and admins. Say if it should be
+  narrower.
+
+### Not built, by choice
+
+- A text, email or push alert for when nobody has the app open.
+- A cross-job report of hours lost waiting, per customer or rep.
+- Info Request on Laser Status, Cutting or Nesting: Laser production's
+  screens, so ask that conversation first.
+
+### Pick up next
+
+1. Whatever Heinrich's test turns up.
+2. Offer again, as part of work he is testing: lifting the Production
+   tab out of App.jsx into its own file. Flagged, not decided.
+3. Small: the single-stage detail header still says plain Ready or
+   Waiting, without the stage name.
+
+No practice data left by this conversation; it never signed in.

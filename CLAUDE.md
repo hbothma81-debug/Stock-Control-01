@@ -58,6 +58,11 @@ at for five minutes.
   patch, keep the hunks that carry your names, `git apply --cached` that
   patch, and check `git diff --cached --stat` before committing. Never
   `git add src/App.jsx` whole in that state, and never stash their work.
+  Keep git's default context lines in that patch: a `-U0` patch applied with
+  `--unidiff-zero` places an insertion by line number, and their uncommitted
+  lines above it move it (on 14 Sep a section landed inside the next
+  function). Before committing, parse the staged copy itself:
+  `git show :src/App.jsx | node_modules/.bin/esbuild --loader=jsx > /dev/null`.
 - **If anything is already staged when you start** (`git diff --cached
   --name-only`), it is somebody's commit in progress: wait for it, because
   `git commit` takes the whole index. An undo takes back only what you
@@ -75,7 +80,7 @@ Which conversation owns what, so far:
 - **Planning (the main conversation)** — shifts, the time lockout, keeping the app's downloads down, every push, and whatever we are designing next
 - **Quoting** — the quoting module and the bill of materials, one plan in `docs/QUOTING-AND-BOM-PLAN.md`; also built the Items tab's part controls (add, edit, import, move)
 - **Stock Manager** — the Stock Manager settings: suppliers, sections, materials, fasteners and the other master lists
-- **Dropdowns and the Production tab** — the shared `TypeToFind` box, keeping lists alphabetical, and the Production tab's ready and waiting pills
+- **Dropdowns and the Production tab** — the shared `TypeToFind` box, keeping lists alphabetical, the Production tab's ready and waiting pills, and Info Request (`src/lib/infoRequests.js`)
 
 `src/App.jsx` is the one file all of you have to touch, because it wires
 everything together. That is the collision point. When your work naturally
@@ -89,6 +94,7 @@ after asking me.
 - I paste SQL into the Supabase SQL editor myself: practice (stock-control-TEST) first, then live. Give me the SQL itself in a code block — never a terminal command like `cat file.sql`, which the editor tries to run as SQL.
 - Keep a paste under about 40 lines and name dollar quotes (`$body$`, `$do$`) rather than bare `$$`. If the editor offers to change the query ("Potential issues detected"), run it unchanged.
 - Register every new setup file in `build-test-database.sh` and `CHECK-which-setup-files-are-run.sql`, then run `build-test-database.sh` to regenerate `setup-ALL.sql`.
+- `make-policies-idempotent.cjs`, the last step of `build-test-database.sh`, treats any `do $tag$ … end $tag$;` block as already guarded. Until 14 Sep it knew only bare `$$` and wrapped policies inside named blocks a second time, which broke `setup-ALL.sql`. After regenerating, `git diff setup-ALL.sql` should hold only the new file. From Git Bash, pipe nothing into `head`: it can stop the script before that step.
 - If app code needs a new column, either the SQL is on both databases before the push, or the code must still work without the column. A field in `PO_DB_FIELDS` or the stock field map without its column breaks every save of that table.
 - The database caches its table list for about a minute after a paste. A "could not find the table" error straight afterwards is not proof the SQL failed.
 - A table set up with read, add and delete rules and no update rule silently refuses every update: no error, zero rows changed, the screen looks frozen. Before the app's first update to any table, check `pg_policies` for an UPDATE rule (job_documents lacked one until `setup-job-documents-move.sql`). Ask for the changed row back with `.select()` and say so when none comes.
@@ -107,7 +113,7 @@ after asking me.
 
 - Free plan: 5 GB of downloads a month, billing cycle 25th to 25th. It went over in the cycle ending 25 Sep 2026. Projects are restricted from 14 Oct 2026 if the organisation is still over quota.
 - Never add a fetch of a whole table on a timer. Background refreshes ask only for rows with `updated_at` at or after the newest one held, plus a row count to catch deletions (`loadAllData(false, { incremental: true })`, `loadTableRows`, `fetchNotifications({ incremental: true })`).
-- Database triggers keep `updated_at` on stock_items, requisitions, purchase_orders, usage_log and job_notifications. A table that joins the incremental refresh needs the same trigger first.
+- Database triggers keep `updated_at` on stock_items, requisitions, purchase_orders, usage_log, job_notifications and job_info_requests. A table that joins the incremental refresh needs the same trigger first.
 - When refreshed rows are merged into a list that has a `lastSaved…Ref` autosave, move that ref too, or the autosave writes every arrived row back.
 - `BACKGROUND_REFRESH_MS` is 5 minutes until the 25 Sep 2026 reset (normally 1 minute). Master lists refresh every 10 minutes. The shift check stays at 1 minute because the lockout warning counts down from it. Refreshing pauses after 10 minutes with nobody touching the screen.
 
@@ -131,7 +137,7 @@ after asking me.
 - Job lines can be parent and child. Money sees parents only; a stage with a machine sees the children; see `docs/JOB-PARTS-WARNINGS.md` before touching anything that lists job lines.
 - Every picker over a list of names (customers, suppliers, materials, sections, people, jobs, shifts, departments) is the shared `src/TypeToFind.jsx` box, never a `<select>`. Options are strings or `{ value, label, hint }`; `allowNew` on form fields only, never on filters. Plain `<select>` stays for a fixed handful of choices (status, theme, batch/each, direction, shortage reason, made-on) and the numeric size filters.
 - Master lists and the people list are held alphabetical in memory (`sortMaster`, and the `setMaster` / `setPeople` wrappers), case ignored, numbers read as numbers. Job Process Types and Laser Thicknesses keep their stored order; both have reorder controls in the Manager. Nothing may assume "the last entry is the newest".
-- Production tab: each department shows a "Ready now" pill (open) and a "Waiting on earlier stages" pill (shut). `blockingStages(process, jobProcesses)` is the one rule for whether a stage may start and what it waits for; `isProcessActionable` sits on it. A per-item stage with pieces already let through counts as ready ("Partly ready: x of y"). The overview card number is the ready count.
+- Production tab: each department shows a "Ready now" pill (open) and a "Waiting on earlier stages" pill (shut). `blockingStages(process, jobProcesses)` is the one rule for whether a stage may start and what it waits for; `isProcessActionable` sits on it. A per-item stage with pieces already let through counts as ready ("Partly ready: x of y"). The overview card number is the ready count. A stage with an open Info Request sits in a red "Standing — waiting on office" pill above both (`Section` with `danger`), counted in neither; the overview card adds "n standing".
 - On the New stock item form for Customer Stock, the Part number and Description boxes both search the same known parts (stock for that customer, then drawings) and fill each other in.
 - Supplier logos are gone from the app and the Purchase Order PDF. The `master_suppliers.logo` column is left in place and nothing reads it.
 - Structural stock picks its section type, section and material from Stock Manager's lists (`LibraryField` with `pickOnly`); the add-stock form never adds to them. Anyone who can open Stock Manager adds new ones there.
@@ -144,6 +150,7 @@ after asking me.
 - New Job asks only customer, description and due date, then opens the job. Stages, lines, cut list, materials and buy-outs are all set on the job itself.
 - A tube job line says what it is cut from in `job_quote_items.material_type`, in the words `materialText` (`src/laser/stockOptions.js`) makes, e.g. "SHS 50x50x3mm 304". The tube import is to match on those exact words, so any rename of a section or material must rewrite this column in the same pass.
 - The printed job sheet lists the job's reservations as "Stock from stores": Reserved, Taken, Outstanding and an empty Pulled box, grouped as the Materials tab groups them (no stage yet, stages in flow order, a stage since removed). Handed-back ones are left off. Drawn by `src/jobs/stockFromStores.js`, which mirrors `Materials.jsx`. The stock item's shelf location (`loc`) is left off by decision, for now.
+- Info Request (`job_info_requests`; rules and database calls in `src/lib/infoRequests.js`, tested): the floor flags from a stage's Production card that the job is standing until the office answers. A warning only: it never feeds `blockingStages`, and the stage can still be ticked. Raising one tells the job's sales rep, matched by name (or email) to a profile; no rep, or a rep not on the app, tells every admin. A red banner under the header on every screen shows a rep their own open requests and an admin every one; it cannot be dismissed. It closes by the office's Answer (attached files are filed on that stage's card) or the operator's "Got it / sorted", whichever comes first; neither overwrites the other. Never deleted: a closed one stays on its card for 3 days, the job page lists them all, and the printed Job History adds up how long the job stood. No colour change with age. Loads open ones and those closed in 3 days, then only rows changed since.
 
 ## Gotchas in App.jsx (each one passed a clean build)
 
@@ -166,5 +173,6 @@ after asking me.
 ## Checking a screen without signing in
 
 - `http://localhost:5173/ui-preview.html` on the dev server shows the shared pieces (`Section`, `RecordRow`, `TypeToFind`) with made-up data and no login. Add a demo there when a shared piece changes.
+- The preview tool will not start a second dev server in this folder while another conversation's is running, on any port. Navigate the Browser pane to that server instead: it serves this folder's files, yours included.
 - The Browser pane's clicks and key presses can stop reaching the page while the pane is hidden; typing still arrives. A script-dispatched `mousedown` on a suggestion, or `.focus()` on a box, exercises the same handlers. Its `type` action does not replace selected text the way a keyboard does.
 - A PDF is checked by looking at it. Draw it with `jspdf` from a node script (keep a new PDF piece in its own module so the script draws the real code), turn page 1 into a PNG in the scratchpad with `pdfjs-dist` and `@napi-rs/canvas`, and read the PNG. The Read tool cannot open a PDF here (no `pdftoppm`), and the Browser pane cannot screenshot a local file.
