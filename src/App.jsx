@@ -323,29 +323,46 @@ const shortageReasonText = (shortage) => {
   return note ? `${label} — ${note}` : label;
 };
 
-// Where an item is made. Stored as a fixed code, shown as a label, so
-// nobody can end up with "Tube Laser" and "tube laser" as two different
-// things. The database refuses anything else (setup-made-on-tag.sql).
+// Where an item is made: its first step. Stored as a fixed code, shown
+// as a label, so nobody can end up with "Tube Laser" and "tube laser" as
+// two different things. The database refuses anything else
+// (setup-made-on-tag.sql, widened by setup-made-on-welding.sql and
+// setup-made-on-external.sql, which carries the whole list).
 //
-// On a job's line and on the stock part it is one of the five. On a stage
+// On a job's line and on the stock part it is one of these. On a stage
 // (Stock Manager -> Job Process Types) it says which tag that stage cuts,
 // and blank means every item -- bending, delivery, invoicing. Assembly is
 // never a stage's setting: nothing cuts an assembly.
 //
+// Work an outside supplier does as the first step is a cut method too:
+// Laser - external, Machining - external. Their stages are set to
+// "Cuts:" them; left on every item, such a stage takes every line and
+// holds each one back on every per-item stage after it.
+//
+// Work done after the first step (bending, drilling, machining sent out
+// after an in-house cut) is not a cut method: it is the line's extra
+// stages, in its own order.
+//
+// A retired code is no longer offered, but a line or stage that already
+// carries it keeps it and still shows it (madeOnChoices). Welding was
+// retired on 15 Sep 2026 -- welding is done to parts already cut, and
+// nothing on live carried it. The database still allows it.
+//
 // Plan: docs/MADE-ON-TAG-PLAN.md.
 const MADE_ON_OPTIONS = [
   { code: "laser", label: "Laser" },
+  { code: "laser_external", label: "Laser - external" },
   { code: "tube_laser", label: "Tube laser" },
-  { code: "cnc", label: "CNC" },
+  { code: "cnc", label: "CNC Lathe" },
+  { code: "machining_external", label: "Machining - external" },
   { code: "cut_to_size", label: "Cut to size" },
-  // Where welded parts come together. Needs setup-made-on-welding.sql on
-  // the database first, or choosing it is refused and the line will not
-  // save. A part tagged Welding is listed by no stage until one is set
-  // to "Cuts: Welding" under Job Process Types -- see the note at the
-  // foot of that file.
-  { code: "welding", label: "Welding" },
   { code: "assembly", label: "Assembly" },
+  { code: "welding", label: "Welding", retired: true },
 ];
+// What a dropdown offers: everything not retired, plus whatever is
+// already chosen, so a line still tagged with a retired code does not
+// suddenly read blank.
+const madeOnChoices = (current) => MADE_ON_OPTIONS.filter((o) => !o.retired || o.code === (current || ""));
 const madeOnLabel = (code) => MADE_ON_OPTIONS.find((o) => o.code === code)?.label || "";
 
 // Parent and child job lines. A child is a part under the job's own line
@@ -6884,7 +6901,7 @@ export default function StockControl() {
       const refused = /violates check constraint|made_on_check/i.test(err?.message || "");
       alert(
         refused
-          ? `The database does not allow "${madeOnLabel(code) || code}" yet. Run setup-made-on-welding.sql on this database, then try again.`
+          ? `The database does not allow "${madeOnLabel(code) || code}" yet. Run setup-made-on-external.sql on this database (it carries every cut method), then try again.`
           : "That didn't save — check your connection and try again."
       );
     }
@@ -10608,7 +10625,15 @@ export default function StockControl() {
         supabase.from("shortages").update({ flagged_department: newValue }).eq("flagged_department", oldValue),
         // Keyed by name, so a rename has to carry them or the stage
         // silently loses whatever it was set up to do.
-        supabase.from("process_type_settings").update({ process_name: newValue }).eq("process_name", oldValue)
+        supabase.from("process_type_settings").update({ process_name: newValue }).eq("process_name", oldValue),
+        // A reservation aimed at a stage prints its name ("for Bending");
+        // an Info Request files its answer's documents against its stage by
+        // name, so a stale one would put them on no card at all; and a
+        // saved recipe lists the stages it needs. All three hold the name
+        // as text, so a rename has to carry them.
+        supabase.from("job_allocations").update({ process_name: newValue }).eq("process_name", oldValue),
+        supabase.from("job_info_requests").update({ stage_name: newValue }).eq("stage_name", oldValue),
+        supabase.from("bom_stages").update({ process_name: newValue }).eq("process_name", oldValue)
       );
     }
     if (listKey === "customers") {
@@ -20331,7 +20356,7 @@ export default function StockControl() {
                                 title="Which items this stage cuts. Leave on Every item for stages after cutting."
                               >
                                 <option value="">Every item</option>
-                                {MADE_ON_OPTIONS.filter((o) => o.code !== "assembly").map((o) => (
+                                {madeOnChoices(cutsMadeOn(entry)).filter((o) => o.code !== "assembly").map((o) => (
                                   <option key={o.code} value={o.code}>
                                     Cuts: {o.label}
                                   </option>
@@ -22241,7 +22266,7 @@ export default function StockControl() {
                                   }
                                 >
                                   <option value="">Made on…</option>
-                                  {MADE_ON_OPTIONS.map((o) => (
+                                  {madeOnChoices(it.made_on).map((o) => (
                                     <option key={o.code} value={o.code}>
                                       {o.label}
                                     </option>
@@ -22410,7 +22435,7 @@ export default function StockControl() {
                                     title="Which machine cuts this part. Decides which cutting stage lists it."
                                   >
                                     <option value="">Cut method…</option>
-                                    {MADE_ON_OPTIONS.map((o) => (
+                                    {madeOnChoices(c.made_on).map((o) => (
                                       <option key={o.code} value={o.code}>
                                         {o.label}
                                       </option>
@@ -22519,7 +22544,7 @@ export default function StockControl() {
                                 title="Which machine cuts this part"
                               >
                                 <option value="">Cut method…</option>
-                                {MADE_ON_OPTIONS.map((o) => (
+                                {madeOnChoices(newPartForm.madeOn).map((o) => (
                                   <option key={o.code} value={o.code}>
                                     {o.label}
                                   </option>
