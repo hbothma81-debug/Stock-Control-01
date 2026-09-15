@@ -971,3 +971,98 @@ and the trigger. Registered in `build-test-database.sh` and
    Waiting, without the stage name.
 
 No practice data left by this conversation; it never signed in.
+
+---
+
+## 15 Sep 2026 — Planning (main conversation): PDF viewer, Invoicing, shortage reason, the pushes
+
+### Done and live (14–15 Sep)
+
+- **Every PDF is drawn by PDF.js** (`src/PdfViewer.jsx`; 64f9d29, eb946c4).
+  All pages and zoom on phones and tablets. **PDF.js 4.10.38, pinned**,
+  for the Huawei MatePad at Bending (Huawei's browser, Chrome 114 engine,
+  no Chrome); 6.x drew it blank. Heinrich confirmed the tablet shows PDFs
+  now. Too-old browsers get the frame (`src/lib/pdfSupport.js`, tested). If
+  a PDF cannot be drawn, it says so in red with the browser version.
+- **"Can print and download PDFs"** (`profiles.can_print_pdfs`): Open /
+  Print and Download for admins and the tick only; delivery notes for
+  everyone. Ticked on live by SQL: Andries, Chanté, Gawie Labuschagne,
+  Mark Bezuidenhout.
+- **Orange alarm buttons** (a74d058): Mark urgent, Flag shortage, Info
+  Request on Production, the nesting screen and Laser Status.
+- **Invoicing** (83ed2c0): the Invoicing stage's Production card has
+  **Request invoice**. It makes the same request as the job page's
+  "Invoice Now (all remaining)" and ticks the stage. Records → Invoice
+  Requests folded into Records → Invoicing as the "All requests" pill.
+  Built here on Heinrich's say-so; invoicing is otherwise the Jobs page
+  conversation's.
+- **Shortage "What happened?" is required** (c0039a8): step 3 of Laser
+  production's shortage plan, built here on Heinrich's say-so. Steps 4
+  (cancel) and 5 (uncut-program warning) are still Laser production's.
+- **Pushed after review, for other conversations:** the tube Cutting
+  screen grouped by job, Stock Manager's checks, Info Request steps 1–5,
+  Stock from stores on the job sheet, the tube floor printout, shortages
+  step 1, the JOB-0078 check, the extra-stages check, and CLAUDE.md and
+  handover notes. Every push was checked live with `CHECK-what-is-live.cjs`.
+- **Egress on 14 Sep:** 5.795 GB of 5 GB (116%). About 650–900 MB a day
+  on 7–11 Sep, 110 MB Saturday, 55 MB Sunday. The 5-minute refresh only
+  went live 07:54 on 14 Sep, so 15 Sep is the first fair day. Figures
+  and the Logs explorer change are in the memory note.
+
+### Every setup file this conversation wrote
+
+| File | Adds | Practice | Live |
+| --- | --- | --- | --- |
+| `setup-pdf-print-permission.sql` | column `profiles.can_print_pdfs` | yes, 200 (checked 15 Sep) | yes, 200 (checked 15 Sep) |
+
+Registered in `build-test-database.sh` and `CHECK-which-setup-files-are-run.sql`.
+Not setup files: the one-line updates ticking the four people above
+(Heinrich pasted the result); Prince's line was given, not confirmed run.
+Other conversations' SQL checked here: `setup-shortage-reason-and-cancel.sql`
+200 on both (15 Sep), `setup-info-requests.sql` and
+`setup-tube-laser-nests.sql` 200 on both (14 Sep).
+
+### Built but not yet tested by Heinrich
+
+1. **PDF viewer:** what someone without the print tick sees ("not ticked
+   for you" under a job sheet or PO, buttons under a delivery note). A
+   drawing on the Bending tablet.
+2. **Request invoice on live**, once someone has Invoicing ticked. Also
+   someone with only the Invoice Requests tick: Records → Invoicing
+   should show them only All requests.
+3. **Shortage "What happened?"** on live: the button stays off until it is
+   filled; the words show on the Nesting row.
+4. **Orange buttons** on Laser Status (not seen on screen).
+5. **Others' features, tried here only as one admin:** Info Request as a
+   rep who is not an admin, on a job with no rep, and "Show all" with more
+   than three; the tube printout's nest pages on a fresh import.
+
+### Waiting on Heinrich
+
+- **User Management:** tick **Invoicing** in the stages of whoever should
+  press Request invoice. The Production tab shows people only their own
+  stages.
+- Jobs under Records → Invoicing with no request (finished before 15 Sep):
+  he is sorting them by hand.
+- Prince's print tick: confirm the SQL ran, or tick it in User Management.
+- **Egress:** read Usage → Egress for 15 Sep. Ask staff to reload tabs
+  left open since before 11 Sep. Decide the 1-minute refresh after the
+  25 Sep reset.
+
+### Practice data left by testing
+
+- JOB-0002: two Info Requests marked "TEST by Claude", one answered with
+  `TEST-answer-note.txt` on the welding card and one cleared with a red
+  test photo. A job sheet under Records → Process Sheets. A shortage
+  "TEST by Claude: gusset × 2" (plate, flagged), to cancel once step 4
+  exists.
+- "Invoicing" added to practice's Job Process Types and to the Test
+  account's stages; Invoicing stages on JOB-0007 and JOB-0010 (both
+  Complete now); a request on JOB-0010.
+
+### Pick up next
+
+1. The Egress chart for 15 Sep. If weekdays are still over about 160 MB,
+   take master lists off the timer.
+2. After 25 Sep: `BACKGROUND_REFRESH_MS` back to 60000, or not.
+3. Whatever Heinrich's tries above turn up.
