@@ -305,8 +305,9 @@ const shortageIsOverdue = (shortage) => (shortageAgeDays(shortage) ?? 0) >= SHOR
 // codes, and it used to be shown as the bare code ("Reason: short"). The
 // flagger's own words (reason_note, setup-shortage-reason-and-cancel.sql)
 // say what actually happened, so whoever nests can tell a real shortage
-// from parts still waiting to be cut. Blank until that SQL has run, and
-// on every shortage flagged before it.
+// from parts still waiting to be cut. The flag form asks for them and will
+// not send without them (15 Sep 2026); shortages flagged before that have
+// none, and show the choice alone.
 const SHORTAGE_REASONS = [
   ["short", "Short (not enough cut)"],
   ["damaged", "Damaged"],
@@ -5882,13 +5883,18 @@ export default function StockControl() {
       // is one shortage to be re-cut together, not several.
       lines: [{ description: "", qty: "", photo: "", photoName: "" }],
       reason: "short",
+      // What happened, in the flagger's words. Required (Heinrich, 14 and
+      // 15 Sep 2026): the four choices alone cannot tell a nester whether
+      // the parts are really missing or only not cut yet.
+      reasonNote: "",
       isPriority: true,
       priorityNote: "",
     });
   }
 
   async function submitNewShortage() {
-    const { job, process, boardNumber, lines, reason, isPriority, priorityNote, lane } = shortageModal;
+    const { job, process, boardNumber, lines, reason, reasonNote, isPriority, priorityNote, lane } = shortageModal;
+    if (!(reasonNote || "").trim()) return;
     // Blank rows are ignored rather than rejected — someone adding a line
     // and changing their mind should not have to remove it again.
     const items = (lines || [])
@@ -5924,6 +5930,7 @@ export default function StockControl() {
         description: description.trim(),
         qty: Number(qty),
         reason,
+        reason_note: reasonNote.trim(),
         status: "flagged",
         is_priority: !!isPriority,
         priority_note: (priorityNote || "").trim(),
@@ -23094,6 +23101,15 @@ export default function StockControl() {
                 </select>
               </div>
             </div>
+            <div style={{ marginTop: 8 }}>
+              <label style={S.label}>What happened? (required)</label>
+              <textarea
+                style={{ ...S.input, minHeight: 60, resize: "vertical" }}
+                value={shortageModal.reasonNote}
+                onChange={(e) => setShortageModal((m) => ({ ...m, reasonNote: e.target.value }))}
+                placeholder="e.g. only 3 of 5 came off the nest — the sheet ran out"
+              />
+            </div>
             {/* Which laser cuts the replacement. Prefilled when the job only
                 has one kind of nesting stage; a mixed job must be told, or
                 the re-cut lands on both nesters' lists. */}
@@ -23145,11 +23161,18 @@ export default function StockControl() {
               type="button"
               className="stk-btn"
               style={S.submitBtn}
-              disabled={!shortageModal.lane || !shortageModal.lines.some((l) => (l.description || "").trim() && Number(l.qty) > 0)}
+              disabled={
+                !shortageModal.lane ||
+                !shortageModal.lines.some((l) => (l.description || "").trim() && Number(l.qty) > 0) ||
+                !(shortageModal.reasonNote || "").trim()
+              }
               onClick={submitNewShortage}
             >
               Flag Shortage
             </button>
+            {!(shortageModal.reasonNote || "").trim() && (
+              <div style={{ ...S.roleHint, marginTop: 6 }}>Say what happened before flagging it.</div>
+            )}
           </div>
         </div>
       )}
