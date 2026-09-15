@@ -354,6 +354,18 @@ const hasChildLines = (it, all) => !!it && (all || []).some((c) => c.parent_quot
 const childLinesOf = (it, all) => (all || []).filter((c) => c.parent_quote_item_id === it?.id);
 // The lines money is counted on: everything that is not a part.
 const billableLines = (all) => (all || []).filter((it) => !isChildLine(it));
+// What is still to be sent to accounts on a job: every billable line with
+// quantity left to invoice, less anything out with a supplier, which is
+// billed once it is back. The job page's "Invoice Now (all remaining)" and
+// the Production tab's "Request invoice" both use this, so they cannot
+// disagree about what "everything left" means.
+const remainingToInvoice = (quoteItems) =>
+  billableLines(quoteItems)
+    .filter((it) => (it.item_status || "on_floor") !== "out_external" && Number(it.qty) - Number(it.qty_invoiced) > 0)
+    .map((it) => ({ item: it, qty: Number(it.qty) - Number(it.qty_invoiced) }));
+// The stage where a finished job is handed to accounts. Its Production card
+// has "Request invoice" instead of a plain tick (requestInvoiceFromProduction).
+const isInvoicingStage = (name) => (name || "").trim().toLowerCase() === "invoicing";
 // Whether a line still wants a cut method set on it.
 //
 // A line that has parts under it never does. Its parts carry the
@@ -7575,9 +7587,7 @@ export default function StockControl() {
   }
 
   async function invoiceEntireJob(job, quoteItems) {
-    const eligibleItems = billableLines(quoteItems)
-      .filter((it) => (it.item_status || "on_floor") !== "out_external" && Number(it.qty) - Number(it.qty_invoiced) > 0)
-      .map((it) => ({ item: it, qty: Number(it.qty) - Number(it.qty_invoiced) }));
+    const eligibleItems = remainingToInvoice(quoteItems);
     if (eligibleItems.length === 0) {
       alert("Nothing left to invoice on this job — everything's either already invoiced or currently out with a supplier.");
       return;
@@ -7593,6 +7603,56 @@ export default function StockControl() {
       console.error("Failed to invoice job:", err);
       alert("Couldn't submit that — check your connection and try again.");
     }
+  }
+
+  // The Production tab's "Request invoice" on the Invoicing stage: the
+  // floor's way to hand a finished job to accounts. The same request the
+  // job page's "Invoice Now (all remaining)" makes -- every line not yet
+  // requested, as the PDF accounts opens from Records -> Invoicing -- and
+  // then the stage is ticked, which completes the job. With nothing left
+  // to request (the job page got there first, or the job has no lines) it
+  // just ticks the stage. Anyone who works the stage may: the PDF is
+  // stored, never shown, so no prices reach anyone who may not see them.
+  // Unlike invoiceEntireJob it never opens Mark as Invoiced -- that is
+  // accounts' step, once the invoice exists in Sage.
+  async function requestInvoiceFromProduction(process, job) {
+    let quoteItems;
+    try {
+      const { data, error } = await supabase.from("job_quote_items").select("*").eq("job_id", job.id);
+      if (error) throw error;
+      quoteItems = data || [];
+    } catch (err) {
+      console.error("Failed to load items for the invoice request:", err);
+      alert("Couldn't load this job's lines — check your connection and try again.");
+      return;
+    }
+    const eligible = remainingToInvoice(quoteItems);
+    const withSupplier = billableLines(quoteItems).filter(
+      (it) => it.item_status === "out_external" && Number(it.qty) - Number(it.qty_invoiced) > 0
+    ).length;
+    if (eligible.length > 0) {
+      const ok = window.confirm(
+        `Send ${job.job_number} to accounts?\n\n` +
+          `This makes the invoice request for the ${eligible.length} line${eligible.length === 1 ? "" : "s"} not yet invoiced, ` +
+          `and ticks Invoicing.` +
+          (withSupplier
+            ? `\n\n${withSupplier} line${withSupplier === 1 ? " is" : "s are"} out with a supplier and left for later.`
+            : "")
+      );
+      if (!ok) return;
+      try {
+        await submitItemsToInvoice(job, eligible);
+      } catch (err) {
+        console.error("Failed to request the invoice:", err);
+        alert("The invoice request didn't go through — check your connection and try again. Invoicing is not ticked.");
+        return;
+      }
+    }
+    await toggleJobProcessComplete(process, job);
+    if (eligible.length === 0) {
+      alert(`Invoicing ticked on ${job.job_number}. No request was made: nothing on this job is left to request.`);
+    }
+    fetchJobs();
   }
 
   async function viewJobInvoiceRequest(request) {
@@ -9777,7 +9837,10 @@ export default function StockControl() {
     if (section === "requisitions") return !!profile?.canRequisition || !!profile?.canManageRequisitions;
     if (section === "purchaseOrders") return !!profile?.canManageRequisitions || !!profile?.canRaisePO;
     if (section === "receiving") return !!profile?.canMarkReceived;
-    if (section === "invoicing") return !!profile?.canManageInvoicing;
+    // Records -> Invoicing also opens for the "Invoice Requests" view tick,
+    // which used to open a Records screen of its own. Those people see only
+    // the All requests pill there.
+    if (section === "invoicing") return !!profile?.canManageInvoicing || !!profile?.permissions?.invoiceRequests?.view;
     if (section === "notifications") return !!profile;
     if (section === "production") return !!profile?.allowedProcessTypes?.length;
     // The programs tab belongs to whoever nests or cuts. Matched on the
@@ -15713,6 +15776,19 @@ export default function StockControl() {
                                     </button>
                                   )}
                                 </>
+                              ) : isInvoicingStage(process.process_name) && !process.is_complete ? (
+                                // The Invoicing stage sends the job to accounts
+                                // and ticks itself, where a plain tick used to
+                                // send nothing (requestInvoiceFromProduction).
+                                <button
+                                  type="button"
+                                  className="stk-btn"
+                                  style={{ ...S.reqActionBtn, ...(isReady ? {} : { opacity: 0.5, cursor: "not-allowed" }) }}
+                                  disabled={!isReady}
+                                  onClick={() => requestInvoiceFromProduction(process, job)}
+                                >
+                                  <FileText size={13} /> Request invoice
+                                </button>
                               ) : (
                                 <label style={{ ...S.checkRow, fontWeight: 600 }}>
                                   <input
@@ -15969,6 +16045,12 @@ export default function StockControl() {
         </div>
       ) : tab === "invoicing" ? (
         <div style={S.list}>
+          {/* Accounts' side: Outstanding and Invoiced. Somebody who has only
+              the "Invoice Requests" view tick (see canView) sees just the
+              book of requests at the bottom, which is all the separate
+              Records screen of that name used to show them. */}
+          {(isAdmin || !!profile?.canManageInvoicing) && (
+          <>
           <div style={S.roleHint}>
             Jobs marked Complete show up here, ready to invoice — create the real invoice in Sage, then mark it here to keep a record.
           </div>
@@ -16174,6 +16256,59 @@ export default function StockControl() {
                 ))}
             </div>
           </Section>
+          </>
+          )}
+          {/* Every request document ever made, newest first. It was its own
+              Records screen, "Invoice Requests", until 15 Sep 2026, when it
+              was folded in here so invoicing lives in one place. The view
+              tick of that name still decides who else may see it. */}
+          <Section title="All requests" defaultOpen={false} count={jobInvoiceRequests.length}>
+            <div className="stk-filter-bar" style={S.filterBar}>
+              <div>
+                <label style={S.label}>From</label>
+                <input type="date" style={S.input} value={invoiceRequestsDateFrom} onChange={(e) => setInvoiceRequestsDateFrom(e.target.value)} />
+              </div>
+              <div>
+                <label style={S.label}>To</label>
+                <input type="date" style={S.input} value={invoiceRequestsDateTo} onChange={(e) => setInvoiceRequestsDateTo(e.target.value)} />
+              </div>
+              <input
+                style={S.input}
+                value={invoiceRequestsSearchQuery}
+                onChange={(e) => setInvoiceRequestsSearchQuery(e.target.value)}
+                placeholder="Search job number…"
+              />
+            </div>
+            {(() => {
+              const rows = jobInvoiceRequests
+                .map((r) => ({ r, job: (jobsList || []).find((j) => j.id === r.job_id) }))
+                .filter(({ r }) => !invoiceRequestsDateFrom || new Date(r.submitted_at) >= new Date(invoiceRequestsDateFrom))
+                .filter(({ r }) => !invoiceRequestsDateTo || new Date(r.submitted_at) <= new Date(invoiceRequestsDateTo + "T23:59:59"))
+                .filter(({ job }) => !invoiceRequestsSearchQuery.trim() || (job?.job_number || "").toLowerCase().includes(invoiceRequestsSearchQuery.trim().toLowerCase()))
+                .sort((a, b) => new Date(b.r.submitted_at) - new Date(a.r.submitted_at));
+              return (
+                <>
+                  {rows.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
+                  {rows.map(({ r, job }) => (
+                    <RecordRow
+                      key={r.id}
+                      title={r.file_name}
+                      summary={job ? `${job.job_number} — ${job.customer || "No customer"}` : "Job not found"}
+                      right={r.total_amount != null ? <span style={S.roleHint}>R {Number(r.total_amount).toFixed(2)}</span> : null}
+                    >
+                      <div className="stk-meta-row" style={S.rowMeta}>
+                        <span>Submitted by {r.submitted_by}</span>
+                        <span>{new Date(r.submitted_at).toLocaleDateString()}</span>
+                      </div>
+                      <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 8 }} onClick={() => viewJobInvoiceRequest(r)}>
+                        <FileText size={13} /> View document
+                      </button>
+                    </RecordRow>
+                  ))}
+                </>
+              );
+            })()}
+          </Section>
         </div>
       ) : tab === "deliveryNotes" ? (
         <div style={S.list}>
@@ -16249,55 +16384,6 @@ export default function StockControl() {
                       onClick={() => job && viewDeliveryNoteDocument(job, first)}
                       disabled={!job}
                     >
-                      <FileText size={13} /> View document
-                    </button>
-                  </RecordRow>
-                ))}
-              </Section>
-            );
-          })()}
-        </div>
-      ) : tab === "invoiceRequests" ? (
-        <div style={S.list}>
-          <div style={S.roleHint}>Every invoice request document generated across every job — its own book, separate from the Invoicing workflow itself.</div>
-          <div className="stk-filter-bar" style={S.filterBar}>
-            <div>
-              <label style={S.label}>From</label>
-              <input type="date" style={S.input} value={invoiceRequestsDateFrom} onChange={(e) => setInvoiceRequestsDateFrom(e.target.value)} />
-            </div>
-            <div>
-              <label style={S.label}>To</label>
-              <input type="date" style={S.input} value={invoiceRequestsDateTo} onChange={(e) => setInvoiceRequestsDateTo(e.target.value)} />
-            </div>
-            <input
-              style={S.input}
-              value={invoiceRequestsSearchQuery}
-              onChange={(e) => setInvoiceRequestsSearchQuery(e.target.value)}
-              placeholder="Search job number…"
-            />
-          </div>
-          {(() => {
-            const rows = jobInvoiceRequests
-              .map((r) => ({ r, job: (jobsList || []).find((j) => j.id === r.job_id) }))
-              .filter(({ r }) => !invoiceRequestsDateFrom || new Date(r.submitted_at) >= new Date(invoiceRequestsDateFrom))
-              .filter(({ r }) => !invoiceRequestsDateTo || new Date(r.submitted_at) <= new Date(invoiceRequestsDateTo + "T23:59:59"))
-              .filter(({ job }) => !invoiceRequestsSearchQuery.trim() || (job?.job_number || "").toLowerCase().includes(invoiceRequestsSearchQuery.trim().toLowerCase()))
-              .sort((a, b) => new Date(b.r.submitted_at) - new Date(a.r.submitted_at));
-            return (
-              <Section title="Invoice requests" count={rows.length}>
-                {rows.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
-                {rows.map(({ r, job }) => (
-                  <RecordRow
-                    key={r.id}
-                    title={r.file_name}
-                    summary={job ? `${job.job_number} — ${job.customer || "No customer"}` : "Job not found"}
-                    right={r.total_amount != null ? <span style={S.roleHint}>R {Number(r.total_amount).toFixed(2)}</span> : null}
-                  >
-                    <div className="stk-meta-row" style={S.rowMeta}>
-                      <span>Submitted by {r.submitted_by}</span>
-                      <span>{new Date(r.submitted_at).toLocaleDateString()}</span>
-                    </div>
-                    <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 8 }} onClick={() => viewJobInvoiceRequest(r)}>
                       <FileText size={13} /> View document
                     </button>
                   </RecordRow>

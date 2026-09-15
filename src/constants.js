@@ -34,7 +34,6 @@ export const NAV_TABS = [
   { key: "receiving", label: "Receiving" },
   { key: "invoicing", label: "Invoicing" },
   { key: "deliveryNotes", label: "Delivery Notes" },
-  { key: "invoiceRequests", label: "Invoice Requests" },
   { key: "processSheets", label: "Process Sheets" },
   { key: "poReports", label: "PO Reports" },
   { key: "usageLog", label: "Usage Log" },
@@ -54,7 +53,7 @@ export const TAB_GROUPS = [
   // in a separate tab meant leaving the screen to look at it and coming
   // back to act on it.
   { label: "Procurement", keys: ["requisitions", "purchaseOrders", "receiving"] },
-  { label: "Records", keys: ["invoicing", "deliveryNotes", "invoiceRequests", "processSheets", "poReports", "usageLog", "drawings"] },
+  { label: "Records", keys: ["invoicing", "deliveryNotes", "processSheets", "poReports", "usageLog", "drawings"] },
 ];
 
 // Jobs and Notifications still need a canView() entry (for the header
@@ -170,6 +169,15 @@ export const LASER_MACHINES = {
   },
 };
 
-export const EXTRA_SECTIONS = [{ key: "notifications", label: "Notifications" }];
+// invoiceRequests is a view tick with no screen of its own since 15 Sep
+// 2026: the book of requests is the All requests pill on Records ->
+// Invoicing, and this tick opens that screen for people without "Can
+// manage invoicing" (canView in App.jsx). Listed here so the permission
+// grid still has a label for it; it is not in NAV_TABS, or it would come
+// back as a button of its own.
+export const EXTRA_SECTIONS = [
+  { key: "notifications", label: "Notifications" },
+  { key: "invoiceRequests", label: "Invoice Requests (in Invoicing)" },
+];
 
 export const SECTIONS = ["plate", "structural", "cncBar", "custom", "stores", "fasteners", "assets", "drawings", "deliveryNotes", "invoiceRequests", "processSheets", "poReports", "jobs"];
