@@ -64,6 +64,8 @@ import CutToSize from "./jobs/CutToSize.jsx";
 import BuyOuts from "./jobs/BuyOuts.jsx";
 import Materials from "./jobs/Materials.jsx";
 import { addStockFromStores } from "./jobs/stockFromStores.js";
+import { markedStageTakes, comesBeforeForLine, extraStagesOf, routeText, renameInList } from "./jobs/extraStages.js";
+import ExtraStagesBox from "./jobs/ExtraStagesBox.jsx";
 // The tube laser's own wording for a material. Shared, not copied: the
 // job line's material and the nesting import's section must be the same
 // words, or the import's match finds nothing.
@@ -5445,6 +5447,14 @@ export default function StockControl() {
   function cutsMadeOn(name) {
     return processTypeSettings[name]?.cuts_made_on || "";
   }
+  // Whether a stage is an extra stage: it lists only the lines marked for
+  // it -- bending, drilling, machining sent out after an in-house cut.
+  // process_type_settings.only_marked, set under Job Process Types; the
+  // rules are in src/jobs/extraStages.js. A declaration for the same
+  // reason as cutsMadeOn.
+  function onlyMarked(name) {
+    return !!processTypeSettings[name]?.only_marked;
+  }
 
   // Whether a stage handles a given line. A stage that cuts a machine's
   // items takes the lines tagged for that machine, and lines with no tag
@@ -5465,6 +5475,15 @@ export default function StockControl() {
   // without it a parent is treated as a plain line.
   function stageTakesItem(processName, quoteItem, allItems) {
     const tag = cutsMadeOn(processName);
+    // An extra stage lists the lines whose extra stages name it, lines
+    // nobody has set yet (so nothing is missed), and lines whose first
+    // step it is -- Machining - External for a part that comes from the
+    // supplier. Never a line with parts: its parts are what get bent or
+    // drilled before they are welded into it. src/jobs/extraStages.js.
+    if (onlyMarked(processName)) {
+      if (allItems && hasChildLines(quoteItem, allItems)) return false;
+      return markedStageTakes(processName, tag, quoteItem);
+    }
     const made = quoteItem?.made_on || "";
     if (isChildLine(quoteItem)) return !!tag && (!made || made === tag);
     if (allItems && hasChildLines(quoteItem, allItems)) return !tag;
@@ -5482,11 +5501,18 @@ export default function StockControl() {
   // tagged job would sail through nesting unnoticed -- so it is said out
   // loud instead, and the stage keeps a single tick.
   function stageHasNothingToCut(processName, quoteItems) {
-    return !!cutsMadeOn(processName) && (quoteItems || []).length > 0 && itemsForStage(processName, quoteItems).length === 0;
+    return (
+      (!!cutsMadeOn(processName) || onlyMarked(processName)) &&
+      (quoteItems || []).length > 0 &&
+      itemsForStage(processName, quoteItems).length === 0
+    );
   }
   const nothingToCutText = (processName) =>
-    `No items on this job are tagged for the ${madeOnLabel(cutsMadeOn(processName)) || "this"} machine. ` +
-    "Tag them on the job's Items tab, or take this stage off the job.";
+    onlyMarked(processName)
+      ? `No line on this job goes to ${processName}. ` +
+        "Add it to the lines that need it on the job's Items tab, or take this stage off the job."
+      : `No items on this job are tagged for the ${madeOnLabel(cutsMadeOn(processName)) || "this"} machine. ` +
+        "Tag them on the job's Items tab, or take this stage off the job.";
 
   // One setting on one stage, saved straight to the settings table and
   // mirrored into state so the dropdown does not snap back. The row is
@@ -5530,6 +5556,10 @@ export default function StockControl() {
       .filter((p) => flowRank(p.process_name) < mine)
       // The other laser is a separate lane, not an earlier stage.
       .filter((p) => !inOtherLaserLane(process.process_name, p.process_name))
+      // Two extra stages never hold each other back as a whole: one part
+      // is bent before it is machined and the next the other way round,
+      // so each line's own count orders them (itemFlowLimit).
+      .filter((p) => !(onlyMarked(p.process_name) && onlyMarked(process.process_name)))
       .filter((p) => !stageIsCleared(p))
       .sort((a, b) => flowRank(a.process_name) - flowRank(b.process_name));
   }
@@ -5554,14 +5584,17 @@ export default function StockControl() {
   // whole. Anything not switched to Each keeps behaving as it does today.
   function itemFlowLimit(process, jobProcesses, itemProgressForJob, quoteItem, allItems) {
     const sameRun = (p) => (p.shortage_id || null) === (process.shortage_id || null);
-    const mine = flowRank(process.process_name);
     let allowed = Number(quoteItem.qty) || 0;
     let waitingOn = null;
     for (const p of jobProcesses || []) {
       // Cleared, not merely finished: the same test that opens the card
       // on Production, so an open card cannot show a nought count.
       if (!sameRun(p) || stageIsCleared(p)) continue;
-      if (flowRank(p.process_name) >= mine) continue;
+      // Earlier for this line: the factory flow, except between stages the
+      // line itself puts in order -- its first step, then its extra stages
+      // as listed. Cut, machine, bend on one part; cut, bend, machine on the
+      // next. src/jobs/extraStages.js.
+      if (!comesBeforeForLine(quoteItem, p.process_name, process.process_name, { flowRank, cutsMadeOn })) continue;
       // The other laser is a separate lane, not an earlier stage.
       if (inOtherLaserLane(process.process_name, p.process_name)) continue;
       // A stage that never handles this line cannot hold it back: a CNC
@@ -6392,7 +6425,9 @@ export default function StockControl() {
           job_id: job.id,
           process_name: name,
           operator: "",
-          tracking_mode: "batch",
+          // An extra stage counts per item from the start: only then can
+          // each line wait for its own previous step.
+          tracking_mode: onlyMarked(name) ? "each" : "batch",
           sort_order: maxSort + 1 + idx,
         }));
         const { error: addError } = await supabase.from("job_processes").insert(newRows);
@@ -20363,6 +20398,20 @@ export default function StockControl() {
                                 ))}
                               </select>
                               <SavedCheck fieldKey={`pts-${entry}-cuts_made_on`} />
+                              {/* An extra stage lists only the lines whose
+                                  extra stages name it (bending, drilling,
+                                  machining sent out), in each line's own
+                                  order. src/jobs/extraStages.js. */}
+                              <select
+                                value={onlyMarked(entry) ? "marked" : ""}
+                                onChange={(e) => saveProcessTypeSetting(entry, "only_marked", e.target.value === "marked")}
+                                style={{ ...S.input, width: "auto", fontSize: 13, padding: "4px 6px" }}
+                                title="An extra stage lists only the lines marked for it on the Items tab, in each line's own order. Lines nobody has marked yet still come to it."
+                              >
+                                <option value="">Not an extra stage</option>
+                                <option value="marked">Extra stage: marked lines only</option>
+                              </select>
+                              <SavedCheck fieldKey={`pts-${entry}-only_marked`} />
                             </div>
                           )}
                           <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
@@ -21777,9 +21826,20 @@ export default function StockControl() {
                         {p.tracking_mode === "each" && !p.is_complete && (
                           <div style={{ ...S.roleHint, marginLeft: 22 }}>
                             Each-mode progress is tracked per item on the Production tab
-                            {cutsMadeOn(p.process_name)
+                            {onlyMarked(p.process_name)
+                              ? ` — the lines that go to it, ${itemsForStage(p.process_name, jobDetail.quoteItems).length} of ${jobDetail.quoteItems.length}.`
+                              : cutsMadeOn(p.process_name)
                               ? ` — the ${madeOnLabel(cutsMadeOn(p.process_name))} lines, ${itemsForStage(p.process_name, jobDetail.quoteItems).length} of ${jobDetail.quoteItems.length}.`
                               : "."}
+                          </div>
+                        )}
+                        {/* An extra stage on one tick for the job cannot let
+                            one line through before another, so a line could
+                            be machined before it is bent when it should be
+                            the other way round. */}
+                        {p.tracking_mode !== "each" && !p.is_complete && onlyMarked(p.process_name) && (
+                          <div style={{ ...S.roleHint, marginLeft: 22, color: C.accentRaw }}>
+                            Set this stage to Each: an extra stage counts per item, so every line waits for its own previous step.
                           </div>
                         )}
                         {stageHasNothingToCut(p.process_name, jobDetail.quoteItems) && (
@@ -23574,8 +23634,7 @@ export default function StockControl() {
                 <div style={{ ...S.roleHint, color: C.accentRaw, fontWeight: 600, marginTop: 10 }}>
                   {idle.map((name) => (
                     <div key={name}>
-                      {name}: no items on this job are tagged for the {madeOnLabel(cutsMadeOn(name))} machine. Untick it, or
-                      tag the items on the Items tab.
+                      {name}: {nothingToCutText(name)}
                     </div>
                   ))}
                 </div>
