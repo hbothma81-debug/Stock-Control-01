@@ -69,6 +69,7 @@ ORDER=(
   setup-quoting-and-bom.sql
   setup-made-on-welding.sql
   setup-made-on-external.sql
+  setup-extra-stages.sql
   setup-job-line-stock-code.sql
   setup-job-line-material-type.sql
 

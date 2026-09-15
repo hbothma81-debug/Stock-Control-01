@@ -113,7 +113,13 @@ with checks (setup_file, looks_for, found) as (
     ('setup-made-on-welding.sql',       'cut method Welding allowed',
       exists (select 1 from pg_constraint where conname = 'job_quote_items_made_on_check' and pg_get_constraintdef(oid) like '%welding%')),
     ('setup-made-on-external.sql',      'cut methods Laser - external and Machining - external allowed',
-      exists (select 1 from pg_constraint where conname = 'job_quote_items_made_on_check' and pg_get_constraintdef(oid) like '%machining_external%'))
+      exists (select 1 from pg_constraint where conname = 'job_quote_items_made_on_check' and pg_get_constraintdef(oid) like '%machining_external%')),
+    ('setup-extra-stages.sql',          'column job_quote_items.extra_stages',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'job_quote_items' and column_name = 'extra_stages')),
+    ('setup-extra-stages.sql',          'column stock_items.extra_stages',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'stock_items' and column_name = 'extra_stages')),
+    ('setup-extra-stages.sql',          'column process_type_settings.only_marked',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'process_type_settings' and column_name = 'only_marked'))
 )
 select
   setup_file,
