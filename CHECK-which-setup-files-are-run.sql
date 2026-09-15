@@ -111,7 +111,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-job-line-material-type.sql', 'column job_quote_items.material_type',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'job_quote_items' and column_name = 'material_type')),
     ('setup-made-on-welding.sql',       'cut method Welding allowed',
-      exists (select 1 from pg_constraint where conname = 'job_quote_items_made_on_check' and pg_get_constraintdef(oid) like '%welding%'))
+      exists (select 1 from pg_constraint where conname = 'job_quote_items_made_on_check' and pg_get_constraintdef(oid) like '%welding%')),
+    ('setup-made-on-external.sql',      'cut methods Laser - external and Machining - external allowed',
+      exists (select 1 from pg_constraint where conname = 'job_quote_items_made_on_check' and pg_get_constraintdef(oid) like '%machining_external%'))
 )
 select
   setup_file,
