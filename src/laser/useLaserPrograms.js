@@ -397,7 +397,7 @@ export default function useLaserPrograms(deps) {
     // the one person who could act on it. One on live sat like that for
     // days, showing as "on its way" with nothing on its way.
     for (const sh of d.shortages) {
-      if (sh.status === "cut" || sh.status === "finishing") continue;
+      if (sh.status === "cut" || sh.status === "finishing" || sh.status === "cancelled") continue;
       if (shortagesOnAProgram.has(sh.id)) continue;
       const job = jobById.get(sh.job_id);
       rows.push({
@@ -468,7 +468,7 @@ export default function useLaserPrograms(deps) {
     }
     const onAProgram = new Set(d.links.filter((l) => l.shortage_id).map((l) => l.shortage_id));
     for (const sh of d.shortages) {
-      if (sh.status === "cut" || onAProgram.has(sh.id)) continue;
+      if (sh.status === "cut" || sh.status === "cancelled" || onAProgram.has(sh.id)) continue;
       candidates.push({
         key: "short:" + sh.id,
         kind: "shortage",

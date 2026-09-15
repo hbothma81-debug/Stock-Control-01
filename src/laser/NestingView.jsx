@@ -11,6 +11,7 @@ import { stockOptions } from "./stockOptions.js";
 import { parseTypedParts } from "./nestingReport.js";
 import { parentChoices, NEW_PARENT } from "./ImportReportModal.jsx";
 import PrintNestsButton from "./PrintNestsButton.jsx";
+import CancelShortage from "./CancelShortage.jsx";
 
 // The parts box on a hand-typed tube program: one part per line.
 function TypedPartsBox({ value, onChange, parentPick, parent, setParent }) {
@@ -1057,6 +1058,9 @@ function NestRow({
               <span style={r.flaggedOverdue ? { color: C.danger, fontWeight: 600 } : undefined}>{r.flagged}</span>
               <span>Reason: {r.reasonText}</span>
             </div>
+          )}
+          {r.kind === "shortage" && canManage && actions?.onCancelShortage && (
+            <CancelShortage shortage={r.shortage} summary={r.detail} onCancel={actions.onCancelShortage} />
           )}
 
           {/* ---- nest it, right here ---- */}

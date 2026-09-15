@@ -36,6 +36,8 @@ export default function LaserTab({
   master,
   shortageSummary,
   shortageReasonText,
+  // Takes back a shortage raised by mistake (App.jsx, asks why first).
+  cancelShortage,
   SavedCheck,
   ExpandableProcessNotes,
   saveJobSigmaNestNumber,
@@ -195,6 +197,7 @@ export default function LaserTab({
                       onUploadDocument: alsoRefreshLaser(uploadJobDocument),
                       // These two open a modal; their own submit refreshes.
                       onFlagShortage: openShortageFlagModal,
+                      onCancelShortage: cancelShortage,
                       onPullStock: (job, process) => setPullStockModal({ job, process, dept: null, search: "" }),
                       onViewDocument: viewJobDocument,
                       onViewDrawing: (d) => openDrawingPreview(d.drawing),
@@ -248,11 +251,18 @@ export default function LaserTab({
                             waitingOn: laserData.processes
                               .filter((pr) => pr.shortage_id === sh.id && !pr.is_complete)
                               .map((pr) => pr.process_name),
+                            // The programs carrying it, for the Cancel question.
+                            programNumbers: laserData.links
+                              .filter((l) => l.shortage_id === sh.id)
+                              .map((l) => laserData.programs.find((p) => p.id === l.program_id))
+                              .filter((p) => p && !p.is_cancelled)
+                              .map((p) => p.program_number),
                           }))
                         : null
                     }
                     summarise={shortageSummary}
                     reasonText={shortageReasonText}
+                    onCancel={canNest ? cancelShortage : null}
                     onGoToNesting={canNest ? () => setLaserView("nesting") : null}
                   />
                 )}

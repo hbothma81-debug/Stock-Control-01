@@ -73,6 +73,7 @@ import EditableName from "./EditableName.jsx";
 import TypeToFind from "./TypeToFind.jsx";
 import LaserStatus from "./laser/LaserStatus.jsx";
 import LaserTab from "./laser/LaserTab.jsx";
+import CancelShortage from "./laser/CancelShortage.jsx";
 import useLaserPrograms from "./laser/useLaserPrograms.js";
 import InfoRequestModal, { InfoAnswerModal } from "./InfoRequestModal.jsx";
 import {
@@ -5244,7 +5245,7 @@ export default function StockControl() {
     // two, a re-cut's packing had nowhere in the whole app to be ticked,
     // and every shortage the packer raised stayed open for good.
     for (const sh of d.shortages || []) {
-      if (sh.status === "cut") continue;
+      if (sh.status === "cut" || sh.status === "cancelled") continue;
       const packing = (d.processes || []).find(
         (pr) => pr.shortage_id === sh.id && isPackingStage(pr.process_name) && !pr.is_complete
       );
@@ -6039,6 +6040,121 @@ export default function StockControl() {
     }
   }
 
+  // Taking back a shortage raised by mistake -- most often parts that were
+  // only waiting to be cut (decided 14 Sep 2026). Cancelled, not deleted:
+  // the row stays with who, when and why, like a cancelled laser program,
+  // so "what happened to that shortage" stays answerable.
+  //
+  // Refused once cutting has started on it: cut parts are real work, and
+  // a program part-way through may already have cut the re-cut. Otherwise
+  // everything the shortage set going goes with it -- its catch-up stages
+  // and its place on any program. The status is written last, so a
+  // failure half-way leaves it open and pressing Cancel again finishes it.
+  //
+  // Every list that reads "not cut" as still open must skip 'cancelled'
+  // too: ShortageCentre, laserNestingData's rows and candidates
+  // (useLaserPrograms.js), laserStatusRows' re-cuts, the job sheet, and
+  // refreshShortageStatus below.
+  async function cancelShortage(shortage, reason) {
+    const why = (reason || "").trim();
+    if (!supabase || !shortage?.id || !why) return false;
+    try {
+      // Fresh, not the copy on screen: a program may have been cut since.
+      const { data: sh, error: shError } = await supabase.from("shortages").select("*").eq("id", shortage.id).single();
+      if (shError) throw shError;
+      if (sh.status === "cancelled") {
+        alert(`That shortage was already cancelled by ${sh.cancelled_by || "someone"}.`);
+      } else if (sh.status === "cut" || sh.status === "finishing") {
+        alert("That shortage has already been cut, so it cannot be cancelled.");
+        return false;
+      } else {
+        const { data: links, error: linksError } = await supabase
+          .from("laser_program_jobs")
+          .select("id, program_id")
+          .eq("shortage_id", sh.id);
+        if (linksError) throw linksError;
+        const programIds = [...new Set((links || []).map((l) => l.program_id))];
+        let programs = [];
+        if (programIds.length > 0) {
+          const { data, error } = await supabase
+            .from("laser_programs")
+            .select("id, program_number, sheets_cut, is_complete, is_cancelled")
+            .in("id", programIds);
+          if (error) throw error;
+          programs = (data || []).filter((p) => !p.is_cancelled);
+        }
+        const started = programs.filter((p) => p.is_complete || Number(p.sheets_cut) > 0);
+        if (started.length > 0) {
+          alert(
+            `Program ${started.map((p) => p.program_number).join(", ")} has already started cutting, so this re-cut may be cut already. ` +
+              "If it is not on the sheets cut so far, take it off that program on the Nesting screen first, then cancel it."
+          );
+          return false;
+        }
+
+        const { error: stagesError } = await supabase.from("job_processes").delete().eq("shortage_id", sh.id);
+        if (stagesError) throw stagesError;
+        if ((links || []).length > 0) {
+          const { error: unlinkError } = await supabase.from("laser_program_jobs").delete().eq("shortage_id", sh.id);
+          if (unlinkError) throw unlinkError;
+          for (const p of programs) {
+            // The program's own history says where the re-cut went. Not fatal.
+            const { error: eventError } = await supabase.from("laser_program_events").insert({
+              program_id: p.id,
+              action: "job removed",
+              detail: `re-cut for ${sh.job_number} — shortage cancelled: ${why}`,
+              acted_by: roleLabel,
+              acted_by_id: currentUser?.id || null,
+            });
+            if (eventError) console.error("Failed to record program history:", eventError);
+          }
+        }
+
+        const { data: changed, error } = await supabase
+          .from("shortages")
+          .update({ status: "cancelled", cancelled_by: roleLabel, cancelled_at: new Date().toISOString(), cancel_reason: why })
+          .eq("id", sh.id)
+          .select("id");
+        if (error) throw error;
+        if (!changed || changed.length === 0) throw new Error("the database changed nothing");
+
+        if (sh.flagged_by_id && sh.flagged_by_id !== currentUser?.id) {
+          await sendNotifications({
+            job_id: sh.job_id,
+            job_number: sh.job_number,
+            recipient_id: sh.flagged_by_id,
+            message: `Shortage cancelled by ${roleLabel} — ${shortageSummary(sh)} for ${sh.job_number} (${sh.customer || "no customer"}): ${why}`,
+          });
+        }
+
+        // A program that carried only this re-cut is empty now. Said, not
+        // deleted: whether it is still going to be cut is the nester's call.
+        if (programs.length > 0) {
+          const { data: left } = await supabase
+            .from("laser_program_jobs")
+            .select("program_id")
+            .in("program_id", programs.map((p) => p.id));
+          const empty = programs.filter((p) => !(left || []).some((l) => l.program_id === p.id));
+          if (empty.length > 0) {
+            alert(
+              `Shortage cancelled. Program ${empty.map((p) => p.program_number).join(", ")} has nothing else on it now — ` +
+                "delete it on the Nesting screen if it will not be cut."
+            );
+          }
+        }
+      }
+      fetchShortages();
+      if (laser.laserData !== null) await laser.fetchLaserData();
+      if (tubeLaser.laserData !== null) await tubeLaser.fetchLaserData();
+      if (productionQueue !== null) fetchProductionQueue();
+      return true;
+    } catch (err) {
+      console.error("Failed to cancel shortage:", err);
+      alert(`That didn't finish: ${err.message || "unknown error"}. Press Cancel shortage again — it carries on from where it stopped.`);
+      return false;
+    }
+  }
+
   // A shortage is finished when the replacement parts have been through
   // every catch-up stage. Whoever flagged it is waiting for finished
   // parts, not a cut blank -- packing that is five brackets short still
@@ -6057,6 +6173,9 @@ export default function StockControl() {
   // between -- off the laser, catch-up work still running -- which the
   // app previously had no way to say.
   async function refreshShortageStatus(shortage, { offTheLaser = false } = {}) {
+    // A cancelled shortage has no catch-up stages left, so "nothing
+    // outstanding" would read as finished and mark it cut.
+    if (shortage?.status === "cancelled") return "cancelled";
     const { data: stages, error } = await supabase
       .from("job_processes")
       .select("process_name, is_complete")
@@ -8628,7 +8747,9 @@ export default function StockControl() {
           `${shortageReasonText(s)}${s.is_priority === false ? "" : " · priority"}`,
           `${s.flagged_by}\n${s.flagged_department}`,
           s.board_number || "—",
-          s.status === "cut"
+          s.status === "cancelled"
+            ? `Cancelled by ${s.cancelled_by || "?"}${s.cancel_reason ? ` — ${s.cancel_reason}` : ""}`
+            : s.status === "cut"
             ? "Re-cut complete"
             : s.status === "finishing"
               ? "Cut — finishing off"
@@ -15002,6 +15123,7 @@ export default function StockControl() {
           master={master}
           shortageSummary={shortageSummary}
           shortageReasonText={shortageReasonText}
+          cancelShortage={cancelShortage}
           SavedCheck={SavedCheck}
           ExpandableProcessNotes={ExpandableProcessNotes}
           saveJobSigmaNestNumber={saveJobSigmaNestNumber}
@@ -15023,6 +15145,7 @@ export default function StockControl() {
           master={master}
           shortageSummary={shortageSummary}
           shortageReasonText={shortageReasonText}
+          cancelShortage={cancelShortage}
           SavedCheck={SavedCheck}
           ExpandableProcessNotes={ExpandableProcessNotes}
           saveJobSigmaNestNumber={saveJobSigmaNestNumber}
@@ -15417,9 +15540,15 @@ export default function StockControl() {
                                     Putting it on a program does all of this properly, so
                                     that is the only way in now. */}
                                 {isNestingProcess(procType) ? (
-                                  <div style={{ ...S.roleHint, marginTop: 6 }}>
-                                    Put this on a program from the Nesting screen — that is what nests it.
-                                  </div>
+                                  <>
+                                    <div style={{ ...S.roleHint, marginTop: 6 }}>
+                                      Put this on a program from the Nesting screen — that is what nests it.
+                                    </div>
+                                    {/* Nesters, admins and whoever flagged it may take it back. */}
+                                    {(isAdmin || s.flagged_by_id === currentUser?.id || (profile?.allowedProcessTypes || []).includes(procType)) && (
+                                      <CancelShortage shortage={s} summary={shortageSummary(s)} onCancel={cancelShortage} />
+                                    )}
+                                  </>
                                 ) : (
                                   <button
                                     type="button"

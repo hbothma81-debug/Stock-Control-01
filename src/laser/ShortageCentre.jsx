@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { C, S } from "../theme.js";
 import Section from "../Section.jsx";
+import CancelShortage from "./CancelShortage.jsx";
 
 // Every shortage across every job, in one place.
 //
@@ -10,14 +11,15 @@ import Section from "../Section.jsx";
 // resolves it. Having the list somewhere else meant leaving this tab to
 // look at it and coming back to act on it.
 //
-// This is a list to read, not to act on. The one action a shortage needs
-// -- putting it on a program -- lives on the Nesting screen, so the two
-// are now one tab apart rather than one tab away.
+// Mostly a list to read. Putting a shortage on a program lives on the
+// Nesting screen, so the two are one tab apart rather than one tab away.
+// The one action here is Cancel, for a shortage raised by mistake that is
+// not yet being cut; cancelled ones stay readable under their own pill.
 
-export default function ShortageCentre({ shortages, summarise, reasonText, onGoToNesting }) {
+export default function ShortageCentre({ shortages, summarise, reasonText, onCancel, onGoToNesting }) {
   const [query, setQuery] = useState("");
 
-  const { open, resolved } = useMemo(() => {
+  const { open, resolved, cancelled } = useMemo(() => {
     const q = query.trim().toLowerCase();
     const matches = (s) =>
       !q ||
@@ -26,8 +28,9 @@ export default function ShortageCentre({ shortages, summarise, reasonText, onGoT
       (s.board_number || "").toLowerCase().includes(q);
     const all = shortages || [];
     return {
-      open: all.filter((s) => s.status !== "cut").filter(matches),
+      open: all.filter((s) => s.status !== "cut" && s.status !== "cancelled").filter(matches),
       resolved: all.filter((s) => s.status === "cut").filter(matches),
+      cancelled: all.filter((s) => s.status === "cancelled").filter(matches),
     };
   }, [shortages, query]);
 
@@ -91,6 +94,9 @@ export default function ShortageCentre({ shortages, summarise, reasonText, onGoT
                     : "Already cut. Nothing left outstanding — it should close itself next time a stage is ticked."}
                 </div>
               )}
+              {onCancel && (s.status === "flagged" || s.status === "nested") && (
+                <CancelShortage shortage={s} summary={summarise(s)} programNumbers={s.programNumbers} onCancel={onCancel} />
+              )}
             </div>
           ))
         )}
@@ -117,6 +123,32 @@ export default function ShortageCentre({ shortages, summarise, reasonText, onGoT
                     Cut by {s.cut_by} on {new Date(s.cut_at).toLocaleDateString()}
                   </span>
                 )}
+              </div>
+            </div>
+          ))}
+        </Section>
+      )}
+
+      {cancelled.length > 0 && (
+        <Section title="Cancelled" count={cancelled.length} collapsible defaultOpen={false}>
+          {cancelled.map((s) => (
+            <div key={s.id} style={S.reqCard}>
+              <div style={S.reqCardTop}>
+                <span style={S.itemName}>
+                  {s.job_number} — {s.customer || "No customer"}
+                </span>
+                <span style={{ ...S.reqStatusTag, color: C.muted }}>Cancelled</span>
+              </div>
+              <div style={{ ...S.itemComment, marginTop: 2 }}>
+                {summarise(s)} {s.board_number && `— SigmaNest ${s.board_number}`}
+              </div>
+              <div className="stk-meta-row" style={S.rowMeta}>
+                <span>Flagged by {s.flagged_by}</span>
+                <span>
+                  Cancelled by {s.cancelled_by || "?"}
+                  {s.cancelled_at ? ` on ${new Date(s.cancelled_at).toLocaleDateString()}` : ""}
+                </span>
+                {s.cancel_reason && <span>Why: {s.cancel_reason}</span>}
               </div>
             </div>
           ))}
