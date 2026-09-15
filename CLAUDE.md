@@ -11,6 +11,7 @@
 - If you see me doing something in an outdated, risky, or less efficient way, tell me directly and explain why — I'm still learning how you work and want to improve.
 - Ask before doing anything irreversible or that goes live to real users.
 - For every instruction: reply with a short plan and numbered questions, wait for my answers, then build. If there is a simpler way to get what I asked for, say so first. Push back on ideas that look wrong.
+- I always want the proper fix. When the app blocks the floor, plan the real change; a workaround on the floor is a one-line footnote at most, and never "tick a stage done that is not done".
 - Never type a password on my behalf. If something needs signing in, I do it myself in the browser pane.
 
 ## Working on this app
@@ -148,6 +149,7 @@ after asking me.
 - Structural stock picks its section type, section and material from Stock Manager's lists (`LibraryField` with `pickOnly`); the add-stock form never adds to them. Anyone who can open Stock Manager adds new ones there.
 - Section names are shop shorthand with no "mm" (SHS 50x50x3, CHS 38.1x2), to be written by the app from fixed boxes per section type, and every existing name is to be converted. One material per real material: MS and Mild Steel are one row. Only the pick-only stock form is built so far.
 - Parts merge back into their line at the first stage left on Every item, usually Welding. There is no hinge tick: it was proposed and turned down, because a practice job's invented stage order had misled the analysis. Never set a machine on that stage: a stage with a machine stops listing the job's own lines. A line that has parts is never asked for a cut method (`wantsCutMethod`).
+- Work done by an outside supplier as the first cut is a cut method, not an extra stage: `laser_external` and `machining_external` (decided 15 Sep for JOB-0068; SQL `setup-made-on-external.sql`, built by the Jobs page conversation). Their stages, Laser - External and Machining - External, are set to "Cuts:" them. Left on every item, such a stage takes every line and holds each one at 0 on every per-item stage after it, in-house work included. One of the packers logs external laser parts back on Laser - External's card.
 - Ticking Nesting or Laser on a job ticks its packing stage too, found by `worked_in_laser_status`, not by name (`stagesImpliedBy`). Unticking the laser leaves packing on. The tube laser needs nothing: its cutting stage is its packing stage.
 - On both lasers a job reaches the packing screen on its first sheet or length cut, not when a whole program is finished (`laserStatusRows`).
 - A SigmaNest quote is always one set, by standing instruction to sales, so its quantities are per set.

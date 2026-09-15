@@ -1066,3 +1066,58 @@ Other conversations' SQL checked here: `setup-shortage-reason-and-cancel.sql`
    take master lists off the timer.
 2. After 25 Sep: `BACKGROUND_REFRESH_MS` back to 60000, or not.
 3. Whatever Heinrich's tries above turn up.
+
+---
+
+## 15 Sep 2026 — JOB-0068 Bending lock (a short Production tab question, handed to Jobs page)
+
+### What was found
+
+- Bending on JOB-0068 (Each) was held by **Laser - External**: open,
+  earlier in the flow, and on "every item". `blockingStages` is
+  whole-stage. `itemFlowLimit` skips only a stage that does not take the
+  line, and a stage on every item takes every line, so every line was
+  capped at 0, the in-house laser ones included. Laser - External is not
+  a laser lane either: `isPlateLaserProcess` excludes /external/ by name.
+
+### Decided by Heinrich
+
+- Two new cut methods, **Laser - external** and **Machining - external**,
+  remembered on the stock part like the others. The two external stages
+  get "Cuts:" set to them, so they hold back only their own lines.
+- One of the packers logs external laser parts back on Laser - External's
+  Production card.
+- All of it is built in the Jobs page conversation. The full brief was
+  sent there; it has committed the SQL (6c02395), with the dropdown
+  entries still to come.
+- Standing rule, now in `CLAUDE.md`: always the proper fix, not a floor
+  workaround.
+
+### Every setup file this conversation wrote
+
+None. `setup-made-on-external.sql` is the Jobs page conversation's
+(6c02395). It holds check rules only, which the REST API cannot see, and
+its commit says it is not yet run on either database.
+
+### Built but not yet tested by Heinrich
+
+Nothing was built in this conversation.
+
+### Waiting on Heinrich (in the Jobs page conversation)
+
+- Its questions: the four from 10:03 (Assembly, the 7 CNC jobs, where
+  Drilling sits, start step 1), plus who logs Machining - External back
+  and where that stage sits in the flow. Answer them there, unless
+  already done.
+- Paste `setup-made-on-external.sql` on practice, then live, before the
+  dropdown entries are pushed.
+- Once the entries are live, in one sitting: Laser - External to "Cuts:
+  Laser - external" (and Machining - External to its own), tag
+  JOB-0068's external lines, and tick the packer for the Laser - External
+  department.
+
+### Pick up next
+
+- Nothing left for this conversation. In the Jobs page conversation,
+  check after setup that JOB-0068's Bending card reads "Partly ready:
+  x of y" and sits under Ready now.
