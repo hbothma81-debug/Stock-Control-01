@@ -1313,3 +1313,36 @@ the job sheet not drawn.
 1. Whatever Heinrich's practice test turns up.
 2. JOB-0068 after setup: its Bending card "Partly ready: x of y" under
    Ready now.
+
+---
+
+## 15 Sep 2026 — Planning (evening): shortage work tested and pushed; Laser quoting brief
+
+### Pushed
+
+- c1661c1..0acba14 on Heinrich's "you test and push": the SQL file for
+  the external cut methods, Cancel shortage, "Shortages you flagged",
+  the uncut-program warning, and notes. Tried on practice first as the
+  admin account: both cancels (one on program TESTCLAUDE1: link, catch-up
+  stage and status went, "job removed" in its history), the Cancelled
+  pill, the warning for no laser / plate / tube. Confirmed live with
+  `CHECK-what-is-live.cjs`.
+- Not tried: the refusal once a program has sheets cut, the notice to a
+  different flagger, a packer's (non-admin) view.
+- Practice leftovers: empty program TESTCLAUDE1; two cancelled TEST
+  shortages on JOB-0002.
+
+### Laser quoting (new area)
+
+- Heinrich wants a DXF laser quoting module, built by a new "Laser
+  quoting" conversation. Decisions, what ERS's DXFs are really like,
+  proven figures and seven open questions: `docs/LASER-QUOTING-PLAN.md`.
+  `/monday Laser quoting` now points there.
+- For Quoting: its plan's step 11 laser calculator should call this
+  module; the new module prices from its own new tables (speed per
+  material, thickness and cut method), not `quote_cutting_speeds`.
+
+### Still queued, not pushed
+
+- The Jobs page's five commits (7a39a90 to 2f7eb3e). 97b0653 must not
+  go live before `setup-extra-stages.sql` is on practice and live.

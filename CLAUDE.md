@@ -82,6 +82,7 @@ Which conversation owns what, so far:
 - **Quoting** — the quoting module and the bill of materials, one plan in `docs/QUOTING-AND-BOM-PLAN.md`; also built the Items tab's part controls (add, edit, import, move)
 - **Stock Manager** — the Stock Manager settings: suppliers, sections, materials, fasteners and the other master lists
 - **Dropdowns and the Production tab** — the shared `TypeToFind` box, keeping lists alphabetical, the Production tab's ready and waiting pills, and Info Request (`src/lib/infoRequests.js`)
+- **Laser quoting** — the DXF laser quoting module, its own screen and its own pricing tables; brief in `docs/LASER-QUOTING-PLAN.md` (new 15 Sep 2026, nothing built yet). The Quoting module's laser line is to call it, not repeat it.
 
 `src/App.jsx` is the one file all of you have to touch, because it wires
 everything together. That is the collision point. When your work naturally
