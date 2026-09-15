@@ -74,6 +74,7 @@ import TypeToFind from "./TypeToFind.jsx";
 import LaserStatus from "./laser/LaserStatus.jsx";
 import LaserTab from "./laser/LaserTab.jsx";
 import CancelShortage from "./laser/CancelShortage.jsx";
+import { programTitle } from "./laser/programTitle.js";
 import useLaserPrograms from "./laser/useLaserPrograms.js";
 import InfoRequestModal, { InfoAnswerModal } from "./InfoRequestModal.jsx";
 import {
@@ -5870,10 +5871,38 @@ export default function StockControl() {
     } catch (err) {
       console.error("Could not read the job's stages to pick a lane:", err);
     }
+    // The job's programs that are not fully cut yet, each marked with its
+    // laser. Most wrong shortages were parts only waiting to be cut, so
+    // the form says so before anyone flags (step 5, decided 14 Sep 2026).
+    // A program on the tube machine is tube and anything else plate, the
+    // same split useLaserPrograms makes for shortages. Not fatal: without
+    // it the form simply has no warning.
+    let uncutPrograms = [];
+    try {
+      const { data: links, error: linksError } = await supabase
+        .from("laser_program_jobs")
+        .select("program_id")
+        .eq("job_id", job.id);
+      if (linksError) throw linksError;
+      const ids = [...new Set((links || []).map((l) => l.program_id))];
+      if (ids.length > 0) {
+        const { data: progs, error: progError } = await supabase
+          .from("laser_programs")
+          .select("id, program_number, nesting_name, material, machine, sheets_required, sheets_cut, is_complete, is_cancelled, reported_at")
+          .in("id", ids);
+        if (progError) throw progError;
+        uncutPrograms = (progs || [])
+          .filter((p) => !p.is_cancelled && !p.is_complete)
+          .map((p) => ({ ...p, lane: p.machine === TUBE_LASER.machine ? "tube" : "plate" }));
+      }
+    } catch (err) {
+      console.error("Could not read the job's programs for the flag form:", err);
+    }
     setShortageModal({
       job,
       process,
       lanesOnJob: { plate: hasPlate, tube: hasTube },
+      uncutPrograms,
       lane: hasPlate && !hasTube ? "plate" : hasTube && !hasPlate ? "tube" : null,
       // Prefilled from the job when nesting has already recorded it, since
       // that is the number the nesting operator needs and retyping it is
@@ -23294,6 +23323,48 @@ export default function StockControl() {
                 ))}
               </div>
             </div>
+
+            {/* Programs on this job not fully cut yet on the chosen laser
+                (both, until one is picked). A warning, not a stop: a part
+                can go missing off a sheet already cut while other programs
+                are still to run. */}
+            {(() => {
+              const pending = (shortageModal.uncutPrograms || []).filter(
+                (p) => !shortageModal.lane || p.lane === shortageModal.lane
+              );
+              if (pending.length === 0) return null;
+              return (
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    border: `1px solid ${C.danger}`,
+                    background: C.dangerTint,
+                    color: C.text,
+                  }}
+                >
+                  <div style={{ fontWeight: 700, color: C.danger }}>Not everything on this job is cut yet</div>
+                  {pending.map((p) => {
+                    const units = (p.lane === "tube" ? TUBE_LASER : PLATE_LASER).units || "sheets";
+                    const needed = Number(p.sheets_required) || 1;
+                    const cut = Math.min(Number(p.sheets_cut) || 0, needed);
+                    return (
+                      <div key={p.id} style={{ fontSize: 13.5, marginTop: 2 }}>
+                        Program {programTitle(p)}
+                        {p.material ? ` (${p.material})` : ""}
+                        {!shortageModal.lane ? ` · ${laneLabel(p.lane)}` : ""} —{" "}
+                        {p.reported_at ? "stopped at the machine" : `${cut} of ${needed} ${units} cut`}
+                      </div>
+                    );
+                  })}
+                  <div style={{ fontSize: 13.5, marginTop: 4 }}>
+                    If the missing parts are on {pending.length === 1 ? "this program" : "one of these"}, they are still to
+                    come — wait for it rather than flagging a shortage.
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* On by default. A shortage is work that was supposed to be
                 finished, so it normally jumps the queue — the exception is
