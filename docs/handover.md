@@ -1121,3 +1121,94 @@ Nothing was built in this conversation.
 - Nothing left for this conversation. In the Jobs page conversation,
   check after setup that JOB-0068's Bending card reads "Partly ready:
   x of y" and sits under Ready now.
+
+---
+
+## 15 Sep 2026 — Laser production: shortages you can take back, with who, why and when
+
+Asked 14 Sep: wrong shortages were coming through, mostly parts only
+waiting to be cut. Five steps, decided with Heinrich on 14 Sep (memory
+note `shortage-undo-and-reason`, and the new bullet in `CLAUDE.md`).
+
+### Done and live
+
+- **Step 1 (5d24790):** the To nest row on both lasers says who flagged
+  the shortage, from which stage, when (red after a day) and why. The
+  reason reads in words everywhere it was a bare code: the Production
+  nesting block, the re-cut card, the Shortages screen, the job sheet
+  (`SHORTAGE_REASONS`, `shortageReasonText`).
+- **Step 2:** `setup-shortage-reason-and-cancel.sql`, on both databases.
+- **Step 3 (c0039a8, built by Planning on Heinrich's say-so):** "What
+  happened?" is required on the flag form.
+
+### Built and committed, not pushed (for the main conversation)
+
+- **334ac48 — Cancel shortage (step 4).** Asks why; removes the catch-up
+  stages and the program link (a "job removed" line in the program's
+  history); status written last; tells the flagger. Refused once cut, or
+  once a program carrying it has sheets cut. A program left empty is
+  named, not deleted. Cancelled is closed in the To nest rows, the program
+  picker, Laser Status re-cuts, `refreshShortageStatus` and the job sheet;
+  the Shortages screen has a shut Cancelled pill.
+- **22a2fb9 — "Shortages you flagged"** on the Production tab's front
+  screen, only when the person has one flagged or on a program, with
+  Cancel on each (option A, 15 Sep).
+- **eae0963 — the uncut-program warning (step 5).** The flag form lists
+  the job's programs not fully cut on the chosen laser ("0 of 1 sheets
+  cut", "stopped at the machine"). Warns, never blocks.
+
+The queue also holds commits that are not this conversation's:
+6c02395 (Jobs page, cut-methods SQL) and 11006dc (CLAUDE.md and the
+JOB-0068 entry).
+
+### Every setup file this conversation wrote
+
+| File | Adds | Practice | Live |
+| --- | --- | --- | --- |
+| `setup-shortage-reason-and-cancel.sql` | columns `shortages.reason_note`, `cancelled_by`, `cancelled_at`, `cancel_reason` | yes, 200 (checked 15 Sep at wrap-up) | yes, 200 (checked 15 Sep at wrap-up) |
+
+Proven on pglite, run twice. Registered in `build-test-database.sh` and
+`CHECK-which-setup-files-are-run.sql`; `setup-ALL.sql` regenerated.
+
+### Built but not yet tested by Heinrich
+
+None of 3 to 5 was seen on screen here: the preview would not start
+beside another conversation's dev server. (`CLAUDE.md` says what to do
+instead: navigate the Browser pane to that server.)
+
+1. **Step 1 on screen:** open a re-cut on the Laser 4kw Nesting screen;
+   the "Flagged by … · Reason: …" line under its parts.
+2. **Step 3 on live** (also on Planning's list): the button stays off
+   until "What happened?" is filled.
+3. **Cancel shortage:** from To nest (practice JOB-0002, "TEST by Claude:
+   gusset × 2"); from the Shortages screen on one already on a program (it
+   comes off, the program's history says so, an emptied program is
+   named); the refusal once that program has a sheet cut; the Cancelled
+   pill; the job sheet's "Cancelled by …"; the flagger's notification.
+4. **Shortages you flagged:** flag one, see it on the Production front
+   screen, cancel it there.
+5. **The warning:** flag on a job with an uncut program; on a mixed job
+   before and after picking the laser; tube programs say lengths.
+
+### Waiting on Heinrich
+
+- The tries above, then the three commits to the main conversation.
+- The tube operator flags from the Tube Laser tab's Packing screen and
+  sees "Shortages you flagged" only if he opens Production. Say if he
+  needs it on his Packing screen too.
+- The two JOB-0078 gaps (14 Sep entry): not decided.
+
+### Practice data left by testing
+
+- JOB-0002: "TEST by Claude: gusset × 2" (plate, flagged), left by
+  Planning for the cancel to be tried on.
+
+### Pick up next
+
+1. Whatever Heinrich's tries turn up.
+2. JOB-0078's gaps: cancelling a program should re-run
+   `syncLaserStagesFor` for its jobs (decide what un-cancelling does);
+   "all packed, a program still uncut, nothing says so" sits beside the
+   step 5 warning.
+3. A per-item stage re-checking itself when its lines change (JOB-0021),
+   from the 14 Sep Laser production entry.

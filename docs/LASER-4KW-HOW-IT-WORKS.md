@@ -17,7 +17,10 @@ memory notes it names, then plan and ask before building anything.
   whose parts are on it. Several jobs share one sheet. Programs are the
   unit of everything on the plate laser.
 - **A re-cut** is a shortage put back on a program. It rides on programs
-  like any other work.
+  like any other work. A shortage raised by mistake is cancelled (Cancel
+  shortage, `cancelShortage` in App.jsx), which takes it off its program
+  with a "job removed" line in that program's history; it is refused once
+  the program has started cutting.
 - **Sheets** are repeats: a program cut three times off the same material
   has sheets_required 3, and the operator ticks them off one at a time.
 
