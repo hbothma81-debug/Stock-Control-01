@@ -12,6 +12,7 @@ import RecordRow from "./RecordRow.jsx";
 import TypeToFind from "./TypeToFind.jsx";
 import PdfViewer from "./PdfViewer.jsx";
 import InfoRequestModal, { InfoAnswerModal } from "./InfoRequestModal.jsx";
+import ExtraStagesBox from "./jobs/ExtraStagesBox.jsx";
 import { jsPDF } from "jspdf";
 import { FileText } from "lucide-react";
 
@@ -102,6 +103,28 @@ function DeviceReport() {
       {facts.map(([k, v]) => `${k}: ${v}`).join("\n")}
       {"\n\nErrors: " + (DEVICE_ERRORS.length ? "\n" + DEVICE_ERRORS.join("\n") : "none")}
     </div>
+  );
+}
+
+// A job line's extra stages (the Then box): never set, two in the line's own
+// order, and read only. No database behind it.
+function ExtraStagesDemo() {
+  const stages = ["Bending", "Drilling", "Machining - External"];
+  const [a, setA] = React.useState(null);
+  const [b, setB] = React.useState(["Machining - External", "Bending"]);
+  return (
+    <Section title="Extra stages" count={3}>
+      <div style={S.roleHint}>Never set: goes to every extra stage until someone sets it, or presses None.</div>
+      <ExtraStagesBox line={{ extra_stages: a }} stages={stages} onJob={["Bending", "Drilling"]} onChange={setA} canEdit />
+      <div style={S.roleHint} data-testid="extra-a">a = {JSON.stringify(a)}</div>
+
+      <div style={{ ...S.roleHint, marginTop: 10 }}>Cut, machine, bend. Machining is not ticked on this job, so its chip is dashed.</div>
+      <ExtraStagesBox line={{ extra_stages: b }} stages={stages} onJob={["Bending", "Drilling"]} onChange={setB} canEdit />
+      <div style={S.roleHint} data-testid="extra-b">b = {JSON.stringify(b)}</div>
+
+      <div style={{ ...S.roleHint, marginTop: 10 }}>Read only, as someone who cannot edit the job sees it.</div>
+      <ExtraStagesBox line={{ extra_stages: b }} stages={stages} canEdit={false} />
+    </Section>
   );
 }
 
@@ -200,6 +223,8 @@ function Preview() {
         <div style={S.roleHint}>Made-up data. No database, no login.</div>
 
         <TypeToFindDemo />
+
+        <ExtraStagesDemo />
 
         <PdfViewerDemo />
 

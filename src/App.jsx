@@ -176,6 +176,11 @@ const ITEM_DB_FIELDS = [
   ["currentReading", "current_reading", "num"], ["status", "status", "text"], ["fastenerType", "fastener_type", "text"],
   ["fastenerGrade", "fastener_grade", "text"], ["finish", "finish", "text"], ["attachmentType", "attachment_type", "text"],
   ["attachmentName", "attachment_name", "text"], ["storesKind", "stores_kind", "text"],
+  // The extra stages this part goes through after it is cut, in order,
+  // remembered so the next job with it comes in with them: a list, or
+  // null for never set. Needs setup-extra-stages.sql on the database
+  // first, or saving any stock item fails. src/jobs/extraStages.js.
+  ["extraStages", "extra_stages", "list"],
 ];
 function dbRowToItem(row) {
   const item = { id: row.id };
@@ -186,7 +191,7 @@ function itemToDbRow(item) {
   const row = { id: item.id };
   for (const [jsKey, dbKey, type] of ITEM_DB_FIELDS) {
     const v = item[jsKey];
-    const fallback = type === "num" ? 0 : type === "bool" ? false : "";
+    const fallback = type === "num" ? 0 : type === "bool" ? false : type === "list" ? null : "";
     row[dbKey] = v === undefined || v === null ? fallback : v;
   }
   return row;
@@ -4020,6 +4025,8 @@ export default function StockControl() {
         // Only fills a price that is not there. Somebody's own figure is
         // not overwritten by the catalogue.
         if (!(Number(item.unit_price) > 0) && Number(match.value) > 0) patch.unit_price = Number(match.value);
+        // Its extra stages the same way: only when the line has none yet.
+        if (extraStagesOf(item) === null && Array.isArray(match.extraStages)) patch.extra_stages = match.extraStages;
       } else {
         patch.linked_item_id = null;
       }
@@ -4464,6 +4471,7 @@ export default function StockControl() {
             // A line picked from the customer's parts comes in tagged
             // with where that part is made, if the part remembers.
             made_on: (it.linkedItemId && (items || []).find((i) => i.id === it.linkedItemId)?.madeOn) || "",
+            ...extraStagesFromPart(it.linkedItemId),
             sort_order: idx,
           }));
           const { error: quoteItemError } = await supabase.from("job_quote_items").insert(quoteItemRows);
@@ -4683,6 +4691,7 @@ export default function StockControl() {
             linked_item_id: p.linkedItemId || null,
             sort_order: nextOrder++,
             made_on: madeOn,
+            ...extraStagesFromPart(p.linkedItemId),
           });
         }
       }
@@ -6787,6 +6796,8 @@ export default function StockControl() {
             // database where setup-job-line-material-type.sql has not
             // been run yet.
             ...(it.material_type ? { material_type: it.material_type } : {}),
+            // The same for extra stages (setup-extra-stages.sql).
+            ...(Array.isArray(it.extra_stages) ? { extra_stages: it.extra_stages } : {}),
             sort_order: idx,
           }))
         );
@@ -6836,6 +6847,7 @@ export default function StockControl() {
         linked_item_id: linkedItemId || null,
         stock_code: stockCodeOf(linkedItemId),
         made_on: linkedItem?.madeOn || "",
+        ...extraStagesFromPart(linkedItemId),
         sort_order: nextOrder,
       });
       if (error) throw error;
@@ -6871,6 +6883,7 @@ export default function StockControl() {
         linked_item_id: linkedItemId || null,
         stock_code: stockCodeOf(linkedItemId),
         made_on: madeOn || "",
+        ...extraStagesFromPart(linkedItemId),
         length_mm: Number.isFinite(length) ? length : null,
         sort_order: nextOrder,
       });
@@ -6937,6 +6950,71 @@ export default function StockControl() {
       alert(
         refused
           ? `The database does not allow "${madeOnLabel(code) || code}" yet. Run setup-made-on-external.sql on this database (it carries every cut method), then try again.`
+          : "That didn't save — check your connection and try again."
+      );
+    }
+  }
+
+  // The extra stages a stock part remembers, as fields for a new job line.
+  // Nothing at all when the part remembers none, so a line still saves on
+  // a database where setup-extra-stages.sql has not been run.
+  function extraStagesFromPart(linkedItemId) {
+    const remembered = linkedItemId ? (items || []).find((i) => i.id === linkedItemId)?.extraStages : null;
+    return Array.isArray(remembered) ? { extra_stages: remembered } : {};
+  }
+  // The stages switched to "Extra stage", in factory order: what a
+  // line's Then box offers.
+  function extraStageNames() {
+    return (master?.jobProcessTypes || []).filter((n) => onlyMarked(n));
+  }
+
+  // Sets a line's extra stages and remembers them on its stock part, so
+  // the next job with that part comes in with them. Unlike the cut
+  // method, a stage taken off here comes off the part too (Heinrich,
+  // 15 Sep 2026): a revised drawing can drop a bend.
+  async function setJobLineExtraStages(job, item, list) {
+    if (!supabase) return;
+    try {
+      const { error } = await supabase.from("job_quote_items").update({ extra_stages: list }).eq("id", item.id);
+      if (error) throw error;
+      flashSaved(`quoteitem-extra-${item.id}`);
+      if (item.linked_item_id) {
+        setItems((prev) => (prev ? prev.map((i) => (i.id === item.linked_item_id ? { ...i, extraStages: list } : i)) : prev));
+      }
+      await logJobEvent(job.id, "item changed", `${item.description} — then ${list.length ? list.join(", ") : "nothing extra"}`);
+      await openJobDetail(job);
+    } catch (err) {
+      console.error("Failed to set the extra stages:", err);
+      alert(
+        /extra_stages/i.test(err?.message || "")
+          ? "This database has no extra stages yet. Run setup-extra-stages.sql on it, then try again."
+          : "That didn't save — check your connection and try again."
+      );
+    }
+  }
+
+  // "Nothing extra" on every line and part of the job nobody has set, so
+  // a 20-line job with five bends takes marking the five and one press.
+  // Remembered on their parts too, where a part has no answer yet.
+  async function setRestNoExtraStages(job, quoteItems) {
+    const rest = (quoteItems || []).filter((it) => !hasChildLines(it, quoteItems) && extraStagesOf(it) === null);
+    if (!supabase || rest.length === 0) return;
+    try {
+      const { error } = await supabase.from("job_quote_items").update({ extra_stages: [] }).in("id", rest.map((it) => it.id));
+      if (error) throw error;
+      const partIds = new Set(rest.map((it) => it.linked_item_id).filter(Boolean));
+      if (partIds.size) {
+        setItems((prev) =>
+          prev ? prev.map((i) => (partIds.has(i.id) && !Array.isArray(i.extraStages) ? { ...i, extraStages: [] } : i)) : prev
+        );
+      }
+      await logJobEvent(job.id, "item changed", `${rest.length} line${rest.length === 1 ? "" : "s"} set to nothing extra`);
+      await openJobDetail(job);
+    } catch (err) {
+      console.error("Failed to set the rest to nothing extra:", err);
+      alert(
+        /extra_stages/i.test(err?.message || "")
+          ? "This database has no extra stages yet. Run setup-extra-stages.sql on it, then try again."
           : "That didn't save — check your connection and try again."
       );
     }
@@ -7215,6 +7293,7 @@ export default function StockControl() {
         // A line matched to the customer's parts comes in tagged with
         // where that part is made, the same as the New Job form does.
         made_on: (l.linkedItemId && (items || []).find((i) => i.id === l.linkedItemId)?.madeOn) || "",
+        ...extraStagesFromPart(l.linkedItemId),
         sort_order: start + idx,
       }));
       const { error } = await supabase.from("job_quote_items").insert(rows);
@@ -8597,7 +8676,10 @@ export default function StockControl() {
         // what each cutting stage on screen will list.
         // The code leads, because that is what identifies the part on
         // the floor and in the customer's own system.
-        head: [["Code", "Item", "Made on", "Qty", "Invoiced", "Outstanding"]],
+        // Then: the line's extra stages in its own order after the first
+        // step, "Laser > Bending > Drilling" (routeText, plain > because
+        // the font has no arrows).
+        head: [["Code", "Item", "Made on, then", "Qty", "Invoiced", "Outstanding"]],
         // Parents carry the money columns; their parts follow, indented,
         // with the length, so the paper is also the shop's parts list.
         body: billableLines(quoteItems).flatMap((it) => {
@@ -8607,7 +8689,7 @@ export default function StockControl() {
           const row = [
             jobLineCode(it, linked) || "—",
             jobLineDescription(it, linked),
-            madeOnLabel(it.made_on) || "—",
+            routeText(madeOnLabel(it.made_on), it) || "—",
             qty,
             invoiced,
             Math.max(qty - invoiced, 0),
@@ -8622,7 +8704,7 @@ export default function StockControl() {
             `   • ${jobLineDescription(c, c.linked_item_id ? (items || []).find((i) => i.id === c.linked_item_id) : null)}${
               c.length_mm ? ` · ${Number(c.length_mm)} mm` : ""
             }`,
-            madeOnLabel(c.made_on) || "—",
+            routeText(madeOnLabel(c.made_on), c) || "—",
             Number(c.qty) || 0,
             "",
             "",
@@ -10704,6 +10786,32 @@ export default function StockControl() {
             .eq("id", p.id);
           if (upError) throw upError;
         }
+        // A line's extra stages name stages as text, and so does the stock
+        // part that remembers them. Lines are rewritten here; parts through
+        // state, so the stock auto-save carries them rather than writing
+        // the old names back. Skipped quietly on a database without
+        // setup-extra-stages.sql, where there is nothing to rewrite.
+        const { data: marked, error: markedError } = await supabase
+          .from("job_quote_items")
+          .select("id, extra_stages")
+          .not("extra_stages", "is", null);
+        if (markedError && !/extra_stages/i.test(markedError.message || "")) throw markedError;
+        for (const row of (marked || []).filter((r) => (r.extra_stages || []).some((n) => sameText(n, oldValue)))) {
+          const { error: upError } = await supabase
+            .from("job_quote_items")
+            .update({ extra_stages: renameInList(row.extra_stages, oldValue, newValue) })
+            .eq("id", row.id);
+          if (upError) throw upError;
+        }
+        setItems((prev) =>
+          prev
+            ? prev.map((i) =>
+                Array.isArray(i.extraStages) && i.extraStages.some((n) => sameText(n, oldValue))
+                  ? { ...i, extraStages: renameInList(i.extraStages, oldValue, newValue) }
+                  : i
+              )
+            : prev
+        );
         loadPeople();
         if (productionQueue !== null) fetchProductionQueue();
       }
@@ -22181,6 +22289,34 @@ export default function StockControl() {
                     </div>
                   );
                 })()}
+                {/* Extra stages. Lines nobody has set go to every extra
+                    stage on the job, so once one is ticked the count is
+                    here to be noticed and the button settles the rest in
+                    one press. src/jobs/extraStages.js. */}
+                {(() => {
+                  if (!canEditThisJob) return null;
+                  const onJob = (jobDetail.processes || []).filter((p) => onlyMarked(p.process_name)).map((p) => p.process_name);
+                  if (onJob.length === 0) return null;
+                  const takers = jobDetail.quoteItems.filter((it) => !hasChildLines(it, jobDetail.quoteItems));
+                  const unset = takers.filter((it) => extraStagesOf(it) === null).length;
+                  if (unset === 0) return null;
+                  return (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                      <span style={{ ...S.roleHint, color: C.accentRaw, fontWeight: 600 }}>
+                        {unset} of {takers.length} not set, so they go to {[...new Set(onJob)].join(" and ")}
+                      </span>
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={S.reqActionBtnMuted}
+                        onClick={() => setRestNoExtraStages(jobDetail.job, jobDetail.quoteItems)}
+                        title="Every line and part not set yet goes to no extra stage. Lines already set are left alone."
+                      >
+                        Nothing extra on the rest
+                      </button>
+                    </div>
+                  );
+                })()}
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
                   {/* Parents only on the list; each one's parts follow it,
                       indented. A part is cut and packed, never invoiced
@@ -22361,6 +22497,20 @@ export default function StockControl() {
                               )
                             )}
                           </div>
+                          {/* Its extra stages, in order. Not on a line with
+                              parts: its parts carry them. */}
+                          {parts.length === 0 && extraStageNames().length > 0 && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3 }}>
+                              <ExtraStagesBox
+                                line={it}
+                                stages={extraStageNames()}
+                                onJob={(jobDetail.processes || []).map((p) => p.process_name)}
+                                canEdit={canEditThisJob}
+                                onChange={(list) => setJobLineExtraStages(jobDetail.job, it, list)}
+                              />
+                              <SavedCheck fieldKey={`quoteitem-extra-${it.id}`} />
+                            </div>
+                          )}
                           {linkedItem && (
                             <div style={S.roleHint}>
                               Available: {linkedItem.qty}
@@ -22518,6 +22668,18 @@ export default function StockControl() {
                                       <SavedCheck fieldKey={`quoteitem-material-${c.id}`} />
                                     </>
                                   )}
+                                  {extraStageNames().length > 0 && (
+                                    <>
+                                      <ExtraStagesBox
+                                        line={c}
+                                        stages={extraStageNames()}
+                                        onJob={(jobDetail.processes || []).map((p) => p.process_name)}
+                                        canEdit
+                                        onChange={(list) => setJobLineExtraStages(jobDetail.job, c, list)}
+                                      />
+                                      <SavedCheck fieldKey={`quoteitem-extra-${c.id}`} />
+                                    </>
+                                  )}
                                 </>
                               ) : (
                                 <>
@@ -22526,6 +22688,7 @@ export default function StockControl() {
                                   {c.length_mm != null && c.length_mm !== "" && <span style={S.roleHint}>{Number(c.length_mm)} mm</span>}
                                   {c.made_on && <span style={S.roleHint}>{madeOnLabel(c.made_on)}</span>}
                                   {c.made_on === "tube_laser" && c.material_type && <span style={S.roleHint}>{c.material_type}</span>}
+                                  <ExtraStagesBox line={c} stages={[]} canEdit={false} />
                                 </>
                               )}
                               {canEditThisJob && (

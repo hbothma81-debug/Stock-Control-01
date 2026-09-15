@@ -95,7 +95,9 @@ export default function ExtraStagesBox({ line, stages, onJob, onChange, canEdit 
           // A fresh box after every pick, so the chosen name does not sit in it.
           key={chosen.join("|")}
           style={{ width: 150 }}
-          inputStyle={{ fontSize: 12.5, padding: "2px 24px 2px 6px" }}
+          // border-box: without it the padding is added to the full width
+          // and the box spills 32px over the None button beside it.
+          inputStyle={{ fontSize: 12.5, padding: "2px 24px 2px 6px", boxSizing: "border-box" }}
           options={offer}
           value=""
           onChange={(v) => v && onChange([...chosen, v])}
