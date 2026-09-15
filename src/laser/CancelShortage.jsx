@@ -58,8 +58,10 @@ function CancelShortageModal({ shortage: s, summary, programNumbers, onConfirm, 
         <div style={{ ...S.roleHint, marginTop: 6 }}>
           {onPrograms.length > 0
             ? `It comes off program ${onPrograms.join(", ")}, and the stages it was to catch up through are removed. `
+            : s.status === "nested"
+            ? "It comes off the program it is on, and the stages it was to catch up through are removed. "
             : ""}
-          It stays on record as cancelled, with your name and the reason, and whoever flagged it is told.
+          It stays on record as cancelled, with your name and the reason. If someone else flagged it, they are told.
         </div>
 
         <label style={{ ...S.label, marginTop: 10, display: "block" }}>Why?</label>

@@ -15180,6 +15180,39 @@ export default function StockControl() {
             )}
             {productionLoading && <div style={S.empty}>Loading…</div>}
             {Object.keys(productionQueue || {}).length > 0 && productionFilterRow({ marginBottom: 10 })}
+            {/* The shortages this person flagged that are not cut yet. A
+                packer who flagged one by mistake has no other screen that
+                lists it, so it is here, where everyone starts, with Cancel
+                on each (decided 15 Sep 2026). Only shown when there is one. */}
+            {(() => {
+              const mine = (shortagesList || []).filter(
+                (s) => s.flagged_by_id && s.flagged_by_id === currentUser?.id && (s.status === "flagged" || s.status === "nested")
+              );
+              if (mine.length === 0) return null;
+              return (
+                <Section title="Shortages you flagged" count={mine.length}>
+                  {mine.map((s) => (
+                    <div key={s.id} style={{ ...S.reqCard, marginBottom: 6 }}>
+                      <div style={S.reqCardTop}>
+                        <span style={S.itemName}>
+                          {s.job_number} — {s.customer || "No customer"}
+                        </span>
+                        <span style={{ ...S.reqStatusTag, color: C.muted }}>
+                          {s.status === "flagged" ? "Waiting to be nested" : "On a program — waiting to be cut"}
+                        </span>
+                      </div>
+                      <div style={{ ...S.itemComment, marginTop: 2 }}>{shortageSummary(s)}</div>
+                      <div className="stk-meta-row" style={S.rowMeta}>
+                        <span>Reason: {shortageReasonText(s)}</span>
+                        <span>{shortageFlaggedLabel(s)}</span>
+                        {s.lane && <span>{laneLabel(s.lane)}</span>}
+                      </div>
+                      <CancelShortage shortage={s} summary={shortageSummary(s)} onCancel={cancelShortage} />
+                    </div>
+                  ))}
+                </Section>
+              );
+            })()}
             {(() => {
               const q = productionFiltering;
               const matchesJob = ({ job }) => productionJobMatches(job);
