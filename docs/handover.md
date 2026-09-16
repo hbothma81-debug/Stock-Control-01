@@ -1856,3 +1856,60 @@ under their lines" above; this is where it stands now.
 
 - Nothing open in Copy job. When the extra-stages switch is turned on,
   try one copy of a job whose parts remember stages.
+---
+
+## 16 Sep 2026 — Laser production (tube floor printout): state of play at wrap-up
+
+### Done and live
+
+- **Tube floor printout** (2de848d, pushed by Planning). Print on each
+  tube program, on Cutting and in the opened program on Nesting, asks
+  Portrait or Landscape: page 1 with the program number, reference, jobs,
+  "Draw from stores" and every part (mark, drawing, code, length, qty,
+  tick, notes); then a page per nest, two to a page when both fit. How it
+  works: `docs/TUBE-LASER-HOW-IT-WORKS.md`, "The floor printout".
+- The import keeps every nest and each part's software ID on the program.
+- Handover note for Jobs page on the job's print-all (4fffb84, live).
+
+### SQL this conversation wrote
+
+| File | Adds | Practice | Live |
+| --- | --- | --- | --- |
+| `setup-tube-laser-nests.sql` | column `laser_programs.nests` | yes (Heinrich, 14 Sep) | yes (Heinrich, 14 Sep) |
+
+Not proven from here: on 16 Sep `CHECK-live-table.cjs "laser_programs?select=nests"`
+answered 400, but so did the known columns `part_count` and
+`nesting_name` while the table answered 200, so the column check does not
+work on this table. Proof is a fresh import whose Print shows nest pages,
+or `CHECK-which-setup-files-are-run.sql` on live.
+
+Registered in `CHECK-which-setup-files-are-run.sql`; like every laser file
+not in `build-test-database.sh`.
+
+### Built but not yet tested by Heinrich
+
+1. A fresh import of a real report, then Print from Cutting and from
+   Nesting, portrait and landscape: nest pages present, marks match the
+   software, codes shown where the part is a line on the job.
+2. A program on two jobs: page 1 has a Job column.
+
+### Half-done / waiting on Heinrich
+
+- **Old programs print only the draw box** (reported 15 Sep): their nests
+  were never kept and most carry no parts. Proposed, not decided: fill
+  page 1 from the job's tube lines matched to the program's section by
+  `material_type`, else all tube lines with a warning. Three questions
+  asked: that fallback or "re-import" text; all lines with a warning when
+  nothing matches; which old program he tried. Build nothing until
+  answered.
+- Portrait or landscape, once the floor has tried both.
+- Still open from earlier entries: the tube untested list, the Time
+  Manager and User Management ticks, tagging tube lines with material
+  type, and the two JOB-0078 gaps (all packed with a program uncut says
+  nothing; cancelling a program does not re-check the laser stage).
+
+### Pick up next
+
+1. The old-program page 1 fallback, once Heinrich answers.
+2. JOB-0078 gap 2: cancelling a program re-checks the laser stage.
+3. Plate printout only after the SigmaNest export question.
