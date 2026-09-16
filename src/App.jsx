@@ -92,6 +92,7 @@ import Section from "./Section.jsx";
 import RecordRow from "./RecordRow.jsx";
 import PdfViewer from "./PdfViewer.jsx";
 import { extractPdfTextItems, parseSigmaNestQuote, browserInflate } from "./lib/sigmanestQuote.js";
+import { rowsForIds } from "./lib/rowsForIds.js";
 // The tube nesting report's reader, shared with the tube laser tab: the
 // job's Items tab reads the parts off the same file, without the
 // programs.
@@ -479,6 +480,14 @@ async function fetchAllRows(table, { select = "*", orderBy = "id", ascending = t
     from += pageSize;
   }
   return allRows;
+}
+
+// fetchAllRows for the rows whose column is in a list of ids, however long
+// the list. A long list in one request is refused outright (about 600
+// uuids), so the ids go in batches; see src/lib/rowsForIds.js. Rows come
+// back in no particular order.
+async function fetchRowsForIds(table, column, ids, options) {
+  return rowsForIds(fetchAllRows, table, column, ids, options);
 }
 
 // How many rows a table holds, without fetching any of them. head: true
@@ -5705,28 +5714,35 @@ export default function StockControl() {
     if (!supabase || !profile?.allowedProcessTypes?.length) return;
     setProductionLoading(true);
     try {
-      const { data: activeJobs, error: jobsError } = await supabase
-        .from("jobs")
-        .select("*")
-        .in("status", ["in_progress", "complete"]);
-      if (jobsError) throw jobsError;
-      const jobIds = (activeJobs || []).map((j) => j.id);
+      // Every load here is paged, and the job and stage ids go in batches
+      // (fetchRowsForIds). A plain request stops at 1000 rows without
+      // saying so, and one long list of ids is refused outright, which
+      // blanks this whole tab. On 16 Sep 2026 live had 562 stages and 776
+      // lines on it (CHECK-production-queue-size.sql).
+      const activeJobs = await fetchAllRows("jobs", { filter: (q) => q.in("status", ["in_progress", "complete"]) });
+      // Oldest job first, so two jobs level on everything a department
+      // sorts by keep the same places from one load to the next.
+      activeJobs.sort((a, b) => (Date.parse(a.created_at) || 0) - (Date.parse(b.created_at) || 0));
+      const jobIds = activeJobs.map((j) => j.id);
       if (jobIds.length === 0) {
         setProductionQueue({});
         setProductionLoading(false);
         return;
       }
+      // Each load settles to { data, error } the way a plain request did:
+      // the first three stop the queue, the rest are logged and left out.
+      const settle = (load) => load.then((data) => ({ data, error: null }), (error) => ({ data: null, error }));
       const [{ data: allProcesses, error: procError }, { data: allQuoteItems, error: qiError }, { data: allDocs, error: docError }, shortageResult, cutResult, cuttingListResult] = await Promise.all([
-        supabase.from("job_processes").select("*").in("job_id", jobIds).order("sort_order"),
-        supabase.from("job_quote_items").select("*").in("job_id", jobIds),
-        supabase.from("job_documents").select("*").in("job_id", jobIds).not("process_name", "is", null),
+        settle(fetchRowsForIds("job_processes", "job_id", jobIds)),
+        settle(fetchRowsForIds("job_quote_items", "job_id", jobIds)),
+        settle(fetchRowsForIds("job_documents", "job_id", jobIds, { filter: (q) => q.not("process_name", "is", null) })),
         // Fetched here rather than read from shortagesList so the queue
         // never depends on that having loaded first.
-        supabase.from("shortages").select("*").in("job_id", jobIds),
+        settle(fetchRowsForIds("shortages", "job_id", jobIds)),
         // The saw operator's work: the cut list on each job, and the
         // cutting lists already printed for it. Both non-fatal.
-        supabase.from("job_cut_items").select("*").in("job_id", jobIds).order("sort_order"),
-        supabase.from("generated_documents").select("*").in("job_id", jobIds).eq("document_type", "cutting_list").order("generated_at", { ascending: false }),
+        settle(fetchRowsForIds("job_cut_items", "job_id", jobIds)),
+        settle(fetchRowsForIds("generated_documents", "job_id", jobIds, { filter: (q) => q.eq("document_type", "cutting_list") })),
       ]);
       if (procError) throw procError;
       if (qiError) throw qiError;
@@ -5739,20 +5755,18 @@ export default function StockControl() {
       if (cuttingListResult.error) console.error("Failed to load printed cutting lists for the queue:", cuttingListResult.error);
       const allCutItems = cutResult.data || [];
       const allCuttingLists = cuttingListResult.data || [];
+      // Batches and pages arrive in id order. Put back the order these
+      // were asked for in before.
+      allProcesses.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      allCutItems.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      allCuttingLists.sort((a, b) => (Date.parse(b.generated_at) || 0) - (Date.parse(a.generated_at) || 0));
 
       // Each-mode progress is tracked per item, not lumped into one
       // combined count — needs the process ids from the fetch above
       // before it can be filtered, so it can't join the Promise.all.
-      const processIds = (allProcesses || []).map((p) => p.id);
-      let allItemProgress = [];
-      if (processIds.length > 0) {
-        const { data: progressData, error: progressError } = await supabase
-          .from("job_process_item_progress")
-          .select("*")
-          .in("job_process_id", processIds);
-        if (progressError) throw progressError;
-        allItemProgress = progressData || [];
-      }
+      // With no stages it asks for nothing.
+      const processIds = allProcesses.map((p) => p.id);
+      const allItemProgress = await fetchRowsForIds("job_process_item_progress", "job_process_id", processIds);
 
       // Grouped by process type, one "pill box" per type the person has
       // access to — every job with that process still outstanding shows
