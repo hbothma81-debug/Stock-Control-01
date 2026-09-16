@@ -6757,11 +6757,20 @@ export default function StockControl() {
   }
 
   // Creates a fresh job from an existing one as a template — same
-  // customer, description, references, materials, processes, and quoted
-  // items — but everything starts clean: a new job number, no progress
-  // ticked, no quantities invoiced yet.
+  // customer, description, references, materials, processes, quoted
+  // lines with their parts, and cut to size list — but everything starts
+  // clean: a new job number, no progress ticked, nothing cut, no
+  // quantities invoiced yet.
+  //
+  // A line's cut method and extra stages come from what its stock part
+  // remembers now, and from the old line only where the part remembers
+  // nothing (Heinrich, 16 Sep 2026): the part is kept up to date by every
+  // change made on a job, so it is the newer answer.
   async function submitCopyJob() {
     const { job: source, dueDate } = copyJobModal;
+    // Set once the new job exists, so a failure after that point can say
+    // whether the half-made copy was cleared away.
+    let halfMade = null;
     try {
       let jobNumber, newJob;
       let candidateNumber = master.nextJobNumber;
@@ -6802,13 +6811,21 @@ export default function StockControl() {
       }
       if (!newJob) throw new Error("Couldn't find an available job number after several attempts.");
       setMaster((prev) => ({ ...prev, nextJobNumber: candidateNumber + 1 }));
+      halfMade = newJob;
 
-      const [{ data: sourceProcesses }, { data: sourceQuoteItems }] = await Promise.all([
+      const [procRead, lineRead, cutRead] = await Promise.all([
         supabase.from("job_processes").select("*").eq("job_id", source.id),
-        supabase.from("job_quote_items").select("*").eq("job_id", source.id),
+        // Quote order, as the old job's Items tab shows it.
+        supabase.from("job_quote_items").select("*").eq("job_id", source.id).order("sort_order"),
+        supabase.from("job_cut_items").select("*").eq("job_id", source.id).order("sort_order"),
       ]);
+      // A read that failed would otherwise copy as "nothing there".
+      for (const read of [procRead, lineRead, cutRead]) if (read.error) throw read.error;
+      const sourceProcesses = procRead.data || [];
+      const sourceQuoteItems = lineRead.data || [];
+      const sourceCutItems = cutRead.data || [];
 
-      if (sourceProcesses?.length) {
+      if (sourceProcesses.length) {
         const { error: procError } = await supabase.from("job_processes").insert(
           sourceProcesses.map((p) => ({
             job_id: newJob.id,
@@ -6822,26 +6839,85 @@ export default function StockControl() {
         // a job that looks right in the list and does nothing in the shop.
         if (procError) throw procError;
       }
-      if (sourceQuoteItems?.length) {
-        const { error: itemError } = await supabase.from("job_quote_items").insert(
-          sourceQuoteItems.map((it, idx) => ({
+
+      if (sourceQuoteItems.length) {
+        // A column is copied only if this database has it: the old rows
+        // were read whole, so their keys are the table's columns. Where it
+        // is copied, every row carries it. Saving several rows at once, a
+        // row missing a field another row has is saved as null, and a
+        // not-null column such as material_type refuses the whole copy.
+        const has = (column) => column in sourceQuoteItems[0];
+        const partOf = (id) => (id ? (items || []).find((i) => i.id === id) : null);
+        const sourceIds = new Set(sourceQuoteItems.map((it) => it.id));
+        const rows = sourceQuoteItems.map((it, idx) => {
+          const part = partOf(it.linked_item_id);
+          const row = {
             job_id: newJob.id,
             description: it.description,
             qty: it.qty,
             unit_price: it.unit_price,
             linked_item_id: it.linked_item_id,
             stock_code: it.stock_code || "",
-            // Only when there is one, so a copy still works on a
-            // database where setup-job-line-material-type.sql has not
-            // been run yet.
-            ...(it.material_type ? { material_type: it.material_type } : {}),
-            // The same for extra stages (setup-extra-stages.sql).
-            ...(Array.isArray(it.extra_stages) ? { extra_stages: it.extra_stages } : {}),
             sort_order: idx,
+          };
+          // A line with parts keeps its own tag, normally blank: the tag is
+          // ignored while it has parts, and one taken from its stock part
+          // would start sending it to a machine the day the parts come off.
+          if (has("made_on")) {
+            row.made_on = hasChildLines(it, sourceQuoteItems) ? it.made_on || "" : part?.madeOn || it.made_on || "";
+          }
+          if (has("length_mm")) row.length_mm = it.length_mm ?? null;
+          if (has("material_type")) row.material_type = it.material_type || "";
+          if (has("extra_stages")) {
+            row.extra_stages = Array.isArray(part?.extraStages)
+              ? part.extraStages
+              : Array.isArray(it.extra_stages)
+                ? it.extra_stages
+                : null;
+          }
+          const parentId = has("parent_quote_item_id") ? it.parent_quote_item_id : null;
+          return { row, oldParent: parentId && sourceIds.has(parentId) ? parentId : null, oldId: it.id };
+        });
+
+        // Lines first, then the parts under them. A part points at its line
+        // by the line's id, and the copied line has no id until it is saved.
+        // The saved rows come back with their sort_order, which is unique
+        // on this copy, and that is how each is matched to its old row.
+        const newIdOf = new Map();
+        let waiting = rows;
+        while (waiting.length) {
+          const ready = waiting.filter((r) => !r.oldParent || newIdOf.has(r.oldParent));
+          if (!ready.length) throw new Error("Some parts point at a line that could not be copied.");
+          const batch = ready.map((r) => (r.oldParent ? { ...r.row, parent_quote_item_id: newIdOf.get(r.oldParent) } : r.row));
+          const { data: saved, error: itemError } = await supabase.from("job_quote_items").insert(batch).select("id, sort_order");
+          if (itemError) throw itemError;
+          if ((saved || []).length !== batch.length) throw new Error("Not every line on the copy saved.");
+          const newIdByOrder = new Map(saved.map((s) => [Number(s.sort_order), s.id]));
+          for (const r of ready) newIdOf.set(r.oldId, newIdByOrder.get(r.row.sort_order));
+          waiting = waiting.filter((r) => !ready.includes(r));
+        }
+      }
+
+      if (sourceCutItems.length) {
+        // The list as planned; nothing cut yet on the copy.
+        const { error: cutError } = await supabase.from("job_cut_items").insert(
+          sourceCutItems.map((c, idx) => ({
+            job_id: newJob.id,
+            sort_order: idx,
+            drawing_no: c.drawing_no || "",
+            linked_item_id: c.linked_item_id || null,
+            section: c.section || "",
+            grade: c.grade || "",
+            cut_length_mm: Number(c.cut_length_mm) || 0,
+            qty: Number(c.qty) || 0,
+            stock_length_m: Number(c.stock_length_m) || 6,
+            trim_front: c.trim_front !== false,
+            note: c.note || "",
           }))
         );
-        if (itemError) throw itemError;
+        if (cutError) throw cutError;
       }
+      halfMade = null;
 
       // The old job's history stays with the old job. What carries over is
       // one line saying where this one came from -- provenance, not baggage.
@@ -6852,7 +6928,19 @@ export default function StockControl() {
       openJobDetail(newJob);
     } catch (err) {
       console.error("Failed to copy job:", err);
-      alert("Couldn't copy that job — check your connection and try again.");
+      let leftBehind = "";
+      if (halfMade) {
+        // As New Job does: a copy that stopped halfway is taken away whole
+        // (its stages, lines, parts and cut list go with it), so trying
+        // again does not leave two jobs in the list.
+        const { error: rollbackError } = await supabase.from("jobs").delete().eq("id", halfMade.id);
+        if (rollbackError) {
+          console.error("Couldn't clean up the half-made copy:", rollbackError);
+          leftBehind = ` A half-made ${halfMade.job_number} is in the Jobs list; remove it before trying again.`;
+        }
+        fetchJobs();
+      }
+      alert(`Couldn't copy ${source.job_number}: ${err.message || "check your connection and try again"}.${leftBehind}`);
     }
   }
 
@@ -7109,6 +7197,15 @@ export default function StockControl() {
     // left alone, because blank is the right answer for it.
     const blanks = (quoteItems || []).filter((it) => wantsCutMethod(it, quoteItems));
     let tagged = 0;
+    // A tag saved on a line is remembered on its stock part, as picking it
+    // from the dropdown does (setJobItemMadeOn), so the next job and a copy
+    // of this one come in tagged. Only a part with no tag yet: a part that
+    // has one was the guess.
+    const remember = new Map();
+    const rememberOnParts = () => {
+      if (!remember.size) return;
+      setItems((prev) => (prev ? prev.map((i) => (remember.has(i.id) && !i.madeOn ? { ...i, madeOn: remember.get(i.id) } : i)) : prev));
+    };
     try {
       for (const it of blanks) {
         const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
@@ -7117,7 +7214,9 @@ export default function StockControl() {
         const { error } = await supabase.from("job_quote_items").update({ made_on: code }).eq("id", it.id);
         if (error) throw error;
         tagged += 1;
+        if (linkedItem && !linkedItem.madeOn) remember.set(linkedItem.id, code);
       }
+      rememberOnParts();
       if (tagged > 0) await logJobEvent(job.id, "item changed", `${tagged} item(s) tagged with where they are made`);
       await openJobDetail(job);
       const left = blanks.length - tagged;
@@ -7127,6 +7226,9 @@ export default function StockControl() {
           : `Tagged ${tagged}.${left > 0 ? ` ${left} still need a tag — set those from their dropdowns.` : ""}`
       );
     } catch (err) {
+      // The lines tagged before the failure are saved, so their parts
+      // remember too.
+      rememberOnParts();
       console.error("Failed to guess where items are made:", err);
       alert("That didn't save — check your connection and try again.");
     }
@@ -24010,8 +24112,9 @@ export default function StockControl() {
               </button>
             </div>
             <div style={S.roleHint}>
-              Creates a new job with the same customer, description, materials, processes, and quoted items — everything
-              starts fresh: a new job number, no progress ticked, nothing invoiced yet.
+              Creates a new job with the same customer, description, materials, processes, quoted items with their parts,
+              and cut to size list. Cut methods and extra stages come from what each stock part remembers now. Everything
+              starts fresh: a new job number, no progress ticked, nothing cut or invoiced yet.
             </div>
             <div style={{ marginTop: 10 }}>
               <label style={S.label}>Due date (optional)</label>

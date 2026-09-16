@@ -89,6 +89,16 @@ name rather than adding it twice. Importing also fills in the cut
 method on a part that was already there and had none, without undoing
 anything set by hand.
 
+**Copy job** (on the job's header) brings every line across with its
+parts still under it, in quote order, with their lengths and tube
+material, and the Cut to size list with nothing cut. The cut method and
+extra stages come from what each stock part remembers now, and from the
+old job's line only where the part remembers nothing. A line that has
+parts keeps its own cut method, normally blank. Nothing invoiced,
+counted or cut comes across. If the copy fails partway, the half-made
+job is deleted, as New Job does. Until 16 September 2026 a copy turned
+every part into a plain line with no cut method and no length.
+
 ## 4. What the app refuses, and why
 
 - **A line with parts cannot be moved under another line.** Parts do

@@ -1486,3 +1486,64 @@ no fault in the change. Not tried signed in; the job sheet not drawn.
   c49eb8d / 1f712fd / ae91985 sections step 4 (Stock Manager); efb567f
   parts in order on the floor. They cannot go live until the extra-stages
   commits do, or are reordered.
+
+---
+
+## 16 Sep 2026 — Jobs page: Copy job keeps parts under their lines
+
+Found in a read-only sweep; Heinrich answered the plan the same day
+(parts under lines: yes; stock part wins, and must be updated by changes
+on a job; quote order: yes; Cut to size list: yes; a failed copy deletes
+itself: yes).
+
+### Committed with this entry (not pushed)
+
+- `submitCopyJob` (App.jsx): reads the old lines in quote order; saves
+  the lines, then the parts under the copied line (a part needs its
+  line's new id); carries cut method, length, tube material and extra
+  stages; copies the Cut to size list with nothing cut. Cut method and
+  extra stages come from the stock part where it remembers one, else the
+  old line; a line with parts keeps its own tag. A failed read now stops
+  the copy instead of copying "nothing". A copy that fails partway is
+  deleted, as New Job does, and the message says why.
+- Two faults in the old copy, both proven on pglite with the old code:
+  a job with tube material on some lines and not others could not be
+  copied at all (a batch save sends a missing field as null, and
+  `material_type` is not null), and the failed copy stayed in the Jobs
+  list with its stages and no lines. Every copied row now carries every
+  column the database has.
+- Guess the rest now remembers a guessed cut method on the stock part,
+  where the part has none, as the dropdown already did. The Then box and
+  "Nothing extra on the rest" already remembered.
+- This touches the copy's extra-stages line from the held `97b0653`. If
+  the extra-stages commits are dropped rather than fixed, this spot
+  needs redoing.
+
+### Checked
+
+Names 0 problems, 115 tests, build. The real function run on pglite
+through a stand-in for the database library (a missing key saves as
+null, as it does on Supabase): parts under the right copied line, quote
+order renumbered, prices on lines, nothing invoiced or cut, the part's
+tag and list winning, the old line's where the part has none, a parent
+keeping its own tag, with and without the extra_stages column; a forced
+failure on the parts and on the cut list each leave no job behind. The
+old code through the same stand-in fails on the mixed-material job and
+leaves the half-made job. On practice, signed in: copied JOB-0004 to
+**JOB-0012**; its line has both parts under it, 100 and 50 off, 1000 mm,
+Tube laser. The cut list and Guess the rest were not tried on screen.
+
+### Built but not yet tested by Heinrich (practice, signed in)
+
+1. Copy a job with parts (JOB-0012 is one already): parts under their
+   line, lengths, cut methods, same order as the old job's Items tab.
+2. Copy a job with a Cut to size list (JOB-0008): the list comes across,
+   nothing cut.
+3. A line whose stock part remembers a different cut method from the old
+   job: the copy takes the part's.
+4. Guess the rest on a job, then add that part to another job: it comes
+   in tagged.
+
+### Practice data left by testing
+
+- JOB-0012, the copy of JOB-0004. Remove it or keep it for test 1.
