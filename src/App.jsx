@@ -9660,6 +9660,50 @@ export default function StockControl() {
     }
   }
 
+  // The plate laser's queue number on a job (jobs.laser_priority): 1 is
+  // cut first, two jobs may share a number, blank is ordinary work. Sales,
+  // the nester and admins set it (canSetLaserPriority). Who and when are
+  // kept on the job so Prince's row can say them, and every change goes
+  // into the job's History. The row is asked for back: a refused update
+  // would otherwise look like a save.
+  async function setLaserPriority(job, value) {
+    const blank = value === "" || value === null || value === undefined;
+    const next = blank ? null : Math.floor(Number(value));
+    if (!blank && !Number.isFinite(next)) return;
+    if (next !== null && next < 1) {
+      alert("1 is the highest priority. Leave it blank for ordinary work.");
+      return;
+    }
+    const prev = job.laser_priority ?? null;
+    if (next === prev) return;
+    try {
+      const { data, error } = await supabase
+        .from("jobs")
+        .update({
+          laser_priority: next,
+          laser_priority_by: next === null ? null : roleLabel,
+          laser_priority_at: next === null ? null : new Date().toISOString(),
+        })
+        .eq("id", job.id)
+        .select("id");
+      if (error) throw error;
+      if (!data || data.length === 0) throw new Error("the job was not found");
+      await logJobEvent(
+        job.id,
+        "laser priority",
+        next === null ? `cleared (was ${prev})` : prev === null ? `set to ${next}` : `${prev} to ${next}`,
+      );
+      flashSaved(`job-${job.id}-laser_priority`);
+      // Prince's To nest list reads the job from jobsList, so this is what
+      // moves his row; nothing on the laser tables changed.
+      await fetchJobs();
+      if (jobDetail?.job.id === job.id) refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to set the laser priority:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
   function openMarkInvoicedModal(job) {
     setMarkInvoicedModal({ job, invoiceNumber: "" });
   }
@@ -10800,6 +10844,22 @@ export default function StockControl() {
   // unrepairable — and a job carrying stages from an old process list has
   // to be fixable by somebody.
   const canEditThisJob = canEditQty("jobs") && (!jobIsLocked || isAdmin);
+
+  // Who may put a job in the plate laser's queue (jobs.laser_priority):
+  // sales, whoever nests on that laser, and admins. Decided 16 Sep 2026.
+  // Its own gate, not canEditThisJob, because Prince need not be able to
+  // edit jobs to say what he cuts next. The operator only sees it.
+  const canSetLaserPriority =
+    isAdmin || !!profile?.isSalesPerson || !!profile?.allowedProcessTypes?.some(isPlateNestingProcess);
+  // The box only makes sense on a job the plate laser still has to cut:
+  // a number given once Nesting and Laser are both ticked reaches no
+  // list. The tube laser has no queue number, by decision.
+  const jobGoesToPlateLaser = (jobDetail?.processes || []).some(
+    (p) =>
+      !p.shortage_id &&
+      !p.is_complete &&
+      (isPlateNestingProcess(p.process_name) || isProgramLaserProcess(p.process_name)),
+  );
 
   // Every file on the open job, whichever way it got there: uploaded by
   // somebody, or produced by the app. Two different tables and two
@@ -15937,6 +15997,21 @@ export default function StockControl() {
                   <span style={{ fontSize: 15, color: C.text }}>{job.laser_job_reference || "No SigmaNest #"}</span>
                   <span style={{ fontSize: 15, color: C.text }}>{job.customer || "No customer"}</span>
                   <span style={{ fontSize: 15, color: C.text }}>{job.sales_rep || "No sales rep"}</span>
+
+                  {/* The plate laser's queue number, so the sales desk can
+                      see what is already pushed forward before asking for
+                      another 1. Only while the job is open: on a finished
+                      one the number is history. */}
+                  {job.laser_priority != null && job.status === "in_progress" && (
+                    <span
+                      style={{ ...S.chip, flexShrink: 0, color: C.danger, borderColor: C.danger, fontWeight: 700 }}
+                      title={`Laser 4kw priority ${job.laser_priority} — set by ${job.laser_priority_by || "someone"}${
+                        job.laser_priority_at ? `, ${new Date(job.laser_priority_at).toLocaleDateString()}` : ""
+                      }`}
+                    >
+                      Laser P{job.laser_priority}
+                    </span>
+                  )}
 
                   {/* What it is worth, so the big ones can be picked out of
                       a long list. Rounded to the rand: this is for choosing
@@ -22561,6 +22636,15 @@ export default function StockControl() {
             {jobDetail.job.due_date && <span>Due {new Date(jobDetail.job.due_date).toLocaleDateString()}</span>}
             {jobDetail.job.quote_reference && <span>Quote: {jobDetail.job.quote_reference}</span>}
             {jobDetail.job.customer_po && <span>Customer PO: {jobDetail.job.customer_po}</span>}
+            {/* Shown to everyone, set on the Overview tab by the few. */}
+            {jobDetail.job.laser_priority != null && (
+              <span
+                style={{ color: C.danger, fontWeight: 700 }}
+                title={`Laser 4kw priority — set by ${jobDetail.job.laser_priority_by || "someone"}`}
+              >
+                Laser priority {jobDetail.job.laser_priority}
+              </span>
+            )}
           </div>
 
           {/* Info Requests on this job (src/lib/infoRequests.js). Open ones
@@ -22772,6 +22856,45 @@ export default function StockControl() {
                     )}
                   </div>
                 </>
+              )}
+
+              {/* The plate laser's queue number (jobs.laser_priority). Its
+                  gate is its own, not canEditThisJob: Prince sets what he
+                  cuts next without being able to edit jobs. Only on a job
+                  the plate laser cuts; the tube laser has no queue number,
+                  by decision (16 Sep 2026). */}
+              {canSetLaserPriority && !jobIsLocked && jobGoesToPlateLaser && (
+                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={S.label}>Laser 4kw priority</label>
+                    {/* Keyed on the stored number so the box is rebuilt
+                        when somebody else changes it while this job is
+                        open; a plain defaultValue kept showing the old
+                        number and wrote it back on the next blur. A
+                        number box reports "" for text it cannot read
+                        ("1e"), which must not pass for "clear it". */}
+                    <input
+                      key={jobDetail.job.laser_priority ?? "blank"}
+                      type="number"
+                      min="1"
+                      step="1"
+                      style={S.input}
+                      defaultValue={jobDetail.job.laser_priority ?? ""}
+                      onBlur={(e) => {
+                        if (e.target.validity?.badInput) return;
+                        setLaserPriority(jobDetail.job, e.target.value);
+                      }}
+                      placeholder="1 is cut first — blank is ordinary work"
+                    />
+                    {jobDetail.job.laser_priority != null && (
+                      <div style={S.roleHint}>
+                        Set by {jobDetail.job.laser_priority_by || "someone"}
+                        {jobDetail.job.laser_priority_at ? ` — ${new Date(jobDetail.job.laser_priority_at).toLocaleString()}` : ""}
+                      </div>
+                    )}
+                  </div>
+                  <SavedCheck fieldKey={`job-${jobDetail.job.id}-laser_priority`} />
+                </div>
               )}
 
             {jobDetail.quoteItems.length > 0 && (

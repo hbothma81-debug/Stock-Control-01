@@ -34,6 +34,7 @@ ORDER=(
   setup-jobs-qty-tracking.sql
   setup-jobs-invoice-number.sql
   setup-jobs-customer-po.sql
+  setup-laser-priority.sql
 
   # --- processes (need jobs and job_quote_items to exist first)
   setup-process-assignment.sql

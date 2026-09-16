@@ -128,7 +128,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-extra-stages.sql',          'column stock_items.extra_stages',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'stock_items' and column_name = 'extra_stages')),
     ('setup-extra-stages.sql',          'column process_type_settings.only_marked',
-      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'process_type_settings' and column_name = 'only_marked'))
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'process_type_settings' and column_name = 'only_marked')),
+    ('setup-laser-priority.sql',        'column jobs.laser_priority',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'jobs' and column_name = 'laser_priority'))
 )
 select
   setup_file,
