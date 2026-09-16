@@ -106,6 +106,7 @@ after asking me.
 
 - `node CHECK-what-is-live.cjs "text"` — pass text that exists only in the new build, each as its own argument (plain text, not a pattern). The build strips comments and renames code, so a comment-only or behaviour-only change has to be checked by reading the deployed code. It matches capitals exactly: text a PDF prints in capitals is written in capitals in the code ("DRAW FROM STORES"). A style-only change is found by its style's name (`reqActionBtnAlertOn`): the keys of `S` survive the build.
 - `node CHECK-live-table.cjs table` — whether a table answers on live. A column can be checked the same way without signing in: selecting it answers 200 if it exists, 400 if not.
+- A row count cannot be read without signing in: the public key sees no rows, so every count through it reads 0. Counts come from a `CHECK-*.sql` pasted on live (`CHECK-production-queue-size.sql` shows how close the Production tab's loads are to both limits under "Loading data").
 - `node CHECK-undefined-names.cjs` after every change — a missing name blanks the whole app even though the build passes.
 - Run `git log --oneline origin/main..HEAD` as its own step and read the answer before pushing. Never chain the check and the push in one command.
 - `npm test` runs Node's own test runner over `src/**/*.test.js`: the shift-window and cutting-time sums, the nesting-report parser, the job sheet's stock grouping and more. No database, a second to run.
@@ -117,6 +118,7 @@ after asking me.
 - Never add a fetch of a whole table on a timer. Background refreshes ask only for rows with `updated_at` at or after the newest one held, plus a row count to catch deletions (`loadAllData(false, { incremental: true })`, `loadTableRows`, `fetchNotifications({ incremental: true })`).
 - Database triggers keep `updated_at` on stock_items, requisitions, purchase_orders, usage_log, job_notifications and job_info_requests. A table that joins the incremental refresh needs the same trigger first.
 - When refreshed rows are merged into a list that has a `lastSaved…Ref` autosave, move that ref too, or the autosave writes every arrived row back.
+- Two limits on any one request, neither giving a warning on screen. A plain `.select()` stops at 1000 rows with no error: page anything that can grow with `fetchAllRows`, ordered by a unique column (`id`; paging on `sort_order` or `created_at` can skip or repeat a row where two pages meet), and sort afterwards. A `.in()` list travels in the web address, and the database refuses a request over about 25,000 characters, headers included (640 uuids went through, 650 did not; 16 Sep 2026): that is an error, and on the Production tab it blanked the whole tab. Any list of ids that can grow goes through `fetchRowsForIds` (batches of 200, each paged; `src/lib/rowsForIds.js`, tested). Batching and paging bring the same rows as one request, so they add no downloads.
 - `BACKGROUND_REFRESH_MS` is 5 minutes until the 25 Sep 2026 reset (normally 1 minute). Master lists refresh every 10 minutes. The shift check stays at 1 minute because the lockout warning counts down from it. Refreshing pauses after 10 minutes with nobody touching the screen.
 
 ## Decisions already made — do not undo without asking
@@ -183,6 +185,7 @@ after asking me.
 - A script that patches App.jsx must demand exactly one match per edit and refuse to write otherwise. A shorter indent is a substring of a longer one, so a loose pattern edits the wrong place.
 - `consumeProgramStock` (a tube cut moving stock) repeats `useAllocation`'s steps: the shelf, the reservation, the usage log. Change one, change the other.
 - When a form's fields move to another screen, move its checks with them. New Job kept "select at least one process" after the stage ticks left it, and blocked every new job on live.
+- Saving several rows in one `insert([...])` sends every key any row has, and a row without that key saves null, not the column's default. A not-null column then refuses the whole batch: Copy job could not copy a job with tube material on only some lines. Give every row every key, or leave the key off every row. To tell whether a column exists, read a row with `select("*")` and check its keys (`submitCopyJob`).
 
 ## Checking a screen without signing in
 
@@ -193,3 +196,4 @@ after asking me.
 - A value set on a number box by script (native setter plus an `input` event) did not reach React on the shortage form; clicking the box and using the pane's `type` did.
 - To read a PDF the app opens in a new tab, replace `window.open` in the page with one that records the address and returns `{}` (a falsy return makes it save a file instead), then read the text with `pdfjs-dist`'s `getTextContent`. Reload afterwards.
 - A PDF is checked by looking at it. Draw it with `jspdf` from a node script (keep a new PDF piece in its own module so the script draws the real code), turn page 1 into a PNG in the scratchpad with `pdfjs-dist` and `@napi-rs/canvas`, and read the PNG. The Read tool cannot open a PDF here (no `pdftoppm`), and the Browser pane cannot screenshot a local file.
+- When the Browser pane is already signed in on the dev server, `await import("/src/lib/supabaseClient.js")` in the page gives the app's own signed-in client (and `/src/lib/…` modules the app's own code), so an old and a new query can be compared row for row on practice, read-only, without anyone signing in.

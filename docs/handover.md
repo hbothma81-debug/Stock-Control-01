@@ -1721,3 +1721,138 @@ on either database (16 Sep); ask Heinrich to paste it again whole.
   total); should un-ticking a stage that closed packing reopen it.
 - `CHECK-job-stuck-on-packing.sql` repeats `stageTakesItem` in SQL and
   knows neither extra stages nor the packer rules.
+
+---
+
+## 16 Sep 2026 — Jobs page (wrap-up): state of play
+
+The entry above has the detail of today's packer work; this is the whole
+conversation's position at clearing (14–16 Sep).
+
+### Done and live (pushed by Planning)
+
+- `7a39a90` Made-on list: Laser - external, Machining - external, CNC
+  Lathe; Welding retired. A stage rename also rewrites reservations'
+  stage names, Info Requests' stage names and recipe stages.
+- `ae8c652`, `3cd0817`, `97b0653`, `fe3ca02` Extra stages, inert on live:
+  the Extra stage switch is hidden and the stock auto-save never writes
+  the list.
+- `a6e8db4` `CHECK-job-stages-and-counts.sql`; `669b13a`
+  `CHECK-extra-stages-before.sql`.
+
+### Committed, not pushed
+
+The packer rules, to push together: `60200fd`, `2b7ffcb`, `a8e7892`,
+`61a0087`, `c6af963`, `e155370`, `264fe3d`, `1e28fbc`. Reviewed five
+times; last check found no blockers. The queue also holds `cb0579c`
+(Stock Manager's Galv SQL) and `1ffb702` (Planning's handover), not this
+conversation's.
+
+### Every setup file this conversation wrote
+
+| File | Adds | Practice | Live |
+| --- | --- | --- | --- |
+| `setup-made-on-external.sql` | check rules only (codes `laser_external`, `machining_external`) | run, Heinrich confirmed 16 Sep | run, Heinrich confirmed 16 Sep (rules cannot be seen over REST) |
+| `setup-extra-stages.sql` | columns `job_quote_items.extra_stages`, `stock_items.extra_stages`, `process_type_settings.only_marked` | not confirmed (the REST check reads live only) | **not there**: all three 400 at wrap-up, 16 Sep |
+
+Read-only checks: `CHECK-extra-stages-before.sql` (run on live 15 Sep),
+`CHECK-job-stages-and-counts.sql` and `CHECK-packer-opens-at-push.sql`
+(not yet run by Heinrich).
+
+### Built but not yet tested by Heinrich
+
+Live now:
+1. Made-on dropdowns on a line, a part and a stage's Cuts: Laser -
+   external and Machining - external offered, CNC reads CNC Lathe, no
+   Welding.
+2. Rename a practice stage that has a reservation aimed at it: the job's
+   Materials tab says "for" the new name.
+3. Extra stages: nothing to try until the SQL is on and the switch shown.
+
+After the packer rules are pushed (practice first):
+4. Nesting ticked, a program uncut, packer taken: a per-item Bending card
+   opens and counts; a one-tick Welding and Invoicing stay waiting.
+5. A Bending count raises the packer's count; Laser Status shows "n
+   counted at Bending", on parts under a line too.
+6. Closing packing while a program is uncut (packer's button, admin
+   close, job page tick) is refused and names what is open.
+7. Cutting the last program closes packing when every line is packed, and
+   the job's Complete check runs; the rep is told once.
+8. Two quick counts on one line, and the same line on two tablets:
+   nothing lost or doubled; a changed count is refused with what it reads
+   now.
+
+### Waiting on Heinrich
+
+- Run `CHECK-packer-opens-at-push.sql` on live; then take the packer rules
+  to Planning; reload the floor tablets after the push.
+- JOB-0068: Laser - External to "Cuts: Laser - external"; retag its
+  outside-supplier lines and parts.
+- Job Process Types: rename "Machine/Drilling/CNC" to "CNC Lathe"; add
+  Drilling above Welding.
+- Paste `setup-extra-stages.sql` again, whole, practice then live, and
+  check the three rows say ready.
+- Decisions: Assembly kept or relabelled "No machine (assembly / bought
+  in)"; whether any of the 7 open CNC jobs is drilling work; Take job
+  confirmation and an admin Give back; a part's quantity under a line of
+  more than one, total or per set; whether un-ticking a stage that closed
+  packing reopens it.
+
+### Pick up next
+
+1. Heinrich's test of the packer rules on JOB-0068.
+2. Extra stages, before the switch is shown: review problems 1–3 and 7
+   (Planning, 16 Sep). The design review here proposed: keep
+   `blockingStages` whole-stage; treat a per-item stage whose every
+   unfinished line is capped at 0 as waiting; a first step beats an
+   unplaced stage only for extra stages; list positions count only for
+   stages that are extra stages now; switch open extra-stage rows to Each
+   on a confirm; show the switch once the column exists.
+3. Hand over: a load counter in `fetchProductionQueue` (Production tab);
+   the "stuck at Laser" gaps in the entry above (Laser production).
+
+---
+
+## 16 Sep 2026 — Jobs page (Copy job): state of play at wrap-up
+
+The full write-up is the 16 Sep entry "Jobs page: Copy job keeps parts
+under their lines" above; this is where it stands now.
+
+### Done
+
+- `9748e38` Copy job: parts under their copied line, quote order,
+  length, tube material, cut method and extra stages (the stock part's
+  remembered value wins, else the old line's), the Cut to size list with
+  nothing cut; a copy that fails partway deletes itself; Guess the rest
+  remembers on the stock part. **Live**: pushed by Planning in
+  7a39a90..75d8bcf. Not changed by any later commit.
+- Nothing half-done. Nothing uncommitted from this conversation.
+
+### SQL
+
+- This conversation wrote **no `setup-*.sql`**. The copy reads which
+  columns exist from the old job's rows, so it works with or without
+  `extra_stages` (still 400 on both databases on 16 Sep); extra stages
+  simply are not copied until that column exists.
+
+### Built but not yet tested by Heinrich (live now; try on practice first)
+
+1. Copy a job with parts (practice JOB-0012 is already one, a copy of
+   JOB-0004): parts under their line, lengths, cut methods, same order
+   as the old job's Items tab.
+2. Copy a job with a Cut to size list (practice JOB-0008): the list
+   comes across, nothing cut.
+3. A line whose stock part remembers a different cut method from the old
+   job: the copy takes the part's.
+4. Guess the rest on a job, then add that part to another job: it comes
+   in tagged.
+
+### Waiting on Heinrich
+
+- The four tries above.
+- Practice JOB-0012: keep it for try 1, or remove it.
+
+### Pick up next
+
+- Nothing open in Copy job. When the extra-stages switch is turned on,
+  try one copy of a job whose parts remember stages.
