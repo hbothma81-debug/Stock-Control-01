@@ -895,6 +895,9 @@ function NestRow({
             {r.nestNowReason || "Nest now"}
           </span>
         )}
+        {/* A re-cut whose flagger said it can wait: still a re-cut, so it
+            is named as one, but it takes its turn. */}
+        {r.canWait && <span style={{ ...S.chip, color: C.muted, flexShrink: 0 }}>Re-cut — can wait</span>}
         <span style={{ fontWeight: 700, fontSize: 15 }}>{r.job?.job_number || "Unknown"}</span>
         <span style={{ color: C.muted, fontSize: 14 }}>{sigmanest || "no SigmaNest #"}</span>
         <span style={{ color: C.muted, fontSize: 14 }}>{r.job?.customer || "no customer"}</span>
@@ -1308,6 +1311,41 @@ function NestRow({
                 />
                 <SavedCheck fieldKey={`job-${r.job.id}-laser_job_reference`} />
               </div>
+
+              {/* The job's place in this laser's queue (jobs.laser_priority),
+                  the same box the job page has: 1 is cut first, blank is
+                  ordinary work. Whoever nests has the final say over the
+                  number sales gave it. */}
+              {machine.hasPriority && actions.onSetPriority && (
+                <div>
+                  <label style={S.label}>Laser priority</label>
+                  {/* Keyed on the stored number so the box is rebuilt when
+                      somebody else changes it; "" from unreadable text
+                      ("1e") must not pass for "clear it". */}
+                  <input
+                    key={r.job.laser_priority ?? "blank"}
+                    type="number"
+                    min="1"
+                    step="1"
+                    style={S.input}
+                    defaultValue={r.job.laser_priority ?? ""}
+                    placeholder="1 is cut first — blank is ordinary work"
+                    onBlur={(e) => {
+                      if (e.target.validity?.badInput) return;
+                      actions.onSetPriority(r.job, e.target.value);
+                    }}
+                  />
+                  <SavedCheck fieldKey={`job-${r.job.id}-laser_priority`} />
+                  {r.job.laser_priority != null && (
+                    <div style={S.roleHint}>
+                      Set by {r.job.laser_priority_by || "someone"}
+                      {r.job.laser_priority_at
+                        ? ` — ${new Date(r.job.laser_priority_at).toLocaleString("en-ZA", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`
+                        : ""}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <button

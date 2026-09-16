@@ -102,6 +102,12 @@ export const LASER_MACHINE = "Laser 4kw";
 //   cutAmount     the cut box takes how many were just cut ("Cut 5")
 //                 and says how many are left, instead of a running total
 //   printsNests   each program has a Print button for the floor sheet
+//   hasPriority   the laser has a queue: a job's number (jobs.laser_priority,
+//                 1 first, set by sales, the nester or an admin) sorts the
+//                 To nest list and puts the programs carrying it in a "Cut
+//                 next" section on the Cutting screen; and a re-cut flagged
+//                 "Can wait" stops jumping the list. Plate only, by decision
+//                 (16 Sep 2026); the tube laser gets the same by setting it.
 //
 // The two stage-name rules (which stage is this laser's nesting, which is
 // its cutting) are functions and live in App.jsx beside the other
@@ -122,6 +128,7 @@ export const LASER_MACHINES = {
     shiftFlag: "cuts_laser",
     cutStageIsPacking: false,
     hasPacking: false,
+    hasPriority: true,
     partsLabel: "Laser parts",
     otherMachineNote: "tube parts are packed under Tube Laser",
   },

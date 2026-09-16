@@ -42,6 +42,9 @@ export default function LaserTab({
   ExpandableProcessNotes,
   saveJobSigmaNestNumber,
   toggleProcessUrgent,
+  // The job's queue number (App.jsx, jobs.laser_priority). Only a laser
+  // with machine.hasPriority shows the box.
+  setLaserPriority,
   saveProcessNote,
   uploadJobDocument,
   openShortageFlagModal,
@@ -193,6 +196,9 @@ export default function LaserTab({
                     actions={{
                       onSaveSigmaNest: alsoRefreshLaser(saveJobSigmaNestNumber),
                       onToggleUrgent: alsoRefreshLaser(toggleProcessUrgent),
+                      // No laser refresh: the number lives on the job, and
+                      // the save reloads jobsList, which the rows read.
+                      onSetPriority: setLaserPriority || null,
                       onSaveNote: alsoRefreshLaser(saveProcessNote),
                       onUploadDocument: alsoRefreshLaser(uploadJobDocument),
                       // These two open a modal; their own submit refreshes.

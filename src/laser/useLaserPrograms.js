@@ -360,14 +360,21 @@ export default function useLaserPrograms(deps) {
           !pr.is_complete
       );
       if (!process) continue;
+      // The job's place in this laser's queue (jobs.laser_priority): 1 is
+      // cut first, blank is ordinary work. Only a laser with a queue reads
+      // it; on the other it is as if nothing were set.
+      const priority = machine.hasPriority && Number(job.laser_priority) >= 1 ? Number(job.laser_priority) : null;
       rows.push({
         key: "job:" + job.id,
         kind: "job",
         // Urgent is the shop saying this one jumps the queue, so it earns
         // the same outline a re-cut gets. Saying which of the reasons it
         // is matters: "nest now" without a why is just a red box.
-        nestNow: !!process.is_urgent,
-        nestNowReason: process.is_urgent ? "Marked urgent" : "",
+        nestNow: priority !== null || !!process.is_urgent,
+        nestNowReason: [priority !== null ? `Priority ${priority}` : "", process.is_urgent ? "Marked urgent" : ""]
+          .filter(Boolean)
+          .join(" · "),
+        priority,
         job,
         process,
         onPrograms: programsByJob[job.id] || [],
@@ -409,14 +416,22 @@ export default function useLaserPrograms(deps) {
       if (sh.status === "cut" || sh.status === "finishing" || sh.status === "cancelled") continue;
       if (shortagesOnAProgram.has(sh.id)) continue;
       const job = jobById.get(sh.job_id);
+      // The flag form's Priority tick (shortages.is_priority). Unticked
+      // means "cut it with the next suitable sheet", so on a laser with a
+      // queue it takes its turn by due date instead of jumping the list.
+      // A re-cut marked nested but on nothing is a fault to fix whatever
+      // the tick says.
+      const canWait = machine.hasPriority && sh.is_priority === false && sh.status !== "nested";
       rows.push({
         key: "short:" + sh.id,
         kind: "shortage",
-        nestNow: true,
-        nestNowReason:
-          sh.status === "nested"
+        nestNow: !canWait,
+        nestNowReason: canWait
+          ? ""
+          : sh.status === "nested"
             ? "Marked nested, but not on any program"
             : "Short of parts — someone is waiting",
+        canWait,
         job: job || { id: sh.job_id, job_number: sh.job_number, customer: sh.customer },
         process: null,
         shortage: sh,
@@ -451,11 +466,22 @@ export default function useLaserPrograms(deps) {
     }
 
     // Stopped programs first, then anything nest-now, then by when it is
-    // due.
-    const urgency = (r) => (r.kind === "stopped" ? 0 : r.nestNow ? 1 : 2);
+    // due. On a laser with a queue (Heinrich, 16 Sep 2026): stopped, then
+    // re-cuts someone is waiting for, then the numbered jobs in number
+    // order, then Mark urgent, then the rest -- a re-cut that can wait
+    // among them -- each tier by due date.
+    const urgency = (r) => {
+      if (r.kind === "stopped") return 0;
+      if (!machine.hasPriority) return r.nestNow ? 1 : 2;
+      if (r.kind === "shortage") return r.nestNow ? 1 : 4;
+      if (r.priority !== null && r.priority !== undefined) return 2;
+      return r.nestNow ? 3 : 4;
+    };
+    const due = (r) => new Date(r.job?.due_date || "2999-01-01");
     rows.sort((a, b) => {
       if (urgency(a) !== urgency(b)) return urgency(a) - urgency(b);
-      return new Date(a.job?.due_date || "2999-01-01") - new Date(b.job?.due_date || "2999-01-01");
+      if (urgency(a) === 2 && a.priority !== b.priority) return a.priority - b.priority;
+      return due(a) - due(b);
     });
 
     // What Prince can put on a program: the jobs themselves, and any

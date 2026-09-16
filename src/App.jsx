@@ -16239,6 +16239,7 @@ export default function StockControl() {
           ExpandableProcessNotes={ExpandableProcessNotes}
           saveJobSigmaNestNumber={saveJobSigmaNestNumber}
           toggleProcessUrgent={toggleProcessUrgent}
+          setLaserPriority={setLaserPriority}
           saveProcessNote={saveProcessNote}
           uploadJobDocument={uploadJobDocument}
           openShortageFlagModal={openShortageFlagModal}
@@ -16261,6 +16262,7 @@ export default function StockControl() {
           ExpandableProcessNotes={ExpandableProcessNotes}
           saveJobSigmaNestNumber={saveJobSigmaNestNumber}
           toggleProcessUrgent={toggleProcessUrgent}
+          setLaserPriority={setLaserPriority}
           saveProcessNote={saveProcessNote}
           uploadJobDocument={uploadJobDocument}
           openShortageFlagModal={openShortageFlagModal}
