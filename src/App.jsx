@@ -66,6 +66,7 @@ import Materials from "./jobs/Materials.jsx";
 import { addStockFromStores } from "./jobs/stockFromStores.js";
 import { markedStageTakes, comesBeforeForLine, extraStagesOf, routeText, renameInList } from "./jobs/extraStages.js";
 import ExtraStagesBox from "./jobs/ExtraStagesBox.jsx";
+import { groupJobLines, compareLines } from "./jobs/lineOrder.js";
 // The tube laser's own wording for a material. Shared, not copied: the
 // job line's material and the nesting import's section must be the same
 // words, or the import's match finds nothing.
@@ -1040,13 +1041,16 @@ function LibraryField({ label, options, value, onChange, customValue, onCustomCh
   );
 }
 
-// "Each"-tracked process control — a running count against the item's
-// total quantity, not a checkbox. Logging a batch subtracts against the
-// remaining total; the process completes itself once the count reaches it.
-// "Each"-tracked process control — one row per item on the job, matching
-// the printed process sheet, each with its own running count against that
-// item's own quantity. Never lumps different items into one shared total.
-function QtyProgressControl({ process, job, quoteItems, itemProgress, limitFor, onSubmit }) {
+// "Each"-tracked process control — one row per item on the job, each with
+// its own running count against that item's own quantity. Never lumps
+// different items into one shared total.
+//
+// Rows in the floor's order, the same as the printed job sheet
+// (src/jobs/lineOrder.js): lines A to Z, a line's parts together under
+// its name, numbers read as numbers. jobItems is the whole job's lines,
+// so a cutting stage, which lists only the parts, can still name the line
+// they belong to. A finished row keeps its place.
+function QtyProgressControl({ process, job, quoteItems, jobItems, itemProgress, limitFor, onSubmit }) {
   const [inputs, setInputs] = useState({});
   if (process.is_complete) {
     return <span style={{ ...S.roleHint, color: C.accentFinished, fontWeight: 600 }}>Complete — all items</span>;
@@ -1054,62 +1058,76 @@ function QtyProgressControl({ process, job, quoteItems, itemProgress, limitFor, 
   if (!quoteItems || quoteItems.length === 0) {
     return <span style={S.roleHint}>No items listed on this job yet.</span>;
   }
+  // Plain arithmetic, not a useMemo: a hook here, below the two returns
+  // above, would run on some renders and not others and blank the screen.
+  const groups = groupJobLines(quoteItems, jobItems || quoteItems);
+  const rowFor = (item) => {
+    const progress = itemProgress.find((ip) => ip.job_quote_item_id === item.id);
+    const done = Number(progress?.qty_complete) || 0;
+    const itemQty = Number(item.qty) || 0;
+    const remaining = Math.max(itemQty - done, 0);
+    const itemDone = remaining === 0 && itemQty > 0;
+    // Per item rather than per stage: this row opens as soon as this
+    // item has cleared the stages before it, even while the rest of
+    // the job has not. flow.allowed is how many of this item those
+    // stages have released; done is how many have already been
+    // logged here.
+    const flow = limitFor ? limitFor(item) : { allowed: itemQty, waitingOn: null };
+    const canLog = Math.max(Math.min(remaining, flow.allowed - done), 0);
+    return (
+      <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12.5, flex: "1 1 140px", color: itemDone ? C.accentFinished : C.text }}>
+          {item.description || "Item"}
+          {item.length_mm ? ` · ${Number(item.length_mm)} mm` : ""} — {done}/{itemQty}
+        </span>
+        {itemDone ? (
+          <span style={{ fontSize: 12, color: C.accentFinished, fontWeight: 600 }}>Done</span>
+        ) : canLog <= 0 ? (
+          <span style={{ fontSize: 12, color: C.muted }}>
+            {flow.waitingOn ? "Waiting on " + flow.waitingOn : "Waiting"}
+          </span>
+        ) : (
+          <>
+            <input
+              type="number"
+              min="0"
+              max={canLog}
+              style={{ ...S.input, width: 64, fontSize: 14, padding: "5px 6px" }}
+              value={inputs[item.id] || ""}
+              onChange={(e) => setInputs((prev) => ({ ...prev, [item.id]: e.target.value }))}
+              placeholder="Qty"
+            />
+            <button
+              type="button"
+              className="stk-btn"
+              style={S.reqActionBtn}
+              disabled={canLog <= 0}
+              onClick={() => {
+                const qty = Math.min(parseFloat(inputs[item.id]) || 0, canLog);
+                if (qty > 0) onSubmit(process, job, item, qty, progress, quoteItems, itemProgress);
+                setInputs((prev) => ({ ...prev, [item.id]: "" }));
+              }}
+            >
+              Log
+            </button>
+          </>
+        )}
+      </div>
+    );
+  };
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {quoteItems.map((item) => {
-        const progress = itemProgress.find((ip) => ip.job_quote_item_id === item.id);
-        const done = Number(progress?.qty_complete) || 0;
-        const itemQty = Number(item.qty) || 0;
-        const remaining = Math.max(itemQty - done, 0);
-        const itemDone = remaining === 0 && itemQty > 0;
-        // Per item rather than per stage: this row opens as soon as this
-        // item has cleared the stages before it, even while the rest of
-        // the job has not. flow.allowed is how many of this item those
-        // stages have released; done is how many have already been
-        // logged here.
-        const flow = limitFor ? limitFor(item) : { allowed: itemQty, waitingOn: null };
-        const canLog = Math.max(Math.min(remaining, flow.allowed - done), 0);
-        return (
-          <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 12.5, flex: "1 1 140px", color: itemDone ? C.accentFinished : C.text }}>
-              {item.description || "Item"}
-              {item.length_mm ? ` · ${Number(item.length_mm)} mm` : ""} — {done}/{itemQty}
-            </span>
-            {itemDone ? (
-              <span style={{ fontSize: 12, color: C.accentFinished, fontWeight: 600 }}>Done</span>
-            ) : canLog <= 0 ? (
-              <span style={{ fontSize: 12, color: C.muted }}>
-                {flow.waitingOn ? "Waiting on " + flow.waitingOn : "Waiting"}
-              </span>
-            ) : (
-              <>
-                <input
-                  type="number"
-                  min="0"
-                  max={canLog}
-                  style={{ ...S.input, width: 64, fontSize: 14, padding: "5px 6px" }}
-                  value={inputs[item.id] || ""}
-                  onChange={(e) => setInputs((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                  placeholder="Qty"
-                />
-                <button
-                  type="button"
-                  className="stk-btn"
-                  style={S.reqActionBtn}
-                  disabled={canLog <= 0}
-                  onClick={() => {
-                    const qty = Math.min(parseFloat(inputs[item.id]) || 0, canLog);
-                    if (qty > 0) onSubmit(process, job, item, qty, progress, quoteItems, itemProgress);
-                    setInputs((prev) => ({ ...prev, [item.id]: "" }));
-                  }}
-                >
-                  Log
-                </button>
-              </>
-            )}
-          </div>
-        );
-      })}
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {groups.map((g) => (
+        <div key={g.key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {g.heading && <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{g.heading}</div>}
+          {g.rows.filter((r) => !r.indent).map((r) => rowFor(r.item))}
+          {g.rows.some((r) => r.indent) && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, paddingLeft: 10, borderLeft: `2px solid ${C.border}` }}>
+              {g.rows.filter((r) => r.indent).map((r) => rowFor(r.item))}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -5258,6 +5276,9 @@ export default function StockControl() {
         quoteItems: packing
           ? itemsForStage(packing.process_name, (d.quoteItems || []).filter((it) => it.job_id === job.id))
           : (d.quoteItems || []).filter((it) => it.job_id === job.id),
+        // The whole job's lines, so a list of parts can be grouped under
+        // the names of the lines they belong to (src/jobs/lineOrder.js).
+        jobItems: (d.quoteItems || []).filter((it) => it.job_id === job.id),
         itemProgress: packing ? (d.itemProgress || []).filter((ip) => ip.job_process_id === packing.id) : [],
         // Every line is another machine's: said out loud, single tick kept.
         nothingToCut:
@@ -8670,6 +8691,15 @@ export default function StockControl() {
     // where things actually stand, not just what was originally quoted.
     if (quoteItems?.length) {
       y += 3;
+      // The name each line prints under, found once for the sort below
+      // rather than on every comparison.
+      const sheetNames = new Map(
+        quoteItems.map((it) => [
+          it.id,
+          jobLineDescription(it, it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null),
+        ])
+      );
+      const bySheetName = (a, b) => compareLines(a, b, (it) => sheetNames.get(it.id) || "Item");
       autoTable(doc, {
         startY: y,
         // Made on: which machine each line goes to, so the paper matches
@@ -8682,7 +8712,11 @@ export default function StockControl() {
         head: [["Code", "Item", "Made on, then", "Qty", "Invoiced", "Outstanding"]],
         // Parents carry the money columns; their parts follow, indented,
         // with the length, so the paper is also the shop's parts list.
-        body: billableLines(quoteItems).flatMap((it) => {
+        // In the floor's order, the same as the Each counts on screen:
+        // lines A to Z, each line's parts A to Z under it, by the name the
+        // sheet prints (src/jobs/lineOrder.js). Not quote order: that
+        // stays on the Items tab, delivery notes and invoice requests.
+        body: [...billableLines(quoteItems)].sort(bySheetName).flatMap((it) => {
           const qty = Number(it.qty) || 0;
           const invoiced = Number(it.qty_invoiced) || 0;
           const linked = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
@@ -8694,7 +8728,7 @@ export default function StockControl() {
             invoiced,
             Math.max(qty - invoiced, 0),
           ];
-          const parts = childLinesOf(it, quoteItems).map((c) => [
+          const parts = [...childLinesOf(it, quoteItems)].sort(bySheetName).map((c) => [
             jobLineCode(c, c.linked_item_id ? (items || []).find((i) => i.id === c.linked_item_id) : null) || "",
             // A bullet, not the ↳ used on screen. The PDF's standard font
             // has no arrow: it printed as a stray glyph AND spaced out
@@ -16113,6 +16147,7 @@ export default function StockControl() {
                                     process={process}
                                     job={job}
                                     quoteItems={itemsForStage(process.process_name, quoteItems)}
+                                    jobItems={quoteItems}
                                     itemProgress={itemProgress}
                                     limitFor={(item) => itemFlowLimit(process, stagesOnJob, progressOnJob, item, quoteItems)}
                                     onSubmit={submitProcessItemProgress}

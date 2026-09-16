@@ -372,6 +372,9 @@ export default function useLaserPrograms(deps) {
           typeof itemsForStage === "function"
             ? itemsForStage(process.process_name, (d.quoteItems || []).filter((it) => it.job_id === job.id))
             : [],
+        // The whole job's lines, so the parts above can be grouped under
+        // the names of the lines they belong to.
+        jobItems: (d.quoteItems || []).filter((it) => it.job_id === job.id),
         itemProgress: (d.itemProgress || []).filter((ip) => ip.job_process_id === process.id),
         documents: d.documents.filter((doc) => doc.job_id === job.id && doc.process_name === process.process_name),
         allocations: d.allocations.filter((a) => a.process_id === process.id && a.status !== "released"),

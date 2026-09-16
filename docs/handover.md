@@ -1346,3 +1346,69 @@ the job sheet not drawn.
 
 - The Jobs page's five commits (7a39a90 to 2f7eb3e). 97b0653 must not
   go live before `setup-extra-stages.sql` is on practice and live.
+
+---
+
+## 16 Sep 2026 — Production tab: a job's parts listed in order (JOB-0068)
+
+Heinrich: the Each parts display on JOB-0068, a job with many parts, is
+confusing; arrange the parts alphabetically and numerically. Found: every
+Each list came out in no order at all (Production loads job lines with no
+order; the laser screens by random uuid), with parts of different lines
+mixed and nothing to tell apart three identical names under three lines
+(JOB-0078). His answers, 16 Sep: grouped under the line's name; lines
+A to Z; the printed job sheet in the same order; a finished part keeps
+its place.
+
+### Committed with this entry (not pushed)
+
+- `src/jobs/lineOrder.js` (13 tests): `compareLines` (name with numbers
+  read as numbers, then length, code, quote order, id) and
+  `groupJobLines` (lines A to Z, a line's parts A to Z under its name).
+- `QtyProgressControl` takes `jobItems` (the whole job) and draws the
+  groups: the Production card, Laser Status, Tube Laser Packing, Tube
+  Laser Status and tube Nesting. `laserStatusRows` and
+  `laserNestingData` rows carry `jobItems`.
+- The packer's non-Each "To pack" list is grouped the same way.
+- `printJobSheet`: lines A to Z, parts A to Z under each, by the name the
+  sheet prints.
+- Unchanged on purpose: the Items tab, delivery notes, invoice requests
+  (quote order).
+- For Laser production: `LaserStatus.jsx` and `NestingView.jsx` gained
+  one prop each (`jobItems`), plus the To pack grouping.
+
+### Checked
+
+106 tests, names 0 problems, build. The real `QtyProgressControl` drawn
+outside the app with JOB-0078-style data: headings per line, Part 2 before
+Part 10, the shorter of two same-named tubes first, a Done row in place,
+"Waiting on Laser" intact. A three-angle review with a skeptic pass found
+no fault in the change. Not tried signed in; the job sheet not drawn.
+
+### Built but not yet tested by Heinrich (practice, signed in)
+
+1. JOB-0068 (or any job with parts) on a Production card set to Each:
+   line names as headings, parts A to Z under each.
+2. The same job on Laser Status, and a tube job on Tube Laser Status,
+   Packing and Nesting.
+3. Print the job sheet: lines A to Z, parts A to Z under each line.
+4. The Items tab still in quote order.
+
+### Found, not changed
+
+- **Blank screen on Tube Laser > Nesting:** opening a re-cut (a tube
+  shortage not yet on a program) hands `QtyProgressControl` a null stage
+  (`useLaserPrograms.js` shortage rows, `process: null`;
+  `NestingView.jsx` shows the parts box for every row); `process.is_complete`
+  throws and the whole app goes blank. In the code since 11 Sep. Fix
+  proposed to Heinrich: skip the parts box on a re-cut row, and a guard
+  in the control.
+- **1000-row cap on the Production tab:** `fetchProductionQueue` loads
+  `job_quote_items` for every job in progress with a plain select, which
+  Supabase stops at 1000 rows without an error. Live held 743 lines in
+  all on 14 Sep; past the cap, parts silently vanish from Production
+  lists. Offered as a separate task.
+- Copy job drops a part's line, cut method, length and extra stages, and
+  copies in no order. Offered as a separate task.
+- The tube program printout sorts TUBING_10 before TUBING_2
+  (`nestingPrint.js:96`, compare without numbers). Laser production's.

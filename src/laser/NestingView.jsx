@@ -953,6 +953,7 @@ function NestRow({
                 process={r.process}
                 job={r.job}
                 quoteItems={r.quoteItems || []}
+                jobItems={r.jobItems}
                 itemProgress={r.itemProgress || []}
                 onSubmit={(process, job, item, qty, progress) => onLogNestedItem(r, item, qty, progress)}
               />

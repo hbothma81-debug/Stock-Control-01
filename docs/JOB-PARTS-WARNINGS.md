@@ -104,7 +104,11 @@ anything set by hand.
 ## 5. On the printed job sheet
 
 Parts print under their line, indented, each with its cut method and the
-drawing revision it was built to. Two things about that page, both
+drawing revision it was built to. Lines print A to Z and each line's
+parts A to Z under it (numbers read as numbers), the same order as the
+Each counts on the Production tab and the packing screens
+(`src/jobs/lineOrder.js`, 16 September 2026). The Items tab keeps quote
+order. Two things about that page, both
 fixed on 11 September 2026 and both worth knowing if it is changed
 again:
 

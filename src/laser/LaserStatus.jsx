@@ -3,6 +3,7 @@ import { Check, Hand, AlertTriangle, ChevronDown } from "lucide-react";
 import { C, S } from "../theme.js";
 import Section from "../Section.jsx";
 import { programTitle } from "./programTitle.js";
+import { groupJobLines } from "../jobs/lineOrder.js";
 
 // Where a job goes after the laser, and where the packer works.
 //
@@ -430,6 +431,7 @@ function StatusRow({
                     process={r.process}
                     job={r.job}
                     quoteItems={r.quoteItems || []}
+                    jobItems={r.jobItems}
                     itemProgress={r.itemProgress || []}
                     onSubmit={(process, job, item, qty, progress) => onLogItem(r, item, qty, progress)}
                   />
@@ -450,12 +452,27 @@ function StatusRow({
             {!perItem && (r.quoteItems || []).length > 0 && (
               <div style={{ marginTop: 10 }}>
                 <div style={S.label}>To pack · {(r.quoteItems || []).reduce((n, it) => n + (Number(it.qty) || 0), 0)} off</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 4 }}>
-                  {(r.quoteItems || []).map((it) => (
-                    <div key={it.id} style={{ fontSize: 13, display: "flex", gap: 8 }}>
-                      <span style={{ fontWeight: 600 }}>{Number(it.qty)}×</span>
-                      <span style={{ flex: 1, minWidth: 0 }}>{it.description}</span>
-                      {it.length_mm != null && it.length_mm !== "" && <span style={S.roleHint}>{Number(it.length_mm)} mm</span>}
+                {/* In the floor's order, the same as the Each count:
+                    lines A to Z, a line's parts under its name. */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+                  {groupJobLines(r.quoteItems, r.jobItems).map((g) => (
+                    <div key={g.key} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      {g.heading && <div style={{ fontSize: 13, fontWeight: 700 }}>{g.heading}</div>}
+                      {g.rows.map(({ item: it, indent }) => (
+                        <div
+                          key={it.id}
+                          style={{
+                            fontSize: 13,
+                            display: "flex",
+                            gap: 8,
+                            ...(indent ? { paddingLeft: 10, borderLeft: `2px solid ${C.border}` } : {}),
+                          }}
+                        >
+                          <span style={{ fontWeight: 600 }}>{Number(it.qty)}×</span>
+                          <span style={{ flex: 1, minWidth: 0 }}>{it.description}</span>
+                          {it.length_mm != null && it.length_mm !== "" && <span style={S.roleHint}>{Number(it.length_mm)} mm</span>}
+                        </div>
+                      ))}
                     </div>
                   ))}
                 </div>
