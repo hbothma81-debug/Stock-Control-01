@@ -11062,9 +11062,27 @@ export default function StockControl() {
     return out;
   }, [master, effectiveSectionType]);
 
+  // The section types the stock screens offer: the stored list, plus any
+  // type a section in Stock Manager is filed under. A section added from
+  // its type's boxes is filed under the fixed type's words ("Pipe", "Flat
+  // Bar"), which the stored list does not hold until step 5 converts it;
+  // without this the stock form, being pick-only, could never stock it.
+  const stockSectionTypes = useMemo(() => {
+    if (!master) return [];
+    const seen = new Map();
+    for (const t of [...(master.sectionTypes || []), ...(master.sections || []).map((s) => s.type)]) {
+      const clean = (t || "").trim();
+      if (clean && !seen.has(clean.toLowerCase())) seen.set(clean.toLowerCase(), clean);
+    }
+    return [...seen.values()].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+  }, [master]);
+
+  // A material is stored by its short name when it has one ("SS304 2B"),
+  // so match either, the way findPrice does.
   function findFactor(listKey, name) {
     if (!master) return null;
-    const hit = (master[listKey] || []).find((e) => e.name.toLowerCase() === (name || "").toLowerCase());
+    const q = (name || "").toLowerCase();
+    const hit = (master[listKey] || []).find((e) => e.name.toLowerCase() === q || (e.shortName || "").toLowerCase() === q);
     return hit ? hit.factor : null;
   }
 
@@ -13510,7 +13528,7 @@ export default function StockControl() {
     }
     if (it.mainCat === "structural") {
       const section = resolveField(master.sections.map((s) => s.name), it.name);
-      const type = resolveField(master.sectionTypes, findSectionType(it.name));
+      const type = resolveField(stockSectionTypes, findSectionType(it.name));
       return {
         ...base,
         grade: grade.field, customGrade: grade.custom,
@@ -18179,7 +18197,7 @@ export default function StockControl() {
         </div>
       )}
 
-      {tab === "structural" && master.sectionTypes.length > 0 && (
+      {tab === "structural" && stockSectionTypes.length > 0 && (
         <div style={{ marginBottom: 4 }} ref={customerChipsRef}>
           <button
             className="stk-btn"
@@ -18202,7 +18220,7 @@ export default function StockControl() {
               >
                 All types
               </button>
-              {master.sectionTypes.map((t) => (
+              {stockSectionTypes.map((t) => (
                 <button
                   key={t}
                   className="stk-btn"
@@ -19242,7 +19260,7 @@ export default function StockControl() {
                   <LibraryField
                     label="Section type"
                     pickOnly
-                    options={master.sectionTypes}
+                    options={stockSectionTypes}
                     value={form.sectionType}
                     onChange={(v) => setForm({ ...form, sectionType: v, customSectionType: "", section: "", customSection: "" })}
                     customValue={form.customSectionType}
