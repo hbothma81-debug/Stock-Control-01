@@ -12329,17 +12329,21 @@ export default function StockControl() {
 
   function updateReqPrice(req, newPriceStr) {
     const price = parseFloat(newPriceStr) || 0;
+    // A material is stored by its short name when it has one ("SS304"),
+    // so match either, the way findPrice reads it.
+    const q = (req.itemGrade || "").toLowerCase();
+    const isGrade = (g) => g.name.toLowerCase() === q || (g.shortName || "").toLowerCase() === q;
     if (req.mainCat === "plate") {
       setMaster((prev) => ({
         ...prev,
-        grades: prev.grades.map((g) => (g.name.toLowerCase() === (req.itemGrade || "").toLowerCase() ? { ...g, price } : g)),
+        grades: prev.grades.map((g) => (isGrade(g) ? { ...g, price } : g)),
       }));
     } else if (req.mainCat === "structural") {
       setSectionPrice(req.itemRawName, req.itemGrade, price);
     } else if (req.mainCat === "cncBar") {
       setMaster((prev) => ({
         ...prev,
-        cncGrades: prev.cncGrades.map((g) => (g.name.toLowerCase() === (req.itemGrade || "").toLowerCase() ? { ...g, price } : g)),
+        cncGrades: prev.cncGrades.map((g) => (isGrade(g) ? { ...g, price } : g)),
       }));
     } else {
       setItems((prev) => prev.map((it) => (it.id === req.itemId ? { ...it, value: price } : it)));
@@ -20290,7 +20294,7 @@ export default function StockControl() {
                         prices, so the grade has to be chosen here. */}
                     <TypeToFind
                       style={{ flex: 1 }}
-                      options={(master.grades || []).map((g) => g.name)}
+                      options={(master.grades || []).map((g) => g.shortName || g.name)}
                       value={managerSectionGrade}
                       onChange={setManagerSectionGrade}
                       emptyLabel="No grade"
@@ -20375,7 +20379,7 @@ export default function StockControl() {
                           <TypeToFind
                             style={{ width: 110 }}
                             inputStyle={{ ...S.managerFactorInput, width: "100%", padding: "5px 24px 5px 7px" }}
-                            options={(master.grades || []).map((g) => g.name)}
+                            options={(master.grades || []).map((g) => g.shortName || g.name)}
                             value={entry.grade || ""}
                             onChange={(v) => updateSectionGrade(entry.name, entry.grade, v)}
                             emptyLabel="No grade"
