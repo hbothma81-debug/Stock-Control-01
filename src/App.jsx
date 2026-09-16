@@ -181,15 +181,19 @@ const ITEM_DB_FIELDS = [
   ["currentReading", "current_reading", "num"], ["status", "status", "text"], ["fastenerType", "fastener_type", "text"],
   ["fastenerGrade", "fastener_grade", "text"], ["finish", "finish", "text"], ["attachmentType", "attachment_type", "text"],
   ["attachmentName", "attachment_name", "text"], ["storesKind", "stores_kind", "text"],
-  // The extra stages this part goes through after it is cut, in order,
-  // remembered so the next job with it comes in with them: a list, or
-  // null for never set. Needs setup-extra-stages.sql on the database
-  // first, or saving any stock item fails. src/jobs/extraStages.js.
-  ["extraStages", "extra_stages", "list"],
 ];
 function dbRowToItem(row) {
   const item = { id: row.id };
   for (const [jsKey, dbKey] of ITEM_DB_FIELDS) item[jsKey] = row[dbKey];
+  // The extra stages this part goes through after it is cut, in order,
+  // remembered so the next job with it comes in with them: a list, or
+  // null for never set (src/jobs/extraStages.js). Read here but kept OUT
+  // of ITEM_DB_FIELDS on purpose: the stock auto-save writes every mapped
+  // field on every save, so on a database without setup-extra-stages.sql
+  // every stock save would fail. The list is written by its own update
+  // where it changes: setJobLineExtraStages, setRestNoExtraStages, and a
+  // stage rename. The catalogue Replace import carries it in state.
+  item.extraStages = Array.isArray(row.extra_stages) ? row.extra_stages : null;
   return item;
 }
 function itemToDbRow(item) {
@@ -375,6 +379,14 @@ const MADE_ON_OPTIONS = [
 // already chosen, so a line still tagged with a retired code does not
 // suddenly read blank.
 const madeOnChoices = (current) => MADE_ON_OPTIONS.filter((o) => !o.retired || o.code === (current || ""));
+
+// The "Extra stage" switch under Job Process Types stays hidden until the
+// rule problems a review found on 16 Sep 2026 are fixed (docs/handover.md,
+// Planning entry of that date: two extra stages and batch mode, Ready while
+// capped at 0, a first step from the supplier waiting the wrong way) and
+// setup-extra-stages.sql answers on both databases. With no stage switched
+// on, nothing about extra stages shows or changes anywhere in the app.
+const EXTRA_STAGES_SWITCH_ON = false;
 const madeOnLabel = (code) => MADE_ON_OPTIONS.find((o) => o.code === code)?.label || "";
 
 // Parent and child job lines. A child is a part under the job's own line
@@ -7101,17 +7113,26 @@ export default function StockControl() {
   // 15 Sep 2026): a revised drawing can drop a bend.
   async function setJobLineExtraStages(job, item, list) {
     if (!supabase) return;
+    // Shown at once, so a second pick straight after builds on this one
+    // and not on the list from before the reload (review, 16 Sep 2026).
+    setJobDetail((prev) =>
+      prev ? { ...prev, quoteItems: prev.quoteItems.map((q) => (q.id === item.id ? { ...q, extra_stages: list } : q)) } : prev
+    );
     try {
       const { error } = await supabase.from("job_quote_items").update({ extra_stages: list }).eq("id", item.id);
       if (error) throw error;
       flashSaved(`quoteitem-extra-${item.id}`);
       if (item.linked_item_id) {
+        // Its own update: extra_stages is not in the stock auto-save.
+        const { error: partError } = await supabase.from("stock_items").update({ extra_stages: list }).eq("id", item.linked_item_id);
+        if (partError) throw partError;
         setItems((prev) => (prev ? prev.map((i) => (i.id === item.linked_item_id ? { ...i, extraStages: list } : i)) : prev));
       }
       await logJobEvent(job.id, "item changed", `${item.description} — then ${list.length ? list.join(", ") : "nothing extra"}`);
       await openJobDetail(job);
     } catch (err) {
       console.error("Failed to set the extra stages:", err);
+      openJobDetail(job);
       alert(
         /extra_stages/i.test(err?.message || "")
           ? "This database has no extra stages yet. Run setup-extra-stages.sql on it, then try again."
@@ -7127,10 +7148,22 @@ export default function StockControl() {
     const rest = (quoteItems || []).filter((it) => !hasChildLines(it, quoteItems) && extraStagesOf(it) === null);
     if (!supabase || rest.length === 0) return;
     try {
-      const { error } = await supabase.from("job_quote_items").update({ extra_stages: [] }).in("id", rest.map((it) => it.id));
+      // Only lines still unset on the database: one set a moment ago in the
+      // Then box is left alone even if this screen has not caught up.
+      const { error } = await supabase
+        .from("job_quote_items")
+        .update({ extra_stages: [] })
+        .in("id", rest.map((it) => it.id))
+        .is("extra_stages", null);
       if (error) throw error;
       const partIds = new Set(rest.map((it) => it.linked_item_id).filter(Boolean));
       if (partIds.size) {
+        const { error: partError } = await supabase
+          .from("stock_items")
+          .update({ extra_stages: [] })
+          .in("id", [...partIds])
+          .is("extra_stages", null);
+        if (partError) throw partError;
         setItems((prev) =>
           prev ? prev.map((i) => (partIds.has(i.id) && !Array.isArray(i.extraStages) ? { ...i, extraStages: [] } : i)) : prev
         );
@@ -10948,31 +10981,40 @@ export default function StockControl() {
           if (upError) throw upError;
         }
         // A line's extra stages name stages as text, and so does the stock
-        // part that remembers them. Lines are rewritten here; parts through
-        // state, so the stock auto-save carries them rather than writing
-        // the old names back. Skipped quietly on a database without
-        // setup-extra-stages.sql, where there is nothing to rewrite.
-        const { data: marked, error: markedError } = await supabase
-          .from("job_quote_items")
-          .select("id, extra_stages")
-          .not("extra_stages", "is", null);
-        if (markedError && !/extra_stages/i.test(markedError.message || "")) throw markedError;
-        for (const row of (marked || []).filter((r) => (r.extra_stages || []).some((n) => sameText(n, oldValue)))) {
+        // part that remembers them. Both are rewritten here, each by its own
+        // update (extra_stages is not in the stock auto-save), every page of
+        // lines and not only the first 1000 (review, 16 Sep 2026). Skipped
+        // quietly on a database without setup-extra-stages.sql.
+        let marked = [];
+        try {
+          marked = await fetchAllRows("job_quote_items", {
+            select: "id, extra_stages",
+            filter: (q) => q.not("extra_stages", "is", null),
+          });
+        } catch (markedError) {
+          if (!/extra_stages/i.test(markedError?.message || "")) throw markedError;
+        }
+        for (const row of marked.filter((r) => (r.extra_stages || []).some((n) => sameText(n, oldValue)))) {
           const { error: upError } = await supabase
             .from("job_quote_items")
             .update({ extra_stages: renameInList(row.extra_stages, oldValue, newValue) })
             .eq("id", row.id);
           if (upError) throw upError;
         }
-        setItems((prev) =>
-          prev
-            ? prev.map((i) =>
-                Array.isArray(i.extraStages) && i.extraStages.some((n) => sameText(n, oldValue))
-                  ? { ...i, extraStages: renameInList(i.extraStages, oldValue, newValue) }
-                  : i
-              )
-            : prev
-        );
+        const renamedParts = (items || []).filter((i) => Array.isArray(i.extraStages) && i.extraStages.some((n) => sameText(n, oldValue)));
+        for (const part of renamedParts) {
+          const { error: upError } = await supabase
+            .from("stock_items")
+            .update({ extra_stages: renameInList(part.extraStages, oldValue, newValue) })
+            .eq("id", part.id);
+          if (upError) throw upError;
+        }
+        if (renamedParts.length) {
+          const ids = new Set(renamedParts.map((p) => p.id));
+          setItems((prev) =>
+            prev ? prev.map((i) => (ids.has(i.id) ? { ...i, extraStages: renameInList(i.extraStages, oldValue, newValue) } : i)) : prev
+          );
+        }
         loadPeople();
         if (productionQueue !== null) fetchProductionQueue();
       }
@@ -13860,6 +13902,9 @@ export default function StockControl() {
                   salesPerson: before?.salesPerson || "",
                   customerRevision: row.revision,
                   madeOn: before?.madeOn || "",
+                  // Not saved by the auto-save, so the database keeps it anyway;
+                  // kept here so the screen and the next job agree with it.
+                  extraStages: before?.extraStages ?? null,
                 };
               });
             return [...otherItems, ...keptRealStock, ...newItems];
@@ -20932,7 +20977,10 @@ export default function StockControl() {
                               {/* An extra stage lists only the lines whose
                                   extra stages name it (bending, drilling,
                                   machining sent out), in each line's own
-                                  order. src/jobs/extraStages.js. */}
+                                  order. src/jobs/extraStages.js. Hidden
+                                  until EXTRA_STAGES_SWITCH_ON. */}
+                              {EXTRA_STAGES_SWITCH_ON && (
+                                <>
                               <select
                                 value={onlyMarked(entry) ? "marked" : ""}
                                 onChange={(e) => saveProcessTypeSetting(entry, "only_marked", e.target.value === "marked")}
@@ -20943,6 +20991,8 @@ export default function StockControl() {
                                 <option value="marked">Extra stage: marked lines only</option>
                               </select>
                               <SavedCheck fieldKey={`pts-${entry}-only_marked`} />
+                                </>
+                              )}
                             </div>
                           )}
                           <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
