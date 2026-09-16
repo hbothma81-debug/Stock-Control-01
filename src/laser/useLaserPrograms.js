@@ -1064,9 +1064,14 @@ export default function useLaserPrograms(deps) {
       // Done nesting can be the last thing the laser work was waiting for even
       // when Laser itself was already ticked, or on a job with no Laser stage,
       // so packing that waited is checked here too (App.jsx
-      // afterLaserStagesDone; safe to run twice).
-      if (done && !machine.cutStageIsPacking && afterLaserStagesDone) await afterLaserStagesDone([job.id]);
-      setLaserData(changed > 0 ? await loadLaserRaw() : fresh);
+      // afterLaserStagesDone). When the sync closed Laser it has already run
+      // that check. If packing closed, reload so this screen does not keep
+      // showing the old row.
+      let closedPacking = 0;
+      if (done && changed === 0 && !machine.cutStageIsPacking && afterLaserStagesDone) {
+        closedPacking = await afterLaserStagesDone([job.id]);
+      }
+      setLaserData(changed > 0 || closedPacking > 0 ? await loadLaserRaw() : fresh);
       if (productionQueue !== null) fetchProductionQueue();
     } catch (err) {
       console.error("Failed to change the nesting stage:", err);
