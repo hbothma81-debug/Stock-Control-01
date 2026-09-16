@@ -1058,6 +1058,10 @@ function LibraryField({ label, options, value, onChange, customValue, onCustomCh
 // they belong to. A finished row keeps its place.
 function QtyProgressControl({ process, job, quoteItems, jobItems, itemProgress, limitFor, onSubmit }) {
   const [inputs, setInputs] = useState({});
+  // No stage, nothing to count. A tube re-cut row reached here with none
+  // and the read below threw, blanking the whole app. Below useState, so
+  // the hooks run the same way every time.
+  if (!process) return null;
   if (process.is_complete) {
     return <span style={{ ...S.roleHint, color: C.accentFinished, fontWeight: 600 }}>Complete — all items</span>;
   }

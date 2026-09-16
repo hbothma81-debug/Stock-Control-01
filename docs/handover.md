@@ -1396,13 +1396,17 @@ no fault in the change. Not tried signed in; the job sheet not drawn.
 
 ### Found, not changed
 
-- **Blank screen on Tube Laser > Nesting:** opening a re-cut (a tube
-  shortage not yet on a program) hands `QtyProgressControl` a null stage
-  (`useLaserPrograms.js` shortage rows, `process: null`;
-  `NestingView.jsx` shows the parts box for every row); `process.is_complete`
-  throws and the whole app goes blank. In the code since 11 Sep. Fix
-  proposed to Heinrich: skip the parts box on a re-cut row, and a guard
-  in the control.
+- **Blank screen on Tube Laser > Nesting, FIXED 16 Sep (his "fix
+  crash"):** opening a re-cut (a tube shortage not yet on a program)
+  handed `QtyProgressControl` a null stage (`useLaserPrograms.js` shortage
+  rows, `process: null`; `NestingView.jsx` showed the parts box for every
+  row); `process.is_complete` threw and the whole app went blank. In the
+  code since 11 Sep. Now the parts box needs `r.process`, and the control
+  returns nothing without a stage. Checked by drawing the control with
+  and without one; practice has no tube re-cut to open, so not tried on
+  screen. For Laser production: one guard in `NestingView.jsx`.
+- Test parts added to practice JOB-0011 for the order test were removed
+  the same day.
 - **1000-row cap on the Production tab:** `fetchProductionQueue` loads
   `job_quote_items` for every job in progress with a plain select, which
   Supabase stops at 1000 rows without an error. Live held 743 lines in

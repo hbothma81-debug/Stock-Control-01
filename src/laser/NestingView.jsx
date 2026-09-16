@@ -932,7 +932,10 @@ function NestRow({
               see. This is the thing the nester came to the row to do;
               everything below it is the program, which he only touches
               when he is making one. */}
-          {ItemProgress && (
+          {/* A re-cut row has no stage of its own (process is null): its
+              parts are the shortage's, said in its detail, not lines to
+              count here. Handing it to the counter blanked the whole app. */}
+          {ItemProgress && r.process && (
             <div
               style={{
                 border: `2px solid ${C.accentRaw}`,
