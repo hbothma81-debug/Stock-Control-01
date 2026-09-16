@@ -2037,3 +2037,55 @@ Nothing for this work: no SQL, no ticks, no open decision.
    two reloads of one card landing out of order cannot refuse a quick count.
 3. For Laser production: the tube program printout sorts TUBING_10 before
    TUBING_2 (`nestingPrint.js`, compare without numbers).
+
+---
+
+## 16 Sep 2026 — Production tab (wrap-up): state of play
+
+The detail is in "Production tab: a job's parts listed in order (JOB-0068)"
+above; this is where it stands at clearing.
+
+### Done and live (pushed by Planning in the 16 Sep batch up to 75d8bcf)
+
+- `efb567f` Parts in order on the floor: every Each list, the packer's To
+  pack list and the printed job sheet show lines A to Z with each line's
+  parts A to Z under its name (`src/jobs/lineOrder.js`). `jobItems` is in
+  the live bundle (`CHECK-what-is-live.cjs`, 16 Sep). Tried on practice
+  with Heinrich signed in: JOB-0011's "laser aaaa" card and its printed job
+  sheet right, the Items tab still in quote order. The 8 test parts were
+  removed.
+- `4ea57c1` Tube Laser > Nesting: opening a re-cut row no longer blanks
+  the app.
+- From this conversation's findings, built by others and pushed: Copy job
+  keeps parts under their lines (`9748e38`, Jobs page); the Production tab
+  loads in pages (`75d8bcf`).
+
+### Every setup file this conversation wrote
+
+None. The only database look was read-only: on 15 Sep the Jobs page's
+extra-stages columns answered 400 on live (since recorded in its entries).
+
+### Built but not yet tested by Heinrich
+
+1. Laser Status, and Tube Laser Status, Packing and Nesting, on a job with
+   parts: line names as headings, parts A to Z. Same code as the Production
+   card, not yet seen with real data.
+2. The packer's To pack list (packing stage not on Each): grouped the same
+   way.
+3. Tube Laser > Nesting: open a re-cut (a tube shortage not on any
+   program). The row opens with its shortage details and no parts counter.
+   Practice has no tube re-cut, so this was proven only by drawing the
+   control without a stage.
+4. JOB-0068 on live: its Each cards in the order he asked for.
+
+### Waiting on Heinrich
+
+Nothing for this work: no SQL, no ticks, no open decision.
+
+### Pick up next
+
+1. Whatever his look at JOB-0068 on live turns up.
+2. From the Jobs page entry: a load counter in `fetchProductionQueue`, so
+   two reloads of one card landing out of order cannot refuse a quick count.
+3. For Laser production: the tube program printout sorts TUBING_10 before
+   TUBING_2 (`nestingPrint.js`, compare without numbers).
