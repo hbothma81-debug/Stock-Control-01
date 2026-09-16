@@ -115,6 +115,8 @@ with checks (setup_file, looks_for, found) as (
                     on m.list_name = 'grades' and coalesce(m.short_name, '') <> '' and lower(m.short_name) <> lower(m.name)
                    and lower(trim(s.grade)) = lower(trim(m.name))
                   where s.main_cat not in ('cncBar', 'fasteners'))),
+    ('setup-material-spellings-2.sql',  'the Galvanised grade has the short name Galv',
+      exists (select 1 from public.master_factor_items where list_name = 'grades' and name = 'Galvanised' and short_name = 'Galv')),
     ('setup-section-dimensions.sql',    'column master_factor_items.dimensions',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'master_factor_items' and column_name = 'dimensions')),
     ('setup-made-on-welding.sql',       'cut method Welding allowed',

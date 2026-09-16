@@ -1613,3 +1613,16 @@ trace of every write of `extra_stages` in the code.
   "Galv".
 - Checked on live 16 Sep: no duplicate section rows for SS304/Galv; no
   tube aliases or tube job lines with the old spellings.
+
+### Galvanised, decided 16 Sep (Heinrich: "Galvanised, keep Galv")
+
+- `setup-material-spellings-2.sql`, written by Planning: PART 1 renames
+  the Material Types row to Galvanised with short name Galv; PART 2 writes
+  Galv on plate lines, sections, requisitions (not CNC bar or fasteners),
+  cut lists, and the endings of laser programs, tube job lines and tube
+  aliases; PART 3 puts the full name back on CNC bar requests that got a
+  short name (the "SS304" request). Proven on pglite, runs twice.
+  Registered; setup-ALL.sql regenerated. Given to Heinrich to paste,
+  practice then live. `findFactor` (weight by full name only) is still
+  Stock Manager's to fix: Galv plate lines get no weight until then
+  (the Galvanised row has factor 0 on live anyway).
