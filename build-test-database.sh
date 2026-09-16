@@ -72,6 +72,7 @@ ORDER=(
   setup-extra-stages.sql
   setup-job-line-stock-code.sql
   setup-job-line-material-type.sql
+  setup-material-spellings.sql
 
   # --- extra columns and permissions on profiles
   setup-production-access.sql
