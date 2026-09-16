@@ -1659,7 +1659,12 @@ under Decisions (the packer bullet and the count-save bullet).
   fixes), and two checks (they made every per-item count save only if it
   still reads what the screen showed, Log wait for the reload, the carry
   to the packer only raise, and a tick ignore a double tap). A last
-  one-agent check of `e155370` was running when this was written.
+  check of `e155370` found no blocker; its two duplicate-notification
+  points (a stage closed by two last-line saves at once, a tick repeated
+  before its reload) were fixed in the commit after it. Left: two reloads
+  of one Production card can land out of order and refuse one quick
+  count (nothing lost); the fix is a load counter in
+  `fetchProductionQueue`, the Production tab conversation's function.
 - Laser production's files touched: `useLaserPrograms.js`
   (`afterLaserStagesDone` dep, called from `syncLaserStagesFor` and
   `setJobNestingDone`), `LaserStatus.jsx` (the note, the hint).

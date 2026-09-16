@@ -6555,12 +6555,18 @@ export default function StockControl() {
         allItemsDone && !process.shortage_id && workedInLaserStatus(process.process_name) && !(await laserDoneForJob(job.id));
 
       if (allItemsDone && !packerWaitsForLaser) {
-        const { error: procError } = await supabase
+        // Only the save that actually closes the stage tells the rep and
+        // settles the job: two last lines saved at the same moment both see
+        // it full, and the second finds it already closed.
+        const { data: closedRows, error: procError } = await supabase
           .from("job_processes")
           .update({ is_complete: true, completed_by: roleLabel, completed_at: new Date().toISOString() })
-          .eq("id", process.id);
+          .eq("id", process.id)
+          .eq("is_complete", false)
+          .select("id");
         if (procError) throw procError;
-        if (job.sales_rep) {
+        const closedHere = (closedRows || []).length > 0;
+        if (closedHere && job.sales_rep) {
           await sendNotifications({
             job_id: job.id,
             job_number: job.job_number,
@@ -6568,7 +6574,7 @@ export default function StockControl() {
             message: `${process.process_name} marked complete by ${roleLabel} on ${job.job_number} (${job.customer || "no customer"})`,
           });
         }
-        await settleJobAfterTick(job.id);
+        if (closedHere) await settleJobAfterTick(job.id);
       }
       // A part counted after the plate packer has been packed; a stage that
       // closed by its counts carries through as a tick does.
@@ -6960,15 +6966,25 @@ export default function StockControl() {
     }
 
     try {
-      const { error } = await supabase
+      const { data: changedRows, error } = await supabase
         .from("job_processes")
         .update({
           is_complete: nowComplete,
           completed_by: nowComplete ? roleLabel : null,
           completed_at: nowComplete ? new Date().toISOString() : null,
         })
-        .eq("id", process.id);
+        .eq("id", process.id)
+        // Only from the state this screen showed: a second tap, or another
+        // device, that finds it already changed does nothing more -- no
+        // second notification, no second settle.
+        .eq("is_complete", !nowComplete)
+        .select("id");
       if (error) throw error;
+      if ((changedRows || []).length === 0) {
+        if (jobDetail?.job.id === job.id) await refreshJobDetail();
+        if (productionQueue !== null) await fetchProductionQueue();
+        return;
+      }
 
       // Ticking a catch-up stage may have been the last one. Same rule as
       // the laser side uses -- this used to be a second, different one,
@@ -7012,8 +7028,9 @@ export default function StockControl() {
       else await reopenJobAfterUntick(job.id);
       // Refresh whichever view(s) are actually active — this can be
       // called from Job Detail, the Production queue, or both.
-      if (jobDetail?.job.id === job.id) refreshJobDetail();
-      if (productionQueue !== null) fetchProductionQueue();
+      // Waited for, so the tick stays guarded until the screen shows it.
+      if (jobDetail?.job.id === job.id) await refreshJobDetail();
+      if (productionQueue !== null) await fetchProductionQueue();
     } catch (err) {
       console.error("Failed to update process:", err);
       alert("Couldn't update that — check your connection and try again.");
