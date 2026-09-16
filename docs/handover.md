@@ -1626,3 +1626,93 @@ trace of every write of `extra_stages` in the code.
   practice then live. `findFactor` (weight by full name only) is still
   Stock Manager's to fix: Galv plate lines get no weight until then
   (the Galvanised row has factor 0 on live anyway).
+
+---
+
+## 16 Sep 2026 — Jobs page: JOB-0068 Bending, the packer rules, the push queue unblocked
+
+JOB-0068: 4 plate programs still to cut while most of the job was cut,
+packed and bent; the Laser stage closes only when every program is cut, so
+Bending was held. Also found: the parts-in-order commit was stuck in the
+push queue behind the held extra-stages commits. Rules in `CLAUDE.md`
+under Decisions (the packer bullet and the count-save bullet).
+
+### Pushed by Planning today (in the 19 commits up to 75d8bcf)
+
+- `fe3ca02` Extra stages out of the stock auto-save, Extra stage switch
+  hidden, review problems 4, 5, 6 fixed: the queue became safe without
+  `setup-extra-stages.sql`. Three skeptics found nothing that breaks live;
+  a fresh-clone build passed.
+
+### Committed, NOT pushed: the packer rules (push together)
+
+`60200fd`, `2b7ffcb`, `61a0087`, `c6af963`, `e155370`, with the checks
+`a6e8db4` (`CHECK-job-stages-and-counts.sql`) and `a8e7892`
+(`CHECK-packer-opens-at-push.sql`).
+
+- Heinrich's decisions, 16 Sep: Bending opens when the packer takes the
+  job; a count at any stage after packing counts as packed, and ticking it
+  ticks packing; Nesting must be ticked first; packing never closes while
+  programs are still to cut.
+- Reviewed four times: a design review (it made rule 1 per-item, Laser
+  only, Nesting first, and packing wait for the laser), a code review (12
+  fixes), and two checks (they made every per-item count save only if it
+  still reads what the screen showed, Log wait for the reload, the carry
+  to the packer only raise, and a tick ignore a double tap). A last
+  one-agent check of `e155370` was running when this was written.
+- Laser production's files touched: `useLaserPrograms.js`
+  (`afterLaserStagesDone` dep, called from `syncLaserStagesFor` and
+  `setJobNestingDone`), `LaserStatus.jsx` (the note, the hint).
+- Checked: names 0, build, 136 tests. Not tried signed in.
+
+### Before the push (Heinrich)
+
+1. Run `CHECK-packer-opens-at-push.sql` on live and read the list: every
+   per-item stage that opens at push, with programs still to cut and what
+   else it waits on.
+2. JOB-0068: Laser - External to "Cuts: Laser - external", and tag its
+   external lines and parts (the SigmaNest parts import tags everything
+   laser). Otherwise Bending still waits on Laser - External.
+3. After the push, reload the floor tablets: the Production tab loads its
+   list once per session and Refresh does not reload it.
+
+### Try on practice (signed in)
+
+1. A job with Nesting ticked, a program uncut, the packer taken on Laser
+   Status: a per-item Bending card opens and counts; a batch Welding and
+   Invoicing stay waiting.
+2. Log at Bending: the packer's row on Laser Status shows "n counted at
+   Bending", and his count rose.
+3. Try to close packing (packer's button, admin close, job page tick)
+   while a program is uncut: refused, naming what is open.
+4. Cut the last program: packing closes if every line is packed; the
+   job's Complete check runs.
+5. Log twice quickly on one line, and on two tablets: nothing lost or
+   doubled; a changed count is refused with what it reads now.
+
+### Database changes
+
+None for the packer rules. `setup-extra-stages.sql` still did not answer
+on either database (16 Sep); ask Heinrich to paste it again whole.
+
+### Left open
+
+- Extra stages: review problems 1–3 and 7 (the rules) before the switch
+  is shown; the SQL re-paste.
+- For Laser production, from the "stuck at Laser" map (6 agents): a re-cut
+  program linked to the job holds the job's own Laser
+  (`syncLaserStagesFor` counts shortage links); deleting a program or
+  taking a job off one never re-syncs; the header Refresh reloads neither
+  the Production queue nor the laser data nor stage settings; a cut
+  count typed while another program saves is dropped silently; a job set
+  Complete by hand drops off To nest and Laser Status; a plate re-cut's
+  catch-up run copies Laser - External.
+- A count on the tube Production card leaves Tube Laser Status showing
+  the old number until it reloads (and back); the next count there is
+  refused once.
+- Questions for Heinrich: should Take job ask first when programs are
+  uncut, and admins get a Give back; is a part's quantity under a line of
+  more than one the job total or per set (the proportional raise assumes
+  total); should un-ticking a stage that closed packing reopen it.
+- `CHECK-job-stuck-on-packing.sql` repeats `stageTakesItem` in SQL and
+  knows neither extra stages nor the packer rules.
