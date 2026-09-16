@@ -2413,7 +2413,20 @@ export default function StockControl() {
     // only after closing and opening the app. Refresh is exactly when
     // someone wants to know, and the shortages and reservations beside
     // them were loaded the same way and had the same problem.
-    await Promise.all([loadAllData(false), fetchNotifications(), fetchShortages(), fetchAllocations(), fetchInfoRequests({ incremental: true })]);
+    await Promise.all([
+      loadAllData(false),
+      fetchNotifications(),
+      fetchShortages(),
+      fetchAllocations(),
+      fetchInfoRequests({ incremental: true }),
+      // The laser screens load once and after their own actions only, so
+      // a priority set at the sales desk reached an open Nesting or
+      // Cutting screen only on a reload. Refresh re-reads them now, for
+      // the screens that are loaded (Heinrich, 16 Sep 2026). A person's
+      // own press, never a timer: the laser load is ten whole tables.
+      ...(laser.laserData !== null ? [laser.fetchLaserData()] : []),
+      ...(tubeLaser.laserData !== null ? [tubeLaser.fetchLaserData()] : []),
+    ]);
     setIsRefreshing(false);
   }
 
@@ -9697,6 +9710,28 @@ export default function StockControl() {
         next === null ? `cleared (was ${prev})` : prev === null ? `set to ${next}` : `${prev} to ${next}`,
       );
       flashSaved(`job-${job.id}-laser_priority`);
+      // Whoever nests on the plate laser, and the admins, are told -- not
+      // the person who set it. By name, not by "the nester": it still has
+      // to reach somebody when Prince is on leave. Not fatal: the number
+      // is saved and showing by now, only the notice is missing.
+      const tell = (people || []).filter(
+        (pn) => pn.id !== currentUser?.id && (pn.isAdmin || (pn.allowedProcessTypes || []).some(isPlateNestingProcess)),
+      );
+      if (tell.length) {
+        const { error: noteError } = await sendNotifications(
+          tell.map((pn) => ({
+            job_id: job.id,
+            job_number: job.job_number,
+            sales_rep: "",
+            recipient_id: pn.id,
+            message:
+              next === null
+                ? `${job.job_number} laser priority cleared by ${roleLabel}`
+                : `${job.job_number} is laser priority ${next} — set by ${roleLabel}`,
+          })),
+        );
+        if (noteError) console.error("The laser priority saved, but nobody could be told:", noteError);
+      }
       // Prince's To nest list reads the job from jobsList, so this is what
       // moves his row; nothing on the laser tables changed.
       await fetchJobs();
@@ -22916,7 +22951,8 @@ export default function StockControl() {
                     {jobDetail.job.laser_priority != null && (
                       <div style={S.roleHint}>
                         Set by {jobDetail.job.laser_priority_by || "someone"}
-                        {jobDetail.job.laser_priority_at ? ` — ${new Date(jobDetail.job.laser_priority_at).toLocaleString()}` : ""}
+                        {jobDetail.job.laser_priority_at ? ` — ${new Date(jobDetail.job.laser_priority_at).toLocaleString()}` : ""}.
+                        Clears itself once the laser is done with the job.
                       </div>
                     )}
                   </div>

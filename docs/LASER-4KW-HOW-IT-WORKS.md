@@ -119,6 +119,27 @@ admin flag. The two rules sit near the top of App.jsx:
 - **Two lanes.** The plate laser (Nesting, Laser) and the tube laser (Tube
   Laser Nesting, Tube Laser) never wait for each other; everything after
   them waits for both. `isTubeLaserProcess` in App.jsx is that rule.
+- **The queue (16 September 2026).** A job carries a laser priority
+  (`jobs.laser_priority`, with `_by` and `_at`): 1 is cut first, two jobs
+  may share a number, blank is ordinary work. Sales people, plate nesters
+  and admins set it, on the job page's Overview tab or on the opened To
+  nest row (`setLaserPriority` in App.jsx, gated by `canSetLaserPriority`,
+  never by "can edit jobs"); everyone sees it on the job header and as a
+  red "Laser P1" chip on the Jobs list. Every change goes to the job's
+  History and tells the plate nesters and admins. To nest sorts: stopped
+  programs, re-cuts someone is waiting for, numbered jobs in number order,
+  Mark urgent, then the rest by due date -- and a re-cut flagged "Can
+  wait" (`shortages.is_priority` false) takes its turn there instead of
+  jumping the list. The Cutting screen puts the programs carrying a
+  waiting re-cut or a numbered job in a red "Cut next" section on top,
+  across the thickness groups; a program takes the best number among its
+  jobs. The number clears itself, with a History line, once the job's own
+  Nesting and Laser are both closed (`clearLaserPriorityFor`, from
+  `afterLaserStagesDone`). Refresh re-reads the laser data for the
+  screens that are loaded, so a number set at the sales desk reaches
+  Prince and the operator without a reload. All of it hangs off
+  `LASER_MACHINES.laser4kw.hasPriority`; the tube laser has no queue until
+  its profile says so.
 
 ## What the tube laser has today
 
