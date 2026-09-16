@@ -1913,3 +1913,127 @@ not in `build-test-database.sh`.
 1. The old-program page 1 fallback, once Heinrich answers.
 2. JOB-0078 gap 2: cancelling a program re-checks the laser stage.
 3. Plate printout only after the SigmaNest export question.
+
+---
+
+## 16 Sep 2026 — Production tab: the 1000-row cap and the id-list limit
+
+Started from the review note above ("1000-row cap on the Production tab").
+Checking it turned up a second limit, closer and louder.
+
+### Done and live
+
+- `7468057` `CHECK-production-queue-size.sql` (read-only). Heinrich ran it
+  on live on 16 Sep: 89 jobs In Progress or Complete; **562 stages**, sent
+  as one id list that the database refuses at about 600; **776 lines and
+  parts** (cap 1000); 237 per-item counts; 88 files on a stage; 10
+  shortages; 10 cut list lines; 5 printed cutting lists; 876 lines on
+  every job; JOB-0075 the biggest at 120.
+- `75d8bcf` The Production tab loads in pages and sends job and stage ids
+  in batches of 200 (`src/lib/rowsForIds.js`, 8 tests; `fetchRowsForIds`
+  in App.jsx). All eight loads in `fetchProductionQueue`. Stages and cut
+  lists are sorted by `sort_order` afterwards, printed cutting lists
+  newest first, jobs oldest first (ties inside a department used to take
+  whatever order the database sent). Pushed by Planning in the 19 commits;
+  found in the live bundle at wrap-up.
+- The rule is in CLAUDE.md under "Loading data", with a note under
+  "Checking what is live" and one under "Checking a screen" (committed in
+  661ae60 by the Jobs page wrap-up, together with its own lines).
+
+### How it was checked
+
+- The limit, from node with the practice public key: 640 uuids answered
+  200, 650 answered 400, and extra headers lowered it. The old single
+  request of 1300 ids was refused; the new batches were accepted.
+- The Browser pane was already signed in to practice (read only, nothing
+  ticked): the Production tab loads and sends the new requests; every
+  table gave exactly the old requests' rows with batches of 3 ids and
+  pages of 4 rows forced.
+- Names 0, build clean, 131 tests at the time.
+
+### Setup SQL
+
+None written. `CHECK-production-queue-size.sql` only reads; run on live by
+Heinrich on 16 Sep.
+
+### Built but not yet tried by Heinrich (live now)
+
+1. Production tab: departments and counts show as before.
+2. An Each stage card of a job with parts: every part under its line's
+   name, matching the job's Items tab.
+3. Log a count and reload the page: the count is still there.
+4. Floor tablets get the fix only when their page is reloaded.
+
+### Agreed as separate changes, not started
+
+- **Jobs list stage load** (`refreshJobStages`, the Jobs page
+  conversation's): it pages on `sort_order`, which is not unique, so past
+  1000 stages a stage can be skipped or repeated where pages meet; and it
+  sends every non-invoiced job id, cancelled too, as one list.
+- **Leave Complete jobs out of `fetchProductionQueue`**: their stages are
+  all ticked, so they add nothing to a card, but they count toward both
+  limits. First check whether a re-cut added to a finished job reopens
+  it, and the Jobs page's note that a job set Complete by hand drops off
+  To nest and Laser Status.
+
+### Noted for later
+
+- Other `.in()` lists in `src` are small today. The auto-save deletes
+  (stock items, requisitions, purchase orders, usage log, master lists)
+  send the removed ids as one list: a single save removing 600 or more
+  rows would be refused.
+- The Jobs page's open point, two reloads of one Production card landing
+  out of order (a load counter in `fetchProductionQueue`), is in the same
+  function; 75d8bcf does not make it worse.
+
+---
+
+## 16 Sep 2026 — Production tab (wrap-up): state of play
+
+The detail is in "Production tab: a job's parts listed in order (JOB-0068)"
+above; this is where it stands at clearing.
+
+### Done and live (pushed by Planning in the 16 Sep batch up to 75d8bcf)
+
+- `efb567f` Parts in order on the floor: every Each list, the packer's To
+  pack list and the printed job sheet show lines A to Z with each line's
+  parts A to Z under its name (`src/jobs/lineOrder.js`). `jobItems` is in
+  the live bundle (`CHECK-what-is-live.cjs`, 16 Sep). Tried on practice
+  with Heinrich signed in: JOB-0011's "laser aaaa" card and its printed job
+  sheet right, the Items tab still in quote order. The 8 test parts were
+  removed.
+- `4ea57c1` Tube Laser > Nesting: opening a re-cut row no longer blanks
+  the app.
+- From this conversation's findings, built by others and pushed: Copy job
+  keeps parts under their lines (`9748e38`, Jobs page); the Production tab
+  loads in pages (`75d8bcf`).
+
+### Every setup file this conversation wrote
+
+None. The only database look was read-only: on 15 Sep the Jobs page's
+extra-stages columns answered 400 on live (since recorded in its entries).
+
+### Built but not yet tested by Heinrich
+
+1. Laser Status, and Tube Laser Status, Packing and Nesting, on a job with
+   parts: line names as headings, parts A to Z. Same code as the Production
+   card, not yet seen with real data.
+2. The packer's To pack list (packing stage not on Each): grouped the same
+   way.
+3. Tube Laser > Nesting: open a re-cut (a tube shortage not on any
+   program). The row opens with its shortage details and no parts counter.
+   Practice has no tube re-cut, so this was proven only by drawing the
+   control without a stage.
+4. JOB-0068 on live: its Each cards in the order he asked for.
+
+### Waiting on Heinrich
+
+Nothing for this work: no SQL, no ticks, no open decision.
+
+### Pick up next
+
+1. Whatever his look at JOB-0068 on live turns up.
+2. From the Jobs page entry: a load counter in `fetchProductionQueue`, so
+   two reloads of one card landing out of order cannot refuse a quick count.
+3. For Laser production: the tube program printout sorts TUBING_10 before
+   TUBING_2 (`nestingPrint.js`, compare without numbers).
