@@ -60,6 +60,10 @@ async function getPdf() {
 import { TABS, NAV_TABS, TAB_GROUPS, LASER_MACHINES } from "./constants.js";
 import UserManagement from "./UserManagement.jsx";
 import CompanyDetails from "./manager/CompanyDetails.jsx";
+import {
+  SECTION_SHAPES, shapeForType, shapeTitle, buildSection, missingBoxes,
+  PIPE_STANDARDS, SCHEDULES, SANS62_CLASSES, pipeSizes,
+} from "./manager/sectionShapes.js";
 import CutToSize from "./jobs/CutToSize.jsx";
 import BuyOuts from "./jobs/BuyOuts.jsx";
 import Materials from "./jobs/Materials.jsx";
@@ -592,6 +596,8 @@ async function loadMasterFromTables() {
         // Only sections use this. An empty grade is a row that has not
         // been split by material yet and stands in for any of them.
         if (listName === "sections") entry.grade = r.grade || "";
+        // A section built from its type's boxes keeps its numbers.
+        if (listName === "sections" && r.dimensions) entry.dimensions = r.dimensions;
         return entry;
       });
   }
@@ -1979,6 +1985,8 @@ export default function StockControl() {
   const [managerSearchQuery, setManagerSearchQuery] = useState("");
   const [sectionTypeFilterInManager, setSectionTypeFilterInManager] = useState("");
   const [managerSectionGrade, setManagerSectionGrade] = useState("");
+  // What is typed into a section type's boxes before Add (SHS: a, t).
+  const [sectionBoxes, setSectionBoxes] = useState({});
   const [shiftsList, setShiftsList] = useState([]);
   const [newShiftName, setNewShiftName] = useState("");
   const [closuresList, setClosuresList] = useState([]);
@@ -2702,6 +2710,8 @@ export default function StockControl() {
               type: e.type ?? null,
               short_name: e.shortName || null,
               grade: (e.grade || "").trim(),
+              // Needs setup-section-dimensions.sql on the database.
+              ...(listName === "sections" ? { dimensions: e.dimensions || null } : {}),
             }))
           )
         );
@@ -2718,7 +2728,9 @@ export default function StockControl() {
         }
       }
       for (const e of modified) {
-        let q = supabase.from("master_factor_items").update({ factor: e.factor || 0, price: e.price || 0, type: e.type ?? null, short_name: e.shortName || null }).eq("list_name", listName).eq("name", e.name);
+        const changes = { factor: e.factor || 0, price: e.price || 0, type: e.type ?? null, short_name: e.shortName || null };
+        if (listName === "sections") changes.dimensions = e.dimensions || null;
+        let q = supabase.from("master_factor_items").update(changes).eq("list_name", listName).eq("name", e.name);
         if (listName === "sections") q = q.eq("grade", (e.grade || "").trim());
         ops.push(q);
       }
@@ -10510,6 +10522,13 @@ export default function StockControl() {
     return sameText(entry.name, name) && sameText(entry.grade, grade);
   }
 
+  // The pill a section files under in Stock Manager: its type's shape key
+  // ("SHS") when the stored type is one of the fixed types, old words like
+  // "Square Tube" or "H-Beam" included; otherwise the type as it was typed.
+  function sectionGroupKey(s) {
+    return shapeForType(s.type)?.key || s.type || "Ungrouped";
+  }
+
   function findSectionEntry(name, grade) {
     const list = (master && master.sections) || [];
     if (!(name || "").trim()) return null;
@@ -13229,7 +13248,8 @@ export default function StockControl() {
       const taken = new Set(
         list.filter((x) => sameText(x.name, entry.name)).map((x) => (x.grade || "").trim().toLowerCase())
       );
-      const free = (prev.grades || []).map((g) => g.name).find((g) => !taken.has(g.trim().toLowerCase()));
+      // Stored by short name when a material has one, as everywhere else.
+      const free = (prev.grades || []).map((g) => g.shortName || g.name).find((g) => !taken.has(g.trim().toLowerCase()));
       if (!free) {
         alert(
           `${entry.name} already has a row for every material on the list. Add the material under Stock Manager → Material Types first.`
@@ -13240,6 +13260,137 @@ export default function StockControl() {
       const copy = { ...entry, grade: free };
       return { ...prev, sections: [...list.slice(0, idx + 1), copy, ...list.slice(idx + 1)] };
     });
+  }
+
+  // Sections step 4: a section of one of the fixed types is added from its
+  // boxes, and the name is written from them (src/manager/sectionShapes.js).
+  // The same name in the same material is refused, not added twice.
+  function addShapedSection(shape) {
+    const built = buildSection(shape, sectionBoxes);
+    if (!built) return;
+    const grade = managerSectionGrade.trim();
+    setMaster((prev) => {
+      const list = prev.sections || [];
+      if (list.some((x) => isSectionRow(x, built.name, grade))) return prev;
+      const entry = {
+        name: built.name,
+        factor: parseFloat(managerFactor) || 0,
+        price: parseFloat(managerPrice) || 0,
+        type: shape.label,
+        grade,
+        dimensions: built.dimensions,
+      };
+      return { ...prev, sections: [...list, entry] };
+    });
+    // A run of pipe sizes is usually one standard and schedule: keep those.
+    setSectionBoxes((prev) => (shape.key === "PIPE" ? { std: prev.std, sch: prev.sch, cls: prev.cls } : {}));
+    setManagerFactor("");
+    setManagerPrice("");
+  }
+
+  // The Add row for a fixed section type. A plain function, not a
+  // component: declared inside App() a component would remount on every
+  // keystroke and throw the cursor out of the box.
+  function renderShapedSectionAdd(shape) {
+    const d = sectionBoxes;
+    const set = (k, v) => setSectionBoxes((prev) => ({ ...prev, [k]: v }));
+    const built = buildSection(shape, d);
+    const missing = missingBoxes(shape, d);
+    const grade = managerSectionGrade.trim();
+    const clash = built && (master.sections || []).some((x) => isSectionRow(x, built.name, grade));
+    const boxStyle = { display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 90 };
+    const caption = (text) => <span style={{ fontSize: 12, color: C.muted }}>{text}</span>;
+    const numBox = (k, label) => (
+      <label key={k} style={boxStyle}>
+        {caption(label)}
+        <input style={S.input} inputMode="decimal" value={d[k] ?? ""} onChange={(e) => set(k, e.target.value)} />
+      </label>
+    );
+    // A fixed handful of choices, so a plain select.
+    const pick = (k, label, options, onPick) => (
+      <label key={k} style={boxStyle}>
+        {caption(label)}
+        <select style={S.input} value={d[k] ?? ""} onChange={(e) => (onPick ? onPick(e.target.value) : set(k, e.target.value))}>
+          <option value="">Choose…</option>
+          {options.map(([value, text]) => (
+            <option key={value} value={value}>
+              {text}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+    const fromTable = d.std === "SCH" || d.std === "SANS62";
+    const boxes =
+      shape.key !== "PIPE"
+        ? shape.boxes.map(([k, label]) => numBox(k, label))
+        : [
+            pick("std", "Standard", PIPE_STANDARDS.map((s) => [s.key, s.label]), (v) => setSectionBoxes({ std: v })),
+            d.std === "SCH" &&
+              pick("sch", "Schedule", SCHEDULES.map((s) => [s, /^\d+$/.test(s) ? `SCH${s}` : s]), (v) => setSectionBoxes((p) => ({ ...p, sch: v, nb: "" }))),
+            d.std === "SANS62" &&
+              pick("cls", "Class", SANS62_CLASSES.map((c) => [c, c]), (v) => setSectionBoxes((p) => ({ ...p, cls: v, nb: "" }))),
+            fromTable && pick("nb", "NB", pipeSizes(d.std, d.std === "SCH" ? d.sch : d.cls).map((n) => [String(n), `NB${n}`])),
+            d.std === "SABS719" && numBox("nb", "NB"),
+            d.std === "SABS719" && numBox("od", "Outside dia"),
+            d.std === "SABS719" && numBox("t", "Wall"),
+          ];
+    const size = built && shape.key === "PIPE" ? ` (${built.dimensions.od} x ${built.dimensions.t})` : "";
+    return (
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ ...S.managerAddRow, flexWrap: "wrap", alignItems: "flex-end" }}>{boxes}</div>
+        <div style={{ ...S.managerAddRow, flexWrap: "wrap", marginTop: 6 }}>
+          <input
+            style={{ ...S.input, flex: 1, minWidth: 80 }}
+            type="number"
+            step="0.01"
+            value={managerFactor}
+            onChange={(e) => setManagerFactor(e.target.value)}
+            placeholder="kg/m"
+          />
+          <input
+            style={{ ...S.input, flex: 1, minWidth: 80 }}
+            type="number"
+            step="0.01"
+            value={managerPrice}
+            onChange={(e) => setManagerPrice(e.target.value)}
+            placeholder="R/m"
+          />
+          <TypeToFind
+            style={{ flex: 1, minWidth: 120 }}
+            options={(master.grades || []).map((g) => g.shortName || g.name)}
+            value={managerSectionGrade}
+            onChange={setManagerSectionGrade}
+            emptyLabel="No grade"
+          />
+          <button
+            type="button"
+            className="stk-btn"
+            style={{ ...S.addBtn, opacity: built && !clash ? 1 : 0.5 }}
+            disabled={!built || clash}
+            onClick={() => addShapedSection(shape)}
+          >
+            <Plus size={15} strokeWidth={2.5} />
+            Add
+          </button>
+        </div>
+        <div style={{ fontSize: 13, marginTop: 6, color: clash ? C.danger : C.muted }}>
+          {clash ? (
+            <>
+              <b>{built.name}</b> is already on the list in {grade || "no material"}.
+            </>
+          ) : built ? (
+            <>
+              Adds <b>{built.name}</b>
+              {size}
+              {grade ? ` in ${grade}` : ""}.
+            </>
+          ) : (
+            `Still needed: ${missing.join(", ")}.`
+          )}
+        </div>
+      </div>
+    );
   }
 
   function updateSectionGrade(name, oldGrade, newGrade) {
@@ -20233,27 +20384,37 @@ export default function StockControl() {
               // size from every type into one long list.
               !sectionTypeFilterInManager ? (
                 <div style={S.managerListFullPage}>
-                  {master.sections.length === 0 && <div style={S.empty}>Nothing here yet.</div>}
-                  {Object.entries(
-                    master.sections.reduce((acc, s) => {
-                      const k = s.type || "Ungrouped";
-                      (acc[k] = acc[k] || []).push(s);
+                  {/* Every fixed type is listed, empty or not, so the first
+                      square bar can be added. A section whose stored type is
+                      none of them still shows, under its own words, after. */}
+                  {(() => {
+                    const counts = master.sections.reduce((acc, s) => {
+                      const k = sectionGroupKey(s);
+                      acc[k] = (acc[k] || 0) + 1;
                       return acc;
-                    }, {})
-                  )
-                    .sort((a, b) => a[0].localeCompare(b[0]))
-                    .map(([groupName, list]) => (
+                    }, {});
+                    const others = Object.keys(counts)
+                      .filter((k) => !SECTION_SHAPES.some((sh) => sh.key === k))
+                      .sort((a, b) => a.localeCompare(b));
+                    return [
+                      ...SECTION_SHAPES.map((sh) => [sh.key, shapeTitle(sh)]),
+                      ...others.map((k) => [k, k]),
+                    ].map(([groupKey, title]) => (
                       <button
-                        key={groupName}
+                        key={groupKey}
                         type="button"
                         className="stk-btn"
                         style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
-                        onClick={() => setSectionTypeFilterInManager(groupName)}
+                        onClick={() => {
+                          setSectionBoxes({});
+                          setSectionTypeFilterInManager(groupKey);
+                        }}
                       >
-                        <span style={S.itemName}>{groupName}</span>
-                        <span style={S.gradeCount}>{list.length}</span>
+                        <span style={S.itemName}>{title}</span>
+                        <span style={S.gradeCount}>{counts[groupKey] || 0}</span>
                       </button>
-                    ))}
+                    ));
+                  })()}
                 </div>
               ) : (
                 <>
@@ -20265,8 +20426,13 @@ export default function StockControl() {
                   >
                     <ChevronLeft size={18} strokeWidth={2.5} /> Back to Sections
                   </button>
-                  <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>{sectionTypeFilterInManager}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>
+                    {shapeForType(sectionTypeFilterInManager) ? shapeTitle(shapeForType(sectionTypeFilterInManager)) : sectionTypeFilterInManager}
+                  </div>
 
+                  {shapeForType(sectionTypeFilterInManager) ? (
+                    renderShapedSectionAdd(shapeForType(sectionTypeFilterInManager))
+                  ) : (
                   <div style={S.managerAddRow}>
                     <input
                       style={{ ...S.input, flex: 2 }}
@@ -20304,8 +20470,9 @@ export default function StockControl() {
                       Add
                     </button>
                   </div>
+                  )}
 
-                  {master.sections.filter((s) => (s.type || "Ungrouped") === sectionTypeFilterInManager).length > 8 && (
+                  {master.sections.filter((s) => sectionGroupKey(s) === sectionTypeFilterInManager).length > 8 && (
                     <input
                       style={{ ...S.input, marginTop: 10 }}
                       value={managerSearchQuery}
@@ -20323,7 +20490,7 @@ export default function StockControl() {
                       options={[
                         ...new Set(
                           master.sections
-                            .filter((sec) => (sec.type || "Ungrouped") === sectionTypeFilterInManager)
+                            .filter((sec) => sectionGroupKey(sec) === sectionTypeFilterInManager)
                             .map((sec) => (sec.grade || "").trim())
                         ),
                       ]
@@ -20337,7 +20504,7 @@ export default function StockControl() {
 
                   <div style={S.managerListFullPage}>
                     {master.sections
-                      .filter((s) => (s.type || "Ungrouped") === sectionTypeFilterInManager)
+                      .filter((s) => sectionGroupKey(s) === sectionTypeFilterInManager)
                       .filter((s) => s.name.toLowerCase().includes(managerSearchQuery.toLowerCase()))
                       .filter((s) => {
                         const want = sectionGradeFilterInManager;
@@ -20351,7 +20518,7 @@ export default function StockControl() {
                         // nothing on screen saying why. A material that is no
                         // longer there filters nothing.
                         const stillThere = master.sections.some(
-                          (x) => (x.type || "Ungrouped") === sectionTypeFilterInManager && matches(x)
+                          (x) => sectionGroupKey(x) === sectionTypeFilterInManager && matches(x)
                         );
                         return !stillThere || matches(s);
                       })
