@@ -398,6 +398,11 @@ const madeOnChoices = (current) => MADE_ON_OPTIONS.filter((o) => !o.retired || o
 // setup-extra-stages.sql answers on both databases. With no stage switched
 // on, nothing about extra stages shows or changes anywhere in the app.
 const EXTRA_STAGES_SWITCH_ON = false;
+
+// Stages whose tick is being saved right now (toggleJobProcessComplete), so
+// a double tap does not tick, notify and settle twice. Outside the
+// component so it holds across renders without a hook.
+const TICKING_STAGE_IDS = new Set();
 const madeOnLabel = (code) => MADE_ON_OPTIONS.find((o) => o.code === code)?.label || "";
 
 // Parent and child job lines. A child is a part under the job's own line
@@ -1091,9 +1096,10 @@ function LibraryField({ label, options, value, onChange, customValue, onCustomCh
 // packer's "6 counted at Bending" (src/jobs/packingFlow.js).
 function QtyProgressControl({ process, job, quoteItems, jobItems, itemProgress, limitFor, onSubmit, noteFor }) {
   const [inputs, setInputs] = useState({});
-  // The line whose count is being saved: its Log stays off until the save
-  // is done, so a quick second tap cannot land on a number not yet shown.
-  const [savingId, setSavingId] = useState(null);
+  // The lines whose counts are being saved: each one's Log stays off until
+  // its save and the reload after it are done, so a quick second tap cannot
+  // land on a number not yet shown.
+  const [savingIds, setSavingIds] = useState(() => new Set());
   // No stage, nothing to count. A tube re-cut row reached here with none
   // and the read below threw, blanking the whole app. Below useState, so
   // the hooks run the same way every time.
@@ -1148,20 +1154,24 @@ function QtyProgressControl({ process, job, quoteItems, jobItems, itemProgress, 
               type="button"
               className="stk-btn"
               style={S.reqActionBtn}
-              disabled={canLog <= 0 || savingId === item.id}
+              disabled={canLog <= 0 || savingIds.has(item.id)}
               onClick={async () => {
                 const qty = Math.min(parseFloat(inputs[item.id]) || 0, canLog);
                 setInputs((prev) => ({ ...prev, [item.id]: "" }));
                 if (qty <= 0) return;
-                setSavingId(item.id);
+                setSavingIds((prev) => new Set(prev).add(item.id));
                 try {
                   await onSubmit(process, job, item, qty, progress, quoteItems, itemProgress);
                 } finally {
-                  setSavingId(null);
+                  setSavingIds((prev) => {
+                    const next = new Set(prev);
+                    next.delete(item.id);
+                    return next;
+                  });
                 }
               }}
             >
-              {savingId === item.id ? "Saving…" : "Log"}
+              {savingIds.has(item.id) ? "Saving…" : "Log"}
             </button>
           </>
         )}
@@ -6520,12 +6530,19 @@ export default function StockControl() {
             `It changed after your screen showed ${seenOnScreen}, so the ${qtyAdded} you logged was not added. ` +
             "Check the number on the screen and log again for anything not yet counted."
         );
-        if (jobDetail?.job.id === job.id) refreshJobDetail();
-        if (productionQueue !== null) fetchProductionQueue();
+        // Waited for, so Log comes back only once the real number is shown.
+        if (jobDetail?.job.id === job.id) await refreshJobDetail();
+        if (productionQueue !== null) await fetchProductionQueue();
         return;
       }
-      const counts = new Map((savedRows || []).map((r) => [r.job_quote_item_id, Number(r.qty_complete) || 0]));
-      counts.set(quoteItem.id, newDone);
+      // The stage's counts read again after this write, so two lines logged
+      // at the same moment still see each other and the stage can close.
+      const { data: afterRows, error: afterError } = await supabase
+        .from("job_process_item_progress")
+        .select("job_quote_item_id, qty_complete")
+        .eq("job_process_id", process.id);
+      const counts = new Map(((afterError ? savedRows : afterRows) || []).map((r) => [r.job_quote_item_id, Number(r.qty_complete) || 0]));
+      counts.set(quoteItem.id, Math.max(counts.get(quoteItem.id) || 0, newDone));
 
       // Whole process only completes once every item on the job has
       // individually reached its own quantity.
@@ -6557,8 +6574,11 @@ export default function StockControl() {
       // closed by its counts carries through as a tick does.
       await packingFollowsCount(process, job, quoteItem, newDone);
       if (allItemsDone && !packerWaitsForLaser) await packingFollowsTick(process, job);
-      if (jobDetail?.job.id === job.id) refreshJobDetail();
-      if (productionQueue !== null) fetchProductionQueue();
+      // Waited for, so the card's Log comes back only once the new count is
+      // on screen; otherwise a quick second count is compared with the old
+      // number and refused.
+      if (jobDetail?.job.id === job.id) await refreshJobDetail();
+      if (productionQueue !== null) await fetchProductionQueue();
     } catch (err) {
       console.error("Failed to log progress:", err);
       alert("Couldn't save that — check your connection and try again.");
@@ -6602,7 +6622,7 @@ export default function StockControl() {
     const own = (await stagesForPacking(jobId)).filter((p) => !p.shortage_id);
     if (own.some((p) => isPlateNestingProcess(p.process_name) && !p.is_complete)) return "Nesting is not marked done";
     if (own.some((p) => isProgramLaserProcess(p.process_name) && !p.is_complete)) {
-      return "the Laser stage is still open, because a program on this job is not ticked cut";
+      return "the Laser stage is still open. It closes itself once every program on this job is ticked cut; a job whose plate work was done outside the app has Laser ticked on the job page";
     }
     return "";
   }
@@ -6646,16 +6666,40 @@ export default function StockControl() {
       const takes = (it) => stageTakesItem(packing.process_name, it, items);
       const progress = new Map((rows || []).map((r) => [r.job_quote_item_id, Number(r.qty_complete) || 0]));
       const raises = packingRaises({ line: quoteItem, newDone, jobItems: items, packingTakes: takes, progress });
-      if (raises.length) {
+      // Each raise only ever raises: an update where the packer's count is
+      // still below the target, or a first row when there is none. A count
+      // the packer logged a moment ago is never written back down (review,
+      // 16 Sep 2026).
+      for (const r of raises) {
         const now = new Date().toISOString();
-        const { error: upError } = await supabase
+        const hadRow = (rows || []).some((row) => row.job_quote_item_id === r.itemId);
+        let inserted = false;
+        if (!hadRow) {
+          const { error: insError } = await supabase
+            .from("job_process_item_progress")
+            .insert({ job_process_id: packing.id, job_quote_item_id: r.itemId, qty_complete: r.qty, updated_at: now });
+          if (insError && !/duplicate|unique|23505/i.test(`${insError.code || ""} ${insError.message || ""}`)) throw insError;
+          inserted = !insError;
+        }
+        if (!inserted) {
+          const { error: upError } = await supabase
+            .from("job_process_item_progress")
+            .update({ qty_complete: r.qty, updated_at: now })
+            .eq("job_process_id", packing.id)
+            .eq("job_quote_item_id", r.itemId)
+            .lt("qty_complete", r.qty);
+          if (upError) throw upError;
+        }
+      }
+      if (raises.length) {
+        // Read back, so the full test sees what is really saved.
+        const { data: afterRows, error: afterError } = await supabase
           .from("job_process_item_progress")
-          .upsert(
-            raises.map((r) => ({ job_process_id: packing.id, job_quote_item_id: r.itemId, qty_complete: r.qty, updated_at: now })),
-            { onConflict: "job_process_id,job_quote_item_id" }
-          );
-        if (upError) throw upError;
-        for (const r of raises) progress.set(r.itemId, r.qty);
+          .select("job_quote_item_id, qty_complete")
+          .eq("job_process_id", packing.id);
+        if (afterError) throw afterError;
+        progress.clear();
+        for (const row of afterRows || []) progress.set(row.job_quote_item_id, Number(row.qty_complete) || 0);
       }
       if (laserWorkDone(stages, ctx) && packingIsFull({ jobItems: items, packingTakes: takes, progress })) {
         await closePackingFromLaterStage(packing, job, process.process_name);
@@ -6864,6 +6908,18 @@ export default function StockControl() {
 
   async function toggleJobProcessComplete(process, job) {
     if (!supabase || !job) return;
+    // A second tap while the first is still saving is ignored, or both would
+    // write, notify the rep twice and settle the job twice.
+    if (TICKING_STAGE_IDS.has(process.id)) return;
+    TICKING_STAGE_IDS.add(process.id);
+    try {
+      return await toggleJobProcessCompleteOnce(process, job);
+    } finally {
+      TICKING_STAGE_IDS.delete(process.id);
+    }
+  }
+
+  async function toggleJobProcessCompleteOnce(process, job) {
     const nowComplete = !process.is_complete;
 
     // The job's own plate packer is not ticked done while the laser still has
