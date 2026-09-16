@@ -97,6 +97,21 @@ export default function CutList({
   const stopped = filtered.filter((p) => !p.is_complete && p.reported_at);
   const cut = filtered.filter((p) => p.is_complete);
 
+  // Cut next, on a laser with a queue (machine.hasPriority): programs
+  // carrying a re-cut someone is waiting for, then the numbered jobs in
+  // number order (a program takes the best number among its jobs, worked
+  // out by the hook). On top and across the thickness groups, by
+  // Heinrich's decision of 16 Sep 2026; everything else keeps its group.
+  const hasQueue = !!machine.hasPriority && !byJob;
+  const cutNext = useMemo(() => {
+    if (!hasQueue) return [];
+    const num = (p) => (p.priority == null ? Number.MAX_SAFE_INTEGER : p.priority);
+    const list = toCut.filter((p) => p.recutWaiting || p.priority != null);
+    list.sort((a, b) => (b.recutWaiting ? 1 : 0) - (a.recutWaiting ? 1 : 0) || num(a) - num(b));
+    return list;
+  }, [hasQueue, toCut]);
+  const rest = hasQueue ? toCut.filter((p) => !cutNext.includes(p)) : toCut;
+
   // Grouped by material, in the shop's own thickness order. A material
   // reads "1.2mm MS", so its group sorts by where that thickness sits in
   // the list -- alphabetically 10mm would land next to 1.2mm, and the
@@ -108,12 +123,12 @@ export default function CutList({
       const i = (thicknesses || []).findIndex((t) => (material || "").startsWith(t));
       return i === -1 ? Number.MAX_SAFE_INTEGER : i;
     };
-    const names = [...new Set(toCut.map((p) => p.material))];
+    const names = [...new Set(rest.map((p) => p.material))];
     names.sort((a, b) => rank(a) - rank(b) || String(a).localeCompare(String(b)));
     return names
-      .map((m) => ({ material: m, items: toCut.filter((p) => p.material === m) }))
+      .map((m) => ({ material: m, items: rest.filter((p) => p.material === m) }))
       .filter((g) => g.items.length > 0);
-  }, [toCut, thicknesses]);
+  }, [rest, thicknesses]);
 
   // Grouped by job, on the tube laser. A program on two jobs sits under
   // both -- rare, and cutting it from either counts once, because it is
@@ -202,29 +217,36 @@ export default function CutList({
           </Section>
         ))
       ) : (
-        groups.map((g) => (
-          <Section key={g.material} title={g.material} count={g.items.length}>
-            <div style={grid}>
-              {g.items.map((p) => (
-                <ProgramRow
-                  key={p.id}
-                  program={p}
-                  notes={(events || []).filter(
-                    (e) => e.program_id === p.id && (e.action === "note" || e.action === "stopped")
-                  )}
-                  canCut={canCut}
-                  machine={machine}
-                  onToggleCut={onToggleCut}
-                  onSetCutCount={onSetCutCount}
-                  onAskTime={hasTime ? (pr) => setAskTimeFor(pr.id) : () => {}}
-                  onReport={onReport}
-                  onAddNote={onAddNote}
-                  busy={busyId === p.id} jobLines={jobLines}
-                />
-              ))}
-            </div>
-          </Section>
-        ))
+        <>
+          {cutNext.length > 0 && (
+            <Section title="Cut next" count={cutNext.length} danger>
+              <div style={grid}>{cutNext.map((p) => row(p))}</div>
+            </Section>
+          )}
+          {groups.map((g) => (
+            <Section key={g.material} title={g.material} count={g.items.length}>
+              <div style={grid}>
+                {g.items.map((p) => (
+                  <ProgramRow
+                    key={p.id}
+                    program={p}
+                    notes={(events || []).filter(
+                      (e) => e.program_id === p.id && (e.action === "note" || e.action === "stopped")
+                    )}
+                    canCut={canCut}
+                    machine={machine}
+                    onToggleCut={onToggleCut}
+                    onSetCutCount={onSetCutCount}
+                    onAskTime={hasTime ? (pr) => setAskTimeFor(pr.id) : () => {}}
+                    onReport={onReport}
+                    onAddNote={onAddNote}
+                    busy={busyId === p.id} jobLines={jobLines}
+                  />
+                ))}
+              </div>
+            </Section>
+          ))}
+        </>
       )}
 
       {stopped.length > 0 && (
@@ -497,6 +519,17 @@ function ProgramRow({ program, notes, canCut, machine = {}, onToggleCut, onSetCu
       <div style={S.rowMain}>
         <span style={{ ...S.itemName, fontSize: 18, letterSpacing: "0.02em" }}>{programTitle(p)}</span>
         <div style={S.rowMeta}>
+          {/* The job's queue number, carried onto the program (the best
+              among its jobs). Red like the re-cut chip: both say "this
+              one first". */}
+          {p.priority != null && (
+            <span
+              style={{ ...S.partTag, color: C.danger, borderColor: C.danger, fontWeight: 700 }}
+              title="Laser priority — 1 is cut first"
+            >
+              Priority {p.priority}
+            </span>
+          )}
           <span style={S.partTag}>{p.material}</span>
           {p.sheet_name && <span style={S.partTag}>{p.sheet_name}</span>}
           {p.machine && <span style={S.partTag}>{p.machine}</span>}
@@ -523,6 +556,7 @@ function ProgramRow({ program, notes, canCut, machine = {}, onToggleCut, onSetCu
               >
                 {l.job_number || "unknown job"}
                 {l.shortage_id ? " · re-cut" : l.sigmanest_number ? ` · ${l.sigmanest_number}` : ""}
+                {l.laser_priority != null ? ` · P${l.laser_priority}` : ""}
               </span>
             ))
           )}

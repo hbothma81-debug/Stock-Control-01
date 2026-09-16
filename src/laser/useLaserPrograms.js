@@ -312,10 +312,12 @@ export default function useLaserPrograms(deps) {
     const activeJobs = jobs.filter((j) => j.status === "in_progress");
     const jobById = new Map(jobs.map((j) => [j.id, j]));
 
+    const shortageById = new Map((d.shortages || []).map((sh) => [sh.id, sh]));
     const linksByProgram = {};
     for (const l of d.links) {
       if (!linksByProgram[l.program_id]) linksByProgram[l.program_id] = [];
       const job = jobById.get(l.job_id);
+      const shortage = l.shortage_id ? shortageById.get(l.shortage_id) : null;
       linksByProgram[l.program_id].push({
         ...l,
         job_number: job?.job_number || "",
@@ -323,12 +325,29 @@ export default function useLaserPrograms(deps) {
         customer: job?.customer || "",
         sales_rep: job?.sales_rep || "",
         is_recut: !!l.shortage_id,
+        // The job's queue number, and whether this re-cut is one someone
+        // is waiting for (the flag form's Priority tick), so the Cutting
+        // screen can put the program on top. Only a laser with a queue
+        // reads them; on the other both are as if nothing were set.
+        laser_priority: machine.hasPriority && Number(job?.laser_priority) >= 1 ? Number(job.laser_priority) : null,
+        recut_waiting: !!l.shortage_id && !!machine.hasPriority && shortage?.is_priority !== false,
       });
     }
 
+    // A program takes the best number among its jobs: several jobs share
+    // a sheet, and the sheet is cut once.
     const programs = d.programs
       .filter((p) => !p.is_cancelled)
-      .map((p) => ({ ...p, jobs: linksByProgram[p.id] || [] }));
+      .map((p) => {
+        const jobs = linksByProgram[p.id] || [];
+        const numbers = jobs.map((l) => l.laser_priority).filter((n) => n !== null);
+        return {
+          ...p,
+          jobs,
+          priority: numbers.length ? Math.min(...numbers) : null,
+          recutWaiting: jobs.some((l) => l.recut_waiting),
+        };
+      });
 
     // Each entry carries the link that put this job on that program, so the
     // row can take it off again. A copy per job rather than the shared

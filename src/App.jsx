@@ -6753,6 +6753,9 @@ export default function StockControl() {
       try {
         const stages = await stagesForPacking(jobId);
         const ctx = packerFlowCtx();
+        // The plate laser is done with the job, by the hook or by hand:
+        // its queue number has served (Heinrich, 16 Sep 2026).
+        if (laserWorkDone(stages, ctx)) await clearLaserPriorityFor(jobId);
         const packing = ownPackingStage(stages, ctx);
         if (packing && !packing.is_complete && laserWorkDone(stages, ctx)) {
           const { data: jobItems, error } = await supabase.from("job_quote_items").select("*").eq("job_id", jobId);
@@ -9701,6 +9704,28 @@ export default function StockControl() {
     } catch (err) {
       console.error("Failed to set the laser priority:", err);
       alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  // The number goes when the plate laser is done with the job (its own
+  // Nesting and Laser both closed; afterLaserStagesDone). Guarded on the
+  // column, so a job with no number costs nothing and logs nothing. Never
+  // throws: it runs inside a cut, which is already saved.
+  async function clearLaserPriorityFor(jobId) {
+    try {
+      const { data, error } = await supabase
+        .from("jobs")
+        .update({ laser_priority: null, laser_priority_by: null, laser_priority_at: null })
+        .eq("id", jobId)
+        .not("laser_priority", "is", null)
+        .select("id");
+      if (error) throw error;
+      if (!data || data.length === 0) return;
+      await logJobEvent(jobId, "laser priority", "cleared — the laser is done with the job");
+      // So the red chip leaves the Jobs list without a reload.
+      await fetchJobs();
+    } catch (err) {
+      console.error("Could not clear the laser priority:", err);
     }
   }
 
