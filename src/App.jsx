@@ -1987,6 +1987,8 @@ export default function StockControl() {
   const [managerSectionGrade, setManagerSectionGrade] = useState("");
   // What is typed into a section type's boxes before Add (SHS: a, t).
   const [sectionBoxes, setSectionBoxes] = useState({});
+  // A new-style section being changed through its boxes: { name, grade, boxes }.
+  const [sectionEdit, setSectionEdit] = useState(null);
   const [shiftsList, setShiftsList] = useState([]);
   const [newShiftName, setNewShiftName] = useState("");
   const [closuresList, setClosuresList] = useState([]);
@@ -13288,16 +13290,37 @@ export default function StockControl() {
     setManagerPrice("");
   }
 
-  // The Add row for a fixed section type. A plain function, not a
-  // component: declared inside App() a component would remount on every
-  // keystroke and throw the cursor out of the box.
-  function renderShapedSectionAdd(shape) {
-    const d = sectionBoxes;
-    const set = (k, v) => setSectionBoxes((prev) => ({ ...prev, [k]: v }));
-    const built = buildSection(shape, d);
-    const missing = missingBoxes(shape, d);
-    const grade = managerSectionGrade.trim();
-    const clash = built && (master.sections || []).some((x) => isSectionRow(x, built.name, grade));
+  // A section of one of the fixed types is changed only through its boxes
+  // (Heinrich, 16 Sep 2026). The size is one size in every material, so
+  // the new name and numbers go onto all its rows; a name another size
+  // already has is refused rather than merged.
+  function saveSectionEdit() {
+    if (!sectionEdit) return;
+    const oldName = sectionEdit.name;
+    const shape = shapeForType(sectionEdit.shape);
+    const built = shape && buildSection(shape, sectionEdit.boxes);
+    if (!built) return;
+    const taken = (master.sections || []).some((x) => !sameText(x.name, oldName) && sameText(x.name, built.name));
+    if (taken) {
+      alert(`${built.name} is already on the list. Change that one instead, or delete this one.`);
+      return;
+    }
+    if (built.name !== oldName) renameMasterEntry("sections", oldName, built.name);
+    setMaster((prev) => ({
+      ...prev,
+      sections: (prev.sections || []).map((x) =>
+        sameText(x.name, oldName) || sameText(x.name, built.name) ? { ...x, dimensions: built.dimensions } : x
+      ),
+    }));
+    setSectionEdit(null);
+  }
+
+  // A type's boxes, for the Add row and for changing a row. `setD` takes
+  // an updater, like a state setter. Plain functions, not components:
+  // declared inside App() a component would remount on every keystroke and
+  // throw the cursor out of the box.
+  function sectionBoxInputs(shape, d, setD) {
+    const set = (k, v) => setD((prev) => ({ ...prev, [k]: v }));
     const boxStyle = { display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 90 };
     const caption = (text) => <span style={{ fontSize: 12, color: C.muted }}>{text}</span>;
     const numBox = (k, label) => (
@@ -13320,21 +13343,27 @@ export default function StockControl() {
         </select>
       </label>
     );
+    if (shape.key !== "PIPE") return shape.boxes.map(([k, label]) => numBox(k, label));
     const fromTable = d.std === "SCH" || d.std === "SANS62";
-    const boxes =
-      shape.key !== "PIPE"
-        ? shape.boxes.map(([k, label]) => numBox(k, label))
-        : [
-            pick("std", "Standard", PIPE_STANDARDS.map((s) => [s.key, s.label]), (v) => setSectionBoxes({ std: v })),
-            d.std === "SCH" &&
-              pick("sch", "Schedule", SCHEDULES.map((s) => [s, /^\d+$/.test(s) ? `SCH${s}` : s]), (v) => setSectionBoxes((p) => ({ ...p, sch: v, nb: "" }))),
-            d.std === "SANS62" &&
-              pick("cls", "Class", SANS62_CLASSES.map((c) => [c, c]), (v) => setSectionBoxes((p) => ({ ...p, cls: v, nb: "" }))),
-            fromTable && pick("nb", "NB", pipeSizes(d.std, d.std === "SCH" ? d.sch : d.cls).map((n) => [String(n), `NB${n}`])),
-            d.std === "SABS719" && numBox("nb", "NB"),
-            d.std === "SABS719" && numBox("od", "Outside dia"),
-            d.std === "SABS719" && numBox("t", "Wall"),
-          ];
+    return [
+      pick("std", "Standard", PIPE_STANDARDS.map((s) => [s.key, s.label]), (v) => setD(() => ({ std: v }))),
+      d.std === "SCH" &&
+        pick("sch", "Schedule", SCHEDULES.map((s) => [s, /^\d+$/.test(s) ? `SCH${s}` : s]), (v) => setD((p) => ({ ...p, sch: v, nb: "" }))),
+      d.std === "SANS62" && pick("cls", "Class", SANS62_CLASSES.map((c) => [c, c]), (v) => setD((p) => ({ ...p, cls: v, nb: "" }))),
+      fromTable && pick("nb", "NB", pipeSizes(d.std, d.std === "SCH" ? d.sch : d.cls).map((n) => [String(n), `NB${n}`])),
+      d.std === "SABS719" && numBox("nb", "NB"),
+      d.std === "SABS719" && numBox("od", "Outside dia"),
+      d.std === "SABS719" && numBox("t", "Wall"),
+    ];
+  }
+
+  function renderShapedSectionAdd(shape) {
+    const d = sectionBoxes;
+    const built = buildSection(shape, d);
+    const missing = missingBoxes(shape, d);
+    const grade = managerSectionGrade.trim();
+    const clash = built && (master.sections || []).some((x) => isSectionRow(x, built.name, grade));
+    const boxes = sectionBoxInputs(shape, d, setSectionBoxes);
     const size = built && shape.key === "PIPE" ? ` (${built.dimensions.od} x ${built.dimensions.t})` : "";
     return (
       <div style={{ marginBottom: 10 }}>
@@ -20523,8 +20552,56 @@ export default function StockControl() {
                         return !stillThere || matches(s);
                       })
                       .map((entry) => (
-                        <div key={`${entry.name}|${entry.grade || ""}`} style={S.managerRow}>
-                          <EditableName value={entry.name} onCommit={(v) => renameMasterEntry(managerTab, entry.name, v)} />
+                        <div key={`${entry.name}|${entry.grade || ""}`} style={{ ...S.managerRow, flexWrap: "wrap" }}>
+                          {sectionEdit && isSectionRow(entry, sectionEdit.name, sectionEdit.grade) ? (
+                            // Changing a new-style size: its type's boxes, on the row.
+                            (() => {
+                              const shape = shapeForType(sectionEdit.shape);
+                              const built = buildSection(shape, sectionEdit.boxes);
+                              return (
+                                <div style={{ flex: "1 1 100%", display: "flex", flexDirection: "column", gap: 6, marginBottom: 6 }}>
+                                  <div style={{ ...S.managerAddRow, flexWrap: "wrap", alignItems: "flex-end" }}>
+                                    {sectionBoxInputs(shape, sectionEdit.boxes, (fn) => setSectionEdit((p) => ({ ...p, boxes: fn(p.boxes) })))}
+                                  </div>
+                                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", fontSize: 13, color: C.muted }}>
+                                    <span style={{ flex: 1 }}>
+                                      {built ? (
+                                        <>
+                                          Becomes <b>{built.name}</b>, in every material it is on.
+                                        </>
+                                      ) : (
+                                        `Still needed: ${missingBoxes(shape, sectionEdit.boxes).join(", ")}.`
+                                      )}
+                                    </span>
+                                    <button type="button" className="stk-btn" style={{ ...S.addBtn, opacity: built ? 1 : 0.5 }} disabled={!built} onClick={saveSectionEdit}>
+                                      <Check size={15} strokeWidth={2.5} />
+                                      Save
+                                    </button>
+                                    <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => setSectionEdit(null)} title="Cancel">
+                                      <X size={13} />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })()
+                          ) : shapeForType(entry.dimensions?.shape) ? (
+                            <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                              <span style={S.itemName}>{entry.name}</span>
+                              <button
+                                type="button"
+                                className="stk-btn"
+                                style={S.managerDelete}
+                                title="Change this size through its boxes"
+                                onClick={() =>
+                                  setSectionEdit({ name: entry.name, grade: entry.grade || "", shape: entry.dimensions.shape, boxes: { ...entry.dimensions } })
+                                }
+                              >
+                                <Pencil size={13} />
+                              </button>
+                            </div>
+                          ) : (
+                            <EditableName value={entry.name} onCommit={(v) => renameMasterEntry(managerTab, entry.name, v)} />
+                          )}
                           <input
                             type="number"
                             step="0.01"
@@ -20552,14 +20629,27 @@ export default function StockControl() {
                             emptyLabel="No grade"
                             title="Material"
                           />
-                          <TypeToFind
-                            style={{ width: 130 }}
-                            inputStyle={{ ...S.managerFactorInput, width: "100%", padding: "5px 24px 5px 7px" }}
-                            options={master.sectionTypes}
-                            value={entry.type || ""}
-                            onChange={(v) => updateSectionType(entry.name, v, entry.grade)}
-                            emptyLabel="No type"
-                          />
+                          {/* A size built from boxes keeps its type; an older one
+                              can be filed under one of the fixed types. */}
+                          {shapeForType(entry.dimensions?.shape) ? (
+                            <span style={{ width: 130, fontSize: 13, color: C.muted }}>{shapeForType(entry.dimensions.shape).label}</span>
+                          ) : (
+                            <TypeToFind
+                              style={{ width: 130 }}
+                              inputStyle={{ ...S.managerFactorInput, width: "100%", padding: "5px 24px 5px 7px" }}
+                              // TypeToFind shows a value that is not an option as
+                              // blank, so an old type ("Seamless Pipe") stays offered.
+                              options={[
+                                ...SECTION_SHAPES.map((sh) => ({ value: sh.label, label: shapeTitle(sh) })),
+                                ...(entry.type && !SECTION_SHAPES.some((sh) => sh.label === entry.type)
+                                  ? [{ value: entry.type, label: `${entry.type} (old)` }]
+                                  : []),
+                              ]}
+                              value={entry.type || ""}
+                              onChange={(v) => updateSectionType(entry.name, v, entry.grade)}
+                              emptyLabel="No type"
+                            />
+                          )}
                           <button
                             type="button"
                             className="stk-btn"
@@ -20577,6 +20667,27 @@ export default function StockControl() {
                   </div>
                 </>
               )
+            ) : managerTab === "sectionTypes" ? (
+              // A fixed list (Heinrich, 16 Sep 2026): a type needs its boxes,
+              // which live in src/manager/sectionShapes.js, and typed-in types
+              // were how loose entries crept in. The stored sectionTypes list
+              // still feeds the stock screens until step 5 converts it.
+              <>
+                <div style={{ ...S.roleHint, marginBottom: 10 }}>
+                  These are fixed. Each type has its own boxes, and the section name is written from them under Sections. A new type
+                  needs its boxes set up in the app, so ask for it rather than typing it in.
+                </div>
+                <div style={S.managerListFullPage}>
+                  {SECTION_SHAPES.map((sh) => (
+                    <div key={sh.key} style={S.managerRow}>
+                      <span style={{ ...S.itemName, flex: 1 }}>{shapeTitle(sh)}</span>
+                      <span style={{ fontSize: 13, color: C.muted }}>
+                        {sh.key === "PIPE" ? "Standard, Schedule or Class, NB" : sh.boxes.map(([, label]) => label).join(", ")}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
             ) : (
               <>
                 <div style={S.managerAddRow}>
