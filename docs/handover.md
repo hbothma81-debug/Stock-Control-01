@@ -1412,3 +1412,73 @@ no fault in the change. Not tried signed in; the job sheet not drawn.
   copies in no order. Offered as a separate task.
 - The tube program printout sorts TUBING_10 before TUBING_2
   (`nestingPrint.js:96`, compare without numbers). Laser production's.
+
+---
+
+## 16 Sep 2026 — Planning: only 7a39a90 pushed; extra stages held, seven problems for Jobs page
+
+### Pushed
+
+- **7a39a90 alone** (made-on list: Laser - external, Machining - external,
+  CNC Lathe, Welding retired; a stage rename also rewrites
+  job_allocations, job_info_requests and bom_stages). Heinrich chose to
+  push it by itself so JOB-0068 can be set up. Checked on its own in a
+  clean clone: built on 0acba14, 82 tests, names 0. Not tried signed in.
+- Next for JOB-0068: Laser - External to "Cuts: Laser - external", tag
+  its external lines. **Do not switch any stage to "Extra stage"** until
+  the problems below are fixed.
+
+### Held: extra stages (ae8c652, 3cd0817, 97b0653, 2f7eb3e) and everything behind them
+
+- `setup-extra-stages.sql` does not answer on practice or live: all
+  three columns 400 "does not exist" for over 5 minutes after Heinrich's
+  paste on 16 Sep. Ask whether the check returned three `ready` rows
+  (if so, `notify pgrst, 'reload schema';`), else paste again whole.
+  97b0653 must not go live before those columns answer.
+- A review (three readers, each finding re-checked by a skeptic) confirmed
+  seven problems. Line numbers are at 2f7eb3e.
+
+**Only once a stage is switched to Extra stage:**
+1. `blockingStages` (App.jsx ~5571) drops the hold between two extra
+   stages whatever their tracking mode. On batch stages (every stage added
+   before the switch, and every shortage catch-up, inserted as batch at
+   ~6109) the later one reads Ready and can be ticked first: Machining -
+   External before Bending. The job page's "Set this stage to Each" hint
+   does not show on the Production card or on catch-up stages. The agreed
+   plan said blockingStages stays whole-stage.
+2. With both Each, the exempted stage reads "Ready" (isReady true, so the
+   readyQty "Partly ready" count at ~5746 is skipped), sits in Ready now
+   and in the overview count, while `itemFlowLimit` caps every line at 0.
+   blockingStages and itemFlowLimit disagree.
+3. A line made on `machining_external` with extra_stages null:
+   `routePosition` (src/jobs/extraStages.js ~60) returns null for the
+   other stage, so `comesBeforeForLine` falls back to the flow. Bending
+   does not wait for the supplier's parts, and Machining - External waits
+   on Bending. The first step should beat the flow even when the list is
+   unset; the test only covers a set list.
+
+**When lines are marked:**
+4. The Then box (src/jobs/ExtraStagesBox.jsx ~103) and "Nothing extra on
+   the rest" (App.jsx ~7003) build the new list from the lines on screen,
+   which stay stale until openJobDetail reloads (1–3 s). Two quick picks,
+   or the button straight after a pick, and the last write wins: a stage
+   is lost from the line and from its stock part. Fix: build from the
+   latest state, and narrow the button's update with `.is("extra_stages", null)`.
+5. Stage rename (App.jsx ~10794) reads marked lines with a plain select,
+   capped at 1000 rows, not narrowed to the old name. Past 1000 lines with
+   any list (including every `{}`), lines keep the old name and drop off
+   the renamed stage, silently. Fix: `.contains("extra_stages", [oldName])`
+   and page it (fetchAllRows).
+6. The catalogue Replace import (App.jsx ~13524) rebuilds a part without
+   `extraStages`, and the autosave writes null over every remembered list.
+   It already keeps `madeOn` for this reason; keep `extraStages` the same way.
+7. (minor) A parts import that links a typed part to its stock item
+   (App.jsx ~4674) does not bring the part's remembered list, unlike a
+   typed stock code. Fill it when the line's list is null.
+
+### Queued behind the held commits (not reviewed yet)
+
+- aa7f056 SQL one spelling per material, 7d44afe material by short name,
+  c49eb8d / 1f712fd / ae91985 sections step 4 (Stock Manager); efb567f
+  parts in order on the floor. They cannot go live until the extra-stages
+  commits do, or are reordered.
