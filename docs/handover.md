@@ -2037,3 +2037,80 @@ Nothing for this work: no SQL, no ticks, no open decision.
    two reloads of one card landing out of order cannot refuse a quick count.
 3. For Laser production: the tube program printout sorts TUBING_10 before
    TUBING_2 (`nestingPrint.js`, compare without numbers).
+
+## 16 Sep 2026 — Laser production conversation: Laser 4kw priority
+
+Heinrich asked for a priority setting on the plate laser: sales people
+and Prince must be able to flag which job is cut next. Plan sent, ten
+questions answered, built the same day in four commits, none pushed.
+
+### Decided (his answers, 16 Sep)
+
+Numbers, not a strict order: 1 is cut first, two jobs may share a
+number, blank is ordinary work. Set by any sales person, Prince (anyone
+who nests on the plate laser) and admins; the operator only sees it.
+"Cut next" on top of the Cutting screen, across the thickness groups.
+Ranking on To nest: stopped programs, re-cuts someone is waiting for,
+numbered jobs, then the rest. Mark urgent stays. Clears itself once the
+laser is done with the job. Nesters and admins are told. Pressing
+Refresh is good enough for now. Plate only; the tube laser can be given
+the same later by setting `hasPriority` on its profile. And the laser
+Nesting screen now honours the shortage form's "Can wait" tick.
+
+### Committed, not pushed (in order)
+
+- `157e372` step 1: `jobs.laser_priority` (+ `_by`, `_at`); the job page
+  box (Overview), the header line, the red "Laser P1" chip on the Jobs
+  list, the History line. `setup-laser-priority.sql`, proven on pglite.
+- `a44000a` step 2: To nest sorted by it; the box on the opened row; the
+  "Can wait" re-cut takes its turn; `LASER_MACHINES.laser4kw.hasPriority`.
+- `79ae7ac` step 3: the red "Cut next" section on Cutting; "Priority 1"
+  on the card and "· P1" on the job chip; the auto-clear
+  (`clearLaserPriorityFor` from `afterLaserStagesDone`).
+- `f62aa95` step 4: Refresh re-reads loaded laser data; the notice;
+  CLAUDE.md and `docs/LASER-4KW-HOW-IT-WORKS.md`.
+
+Each step: 0 missing names, 136 tests, clean build. Step 1's diff had a
+three-lens adversarial review; its five findings (a hint promising the
+auto-clear before it existed, "1e" clearing a set number, a stale box
+after somebody else's change, the box on a job the laser had finished,
+present-tense SQL comments) are all fixed. Step 2's review hit the usage
+limit and was checked by hand instead.
+
+### SQL this conversation wrote
+
+`setup-laser-priority.sql` — three columns on `jobs` and a check (>= 1).
+Registered in `build-test-database.sh` and
+`CHECK-which-setup-files-are-run.sql`; `setup-ALL.sql` regenerated.
+**Not yet run on practice or live.** The code names the columns in its
+save, so the SQL must be on both databases before this is pushed, or
+every priority save fails ("That didn't save").
+
+### Built but not yet tested by Heinrich
+
+Nothing was tried in a browser: the job page needs a login. To try on
+practice, after the SQL: set a number on a job's Overview tab (as a
+sales person, then as Prince), see the chip on the Jobs list and the
+History line; open Laser 4kw > Nesting and see the row on top with its
+red "Priority 1" chip; put the job on a program and see it under "Cut
+next" on Cutting; mark every program cut and tick Nesting done, then
+see the number gone and the History line; press Refresh on a second PC
+and see a number set on the first arrive.
+
+### Waiting on Heinrich
+
+1. Run `setup-laser-priority.sql` on practice, then live.
+2. Whether any sales person meant to set priorities is in fact a
+   sales person in User Management (`Is a Sales Person`), because that
+   tick is what shows the box.
+3. Confirm the reading of his answer to question 2: sales people, Prince
+   and admins may set it (the reply took "Prince and admin" as an addition
+   to sales, not instead of).
+
+### Pick up next
+
+1. The tube laser: set `hasPriority: true` on `LASER_MACHINES.tubeLaser`
+   if he wants the same there; the job page box would then also need to
+   show for tube stages (`jobGoesToPlateLaser` in App.jsx is plate-only).
+2. "Programs waiting to be cut" on the Nesting screen does not show the
+   priority tag; only Cutting does.
