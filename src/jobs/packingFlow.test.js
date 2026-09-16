@@ -143,6 +143,22 @@ test("rule 2: a whole stage covers packing when it takes every packer line or it
   assert.equal(stageCoversPacking({ jobItems, packingTakes, stageTakes: (it) => it.id === "br" }), false);
 });
 
+test("rule 2: a stage with 'laser' in its name never carries, even left on every item", () => {
+  const blankExternal = { ...ctx, cutsMadeOn: (n) => (n === "Laser - External" ? "" : ctx.cutsMadeOn(n)), isAnyLaserStage: (n) => /laser/i.test(n) };
+  const s = job68();
+  assert.equal(packingCarriedFrom(by(s, "x"), s, blankExternal), null);
+  assert.equal(packingCarriedFrom(by(s, "b"), s, blankExternal).id, "p");
+});
+
+test("the packer's row: a count on a line with parts is shown on its parts", () => {
+  const s = job68();
+  const progress = [{ job_process_id: "b", job_quote_item_id: "bu", qty_complete: 1 }];
+  assert.deepEqual(countedAfterPacking(s, progress, ctx, { jobItems, packingTakes }), {
+    pl: { qty: 2, stage: "Bending" },
+    gu: { qty: 4, stage: "Bending" },
+  });
+});
+
 test("the packer's row: the highest count carried from each later stage, by name", () => {
   const s = job68();
   const progress = [

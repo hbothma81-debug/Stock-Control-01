@@ -76,6 +76,10 @@ export function packingCarriedFrom(stage, jobProcesses, ctx) {
   if (!ownRun(stage)) return null;
   const name = stage.process_name;
   if (ctx.isPackingStage(name) || ctx.isNestingStage(name) || ctx.isLaserCutStage(name) || ctx.isTubeStage(name)) return null;
+  // Any stage with "laser" in its name, Laser - External included, is kept
+  // out by name as well as by its Cuts: setting, so a stage left on every
+  // item never reaches the plate packer (review, 16 Sep 2026).
+  if (ctx.isAnyLaserStage && ctx.isAnyLaserStage(name)) return null;
   if (ctx.cutsMadeOn(name)) return null;
   const packing = ownPackingStage(jobProcesses, ctx);
   if (!packing || packing.is_complete || packing.id === stage.id) return null;
@@ -126,17 +130,27 @@ export function stageCoversPacking({ jobItems, packingTakes, stageTakes }) {
 
 // For the packer's row: per line, the highest count at a stage packing is
 // carried from, and that stage's name, so he can see what came from Bending
-// and log only the rest. { [itemId]: { qty, stage } }
-export function countedAfterPacking(jobProcesses, jobProgress, ctx) {
+// and log only the rest. A count on a line with parts is shown on its parts,
+// in the same proportion packingRaises uses, because the packer's rows are
+// the parts. { [itemId]: { qty, stage } }
+export function countedAfterPacking(jobProcesses, jobProgress, ctx, { jobItems = [], packingTakes = null } = {}) {
   const carriers = new Map(
     (jobProcesses || []).filter((p) => packingCarriedFrom(p, jobProcesses, ctx)).map((p) => [p.id, p.process_name])
   );
   const out = {};
+  const note = (itemId, qty, stage) => {
+    if (qty > 0 && (!out[itemId] || out[itemId].qty < qty)) out[itemId] = { qty, stage };
+  };
   for (const row of jobProgress || []) {
     const stage = carriers.get(row.job_process_id);
     const qty = Number(row.qty_complete) || 0;
     if (!stage || qty <= 0) continue;
-    if (!out[row.job_quote_item_id] || out[row.job_quote_item_id].qty < qty) out[row.job_quote_item_id] = { qty, stage };
+    const line = (jobItems || []).find((it) => it.id === row.job_quote_item_id);
+    if (!line || !packingTakes || packingTakes(line)) {
+      note(row.job_quote_item_id, qty, stage);
+      continue;
+    }
+    for (const r of packingRaises({ line, newDone: qty, jobItems, packingTakes, progress: new Map() })) note(r.itemId, r.qty, stage);
   }
   return out;
 }

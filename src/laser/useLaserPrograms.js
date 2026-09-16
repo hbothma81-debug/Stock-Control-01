@@ -1061,6 +1061,11 @@ export default function useLaserPrograms(deps) {
       // already cut, so its laser stage may finish at the same moment.
       const fresh = await loadLaserRaw();
       const changed = await syncLaserStagesFor([job.id], fresh);
+      // Done nesting can be the last thing the laser work was waiting for even
+      // when Laser itself was already ticked, or on a job with no Laser stage,
+      // so packing that waited is checked here too (App.jsx
+      // afterLaserStagesDone; safe to run twice).
+      if (done && !machine.cutStageIsPacking && afterLaserStagesDone) await afterLaserStagesDone([job.id]);
       setLaserData(changed > 0 ? await loadLaserRaw() : fresh);
       if (productionQueue !== null) fetchProductionQueue();
     } catch (err) {

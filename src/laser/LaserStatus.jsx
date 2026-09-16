@@ -444,7 +444,7 @@ function StatusRow({
                 </div>
                 <div style={S.roleHint}>
                   {partsLabel} only — {otherNote}. This job leaves the screen on its own once every line here is
-                  packed in full and nothing is left to cut.
+                  packed in full{r.countedLater ? " and nothing is left to cut" : ""}.
                 </div>
               </div>
             )}
