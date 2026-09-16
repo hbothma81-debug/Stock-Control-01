@@ -115,6 +115,8 @@ with checks (setup_file, looks_for, found) as (
                     on m.list_name = 'grades' and coalesce(m.short_name, '') <> '' and lower(m.short_name) <> lower(m.name)
                    and lower(trim(s.grade)) = lower(trim(m.name))
                   where s.main_cat not in ('cncBar', 'fasteners'))),
+    ('setup-section-dimensions.sql',    'column master_factor_items.dimensions',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'master_factor_items' and column_name = 'dimensions')),
     ('setup-made-on-welding.sql',       'cut method Welding allowed',
       exists (select 1 from pg_constraint where conname = 'job_quote_items_made_on_check' and pg_get_constraintdef(oid) like '%welding%')),
     ('setup-made-on-external.sql',      'cut methods Laser - external and Machining - external allowed',
