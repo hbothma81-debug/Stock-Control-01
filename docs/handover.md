@@ -1547,3 +1547,69 @@ Tube laser. The cut list and Guess the rest were not tried on screen.
 ### Practice data left by testing
 
 - JOB-0012, the copy of JOB-0004. Remove it or keep it for test 1.
+
+---
+
+## 16 Sep 2026 — Planning (afternoon): 19 commits pushed up to 75d8bcf; packer rules held
+
+### Pushed (Heinrich: "PUSH", after review)
+
+7a39a90..75d8bcf, 19 commits. Clean clone at 75d8bcf: build, 123 tests,
+names 0. Reviewed by three readers with a skeptic pass each, plus a
+trace of every write of `extra_stages` in the code.
+
+- **Extra stages (Jobs page)**, made safe by fe3ca02: the "Extra stage"
+  switch is hidden (`EXTRA_STAGES_SWITCH_ON = false`), `extra_stages` is
+  out of the stock auto-save, so the push no longer needed
+  `setup-extra-stages.sql`. That SQL still answers 400 on practice and
+  live (16 Sep, 15:50). Of the seven review problems: 4, 5, 6 fixed in
+  fe3ca02; 1–3 unreachable while the switch is hidden, still to fix
+  before it is turned on; 7 (minor) open.
+- Parts A to Z on the floor (efb567f); tube re-cut row no longer blanks
+  the app (4ea57c1); Copy job keeps parts, cut methods, cut list
+  (9748e38); Production tab loads in pages and batches ids (75d8bcf;
+  every table it sorts has `id`; nothing on a timer); Sections step 4
+  and materials by short name (7d44afe, c49eb8d, 1f712fd, ae91985,
+  d280fd2; `master_factor_items.dimensions` answers 200 on both);
+  three CHECK files; notes.
+- Not tried signed in by Heinrich: any of it. What to try is in each
+  commit's message.
+
+### Held, not pushed
+
+- 60200fd and 2b7ffcb (Bending opens with the packer; packing closes
+  from later counts) and a8e7892 (their CHECK). The Jobs page
+  conversation's review of them was still running and asked for the
+  hold. They change how the floor moves; Heinrich to run
+  `CHECK-packer-opens-at-push.sql` on live and try them on practice
+  before the next push.
+
+### Known gap now live — for Stock Manager
+
+- A section added from the new boxes is stored with its shape's label
+  (`addShapedSection`, `type: shape.label`: "Pipe", "Flat Bar", "Square
+  Bar", "Hex Bar", "Unequal Angle", "Parallel Flange Channel", "Lipped
+  Channel", "Taper Flange Channel", "IPE Beam", "Tee"). The structural
+  stock form (`LibraryField pickOnly` over `master.sectionTypes`) and the
+  Stock tab's type chips list the stored `sectionTypes` words, so such a
+  size cannot be put into stock, and Section Types is read-only now.
+  Re-filing an old "Seamless Pipe" row as "Pipe" drops it from the stock
+  form. Step 5 (stock form onto the 17 types) closes it; until then add
+  sections the old way if they must be stocked.
+
+### Open on live, not from this push — for Stock Manager
+
+- `findFactor` matches the full grade name only, `findPrice` also the
+  short name (App.jsx ~10309/10315 at 7a39a90). The 4 plate lines now
+  spelled "SS304 2B" (after `setup-material-spellings.sql`) show no
+  weight, and a galvanised sheet stored as "Galv" would too.
+- `setup-material-spellings.sql` rewrote requisitions with no `main_cat`
+  filter: the pending CNC bar request "Stainless 304 ⌀35mm" now says
+  "SS304", which the CNC grades list has no row for, so it prices at R0
+  and a PO from it would say R0. One-row SQL to put it back.
+- Live's Material Types list says "Galvanized" (z); 7 laser programs end
+  "Galvanised" (s). The SQL only knew the s spelling, so "Galv" never
+  took. Heinrich to say which spelling, and whether the short name stays
+  "Galv".
+- Checked on live 16 Sep: no duplicate section rows for SS304/Galv; no
+  tube aliases or tube job lines with the old spellings.
