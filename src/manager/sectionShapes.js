@@ -53,9 +53,9 @@ export function shapeForType(type) {
 // from NB, so those come from the tables below; SABS 719 is welded to a
 // stated outside diameter and wall, so both are typed.
 //
-// TO BE CHECKED BY HEINRICH before this goes live: every number in these
-// tables. Schedule is ASME B36.10M; SANS 62 is taken as ISO 65 (Light,
-// Medium, Heavy). Live has "NB25 SCH40 (33.4x4.55mm)", whose wall is the
+// Checked by Heinrich 16 Sep 2026 (SCH5 to SCH160, STD, XS, SANS 62).
+// Schedule is ASME B36.10M (SCH5 from B36.19); SANS 62 is ISO 65 (Light,
+// Medium, Heavy). Live had "NB25 SCH40 (33.4x4.55mm)", whose wall is the
 // SCH80 figure, and "NB15 Medium (21.7x2.3mm)", which matches neither.
 
 export const PIPE_STANDARDS = [
@@ -64,7 +64,8 @@ export const PIPE_STANDARDS = [
   { key: "SABS719", label: "SABS 719 welded" },
 ];
 
-export const SCHEDULES = ["10", "20", "40", "80", "160", "STD", "XS", "XXS"];
+// Every schedule up to SCH160 (Heinrich, 16 Sep 2026); XXS is not used.
+export const SCHEDULES = ["5", "10", "20", "30", "40", "60", "80", "100", "120", "140", "160", "STD", "XS"];
 export const SANS62_CLASSES = ["Light", "Medium", "Heavy"];
 
 // NB -> outside diameter (mm), ASME B36.10M.
@@ -75,6 +76,12 @@ export const SCHEDULE_OD = {
 
 // NB -> wall (mm) per schedule. A size a schedule does not come in is absent.
 export const SCHEDULE_WALL = {
+  5: { 15: 1.65, 20: 1.65, 25: 1.65, 32: 1.65, 40: 1.65, 50: 1.65, 65: 2.11, 80: 2.11, 100: 2.11, 125: 2.77, 150: 2.77, 200: 2.77, 250: 3.4, 300: 3.96 },
+  30: { 200: 7.04, 250: 7.8, 300: 8.38 },
+  60: { 200: 10.31, 250: 12.7, 300: 14.27 },
+  100: { 200: 15.09, 250: 18.26, 300: 21.44 },
+  120: { 100: 11.13, 125: 12.7, 150: 14.27, 200: 18.26, 250: 21.44, 300: 25.4 },
+  140: { 200: 20.62, 250: 25.4, 300: 28.58 },
   10: { 15: 2.11, 20: 2.11, 25: 2.77, 32: 2.77, 40: 2.77, 50: 2.77, 65: 3.05, 80: 3.05, 100: 3.05, 125: 3.4, 150: 3.4, 200: 3.76, 250: 4.19, 300: 4.57 },
   20: { 200: 6.35, 250: 6.35, 300: 6.35 },
   40: { 6: 1.73, 8: 2.24, 10: 2.31, 15: 2.77, 20: 2.87, 25: 3.38, 32: 3.56, 40: 3.68, 50: 3.91, 65: 5.16, 80: 5.49, 100: 6.02, 125: 6.55, 150: 7.11, 200: 8.18, 250: 9.27, 300: 10.31 },
@@ -82,7 +89,6 @@ export const SCHEDULE_WALL = {
   160: { 15: 4.78, 20: 5.56, 25: 6.35, 32: 6.35, 40: 7.14, 50: 8.74, 65: 9.53, 80: 11.13, 100: 13.49, 125: 15.88, 150: 18.26, 200: 23.01, 250: 28.58, 300: 33.32 },
   STD: { 6: 1.73, 8: 2.24, 10: 2.31, 15: 2.77, 20: 2.87, 25: 3.38, 32: 3.56, 40: 3.68, 50: 3.91, 65: 5.16, 80: 5.49, 100: 6.02, 125: 6.55, 150: 7.11, 200: 8.18, 250: 9.27, 300: 9.53 },
   XS: { 6: 2.41, 8: 3.02, 10: 3.2, 15: 3.73, 20: 3.91, 25: 4.55, 32: 4.85, 40: 5.08, 50: 5.54, 65: 7.01, 80: 7.62, 100: 8.56, 125: 9.53, 150: 10.97, 200: 12.7, 250: 12.7, 300: 12.7 },
-  XXS: { 15: 7.47, 20: 7.82, 25: 9.09, 32: 9.7, 40: 10.15, 50: 11.07, 65: 14.02, 80: 15.24, 100: 17.12, 125: 19.05, 150: 21.95, 200: 22.23 },
 };
 
 // NB -> [outside diameter, Light wall, Medium wall, Heavy wall] (mm), ISO 65.

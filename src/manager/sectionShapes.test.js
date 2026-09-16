@@ -47,6 +47,8 @@ test("pipe to schedule takes its size from the table", () => {
   assert.equal(s.name, "PIPE NB20 SCH160");
   assert.deepEqual(s.dimensions, { shape: "PIPE", std: "SCH", nb: 20, sch: "160", od: 26.7, t: 5.56 });
   assert.equal(buildSection(shape("PIPE"), { std: "SCH", sch: "XS", nb: 25 }).name, "PIPE NB25 XS");
+  assert.equal(buildSection(shape("PIPE"), { std: "SCH", sch: "120", nb: 150 }).dimensions.t, 14.27);
+  assert.deepEqual(missingBoxes(shape("PIPE"), { std: "SCH", sch: "XXS", nb: 25 }), ["Schedule"]);
 });
 
 test("pipe to SANS 62 takes its size from the class", () => {
