@@ -56,6 +56,12 @@ export default function useLaserPrograms(deps) {
     // errors, never throws and never blocks, so a cut is never lost
     // because the stock could not be moved.
     consumeStock,
+    // Called with the ids of jobs whose plate Laser stage this hook has just
+    // closed (the last program cut), so App.jsx can close packing that
+    // waited for it and run the job's Complete check (src/jobs/
+    // packingFlow.js, rule 2, Jobs page conversation). Logs its own errors
+    // and never throws, so a cut is never lost to it.
+    afterLaserStagesDone,
   } = deps;
   // The stage-name rules, under the names the code below has always used.
   const isPlateNestingProcess = machine.isNestingStage;
@@ -850,7 +856,7 @@ export default function useLaserPrograms(deps) {
       );
       const done = !!nesting?.is_complete && mine.length > 0 && mine.every((pg) => pg.is_complete);
       for (const laser of laserStages) {
-        if (done !== !!laser.is_complete) changes.push({ id: laser.id, done });
+        if (done !== !!laser.is_complete) changes.push({ id: laser.id, done, jobId });
       }
     }
     for (const c of changes) {
@@ -864,6 +870,10 @@ export default function useLaserPrograms(deps) {
         .eq("id", c.id);
       if (error) throw error;
     }
+    // Jobs whose Laser has just closed: packing that waited for the last
+    // program may close now, and the job may be finished (App.jsx).
+    const closed = [...new Set(changes.filter((c) => c.done).map((c) => c.jobId))];
+    if (closed.length && afterLaserStagesDone) await afterLaserStagesDone(closed);
     return changes.length;
   }
 

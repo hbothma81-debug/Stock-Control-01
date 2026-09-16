@@ -434,11 +434,17 @@ function StatusRow({
                     jobItems={r.jobItems}
                     itemProgress={r.itemProgress || []}
                     onSubmit={(process, job, item, qty, progress) => onLogItem(r, item, qty, progress)}
+                    // What a later stage has already counted, so the packer
+                    // logs only the rest (src/jobs/packingFlow.js, rule 2).
+                    noteFor={(item) => {
+                      const c = r.countedLater?.[item.id];
+                      return c ? `${c.qty} counted at ${c.stage}` : "";
+                    }}
                   />
                 </div>
                 <div style={S.roleHint}>
                   {partsLabel} only — {otherNote}. This job leaves the screen on its own once every line here is
-                  packed in full.
+                  packed in full and nothing is left to cut.
                 </div>
               </div>
             )}

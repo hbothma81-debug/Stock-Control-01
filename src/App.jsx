@@ -70,7 +70,16 @@ import Materials from "./jobs/Materials.jsx";
 import { addStockFromStores } from "./jobs/stockFromStores.js";
 import { markedStageTakes, comesBeforeForLine, extraStagesOf, routeText, renameInList } from "./jobs/extraStages.js";
 import ExtraStagesBox from "./jobs/ExtraStagesBox.jsx";
-import { packerReleases, packingStageFor, packingRaises, packingIsFull, stageCoversPacking } from "./jobs/packingFlow.js";
+import {
+  packerReleases,
+  packingCarriedFrom,
+  ownPackingStage,
+  laserWorkDone,
+  packingRaises,
+  packingIsFull,
+  stageCoversPacking,
+  countedAfterPacking,
+} from "./jobs/packingFlow.js";
 import { groupJobLines, compareLines } from "./jobs/lineOrder.js";
 // The tube laser's own wording for a material. Shared, not copied: the
 // job line's material and the nesting import's section must be the same
@@ -1078,7 +1087,9 @@ function LibraryField({ label, options, value, onChange, customValue, onCustomCh
 // its name, numbers read as numbers. jobItems is the whole job's lines,
 // so a cutting stage, which lists only the parts, can still name the line
 // they belong to. A finished row keeps its place.
-function QtyProgressControl({ process, job, quoteItems, jobItems, itemProgress, limitFor, onSubmit }) {
+// noteFor(item), optional: a few words after a line's count, e.g. the
+// packer's "6 counted at Bending" (src/jobs/packingFlow.js).
+function QtyProgressControl({ process, job, quoteItems, jobItems, itemProgress, limitFor, onSubmit, noteFor }) {
   const [inputs, setInputs] = useState({});
   // No stage, nothing to count. A tube re-cut row reached here with none
   // and the read below threw, blanking the whole app. Below useState, so
@@ -1111,6 +1122,7 @@ function QtyProgressControl({ process, job, quoteItems, jobItems, itemProgress, 
         <span style={{ fontSize: 12.5, flex: "1 1 140px", color: itemDone ? C.accentFinished : C.text }}>
           {item.description || "Item"}
           {item.length_mm ? ` · ${Number(item.length_mm)} mm` : ""} — {done}/{itemQty}
+          {noteFor && noteFor(item) ? <span style={{ color: C.muted }}> · {noteFor(item)}</span> : null}
         </span>
         {itemDone ? (
           <span style={{ fontSize: 12, color: C.accentFinished, fontWeight: 600 }}>Done</span>
@@ -1943,6 +1955,10 @@ export default function StockControl() {
     consumeStock: consumeProgramStock,
     addParts: addPartsToJob,
     itemsForStage,
+    // Called when a job's plate Laser stage has just closed itself, so
+    // packing that waited for the last program can close and the job's
+    // Complete check runs (src/jobs/packingFlow.js, rule 2).
+    afterLaserStagesDone,
   };
   const laser = useLaserPrograms({ ...laserDeps, machine: PLATE_LASER });
   const tubeLaser = useLaserPrograms({ ...laserDeps, machine: TUBE_LASER });
@@ -5320,6 +5336,17 @@ export default function StockControl() {
         // the names of the lines they belong to (src/jobs/lineOrder.js).
         jobItems: (d.quoteItems || []).filter((it) => it.job_id === job.id),
         itemProgress: packing ? (d.itemProgress || []).filter((ip) => ip.job_process_id === packing.id) : [],
+        // Per line, the most counted at a later stage the plate packer
+        // follows (rule 2, src/jobs/packingFlow.js), so he sees what came
+        // from Bending and logs only the rest. Plate packer only.
+        countedLater:
+          packing && isPackingStage === workedInLaserStatus
+            ? (() => {
+                const stages = d.processes.filter((pr) => pr.job_id === job.id);
+                const ids = new Set(stages.map((pr) => pr.id));
+                return countedAfterPacking(stages, (d.itemProgress || []).filter((ip) => ids.has(ip.job_process_id)), packerFlowCtx());
+              })()
+            : {},
         // Every line is another machine's: said out loud, single tick kept.
         nothingToCut:
           packing && stageHasNothingToCut(packing.process_name, (d.quoteItems || []).filter((it) => it.job_id === job.id))
@@ -5531,10 +5558,13 @@ export default function StockControl() {
   function packerFlowCtx() {
     return {
       flowRank,
-      isPlateLaserStage: isPlateLaserProcess,
+      isNestingStage: isPlateNestingProcess,
+      isLaserCutStage: isProgramLaserProcess,
       isPackingStage: (name) => workedInLaserStatus(name),
-      inOtherLane: inOtherLaserLane,
+      isTubeStage: isTubeLaserProcess,
+      cutsMadeOn: (name) => cutsMadeOn(name),
       stageIsCleared: (p) => stageIsCleared(p),
+      neverRelease: isInvoicingStage,
     };
   }
 
@@ -5642,10 +5672,12 @@ export default function StockControl() {
       // is bent before it is machined and the next the other way round,
       // so each line's own count orders them (itemFlowLimit).
       .filter((p) => !(onlyMarked(p.process_name) && onlyMarked(process.process_name)))
-      // Once the job's packer is taken, the plate laser stages before it
-      // stop holding back every stage after it: parts already packed are
-      // bent while the last programs are still being cut (Heinrich,
-      // 16 Sep 2026, JOB-0068). src/jobs/packingFlow.js, rule 1.
+      // Once the job's packer is taken and Nesting is ticked, the plate
+      // Laser stage stops holding back a per-item stage after the packer:
+      // parts already packed are bent while the last programs are still
+      // being cut (Heinrich, 16 Sep 2026, JOB-0068). Never Nesting, never a
+      // stage on one tick, never Invoicing, never a re-cut's run.
+      // src/jobs/packingFlow.js, rule 1.
       .filter((p) => !packerReleases(p, process, jobProcesses, packerFlowCtx()))
       .filter((p) => !stageIsCleared(p))
       .sort((a, b) => flowRank(a.process_name) - flowRank(b.process_name));
@@ -6411,9 +6443,21 @@ export default function StockControl() {
   // sheet lists them individually rather than as one lumped total.
   async function submitProcessItemProgress(process, job, quoteItem, qtyAdded, existingProgress, allQuoteItems, allProgressForProcess) {
     if (!qtyAdded || qtyAdded <= 0) return;
-    const currentDone = Number(existingProgress?.qty_complete) || 0;
-    const newDone = Math.min(currentDone + qtyAdded, Number(quoteItem.qty) || 0);
     try {
+      // Counted on from what is saved now, not from what this screen loaded:
+      // another device, or a count carried from a later stage (rule 2,
+      // src/jobs/packingFlow.js), may have raised it since, and adding to an
+      // old number would write it back down.
+      const { data: savedRows, error: readError } = await supabase
+        .from("job_process_item_progress")
+        .select("job_quote_item_id, qty_complete")
+        .eq("job_process_id", process.id);
+      if (readError) throw readError;
+      const counts = new Map();
+      for (const p of allProgressForProcess || []) counts.set(p.job_quote_item_id, Number(p.qty_complete) || 0);
+      for (const r of savedRows || []) counts.set(r.job_quote_item_id, Math.max(counts.get(r.job_quote_item_id) || 0, Number(r.qty_complete) || 0));
+      const currentDone = Math.max(Number(existingProgress?.qty_complete) || 0, counts.get(quoteItem.id) || 0);
+      const newDone = Math.min(currentDone + qtyAdded, Number(quoteItem.qty) || 0);
       const { error } = await supabase
         .from("job_process_item_progress")
         .upsert(
@@ -6421,19 +6465,19 @@ export default function StockControl() {
           { onConflict: "job_process_id,job_quote_item_id" }
         );
       if (error) throw error;
+      counts.set(quoteItem.id, newDone);
 
       // Whole process only completes once every item on the job has
       // individually reached its own quantity.
-      const updatedProgress = [
-        ...allProgressForProcess.filter((p) => p.job_quote_item_id !== quoteItem.id),
-        { job_quote_item_id: quoteItem.id, qty_complete: newDone },
-      ];
-      const allItemsDone = allQuoteItems.every((it) => {
-        const p = updatedProgress.find((up) => up.job_quote_item_id === it.id);
-        return (Number(p?.qty_complete) || 0) >= (Number(it.qty) || 0);
-      });
+      const allItemsDone = allQuoteItems.every((it) => (counts.get(it.id) || 0) >= (Number(it.qty) || 0));
+      // Except the job's own plate packer while programs are still to cut
+      // (Heinrich, 16 Sep 2026): the parts off them would have no row left
+      // to be packed on. It closes when the laser is done
+      // (afterLaserStagesDone).
+      const packerWaitsForLaser =
+        allItemsDone && !process.shortage_id && workedInLaserStatus(process.process_name) && !(await laserDoneForJob(job.id));
 
-      if (allItemsDone) {
+      if (allItemsDone && !packerWaitsForLaser) {
         const { error: procError } = await supabase
           .from("job_processes")
           .update({ is_complete: true, completed_by: roleLabel, completed_at: new Date().toISOString() })
@@ -6449,8 +6493,10 @@ export default function StockControl() {
         }
         await settleJobAfterTick(job.id);
       }
-      // A part counted after the plate packer has been packed.
+      // A part counted after the plate packer has been packed; a stage that
+      // closed by its counts carries through as a tick does.
       await packingFollowsCount(process, job, quoteItem, newDone);
+      if (allItemsDone && !packerWaitsForLaser) await packingFollowsTick(process, job);
       if (jobDetail?.job.id === job.id) refreshJobDetail();
       if (productionQueue !== null) fetchProductionQueue();
     } catch (err) {
@@ -6459,19 +6505,37 @@ export default function StockControl() {
     }
   }
 
+  // The job's stages, just the fields the packer rules read.
+  async function stagesForPacking(jobId) {
+    const { data, error } = await supabase
+      .from("job_processes")
+      .select("id, job_id, process_name, shortage_id, tracking_mode, is_complete, started_at")
+      .eq("job_id", jobId);
+    if (error) throw error;
+    return data || [];
+  }
+
+  // Whether the job's own plate Nesting and Laser stages are all done:
+  // nothing left to cut, so the packer may close.
+  async function laserDoneForJob(jobId) {
+    return laserWorkDone(await stagesForPacking(jobId), packerFlowCtx());
+  }
+
   // Rule 2 of src/jobs/packingFlow.js (Heinrich, 16 Sep 2026): a part
-  // counted at any stage after the plate packer has been packed -- it could
-  // not be there otherwise. Raises the packer's count for it (a line with
-  // parts raises its parts in proportion) and closes packing once every
-  // line it handles is full. Read fresh, because a card holds only its own
-  // stage's lines. Never lowers a count; a failure here is logged and does
-  // not undo the count just saved.
+  // counted at a stage after the plate packer with no machine of its own
+  // has been packed. Raises the packer's count for it (a line with parts
+  // raises its parts in proportion). Packing closes here only when every
+  // line it handles is counted AND nothing is left to cut; otherwise it
+  // waits for afterLaserStagesDone. Read fresh, because a card holds only
+  // its own stage's lines. Never lowers a count, never reloads the laser
+  // screens (whole tables), and a failure here is logged without undoing
+  // the count just saved.
   async function packingFollowsCount(process, job, quoteItem, newDone) {
     try {
-      const { data: stages, error } = await supabase.from("job_processes").select("*").eq("job_id", job.id);
-      if (error) throw error;
-      const packing = packingStageFor(process, stages || [], packerFlowCtx());
-      if (!packing || packing.is_complete || (packing.tracking_mode || "batch") !== "each") return;
+      const stages = await stagesForPacking(job.id);
+      const ctx = packerFlowCtx();
+      const packing = packingCarriedFrom(process, stages, ctx);
+      if (!packing || (packing.tracking_mode || "batch") !== "each") return;
       const [{ data: jobItems, error: itemsError }, { data: rows, error: progressError }] = await Promise.all([
         supabase.from("job_quote_items").select("*").eq("job_id", job.id),
         supabase.from("job_process_item_progress").select("job_quote_item_id, qty_complete").eq("job_process_id", packing.id),
@@ -6493,56 +6557,101 @@ export default function StockControl() {
         if (upError) throw upError;
         for (const r of raises) progress.set(r.itemId, r.qty);
       }
-      if (packingIsFull({ jobItems: items, packingTakes: takes, progress })) await closePackingFromLaterStage(packing, job);
-      else if (raises.length && laserData !== null) await fetchLaserData();
+      if (laserWorkDone(stages, ctx) && packingIsFull({ jobItems: items, packingTakes: takes, progress })) {
+        await closePackingFromLaterStage(packing, job, process.process_name);
+      }
     } catch (err) {
       console.error("Could not carry the count through to packing:", err);
     }
   }
 
-  // Rule 2, a whole tick: a stage after the plate packer ticked done ticks
-  // packing done, when it covers every line the packer handles (the line
-  // itself or the line a part sits under). Also reached by an admin's
-  // Close this stage, which ticks through toggleJobProcessComplete.
+  // Rule 2, a whole stage: a stage after the plate packer with no machine
+  // of its own, now done, closes packing when it covers every line the
+  // packer handles (the line itself or the line a part sits under) AND
+  // nothing is left to cut. Reached by a tick, an admin's Close this
+  // stage, and a stage closing by its counts.
   async function packingFollowsTick(process, job) {
     try {
-      const [{ data: stages, error }, { data: jobItems, error: itemsError }] = await Promise.all([
-        supabase.from("job_processes").select("*").eq("job_id", job.id),
-        supabase.from("job_quote_items").select("*").eq("job_id", job.id),
-      ]);
+      const stages = await stagesForPacking(job.id);
+      const ctx = packerFlowCtx();
+      const packing = packingCarriedFrom(process, stages, ctx);
+      if (!packing || !laserWorkDone(stages, ctx)) return;
+      const { data: jobItems, error } = await supabase.from("job_quote_items").select("*").eq("job_id", job.id);
       if (error) throw error;
-      if (itemsError) throw itemsError;
-      const packing = packingStageFor(process, stages || [], packerFlowCtx());
-      if (!packing || packing.is_complete) return;
       const items = jobItems || [];
       const covers = stageCoversPacking({
         jobItems: items,
         packingTakes: (it) => stageTakesItem(packing.process_name, it, items),
         stageTakes: (it) => stageTakesItem(process.process_name, it, items),
       });
-      if (covers) await closePackingFromLaterStage(packing, job);
+      if (covers) await closePackingFromLaterStage(packing, job, process.process_name);
     } catch (err) {
       console.error("Could not tick packing along with that stage:", err);
     }
   }
 
-  // Packing closed because a later stage says the parts are past it. The
-  // same fields finishPacking writes; a re-cut's status and the job's
-  // Complete check follow, as they do there.
-  async function closePackingFromLaterStage(packing, job) {
+  // The laser hook calls this when a job's plate Laser stage has just
+  // closed itself (the last program cut), and a hand tick of Nesting or
+  // Laser does too. Packing that waited for it closes now if every line
+  // it handles is counted, or if a later stage that covers them is already
+  // done. Then the job's Complete check runs, which the laser side never
+  // did. Logs its own errors and never blocks the cut.
+  async function afterLaserStagesDone(jobIds) {
+    for (const jobId of new Set(jobIds || [])) {
+      try {
+        const stages = await stagesForPacking(jobId);
+        const ctx = packerFlowCtx();
+        const packing = ownPackingStage(stages, ctx);
+        if (packing && !packing.is_complete && laserWorkDone(stages, ctx)) {
+          const { data: jobItems, error } = await supabase.from("job_quote_items").select("*").eq("job_id", jobId);
+          if (error) throw error;
+          const items = jobItems || [];
+          const takes = (it) => stageTakesItem(packing.process_name, it, items);
+          let from = "";
+          if ((packing.tracking_mode || "batch") === "each") {
+            const { data: rows, error: progressError } = await supabase
+              .from("job_process_item_progress")
+              .select("job_quote_item_id, qty_complete")
+              .eq("job_process_id", packing.id);
+            if (progressError) throw progressError;
+            const progress = new Map((rows || []).map((r) => [r.job_quote_item_id, Number(r.qty_complete) || 0]));
+            if (packingIsFull({ jobItems: items, packingTakes: takes, progress })) from = "every line packed";
+          }
+          if (!from) {
+            const later = stages.find(
+              (s) =>
+                s.is_complete &&
+                packingCarriedFrom(s, stages, ctx) &&
+                stageCoversPacking({ jobItems: items, packingTakes: takes, stageTakes: (it) => stageTakesItem(s.process_name, it, items) })
+            );
+            if (later) from = later.process_name;
+          }
+          if (from) await closePackingFromLaterStage(packing, { id: jobId }, from);
+        }
+        await settleJobAfterTick(jobId);
+      } catch (err) {
+        console.error("Could not settle packing after the laser closed:", err);
+      }
+    }
+  }
+
+  // Packing closed because the parts are past it. The same fields
+  // finishPacking writes, with where it came from in completed_by, so
+  // Job Detail and the job sheet say it was closed with Bending and not by
+  // the packer. Only ever the job's own run. The job's Complete check
+  // follows, as it does there.
+  async function closePackingFromLaterStage(packing, job, from) {
     const { error } = await supabase
       .from("job_processes")
-      .update({ is_complete: true, completed_by: roleLabel, completed_at: new Date().toISOString() })
+      .update({
+        is_complete: true,
+        completed_by: from ? `${roleLabel} (with ${from})` : roleLabel,
+        completed_at: new Date().toISOString(),
+      })
       .eq("id", packing.id)
       .eq("is_complete", false);
     if (error) throw error;
-    if (packing.shortage_id) {
-      const { data: sh, error: shError } = await supabase.from("shortages").select("*").eq("id", packing.shortage_id).single();
-      if (shError) throw shError;
-      if (sh) await refreshShortageStatus(sh);
-    }
     await settleJobAfterTick(job.id);
-    if (laserData !== null) await fetchLaserData();
   }
 
   function openEditProcessesModal(job, processes) {
@@ -6687,9 +6796,15 @@ export default function StockControl() {
         if (laserData !== null) await fetchLaserData();
       }
 
-      // A stage after the plate packer ticked done ticks packing done too
-      // (src/jobs/packingFlow.js, rule 2). Never on un-ticking.
+      // A stage after the plate packer ticked done ticks packing done too,
+      // once nothing is left to cut (src/jobs/packingFlow.js, rule 2). A
+      // hand tick of the job's own Nesting or Laser may be what finishes the
+      // laser work, so packing that waited for it is checked then. Never on
+      // un-ticking.
       if (nowComplete) await packingFollowsTick(process, job);
+      if (nowComplete && !process.shortage_id && (isPlateNestingProcess(process.process_name) || isProgramLaserProcess(process.process_name))) {
+        await afterLaserStagesDone([job.id]);
+      }
 
       // Notify whoever's running this job the moment a process wraps up —
       // never on un-ticking, that's just a correction, not progress.
