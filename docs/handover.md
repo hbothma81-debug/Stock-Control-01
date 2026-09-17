@@ -2047,8 +2047,11 @@ questions answered, built the same day in four commits, none pushed.
 ### Decided (his answers, 16 Sep)
 
 Numbers, not a strict order: 1 is cut first, two jobs may share a
-number, blank is ordinary work. Set by any sales person, Prince (anyone
-who nests on the plate laser) and admins; the operator only sees it.
+number, blank is ordinary work. Set by Prince (anyone who nests on the
+plate laser) and admins **only**; sales people and the operator see it.
+(First built with sales people too; on 17 Sep he said "Prince and admin"
+meant *instead of* sales, changed in the commit "only the nester and
+admins set it, not sales".)
 "Cut next" on top of the Cutting screen, across the thickness groups.
 Ranking on To nest: stopped programs, re-cuts someone is waiting for,
 numbered jobs, then the rest. Mark urgent stays. Clears itself once the
@@ -2132,10 +2135,10 @@ JOB-0012.
 ### Waiting on Heinrich
 
 1. ~~Run `setup-laser-priority.sql` on practice, then live.~~ Done 17 Sep.
-2. Whether any sales person meant to set priorities is in fact a
-   sales person in User Management (`Is a Sales Person`), because that
-   tick is what shows the box.
-3. Confirm the reading of his answer to question 2: sales people, Prince
+2. ~~Whether the sales people have the Is a Sales Person tick.~~ No
+   longer matters: sales do not set it (17 Sep).
+3. ~~Answered 17 Sep: "instead of".~~ Was: confirm the reading of his
+   answer to question 2: sales people, Prince
    and admins may set it (the reply took "Prince and admin" as an addition
    to sales, not instead of).
 
