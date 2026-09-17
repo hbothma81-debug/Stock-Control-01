@@ -2265,3 +2265,77 @@ the red "Priority 1" mean. Delete practice job JOB-0013 when convenient.
    section should match its alias without asking.
 5. Still open from before: the tube program printout sorts TUBING_10
    before TUBING_2 (`nestingPrint.js`).
+
+---
+
+## 17 Sep 2026 — Production tab (wrap-up): state of play
+
+The detail is in "Production tab: reloads shown in the order they were
+asked for" above; this is where it stands at clearing.
+
+### Done and live
+
+- `5d090d5` An older reload of the Production tab landing late no longer
+  covers a newer one (`src/lib/loadOrder.js`, 7 tests;
+  `fetchProductionQueue`). Pushed by Planning on 17 Sep; `mayShow` and
+  `isNewest` found in the live bundle at wrap-up
+  (`CHECK-what-is-live.cjs`). The entry above still says "not pushed": it
+  was written before the push.
+- The rule and how to force the case on practice are in CLAUDE.md
+  ("Loading data", "Checking a screen without signing in").
+
+### Half-done
+
+Nothing. This conversation has nothing uncommitted and nothing queued.
+
+### Every setup file this conversation wrote
+
+None. No SQL, no database change of any kind.
+
+### Built but not yet tested by Heinrich (live now)
+
+1. An Each card: log two counts quickly on one line; both land, and Log
+   comes back each time with the new number showing.
+2. Tick a stage, Mark urgent, save a note: the card reloads as it always
+   did.
+3. Floor tablets get it when their page is reloaded.
+4. Still untried from the 16 Sep entries: the Production tab's load in
+   pages (departments and counts as before; a count still there after a
+   page reload); parts in order on Laser Status and the tube screens; the
+   packer's To pack list; JOB-0068's Each cards on live; a tube re-cut
+   opened on Tube Laser > Nesting. And from 15 Sep: Info Request end to
+   end.
+
+### Waiting on Heinrich
+
+- No SQL, no permission ticks.
+- One open decision from 15 Sep: Answer on the job page is open to anyone
+  who can open the job, not only the rep and admins. Narrower?
+
+### Pick up next
+
+1. His yes, 17 Sep: when a reload of the Production tab fails, keep the
+   last good screen and say "could not refresh", instead of an empty tab
+   that reads as no work. Plan first; the laser screens already say so
+   (`laserLoadFailed`).
+2. Leave Complete jobs out of `fetchProductionQueue`, after the two
+   checks in the 16 Sep entry.
+3. For Laser production and Jobs page: `fetchLaserData` and
+   `refreshJobDetail` have the same out-of-order gap; `makeLoadOrder` is
+   there for both. His decision on 17 Sep was Production tab only.
+
+### Seen in the folder, not this conversation's
+
+- Uncommitted in `src/App.jsx` at wrap-up: Refresh reloads the stage
+  settings and the Production list is rebuilt when they arrive (JOB-0068,
+  Bending listing every part on a tablet). It calls
+  `fetchProductionQueue`, so it goes through the reload order like any
+  other reload. When it lands, CLAUDE.md's line "The header Refresh …
+  reload neither, nor the stage settings" goes stale: its author's to
+  change.
+- App.jsx about line 12480 (Procurement receiving) writes `jobNumber`
+  twice in one object; the second wins. esbuild warns about it on every
+  parse of the file. Harmless, nobody's yet.
+
+No practice data left: the test note on JOB-0002's welding card was put
+back to empty.
