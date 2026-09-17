@@ -98,10 +98,29 @@ export function packerReleases(earlier, process, jobProcesses, ctx) {
   return started || !!ctx.stageIsCleared(packing);
 }
 
+// The tube side (Heinrich, 17 Sep 2026: "open the tube side too"). A stage
+// after both lasers used to wait for the tube lane as a whole. Once the
+// plate side is cutting (Nesting ticked, first sheet cut), a tube stage no
+// longer holds such a stage back whole: plate parts are bent while the tube
+// nester is still busy. Asked by blockingStages only. itemFlowLimit still
+// caps every tube line by what the tube laser has counted, and a one-tick
+// stage's Complete tick waits for both lasers (rule 3).
+export function tubeLaneReleases(earlier, process, jobProcesses, ctx) {
+  if (!ownRun(earlier) || !ownRun(process)) return false;
+  if (!ctx.isTubeStage(earlier.process_name)) return false;
+  const name = process.process_name;
+  if (ctx.neverRelease && ctx.neverRelease(name)) return false;
+  if (ctx.isTubeStage(name) || ctx.isNestingStage(name) || ctx.isLaserCutStage(name) || ctx.isPackingStage(name)) return false;
+  if (!knownRank(ctx, name) || !knownRank(ctx, earlier.process_name)) return false;
+  if (!(ctx.flowRank(earlier.process_name) < ctx.flowRank(name))) return false;
+  return nestingDone(jobProcesses, ctx) && cuttingStarted(jobProcesses, ctx);
+}
+
 // Rule 3. Whether a Complete tick on `stage` has to wait for the laser: a
 // one-tick stage of the job's own run, after the packer, whose work is the
 // plate parts (no machine of its own, not a laser stage, not Invoicing),
-// while the job's own Nesting or Laser is still open.
+// while the job's own Nesting or Laser is still open, or a tube laser stage
+// before it in the flow is.
 export function tickWaitsForLaser(stage, jobProcesses, ctx) {
   if (!ownRun(stage) || (stage.tracking_mode || "batch") === "each") return false;
   const name = stage.process_name;
@@ -112,7 +131,10 @@ export function tickWaitsForLaser(stage, jobProcesses, ctx) {
   const packing = ownPackingStage(jobProcesses, ctx);
   if (!packing || !knownRank(ctx, name) || !knownRank(ctx, packing.process_name)) return false;
   if (!(ctx.flowRank(packing.process_name) < ctx.flowRank(name))) return false;
-  return !laserWorkDone(jobProcesses, ctx);
+  if (!laserWorkDone(jobProcesses, ctx)) return true;
+  return (jobProcesses || []).some(
+    (p) => ownRun(p) && ctx.isTubeStage(p.process_name) && !p.is_complete && knownRank(ctx, p.process_name) && ctx.flowRank(p.process_name) < ctx.flowRank(name)
+  );
 }
 
 // Rule 2. The packing stage a count or tick at `stage` carries through to,

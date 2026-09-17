@@ -54,11 +54,29 @@ export function routePosition(line, stageName, tag) {
 // against the factory flow. Otherwise -- one not on its route, or both its
 // first step, as Nesting, Laser and Packer are for a laser part -- the
 // factory flow decides, as it always has.
-export function comesBeforeForLine(line, earlier, later, { flowRank, cutsMadeOn }) {
+//
+// Against an extra stage the line's first step always comes first, even
+// where the line's list was never set: a part that arrives from the
+// machining supplier is machined before it is bent, whatever the flow says
+// (review, 16 Sep 2026: such a line waited for Bending at Machining -
+// External). `isMarked(name)` says whether a stage is an extra stage; left
+// out, or with neither stage an extra one, nothing changes.
+export function comesBeforeForLine(line, earlier, later, { flowRank, cutsMadeOn, isMarked = null }) {
   const a = routePosition(line, earlier, cutsMadeOn(earlier));
   const b = routePosition(line, later, cutsMadeOn(later));
   if (a !== null && b !== null && a !== b) return a < b;
+  if (isMarked && a !== b && (a === 0 || b === 0) && (isMarked(earlier) || isMarked(later))) return a === 0;
   return flowRank(earlier) < flowRank(later);
+}
+
+// Whether two extra stages are put in order by each line's own count and so
+// do not hold each other back as whole stages. Only when both count per
+// item: a stage on one tick knows nothing about lines, so two of those keep
+// the factory order, or the later one could be ticked done first (review,
+// 16 Sep 2026).
+export function orderedByLines(a, b, isMarked) {
+  const each = (p) => (p?.tracking_mode || "batch") === "each";
+  return !!isMarked(a?.process_name) && !!isMarked(b?.process_name) && each(a) && each(b);
 }
 
 // The route as words, for the job sheet: "Laser > Machining - External >

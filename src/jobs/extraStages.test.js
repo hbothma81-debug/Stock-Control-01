@@ -5,6 +5,7 @@ import {
   markedStageTakes,
   routePosition,
   comesBeforeForLine,
+  orderedByLines,
   routeText,
   renameInList,
   moveInList,
@@ -92,4 +93,29 @@ test("moving a stage swaps it with its neighbour and refuses the ends", () => {
   assert.deepEqual(moveInList(["Bending", "Drilling", "Machining - External"], 1, -1), ["Drilling", "Bending", "Machining - External"]);
   assert.deepEqual(moveInList(["Bending", "Drilling"], 0, -1), ["Bending", "Drilling"]);
   assert.deepEqual(moveInList(["Bending", "Drilling"], 1, 1), ["Bending", "Drilling"]);
+});
+
+// Review, 16 Sep 2026, fixed 17 Sep. A line from the machining supplier whose
+// list was never set: machined first, then bent, whatever the flow says.
+test("a first step beats the flow against an extra stage even where the list was never set", () => {
+  const marked = { ...ctx, isMarked: (n) => n === "Bending" || n === "Machining - External" || n === "Drilling" };
+  const fromSupplier = { made_on: "machining_external", extra_stages: null };
+  assert.equal(comesBeforeForLine(fromSupplier, "Machining - External", "Bending", marked), true, "machined before it is bent");
+  assert.equal(comesBeforeForLine(fromSupplier, "Bending", "Machining - External", marked), false, "machining does not wait for Bending");
+  assert.equal(comesBeforeForLine(never, "Laser", "Bending", marked), true, "a laser part is cut before it is bent, as the flow says");
+  assert.equal(comesBeforeForLine(never, "Bending", "Laser", marked), false);
+  assert.equal(comesBeforeForLine(never, "Nesting", "Laser", marked), true, "two first steps keep the factory order");
+  assert.equal(comesBeforeForLine(never, "Bending", "Drilling", marked), true, "two extra stages on a never-set line keep the factory order");
+  // With no extra stage in the pair, or no isMarked at all, nothing changes.
+  assert.equal(comesBeforeForLine(fromSupplier, "Welding", "Machining - External", { ...ctx, isMarked: () => false }), false);
+  assert.equal(before(fromSupplier, "Bending", "Machining - External"), true, "without isMarked the flow decides, as before");
+});
+
+test("two extra stages are ordered by their lines only when both count per item", () => {
+  const isMarked = (n) => n === "Bending" || n === "Machining - External";
+  const st = (process_name, tracking_mode) => ({ process_name, tracking_mode });
+  assert.equal(orderedByLines(st("Bending", "each"), st("Machining - External", "each"), isMarked), true);
+  assert.equal(orderedByLines(st("Bending", "batch"), st("Machining - External", "each"), isMarked), false, "one tick keeps the factory order");
+  assert.equal(orderedByLines(st("Bending", "each"), st("Machining - External"), isMarked), false, "no mode means one tick");
+  assert.equal(orderedByLines(st("Bending", "each"), st("Welding", "each"), isMarked), false, "Welding is not an extra stage");
 });

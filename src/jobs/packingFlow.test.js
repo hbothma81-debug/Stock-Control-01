@@ -7,6 +7,7 @@ import {
   cuttingStarted,
   packerReleases,
   tickWaitsForLaser,
+  tubeLaneReleases,
   packingCarriedFrom,
   packingRaises,
   packingIsFull,
@@ -219,4 +220,36 @@ test("the packer's row: the highest count carried from each later stage, by name
     { job_process_id: "p", job_quote_item_id: "br", qty_complete: 3 },
   ];
   assert.deepEqual(countedAfterPacking(s, progress, ctx), { br: { qty: 8, stage: "Drilling" } });
+});
+
+// JOB-0094 as it stood on live, 17 Sep 2026: plate cutting started, the tube
+// nester still busy, Bending on one tick waiting for Tube Laser Nesting.
+test("the tube side: once the plate laser is cutting, a tube stage does not hold the stages after both lasers", () => {
+  const mixed = ({ cutting = true, nested = true, bendingMode = "batch" } = {}) => [
+    stage("tn", "Tube Laser Nesting"),
+    stage("n", "Nesting", { is_complete: nested }),
+    stage("l", "Laser", { started_at: cutting ? "2026-09-17T06:00:00Z" : null }),
+    stage("t", "Tube Laser"),
+    stage("p", "Packer"),
+    stage("b", "Bending", { tracking_mode: bendingMode }),
+    stage("i", "Invoicing"),
+  ];
+  const s = mixed();
+  assert.equal(tubeLaneReleases(by(s, "tn"), by(s, "b"), s, ctx), true, "Tube Laser Nesting no longer holds Bending");
+  assert.equal(tubeLaneReleases(by(s, "t"), by(s, "b"), s, ctx), true, "nor the Tube Laser stage");
+  assert.equal(tubeLaneReleases(by(s, "tn"), by(s, "t"), s, ctx), false, "the tube laser still waits for its own nesting");
+  assert.equal(tubeLaneReleases(by(s, "tn"), by(s, "p"), s, ctx), false, "the plate packer is not a stage after both lasers");
+  assert.equal(tubeLaneReleases(by(s, "tn"), by(s, "i"), s, ctx), false, "never Invoicing");
+  assert.equal(tubeLaneReleases(by(s, "n"), by(s, "b"), s, ctx), false, "only tube stages are released here");
+  const each = mixed({ bendingMode: "each" });
+  assert.equal(tubeLaneReleases(by(each, "tn"), by(each, "b"), each, ctx), true, "per item too: its tube lines stay capped by itemFlowLimit");
+  const notCutting = mixed({ cutting: false });
+  assert.equal(tubeLaneReleases(by(notCutting, "tn"), by(notCutting, "b"), notCutting, ctx), false, "nothing has started");
+  const notNested = mixed({ nested: false });
+  assert.equal(tubeLaneReleases(by(notNested, "tn"), by(notNested, "b"), notNested, ctx), false, "Nesting must be ticked first");
+  // Rule 3 waits for both lasers: the plate work done, the tube laser still open.
+  const plateDone = s.map((x) => (x.id === "l" ? { ...x, is_complete: true } : x));
+  assert.equal(tickWaitsForLaser(by(plateDone, "b"), plateDone, ctx), true, "the tube laser still has work");
+  const allDone = plateDone.map((x) => (x.id === "tn" || x.id === "t" ? { ...x, is_complete: true } : x));
+  assert.equal(tickWaitsForLaser(by(allDone, "b"), allDone, ctx), false);
 });

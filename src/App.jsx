@@ -68,10 +68,11 @@ import CutToSize from "./jobs/CutToSize.jsx";
 import BuyOuts from "./jobs/BuyOuts.jsx";
 import Materials from "./jobs/Materials.jsx";
 import { addStockFromStores } from "./jobs/stockFromStores.js";
-import { markedStageTakes, comesBeforeForLine, extraStagesOf, routeText, renameInList } from "./jobs/extraStages.js";
+import { markedStageTakes, comesBeforeForLine, orderedByLines, extraStagesOf, routeText, renameInList } from "./jobs/extraStages.js";
 import ExtraStagesBox from "./jobs/ExtraStagesBox.jsx";
 import {
   packerReleases,
+  tubeLaneReleases,
   tickWaitsForLaser,
   packingCarriedFrom,
   ownPackingStage,
@@ -392,13 +393,14 @@ const MADE_ON_OPTIONS = [
 // suddenly read blank.
 const madeOnChoices = (current) => MADE_ON_OPTIONS.filter((o) => !o.retired || o.code === (current || ""));
 
-// The "Extra stage" switch under Job Process Types stays hidden until the
-// rule problems a review found on 16 Sep 2026 are fixed (docs/handover.md,
-// Planning entry of that date: two extra stages and batch mode, Ready while
-// capped at 0, a first step from the supplier waiting the wrong way) and
-// setup-extra-stages.sql answers on both databases. With no stage switched
-// on, nothing about extra stages shows or changes anywhere in the app.
-const EXTRA_STAGES_SWITCH_ON = false;
+// The "Extra stage" switch under Job Process Types. Hidden from 16 to 17 Sep
+// 2026 while three rule problems a review found were fixed (two extra stages
+// on one tick keep the factory order: orderedByLines; a card is as ready as
+// its lines: fetchProductionQueue; a first step from the supplier comes
+// before an extra stage: comesBeforeForLine) and until setup-extra-stages.sql
+// answered on both databases (checked 17 Sep). With no stage switched on,
+// nothing about extra stages shows or changes anywhere in the app.
+const EXTRA_STAGES_SWITCH_ON = true;
 
 // Stages whose tick is being saved right now (toggleJobProcessComplete), so
 // a double tap does not tick, notify and settle twice. Outside the
@@ -5719,10 +5721,17 @@ export default function StockControl() {
       .filter((p) => flowRank(p.process_name) < mine)
       // The other laser is a separate lane, not an earlier stage.
       .filter((p) => !inOtherLaserLane(process.process_name, p.process_name))
-      // Two extra stages never hold each other back as a whole: one part
-      // is bent before it is machined and the next the other way round,
-      // so each line's own count orders them (itemFlowLimit).
-      .filter((p) => !(onlyMarked(p.process_name) && onlyMarked(process.process_name)))
+      // Two extra stages that both count per item never hold each other
+      // back as a whole: one part is bent before it is machined and the
+      // next the other way round, so each line's own count orders them
+      // (itemFlowLimit). On one tick they keep the factory order
+      // (orderedByLines, src/jobs/extraStages.js).
+      .filter((p) => !orderedByLines(p, process, onlyMarked))
+      // The tube side: once the plate laser is cutting, a tube stage no
+      // longer holds a stage after both lasers back whole. Tube lines stay
+      // capped by the tube laser's counts (itemFlowLimit does not ask this).
+      // src/jobs/packingFlow.js.
+      .filter((p) => !tubeLaneReleases(p, process, jobProcesses, packerFlowCtx()))
       // Once cutting has started on the job (or its packer is taken) and
       // Nesting is ticked, the plate Laser stage and the packer stop holding
       // back the stages after the packer: parts already cut are bent while
@@ -5769,7 +5778,7 @@ export default function StockControl() {
       // line itself puts in order -- its first step, then its extra stages
       // as listed. Cut, machine, bend on one part; cut, bend, machine on the
       // next. src/jobs/extraStages.js.
-      if (!comesBeforeForLine(quoteItem, p.process_name, process.process_name, { flowRank, cutsMadeOn })) continue;
+      if (!comesBeforeForLine(quoteItem, p.process_name, process.process_name, { flowRank, cutsMadeOn, isMarked: onlyMarked })) continue;
       // The other laser is a separate lane, not an earlier stage.
       if (inOtherLaserLane(process.process_name, p.process_name)) continue;
       // A stage that never handles this line cannot hold it back: a CNC
@@ -5907,23 +5916,36 @@ export default function StockControl() {
         for (const p of jobProcesses) {
           if (p.is_complete || !byProcessType[p.process_name]) continue;
           const blockers = blockingStages(p, jobProcesses);
-          const isReady = blockers.length === 0;
-          // Partly ready: a per-item stage whose earlier stages have let
-          // some pieces through already. Those pieces are real work now,
-          // even though the stage as a whole is still waiting, so the
-          // queue counts them as ready and says how many.
+          let isReady = blockers.length === 0;
+          // A stage that counts per item is as ready as its lines are: the
+          // pieces its earlier stages have let through are real work now,
+          // whatever the stage as a whole still waits for. Ready when every
+          // piece still to do may go, partly ready when some may, waiting
+          // when none may -- so a card never reads Ready with every line
+          // held at nought (review, 16 Sep 2026), and a stage whose own lines
+          // are all clear does not read Waiting for a stage that only holds
+          // somebody else's lines (the tube laser, for a stage with no tube
+          // parts on it). A stage on one tick goes by its blockers alone.
           let readyQty = 0;
           let totalQty = 0;
-          if (!isReady && (p.tracking_mode || "batch") === "each") {
+          let remainingQty = 0;
+          let lineWaitsOn = null;
+          if ((p.tracking_mode || "batch") === "each") {
             for (const it of jobQuoteItems) {
               if (!stageTakesItem(p.process_name, it, jobQuoteItems)) continue;
-              totalQty += Number(it.qty) || 0;
-              const { allowed } = itemFlowLimit(p, jobProcesses, jobItemProgress, it, jobQuoteItems);
+              const qty = Number(it.qty) || 0;
+              totalQty += qty;
+              const { allowed, waitingOn: heldBy } = itemFlowLimit(p, jobProcesses, jobItemProgress, it, jobQuoteItems);
               const doneHere = Number(
                 jobItemProgress.find((ip) => ip.job_process_id === p.id && ip.job_quote_item_id === it.id)?.qty_complete
               ) || 0;
-              readyQty += Math.max(0, allowed - doneHere);
+              const toDo = Math.max(0, qty - doneHere);
+              const mayGo = Math.min(toDo, Math.max(0, allowed - doneHere));
+              remainingQty += toDo;
+              readyQty += mayGo;
+              if (toDo > 0 && mayGo <= 0 && heldBy && !lineWaitsOn) lineWaitsOn = heldBy;
             }
+            if (remainingQty > 0) isReady = readyQty >= remainingQty;
           }
           byProcessType[p.process_name].push({
             job,
@@ -5932,7 +5954,7 @@ export default function StockControl() {
             partlyReady: !isReady && readyQty > 0,
             readyQty,
             totalQty,
-            waitingOn: blockers[0]?.process_name || null,
+            waitingOn: lineWaitsOn || blockers[0]?.process_name || null,
             quoteItems: jobQuoteItems,
             documents: (allDocs || []).filter((d) => d.job_id === job.id && d.process_name === p.process_name),
             itemProgress: allItemProgress.filter((ip) => ip.job_process_id === p.id),
