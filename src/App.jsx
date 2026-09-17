@@ -7698,9 +7698,24 @@ export default function StockControl() {
   async function addNamedStagesToJob(job, names) {
     const wanted = [...new Set((names || []).filter(Boolean))];
     if (!wanted.length) return;
-    const { data: rows, error } = await supabase.from("job_processes").select("process_name, sort_order, shortage_id").eq("job_id", job.id);
+    const { data: rows, error } = await supabase
+      .from("job_processes")
+      .select("id, process_name, sort_order, shortage_id, tracking_mode, is_complete")
+      .eq("job_id", job.id);
     if (error) throw error;
     const own = (rows || []).filter((p) => !p.shortage_id);
+    // A stage the job already carries on one tick cannot list lines, so a
+    // named one that is still open goes to counting per item (JOB-0068,
+    // 17 Sep 2026: Drilling had been added by hand as one tick, and showed
+    // no lines). A finished stage is left as it was.
+    const onOneTick = own.filter(
+      (p) => !p.is_complete && (p.tracking_mode || "batch") !== "each" && wanted.some((n) => sameText(p.process_name, n))
+    );
+    if (onOneTick.length) {
+      const { error: modeError } = await supabase.from("job_processes").update({ tracking_mode: "each" }).in("id", onOneTick.map((p) => p.id));
+      if (modeError) throw modeError;
+      await logJobEvent(job.id, "stage changed", `${onOneTick.map((p) => p.process_name).join(", ")} — now counts per item, named on a line's Then box`);
+    }
     const missing = wanted.filter((n) => !own.some((p) => sameText(p.process_name, n)));
     if (!missing.length) return;
     const maxSort = own.reduce((max, p) => Math.max(max, p.sort_order ?? 0), -1);

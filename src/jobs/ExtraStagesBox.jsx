@@ -65,7 +65,10 @@ export default function ExtraStagesBox({ line, stages, onJob, onChange, canEdit 
               padding: "1px 6px",
               fontSize: 12.5,
               color: notOnJob ? C.muted : C.text,
-              ...(notOnJob ? { borderStyle: "dashed" } : {}),
+              // The whole border, not borderStyle beside S.chip's shorthand:
+              // React drops one of the two when the chip goes from dashed to
+              // solid (the stage has just been added to the job).
+              border: `1px ${notOnJob ? "dashed" : "solid"} ${C.border}`,
             }}
             title={notOnJob ? `${name} is not ticked on this job yet, so nothing lists this line there.` : undefined}
           >
