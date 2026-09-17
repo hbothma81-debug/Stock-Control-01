@@ -14,9 +14,10 @@
 //    the packer stops holding those stages too, taken or not: Take job then
 //    only says who is packing (Heinrich, 17 Sep 2026: jobs open as soon as
 //    the laser starts, without waiting for Take job; JOB-0014). Only Laser
-//    and the packer are released, never Nesting; never a stage on one tick
-//    (it could be ticked done, or invoiced, with parts still on the laser);
-//    never Invoicing; never a re-cut's run.
+//    and the packer are released, never Nesting; never Invoicing; never a
+//    re-cut's run. A stage on one tick opens the same way, so work can
+//    start (Heinrich, 17 Sep 2026, choice A: "we will always have in
+//    process jobs everywhere"), but see rule 3.
 //
 // 2. A part counted at a stage after the packer that has no machine of its
 //    own (Bending, Drilling, Welding -- not Laser - External, not the tube
@@ -26,10 +27,16 @@
 //    done it closes when every line it handles is counted, or when a later
 //    stage that covers every one of them is done. Counts only rise.
 //
+// 3. A stage on one tick that rule 1 opened early cannot be ticked Complete
+//    while the job's own Nesting or Laser is still open: one tick would say
+//    the whole stage is done, and release everything after it, with sheets
+//    still on the laser (tickWaitsForLaser). Only stages whose work is the
+//    plate parts: not a stage with a machine of its own, not Invoicing.
+//
 // App.jsx asks these through blockingStages and itemFlowLimit (rule 1),
-// and submitProcessItemProgress, toggleJobProcessComplete and the laser
-// hook's syncLaserStagesFor (rule 2). The tube laser is not touched: its
-// cutting stage is its packing stage.
+// submitProcessItemProgress, toggleJobProcessComplete and the laser hook's
+// syncLaserStagesFor (rule 2), and toggleJobProcessComplete (rule 3). The
+// tube laser is not touched: its cutting stage is its packing stage.
 //
 // ctx: { flowRank, isNestingStage, isLaserCutStage, isPackingStage,
 //        isTubeStage, cutsMadeOn, stageIsCleared, neverRelease }
@@ -75,7 +82,6 @@ export function cuttingStarted(jobProcesses, ctx) {
 // packer has taken the job, and the packer itself once cutting has started.
 export function packerReleases(earlier, process, jobProcesses, ctx) {
   if (!ownRun(earlier) || !ownRun(process)) return false;
-  if ((process.tracking_mode || "batch") !== "each") return false;
   if (ctx.neverRelease && ctx.neverRelease(process.process_name)) return false;
   const packing = ownPackingStage(jobProcesses, ctx);
   if (!packing || packing.id === process.id) return false;
@@ -90,6 +96,23 @@ export function packerReleases(earlier, process, jobProcesses, ctx) {
   // laser starts; a taken one is already cleared (stageIsCleared).
   if (isPacker) return started;
   return started || !!ctx.stageIsCleared(packing);
+}
+
+// Rule 3. Whether a Complete tick on `stage` has to wait for the laser: a
+// one-tick stage of the job's own run, after the packer, whose work is the
+// plate parts (no machine of its own, not a laser stage, not Invoicing),
+// while the job's own Nesting or Laser is still open.
+export function tickWaitsForLaser(stage, jobProcesses, ctx) {
+  if (!ownRun(stage) || (stage.tracking_mode || "batch") === "each") return false;
+  const name = stage.process_name;
+  if (ctx.neverRelease && ctx.neverRelease(name)) return false;
+  if (ctx.isPackingStage(name) || ctx.isNestingStage(name) || ctx.isLaserCutStage(name) || ctx.isTubeStage(name)) return false;
+  if (ctx.isAnyLaserStage && ctx.isAnyLaserStage(name)) return false;
+  if (ctx.cutsMadeOn(name)) return false;
+  const packing = ownPackingStage(jobProcesses, ctx);
+  if (!packing || !knownRank(ctx, name) || !knownRank(ctx, packing.process_name)) return false;
+  if (!(ctx.flowRank(packing.process_name) < ctx.flowRank(name))) return false;
+  return !laserWorkDone(jobProcesses, ctx);
 }
 
 // Rule 2. The packing stage a count or tick at `stage` carries through to,
