@@ -12,6 +12,7 @@ import {
   readInvoiceAmount,
   onOrderFigure,
   invoicedInMonthFigure,
+  requestedInMonthFigure,
 } from "./jobFigures.js";
 
 test("a month is a South African month, not a UTC one", () => {
@@ -103,6 +104,24 @@ test("invoiced in a month: the typed amount, else what the job was quoted at", (
   ];
   const fig = invoicedInMonthFigure(jobs, "2026-09", { b: 600, c: 400, d: 8000 });
   assert.deepEqual(fig, { total: 1500 + 600 + 400 + 0 + 200, count: 5, atQuotedValue: 2 });
+});
+
+test("requested in a month: every request sent in it, by the day it was sent", () => {
+  const requests = [
+    { job_id: "a", total_amount: 100, submitted_at: "2026-09-02T08:00:00Z" },
+    // A second request on the same job: counted, and the job counted once.
+    { job_id: "a", total_amount: "50.25", submitted_at: "2026-09-20T08:00:00Z" },
+    { job_id: "b", total_amount: 0, submitted_at: "2026-09-21T08:00:00Z" },
+    // 01:30 on 1 October in South Africa.
+    { job_id: "c", total_amount: 999, submitted_at: "2026-09-30T23:30:00Z" },
+    // 01:30 on 1 September in South Africa.
+    { job_id: "d", total_amount: 10, submitted_at: "2026-08-31T23:30:00Z" },
+    { job_id: "e", total_amount: 5000, submitted_at: "2026-08-15T08:00:00Z" },
+    { job_id: "f", total_amount: 7, submitted_at: null },
+  ];
+  assert.deepEqual(requestedInMonthFigure(requests, "2026-09"), { total: 160.25, count: 4, jobs: 3 });
+  assert.deepEqual(requestedInMonthFigure(null, "2026-09"), { total: 0, count: 0, jobs: 0 });
+  assert.deepEqual(requestedInMonthFigure(requests, ""), { total: 0, count: 0, jobs: 0 });
 });
 
 test("no month asked for counts nothing", () => {

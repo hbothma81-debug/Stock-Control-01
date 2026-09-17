@@ -85,6 +85,21 @@ export function onOrderFigure(jobs, lineTotals) {
   return { total, count: open.length, unpriced };
 }
 
+// { total, count, jobs } over the invoice requests sent to accounts in that
+// South African month: what the floor and the office asked to have billed,
+// by the day each request was sent (job_invoice_requests.submitted_at).
+// Not the same figure as Invoiced: a request sent on the 30th is often
+// invoiced in Sage on the 2nd, and a request's total is frozen when it is
+// sent. `jobs` is how many different jobs the requests are for.
+export function requestedInMonthFigure(requests, monthKey) {
+  const inMonth = (requests || []).filter((r) => monthKey && monthKeySA(r.submitted_at) === monthKey);
+  return {
+    total: inMonth.reduce((sum, r) => sum + (Number(r.total_amount) || 0), 0),
+    count: inMonth.length,
+    jobs: new Set(inMonth.map((r) => r.job_id)).size,
+  };
+}
+
 // { total, count, atQuotedValue } over the jobs marked invoiced in that
 // South African month ("2026-09").
 export function invoicedInMonthFigure(jobs, monthKey, lineTotals) {
