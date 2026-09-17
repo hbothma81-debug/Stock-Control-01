@@ -15,6 +15,7 @@ import InfoRequestModal, { InfoAnswerModal } from "./InfoRequestModal.jsx";
 import ExtraStagesBox from "./jobs/ExtraStagesBox.jsx";
 import TwoPriceBoxes from "./manager/TwoPriceBoxes.jsx";
 import NumberBox from "./manager/NumberBox.jsx";
+import FigureBox, { FigureRow } from "./FigureBox.jsx";
 import { jsPDF } from "jspdf";
 import { FileText } from "lucide-react";
 
@@ -169,6 +170,23 @@ function NumberBoxDemo() {
   );
 }
 
+// The Jobs list's money boxes: the second carries the optional note line.
+function FigureBoxDemo() {
+  return (
+    <Section title="Figure boxes" count={2}>
+      <FigureRow>
+        <FigureBox label="On order" value={1234567.8} hint="89 jobs · excluding VAT" />
+        <FigureBox
+          label="Invoiced in September 2026"
+          value={456789.12}
+          hint="14 jobs · excluding VAT"
+          note="3 of 14 at quoted value: no invoice amount was typed"
+        />
+      </FigureRow>
+    </Section>
+  );
+}
+
 function PdfViewerDemo() {
   const [url] = React.useState(makeSamplePdf);
   // Not a PDF at all, to see the message a device gets when one cannot be drawn.
@@ -270,6 +288,7 @@ function Preview() {
         <TwoPriceDemo />
 
         <NumberBoxDemo />
+        <FigureBoxDemo />
 
         <PdfViewerDemo />
 

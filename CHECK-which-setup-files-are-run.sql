@@ -133,7 +133,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-extra-stages.sql',          'column process_type_settings.only_marked',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'process_type_settings' and column_name = 'only_marked')),
     ('setup-laser-priority.sql',        'column jobs.laser_priority',
-      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'jobs' and column_name = 'laser_priority'))
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'jobs' and column_name = 'laser_priority')),
+    ('setup-jobs-invoiced-amount.sql',  'column jobs.invoiced_amount',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'jobs' and column_name = 'invoiced_amount'))
 )
 select
   setup_file,

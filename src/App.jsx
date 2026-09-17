@@ -104,6 +104,10 @@ import {
 } from "./lib/infoRequests.js";
 import Section from "./Section.jsx";
 import RecordRow from "./RecordRow.jsx";
+import FigureBox, { FigureRow, rand } from "./FigureBox.jsx";
+import {
+  monthKeySA, jobWorth, requestedTotalFor, suggestedInvoiceAmount, readInvoiceAmount, onOrderFigure, invoicedInMonthFigure,
+} from "./jobs/jobFigures.js";
 import PdfViewer from "./PdfViewer.jsx";
 import { extractPdfTextItems, parseSigmaNestQuote, browserInflate } from "./lib/sigmanestQuote.js";
 import { rowsForIds } from "./lib/rowsForIds.js";
@@ -9977,8 +9981,26 @@ export default function StockControl() {
     }
   }
 
+  // `amount` stays null until somebody types in the box. Until then the
+  // box shows what the job's requests add up to, worked out as it is
+  // drawn: Invoice Now opens this pop-up the moment its own request is
+  // sent, before the reloaded requests have landed, and a suggestion
+  // fixed at opening would miss that request.
   function openMarkInvoicedModal(job) {
-    setMarkInvoicedModal({ job, invoiceNumber: "" });
+    setMarkInvoicedModal({ job, invoiceNumber: "", amount: null });
+  }
+
+  // Whether this database has jobs.invoiced_amount yet
+  // (setup-jobs-invoiced-amount.sql). Jobs are read with every column, so
+  // a row says so itself. Without the column the box is not shown and the
+  // amount is not written: a key the table lacks refuses the whole save.
+  function jobHasInvoicedAmount(job) {
+    return !!job && "invoiced_amount" in job;
+  }
+
+  function markInvoicedAmountText(modal) {
+    if (!modal) return "";
+    return modal.amount != null ? modal.amount : suggestedInvoiceAmount(modal.job, jobInvoiceRequests, jobLineTotals);
   }
 
   async function submitMarkInvoiced() {
@@ -9987,10 +10009,22 @@ export default function StockControl() {
       alert("Enter the real invoice number from Sage before marking this invoiced.");
       return;
     }
+    const takesAmount = jobHasInvoicedAmount(job);
+    const amount = takesAmount ? readInvoiceAmount(markInvoicedAmountText(markInvoicedModal)) : null;
+    if (takesAmount && amount == null) {
+      alert("Enter the invoice amount from Sage, excluding VAT. Type 0 if the job was invoiced at nothing.");
+      return;
+    }
     try {
       const { error } = await supabase
         .from("jobs")
-        .update({ status: "invoiced", invoiced_by: roleLabel, invoiced_at: new Date().toISOString(), invoice_number: invoiceNumber.trim() })
+        .update({
+          status: "invoiced",
+          invoiced_by: roleLabel,
+          invoiced_at: new Date().toISOString(),
+          invoice_number: invoiceNumber.trim(),
+          ...(takesAmount ? { invoiced_amount: amount } : {}),
+        })
         .eq("id", job.id);
       if (error) throw error;
       // Everything that was only "requested" becomes genuinely invoiced
@@ -16262,7 +16296,7 @@ export default function StockControl() {
               // that the Quoted value box. Most jobs have lines and no box,
               // a few have the box and no lines, and either way the job is
               // worth something.
-              const worthOf = (j) => jobLineTotals[j.id] || Number(j.quoted_value) || 0;
+              const worthOf = (j) => jobWorth(j, jobLineTotals);
 
               const daysOnJob = (job) => {
                 const from = job.created_at ? new Date(job.created_at) : null;
@@ -16442,32 +16476,49 @@ export default function StockControl() {
                       stock screens give: what these filters are showing, not
                       the whole company -- so narrowing to one customer
                       answers what they have on order. */}
+                  {/* Two boxes, drawn like the ones on Purchase Orders (asked
+                      17 Sep 2026); the sums and their rules are in
+                      src/jobs/jobFigures.js.
+
+                      "On order" is the figure this screen always had, in a
+                      box: same jobs (Active and To invoice), same gate (Can
+                      see Rand values), and it still says how many jobs are
+                      not priced, because a job with no quoted value counts
+                      for nothing and the total must not read as the whole
+                      picture.
+
+                      "Invoiced in <month>" is for admins only, by decision:
+                      what the business billed in a month is the owner's
+                      figure, like the total stock value in the header. An
+                      admin always has canSeeValue, so one gate covers both. */}
                   {canSeeValue &&
                     (() => {
-                      const active = jobsList.filter(
-                        (j) => (j.status === "in_progress" || j.status === "complete") && matchesFilters(j)
-                      );
-                      const onOrder = active.reduce((sum, j) => sum + worthOf(j), 0);
-                      const priced = active.filter((j) => worthOf(j) > 0).length;
-                      const total = active.length;
-                      if (total === 0) return null;
+                      const shown = jobsList.filter(matchesFilters);
+                      const onOrder = onOrderFigure(shown, jobLineTotals);
+                      const thisMonth = monthKeySA(new Date());
+                      const invoiced = isAdmin ? invoicedInMonthFigure(shown, thisMonth, jobLineTotals) : null;
+                      const jobsWord = (n) => `${n} ${n === 1 ? "job" : "jobs"}`;
                       return (
-                        <div style={S.summaryBanner}>
-                          <span>
-                            R{" "}
-                            {onOrder.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
-                            on order
-                          </span>
-                          {/* A job with no quoted value counts for nothing in
-                              that figure, so say how many, rather than let it
-                              read as the whole picture. */}
-                          {priced < total && (
-                            <span>
-                              {" · "}
-                              {total - priced} of {total} not priced
-                            </span>
+                        <FigureRow>
+                          <FigureBox
+                            label="On order"
+                            value={onOrder.total}
+                            hint={`${jobsWord(onOrder.count)} · excluding VAT`}
+                            note={onOrder.unpriced > 0 ? `${onOrder.unpriced} of ${onOrder.count} not priced` : null}
+                          />
+                          {invoiced && (
+                            <FigureBox
+                              label={`Invoiced in ${poMonthLabel(thisMonth)}`}
+                              value={invoiced.total}
+                              hint={`${jobsWord(invoiced.count)} · excluding VAT`}
+                              note={
+                                invoiced.atQuotedValue > 0
+                                  ? `${invoiced.atQuotedValue} of ${invoiced.count} at quoted value: no invoice amount was typed`
+                                  : null
+                              }
+                            />
                           )}
-                        </div>
+                        </FigureRow>
                       );
                     })()}
 
@@ -17764,6 +17815,9 @@ export default function StockControl() {
                       })()}
                       <span>Invoiced: {invoiceDateLabel(job.invoiced_at)}</span>
                       {job.invoice_number && <span>Invoice #{job.invoice_number}</span>}
+                      {/* What was typed on Mark as Invoiced, so a slip can be
+                          seen. Blank on jobs invoiced before the box existed. */}
+                      {job.invoiced_amount != null && <span>{rand(job.invoiced_amount)} excl. VAT</span>}
                       <span>By {job.invoiced_by}</span>
                     </div>
                     <div style={S.reqActions}>
@@ -25117,6 +25171,41 @@ export default function StockControl() {
                 autoFocus
               />
             </div>
+            {/* What Sage invoiced, before VAT: the Jobs list's "Invoiced in
+                <month>" adds these up. Filled in from the job's requests
+                (or what the job is worth when it has none), so the usual
+                case is a glance, not typing. Shown to whoever can mark a
+                job invoiced -- they have the Sage invoice in front of
+                them, and Records -> Invoicing already shows them each
+                request's total. */}
+            {jobHasInvoicedAmount(markInvoicedModal.job) && (
+              <div style={{ marginTop: 10 }}>
+                <label style={S.label}>Invoice amount, excluding VAT (R)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  style={S.input}
+                  value={markInvoicedAmountText(markInvoicedModal)}
+                  // A number box reports "" for text it cannot read ("1e").
+                  // Kept as "", which the save refuses: better asked
+                  // again than saved as the number typed before it.
+                  onChange={(e) => setMarkInvoicedModal((m) => ({ ...m, amount: e.target.value }))}
+                  placeholder="From the Sage invoice, before VAT"
+                />
+                {markInvoicedModal.amount == null && markInvoicedAmountText(markInvoicedModal) !== "" && (
+                  <div style={S.roleHint}>
+                    {markInvoicedModal.job.invoiced_amount != null
+                      ? "The amount typed when this job was marked invoiced before."
+                      : requestedTotalFor(markInvoicedModal.job.id, jobInvoiceRequests) > 0
+                      ? "Filled in from this job's invoice requests."
+                      : "Filled in from what the job was quoted at: it has no invoice request."}{" "}
+                    Change it if Sage says otherwise.
+                  </div>
+                )}
+              </div>
+            )}
             <button type="button" className="stk-btn" style={S.submitBtn} onClick={submitMarkInvoiced}>
               Mark as Invoiced
             </button>
