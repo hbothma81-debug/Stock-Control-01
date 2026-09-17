@@ -110,7 +110,10 @@ import {
   requestedInMonthFigure,
 } from "./jobs/jobFigures.js";
 import { JOBS_ORDER_KEY, JOB_ORDERS, isJobOrder, sortJobs } from "./jobs/jobOrder.js";
-import { stageReadiness, readinessLabel } from "./jobs/stageReadiness.js";
+import {
+  stageReadiness, readinessLabel, readinessGroup, jobGroupAtStage,
+  READINESS_STAGE_COLUMNS, READINESS_LINE_COLUMNS, READINESS_COUNT_COLUMNS,
+} from "./jobs/stageReadiness.js";
 import PdfViewer from "./PdfViewer.jsx";
 import { extractPdfTextItems, parseSigmaNestQuote, browserInflate } from "./lib/sigmanestQuote.js";
 import { rowsForIds } from "./lib/rowsForIds.js";
@@ -1825,6 +1828,14 @@ export default function StockControl() {
   // Every open job's stages, keyed by job id, for the progress bar on the
   // Jobs list. Loaded with the list; refreshed when a stage is ticked.
   const [jobStagesByJob, setJobStagesByJob] = useState({});
+  // The Jobs list's stage filter: "everything at Welding". The stage
+  // picked, and what the Ready / Waiting split needs for the jobs at it:
+  // their stages, lines and per-item counts (loadJobsStageData). Loaded
+  // when a stage is picked and after a write, never on a timer.
+  const [jobsStageFilter, setJobsStageFilter] = useState("");
+  const [jobsStageData, setJobsStageData] = useState(null);
+  const jobsStageLoadOrderRef = useRef(null);
+  if (!jobsStageLoadOrderRef.current) jobsStageLoadOrderRef.current = makeLoadOrder();
   const [allDeliveryNotes, setAllDeliveryNotes] = useState([]);
   const [generatedDocuments, setGeneratedDocuments] = useState(null);
   const [deliveryNotesSearchQuery, setDeliveryNotesSearchQuery] = useState("");
@@ -2482,6 +2493,11 @@ export default function StockControl() {
       // 2026, JOB-0068). A small table. The Production list reloads when
       // they arrive (the effect on processTypeSettings).
       reloadProcessTypeSettings(),
+      // With a stage picked on the Jobs list, somebody is choosing what to
+      // work on from it: re-read the list's stages (one small request),
+      // and the Ready / Waiting split reloads behind them (the effect on
+      // jobStagesByJob). Only then, and only on a person's own press.
+      ...(tab === "jobs" && jobsStageFilter && jobsList !== null ? [refreshJobStages()] : []),
     ]);
     setIsRefreshing(false);
   }
@@ -3166,6 +3182,17 @@ export default function StockControl() {
   useEffect(() => {
     if (tab === "tubeLaser" && tubeLaser.laserData === null) tubeLaser.fetchLaserData();
   }, [tab, tubeLaser.laserData]);
+
+  // The Jobs list's stage filter loads when a stage is picked, and again
+  // whenever the list's own stages are re-read (after a write anywhere, or
+  // a Production reload), so the split never stands on older counts than
+  // the stage bars beside it. Only while the Jobs tab is showing with a
+  // stage picked: no timer, and nothing at all for anyone not using it.
+  useEffect(() => {
+    if (tab !== "jobs" || !jobsStageFilter || jobsList === null) return;
+    loadJobsStageData(jobsStageFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, jobsStageFilter, jobStagesByJob]);
 
   // The Production list is built from the stage settings (what a stage
   // cuts, whether it is an extra stage), so it is rebuilt whenever they
@@ -4051,6 +4078,60 @@ export default function StockControl() {
       if (await settleFinishedJobs(byJob, jobs || jobsList)) fetchJobs();
     } catch (err) {
       console.error("Failed to load stages for the Jobs list (the list still shows):", err);
+    }
+  }
+
+  // Whether a job has this stage still open, from the stages the Jobs list
+  // already holds. Its own run or a re-cut's: the Production tab shows both.
+  function jobHasStageOpen(jobId, stageName) {
+    return (jobStagesByJob[jobId] || []).some((p) => !p.is_complete && p.process_name === stageName);
+  }
+
+  // What the Ready / Waiting split needs for the jobs at one stage: every
+  // stage of those jobs, every line and part, and the per-item counts. The
+  // same rows the Production tab works from, but only for the jobs that
+  // have the picked stage open, and only the columns the rules read
+  // (src/jobs/stageReadiness.js). On 16 Sep 2026 live had 776 lines on 89
+  // jobs, so the worst case is about 180 KB, once per pick.
+  //
+  // Reloads can overlap (a pick, then a write), so an older answer never
+  // lands over a newer one (src/lib/loadOrder.js).
+  async function loadJobsStageData(stageName) {
+    if (!supabase || !stageName) return;
+    const loadOrder = jobsStageLoadOrderRef.current;
+    const loadNo = loadOrder.start();
+    try {
+      const ids = (jobsList || [])
+        .filter((j) => (j.status === "in_progress" || j.status === "complete") && jobHasStageOpen(j.id, stageName))
+        .map((j) => j.id);
+      if (ids.length === 0) {
+        if (loadOrder.mayShow(loadNo)) setJobsStageData({ stage: stageName, byJob: {}, error: null });
+        return;
+      }
+      const [processes, lines] = await Promise.all([
+        fetchRowsForIds("job_processes", "job_id", ids, { select: READINESS_STAGE_COLUMNS }),
+        fetchRowsForIds("job_quote_items", "job_id", ids, { select: READINESS_LINE_COLUMNS }),
+      ]);
+      // Counts exist only for stages that count per item.
+      const countedIds = processes.filter((p) => (p.tracking_mode || "batch") === "each").map((p) => p.id);
+      const counts = await fetchRowsForIds("job_process_item_progress", "job_process_id", countedIds, {
+        select: READINESS_COUNT_COLUMNS,
+      });
+      // The order the Production tab hands the rules its stages in.
+      processes.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      const byJob = {};
+      for (const id of ids) byJob[id] = { processes: [], lines: [], counts: [] };
+      const jobOfProcess = {};
+      for (const p of processes) {
+        jobOfProcess[p.id] = p.job_id;
+        byJob[p.job_id]?.processes.push(p);
+      }
+      for (const l of lines) byJob[l.job_id]?.lines.push(l);
+      for (const c of counts) byJob[jobOfProcess[c.job_process_id]]?.counts.push(c);
+      if (loadOrder.mayShow(loadNo)) setJobsStageData({ stage: stageName, byJob, error: null });
+    } catch (err) {
+      console.error("Failed to load what the stage filter needs:", err);
+      if (loadOrder.mayShow(loadNo)) setJobsStageData({ stage: stageName, byJob: {}, error: true });
     }
   }
 
@@ -16313,7 +16394,10 @@ export default function StockControl() {
                 return days >= 0 ? days : null;
               };
 
-              const renderJobRow = (job) => (
+              // Always called as renderJobRow(job) or renderJobRow(job, atStage),
+              // never handed straight to .map: map passes the position as a
+              // second value, which would be taken for atStage.
+              const renderJobRow = (job, atStage = null) => (
                 <button
                   key={job.id}
                   type="button"
@@ -16433,7 +16517,14 @@ export default function StockControl() {
                       const stages = inFlowOrder((jobStagesByJob[job.id] || []).filter((p) => !p.shortage_id), job);
                       if (stages.length === 0) return null;
                       const done = stages.filter((p) => p.is_complete).length;
-                      const current = stages.find((p) => !p.is_complete) || null;
+                      // The amber block is where the job is now: its first
+                      // unticked stage. With a stage picked in the filter it
+                      // is that stage instead -- a job listed under Welding
+                      // with Bending lit would say two things at once.
+                      const current =
+                        (atStage && stages.find((p) => !p.is_complete && p.process_name === atStage.stage)) ||
+                        stages.find((p) => !p.is_complete) ||
+                        null;
                       return (
                         <div style={{ flexBasis: "100%", display: "flex", alignItems: "center", gap: 8, marginTop: 2, flexWrap: "wrap" }}>
                           <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
@@ -16475,8 +16566,85 @@ export default function StockControl() {
                         </div>
                       );
                     })()}
+
+                  {/* With a stage picked: what the Production tab says about
+                      this job at that stage, one tag per open run of it (the
+                      job's own, and any re-cut's). */}
+                  {atStage && (
+                    <div style={{ flexBasis: "100%", display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+                      {atStage.rows.map((r) => (
+                        <span
+                          key={r.process.id}
+                          style={{
+                            ...S.reqStatusTag,
+                            ...(r.standing
+                              ? { color: C.danger, borderColor: C.danger }
+                              : r.readiness.isReady || r.readiness.partlyReady
+                                ? S.reqStatus_received
+                                : S.reqStatus_ordered),
+                          }}
+                        >
+                          {r.process.shortage_id ? "Re-cut · " : ""}
+                          {r.standing ? "Standing: waiting on office" : readinessLabel(r.readiness)}
+                          {r.process.is_urgent ? " · urgent" : ""}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </button>
               );
+
+              // The stage filter. Which jobs have the stage open comes from
+              // the stages this list already holds; Ready or Waiting comes
+              // from src/jobs/stageReadiness.js with the same rules the
+              // Production tab hands it, over rows loaded for the pick
+              // (loadJobsStageData). This list counts jobs where Production
+              // counts cards: a job with a re-cut at the stage is one row.
+              const openJob = (j) => j.status === "in_progress" || j.status === "complete";
+              const stageOptions = (master?.jobProcessTypes || [])
+                .map((name) => ({
+                  name,
+                  count: jobsList.filter((j) => openJob(j) && matchesFilters(j) && jobHasStageOpen(j.id, name)).length,
+                }))
+                .filter((o) => o.count > 0 || o.name === jobsStageFilter)
+                .map((o) => ({ value: o.name, label: o.name, hint: `${o.count} ${o.count === 1 ? "job" : "jobs"}` }));
+              const stageDataReady = !!jobsStageData && jobsStageData.stage === jobsStageFilter && !jobsStageData.error;
+              const standingByProcess = openRequestsByProcess(infoRequestsList);
+              const jobsAtStage = () => {
+                const groups = { standing: [], ready: [], waiting: [] };
+                const candidates = jobsList.filter(
+                  (j) => openJob(j) && matchesFilters(j) && jobHasStageOpen(j.id, jobsStageFilter)
+                );
+                for (const job of sortJobs(candidates, jobsOrder)) {
+                  const data = jobsStageData.byJob[job.id];
+                  // Opened at this stage since the rows were loaded: the
+                  // reload that follows every write brings it.
+                  if (!data) continue;
+                  const rows = data.processes
+                    .filter((p) => !p.is_complete && p.process_name === jobsStageFilter)
+                    .map((p) => ({
+                      process: p,
+                      standing: !!standingByProcess[p.id],
+                      readiness: stageReadiness(
+                        p,
+                        { jobProcesses: data.processes, jobQuoteItems: data.lines, jobItemProgress: data.counts },
+                        readinessRules()
+                      ),
+                    }));
+                  if (rows.length === 0) continue;
+                  groups[jobGroupAtStage(rows)].push({ job, rows, urgent: rows.some((r) => r.process.is_urgent) });
+                }
+                // Marked urgent first, as on the Production tab; then the
+                // Order box's order, which the sort above already gave.
+                for (const key of Object.keys(groups)) {
+                  groups[key] = groups[key]
+                    .map((e, i) => ({ e, i }))
+                    .sort((a, b) => Number(b.e.urgent) - Number(a.e.urgent) || a.i - b.i)
+                    .map(({ e }) => e);
+                }
+                return groups;
+              };
+              const renderAtStage = (e) => renderJobRow(e.job, { stage: jobsStageFilter, rows: e.rows });
 
               const jobsWith = (status) =>
                 sortJobs(jobsList.filter((j) => j.status === status && matchesFilters(j)), jobsOrder);
@@ -16502,6 +16670,16 @@ export default function StockControl() {
                       value={jobsSalesRepFilter}
                       onChange={setJobsSalesRepFilter}
                       emptyLabel="All sales reps"
+                    />
+                    {/* Stages in factory order, each with how many jobs
+                        have it open, under the filters beside it. */}
+                    <TypeToFind
+                      style={{ flex: 1, minWidth: 130 }}
+                      options={stageOptions}
+                      value={jobsStageFilter}
+                      onChange={setJobsStageFilter}
+                      emptyLabel="All stages"
+                      maxShown={50}
                     />
                     {/* Three fixed choices, so a plain select and not a
                         type-to-find box. Every pill below follows it. */}
@@ -16569,12 +16747,58 @@ export default function StockControl() {
                       );
                     })()}
 
+                  {/* With a stage picked the three status pills step aside
+                      for the Production tab's three, for that stage. Keyed
+                      on the stage so a new pick opens Ready and shuts
+                      Waiting again. */}
+                  {jobsStageFilter &&
+                    (() => {
+                      if (jobsStageData?.stage === jobsStageFilter && jobsStageData.error) {
+                        return (
+                          <div style={S.empty}>
+                            Could not work out what is ready at {jobsStageFilter} — check your connection.{" "}
+                            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => loadJobsStageData(jobsStageFilter)}>
+                              Try again
+                            </button>
+                          </div>
+                        );
+                      }
+                      if (!stageDataReady) return <div style={{ ...S.empty, marginTop: 10 }}>Loading…</div>;
+                      const groups = jobsAtStage();
+                      return (
+                        <div key={jobsStageFilter}>
+                          <div style={{ ...S.roleHint, marginTop: 10 }}>
+                            Jobs with {jobsStageFilter} still open, split the way the Production tab splits them.
+                          </div>
+                          {groups.standing.length > 0 && (
+                            <Section title="Standing — waiting on office" count={groups.standing.length} danger>
+                              <div style={S.managerListFullPage}>{groups.standing.map(renderAtStage)}</div>
+                            </Section>
+                          )}
+                          <Section title={`Ready at ${jobsStageFilter}`} count={groups.ready.length}>
+                            <div style={S.managerListFullPage}>
+                              {groups.ready.map(renderAtStage)}
+                              {groups.ready.length === 0 && <div style={S.empty}>Nothing can start at {jobsStageFilter} right now.</div>}
+                            </div>
+                          </Section>
+                          <Section title="Waiting on earlier stages" defaultOpen={false} count={groups.waiting.length}>
+                            <div style={S.managerListFullPage}>
+                              {groups.waiting.map(renderAtStage)}
+                              {groups.waiting.length === 0 && <div style={S.empty}>Nothing waiting.</div>}
+                            </div>
+                          </Section>
+                        </div>
+                      );
+                    })()}
+
+                  {!jobsStageFilter && (
+                  <>
                   <Section
                     title="Active"
                     count={jobsWith("in_progress").length}
                   >
                     <div style={S.managerListFullPage}>
-                      {jobsWith("in_progress").map(renderJobRow)}
+                      {jobsWith("in_progress").map((j) => renderJobRow(j))}
                       {jobsWith("in_progress").length === 0 && <div style={S.empty}>Nothing matches that.</div>}
                     </div>
                   </Section>
@@ -16589,7 +16813,7 @@ export default function StockControl() {
                     count={jobsWith("complete").length}
                   >
                     <div style={S.managerListFullPage}>
-                      {jobsWith("complete").map(renderJobRow)}
+                      {jobsWith("complete").map((j) => renderJobRow(j))}
                       {jobsWith("complete").length === 0 && (
                         <div style={S.empty}>Nothing finished and waiting on an invoice.</div>
                       )}
@@ -16602,10 +16826,12 @@ export default function StockControl() {
                     count={jobsWith("invoiced").length}
                   >
                     <div style={S.managerListFullPage}>
-                      {jobsWith("invoiced").map(renderJobRow)}
+                      {jobsWith("invoiced").map((j) => renderJobRow(j))}
                       {jobsWith("invoiced").length === 0 && <div style={S.empty}>Nothing matches that.</div>}
                     </div>
                   </Section>
+                  </>
+                  )}
                 </>
               );
             })()}
