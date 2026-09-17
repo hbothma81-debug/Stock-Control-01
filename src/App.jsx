@@ -72,6 +72,7 @@ import { markedStageTakes, comesBeforeForLine, extraStagesOf, routeText, renameI
 import ExtraStagesBox from "./jobs/ExtraStagesBox.jsx";
 import {
   packerReleases,
+  tickWaitsForLaser,
   packingCarriedFrom,
   ownPackingStage,
   laserWorkDone,
@@ -5709,12 +5710,13 @@ export default function StockControl() {
       // is bent before it is machined and the next the other way round,
       // so each line's own count orders them (itemFlowLimit).
       .filter((p) => !(onlyMarked(p.process_name) && onlyMarked(process.process_name)))
-      // Once the job's packer is taken and Nesting is ticked, the plate
-      // Laser stage stops holding back a per-item stage after the packer:
-      // parts already packed are bent while the last programs are still
-      // being cut (Heinrich, 16 Sep 2026, JOB-0068). Never Nesting, never a
-      // stage on one tick, never Invoicing, never a re-cut's run.
-      // src/jobs/packingFlow.js, rule 1.
+      // Once cutting has started on the job (or its packer is taken) and
+      // Nesting is ticked, the plate Laser stage and the packer stop holding
+      // back the stages after the packer: parts already cut are bent while
+      // the last programs are still on the laser (Heinrich, 16-17 Sep 2026,
+      // JOB-0068, JOB-0014). Never Nesting, never Invoicing, never a re-cut's
+      // run. A stage on one tick opens too; its Complete tick waits for the
+      // laser (toggleJobProcessComplete). src/jobs/packingFlow.js, rules 1, 3.
       .filter((p) => !packerReleases(p, process, jobProcesses, packerFlowCtx()))
       .filter((p) => !stageIsCleared(p))
       .sort((a, b) => flowRank(a.process_name) - flowRank(b.process_name));
@@ -5746,8 +5748,8 @@ export default function StockControl() {
       // Cleared, not merely finished: the same test that opens the card
       // on Production, so an open card cannot show a nought count.
       if (!sameRun(p) || stageIsCleared(p)) continue;
-      // Released by the job's taken packer, the same as blockingStages
-      // (src/jobs/packingFlow.js, rule 1). No cap takes its place: a count
+      // Released once cutting has started or the packer is taken, the same as
+      // blockingStages (src/jobs/packingFlow.js, rule 1). No cap takes its place: a count
       // after the packer raises the packer's own (rule 2).
       if (packerReleases(p, process, jobProcesses, packerFlowCtx())) continue;
       // Earlier for this line: the factory flow, except between stages the
@@ -6624,8 +6626,8 @@ export default function StockControl() {
 
   // What still holds the job's own plate packer open, in words, or ""
   // when the laser work is done.
-  async function laserHoldForJob(jobId) {
-    const own = (await stagesForPacking(jobId)).filter((p) => !p.shortage_id);
+  async function laserHoldForJob(jobId, stages = null) {
+    const own = (stages || (await stagesForPacking(jobId))).filter((p) => !p.shortage_id);
     if (own.some((p) => isPlateNestingProcess(p.process_name) && !p.is_complete)) return "Nesting is not marked done";
     if (own.some((p) => isProgramLaserProcess(p.process_name) && !p.is_complete)) {
       return "the Laser stage is still open. It closes itself once every program on this job is ticked cut; a job whose plate work was done outside the app has Laser ticked on the job page";
@@ -6939,6 +6941,30 @@ export default function StockControl() {
         }
       } catch (err) {
         console.error("Could not check the laser before ticking packing:", err);
+        alert("That didn't save — check your connection and try again.");
+        return;
+      }
+    }
+
+    // A stage on one tick after the plate packer opens as soon as cutting
+    // starts, so work can begin (Heinrich, 17 Sep 2026, choice A), but one
+    // tick says the whole stage is done and releases everything after it. So
+    // it is not ticked Complete while the laser still has work for the job
+    // (src/jobs/packingFlow.js, rule 3). No reads for a stage that could
+    // never be held (mayCarryToPacking, by name and settings).
+    if (nowComplete && (process.tracking_mode || "batch") !== "each" && mayCarryToPacking(process)) {
+      try {
+        const stages = await stagesForPacking(job.id);
+        if (tickWaitsForLaser(process, stages, packerFlowCtx())) {
+          const hold = await laserHoldForJob(job.id, stages);
+          alert(
+            `${process.process_name} is open so work can start, but it can't be ticked Complete yet: ${hold || "the laser still has work on this job"}.\n\n` +
+              "One tick says the whole stage is finished and opens everything after it. Tick it once the last program on this job is cut."
+          );
+          return;
+        }
+      } catch (err) {
+        console.error("Could not check the laser before ticking the stage:", err);
         alert("That didn't save — check your connection and try again.");
         return;
       }

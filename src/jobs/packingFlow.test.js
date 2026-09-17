@@ -6,6 +6,7 @@ import {
   laserWorkDone,
   cuttingStarted,
   packerReleases,
+  tickWaitsForLaser,
   packingCarriedFrom,
   packingRaises,
   packingIsFull,
@@ -94,8 +95,8 @@ test("rule 1: cutting started opens the stages after the packer without Take job
   assert.equal(packerReleases(by(s, "l"), by(s, "p"), s, ctx), false, "the packer still waits for Laser");
   assert.equal(packerReleases(by(s, "p"), by(s, "i"), s, ctx), false, "never Invoicing");
   const batch = cutting(job68({ taken: false, bendingMode: "batch" }));
-  assert.equal(packerReleases(by(batch, "l"), by(batch, "b"), batch, ctx), false, "never a stage on one tick");
-  assert.equal(packerReleases(by(batch, "p"), by(batch, "b"), batch, ctx), false);
+  assert.equal(packerReleases(by(batch, "l"), by(batch, "b"), batch, ctx), true, "a stage on one tick opens too (choice A)");
+  assert.equal(packerReleases(by(batch, "p"), by(batch, "b"), batch, ctx), true);
   const notNested = cutting(job68({ taken: false, nested: false }));
   assert.equal(packerReleases(by(notNested, "l"), by(notNested, "b"), notNested, ctx), false, "Nesting must be ticked first");
   assert.equal(packerReleases(by(notNested, "p"), by(notNested, "b"), notNested, ctx), false);
@@ -105,9 +106,33 @@ test("rule 1: cutting started opens the stages after the packer without Take job
   assert.equal(packerReleases(by(recut, "rp"), by(recut, "rb"), recut, ctx), false, "a re-cut keeps today's behaviour");
 });
 
-test("rule 1: never a stage on one tick, never Invoicing, never a re-cut, never with no packer", () => {
+// Choice A, Heinrich 17 Sep 2026: a one-tick stage opens early like any
+// other, so work can start; its Complete tick waits for the laser.
+test("rule 3: a one-tick stage after the packer is not ticked Complete while the laser has work", () => {
+  const s = job68({ bendingMode: "batch" });
+  assert.equal(tickWaitsForLaser(by(s, "b"), s, ctx), true, "Bending on one tick, Laser open");
+  assert.equal(tickWaitsForLaser(by(s, "w"), s, ctx), true, "Welding on one tick too");
+  assert.equal(tickWaitsForLaser(by(s, "d"), s, ctx), false, "a per-item stage closes by its counts");
+  assert.equal(tickWaitsForLaser(by(s, "i"), { ...s }, ctx), false);
+  const invoicingOnOneTick = s.map((x) => (x.id === "i" ? { ...x, tracking_mode: "batch" } : x));
+  assert.equal(tickWaitsForLaser(by(invoicingOnOneTick, "i"), invoicingOnOneTick, ctx), false, "Invoicing was never opened early");
+  const externalOnOneTick = s.map((x) => (x.id === "x" ? { ...x, tracking_mode: "batch" } : x));
+  assert.equal(tickWaitsForLaser(by(externalOnOneTick, "x"), externalOnOneTick, ctx), false, "a stage with its own machine finishes on its own");
+  assert.equal(tickWaitsForLaser(by(s, "p"), s, ctx), false, "the packer has its own hold");
+  assert.equal(tickWaitsForLaser(by(s, "l"), s, ctx), false);
+  const laserDone = s.map((x) => (x.id === "l" ? { ...x, is_complete: true } : x));
+  assert.equal(tickWaitsForLaser(by(laserDone, "b"), laserDone, ctx), false, "nothing left to cut");
+  const notNested = job68({ bendingMode: "batch", nested: false }).map((x) => (x.id === "l" ? { ...x, is_complete: true } : x));
+  assert.equal(tickWaitsForLaser(by(notNested, "b"), notNested, ctx), true, "Nesting still open counts as laser work");
+  const noPacker = s.filter((x) => x.id !== "p");
+  assert.equal(tickWaitsForLaser(by(noPacker, "b"), noPacker, ctx), false, "a job with no plate packer is left alone");
+  const recut = [...s, stage("rb", "Bending", { shortage_id: "s1" })];
+  assert.equal(tickWaitsForLaser(by(recut, "rb"), recut, ctx), false, "a re-cut's run is left alone");
+});
+
+test("rule 1: one tick opens too; never Invoicing, never a re-cut, never with no packer", () => {
   const batch = job68({ bendingMode: "batch" });
-  assert.equal(packerReleases(by(batch, "l"), by(batch, "b"), batch, ctx), false, "one tick could be ticked done with parts still on the laser");
+  assert.equal(packerReleases(by(batch, "l"), by(batch, "b"), batch, ctx), true, "one tick opens early; its Complete tick waits (rule 3)");
   const s = job68();
   assert.equal(packerReleases(by(s, "l"), by(s, "i"), s, ctx), false, "Invoicing is never released");
   const recut = [...s, stage("rl", "Laser", { shortage_id: "s1" }), stage("rp", "Packer", { shortage_id: "s1", started_at: "x" }), stage("rb", "Bending", { shortage_id: "s1", tracking_mode: "each" })];
