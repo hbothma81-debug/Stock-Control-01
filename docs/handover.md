@@ -2082,9 +2082,9 @@ limit and was checked by hand instead.
 `setup-laser-priority.sql` — three columns on `jobs` and a check (>= 1).
 Registered in `build-test-database.sh` and
 `CHECK-which-setup-files-are-run.sql`; `setup-ALL.sql` regenerated.
-**Not yet run on practice or live.** The code names the columns in its
-save, so the SQL must be on both databases before this is pushed, or
-every priority save fails ("That didn't save").
+**Run on practice and live by Heinrich, 17 Sep**; both answer 200 for
+the three columns (checked from here with a one-off select, the way
+`CHECK-live-table.cjs` asks). Safe to push.
 
 ### Built but not yet tested by Heinrich
 
@@ -2099,7 +2099,7 @@ and see a number set on the first arrive.
 
 ### Waiting on Heinrich
 
-1. Run `setup-laser-priority.sql` on practice, then live.
+1. ~~Run `setup-laser-priority.sql` on practice, then live.~~ Done 17 Sep.
 2. Whether any sales person meant to set priorities is in fact a
    sales person in User Management (`Is a Sales Person`), because that
    tick is what shows the box.
