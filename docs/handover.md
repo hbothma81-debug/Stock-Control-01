@@ -2436,3 +2436,81 @@ program TESTCLAUDE1, two cancelled TEST shortages on JOB-0002.
 2. His answers to the three offers; the push guard first if he says yes.
 3. Review problem 7 (a parts import that links a typed part does not
    bring the part's remembered Then).
+
+---
+
+## 17 Sep 2026 — Stock Manager (sections and materials): state of play at wrap-up
+
+### Done and live (pushed by this conversation, b171761 and e2ec61b, on Heinrich's say-so)
+
+- **One spelling per material** (step 3): short name when the list has one
+  (SS304, SS304 2B, Galv), else full name (Mild Steel). Pickers and lookups
+  (`findPrice`, `findFactor`, `updateReqPrice`) take either.
+- **Sections from boxes** (step 4): 18 fixed types, Add from the type's
+  boxes with a name preview and duplicate refusal, pencil edits through the
+  boxes, Section Types read-only, pipe standards with OD/ID/wall in the name.
+  The stock form offers every type a section is filed under (`stockSectionTypes`).
+- **Every live section converted** (step 5): 68 sections, merges held, every
+  copied name finds a section (docs/check-results/2026-09-17-section-names-after-conversion.md).
+  Laser production and Jobs were messaged with the changes (Jobs' session was
+  offline; queued).
+- **kg/m worked out from the numbers** (step 6), with "use N" per row.
+- 26 other conversations' commits went live in the b171761 push; their
+  columns (extra_stages, only_marked, laser_priority) were checked on live first.
+
+### SQL this conversation wrote
+
+| File | Practice | Live |
+|---|---|---|
+| `setup-material-spellings.sql` | run (Heinrich, 16 Sep) | run (Heinrich, 16 Sep); data only |
+| `setup-section-dimensions.sql` | answers (per Planning, 16 Sep) | `master_factor_items.dimensions` answers 200 (checked 17 Sep) |
+| `setup-section-names.sql` (generated) | run, check clean (Heinrich, 17 Sep) | run, check clean; `section_rename_map` answers 200 (checked 17 Sep) |
+
+Read-only checks: `CHECK-material-spellings.sql`, `CHECK-section-names-in-use.sql`.
+
+### Only in chat, not in a file
+
+- **PIPE NB100 SCH40 rename.** Added on live at 09:58 on 17 Sep, before the
+  OD/ID code was live, so its name is short (numbers correct). A one-off
+  `do $do$` block renaming it to "PIPE NB100 SCH40 114.3OD 102.26ID 6.02WT"
+  in every copy was given to Heinrich; **not confirmed run**. Check with the
+  section names check.
+
+### Built but not yet tested by Heinrich
+
+1. Stock Manager → Sections: 18 type pills with counts; Add from boxes
+   (SHS, a pipe on each standard); the red duplicate line; pencil edit
+   renaming a size in every material; copy onto another material picks a
+   short name.
+2. Section Types tab is a read-only list.
+3. Stock → Structural → add: the new section names and "Pipe" offered;
+   a new pipe can be stocked.
+4. SS304 2B plate lines show their weight; a price edit on an SS304 2B
+   plate requisition sticks.
+5. kg/m: "use N" on rows; blank kg/m on Add saves the worked-out one; cut
+   lists and stock values no longer read 0 for sizes without a typed kg/m.
+
+### Waiting on Heinrich
+
+- Confirm the NB100 pipe rename ran (above).
+- Type a kg/m for CH 120x55 (no thickness box) and the other PFC/CH/IPE sizes.
+
+### Asked, not started
+
+- **Structural add-stock price (Heinrich, 17 Sep):** "does not take the price
+  per meter, the numbers jump around"; wants **R/m and R/kg as two separate
+  boxes**, typing one shows the other. The code is the `priceUnitMode`
+  toggle block in the structural add form (App.jsx, search
+  `setSectionPrice(effectiveSection`): its input is controlled by the
+  stored price, re-derived and rounded on every keystroke through
+  `setSectionPrice`, so typing jumps. Fix: two boxes with their own typed
+  text, writing R/m to the section row, R/kg shown from `findSectionFactor`.
+  The plate and cncBar forms have the same toggle; ask whether they change too.
+
+### Pick up next
+
+1. The two-box price on the structural add form (above).
+2. Changing a material's short name rewrites every row that stores it
+   (decided 16 Sep, not built).
+3. Fasteners (answers in memory `fasteners-database-plan`; tell Quoting first).
+4. Suppliers steps 3–4 (Tel per contact, categories) when he asks.
