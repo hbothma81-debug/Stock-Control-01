@@ -109,6 +109,7 @@ import {
   monthKeySA, jobWorth, requestedTotalFor, suggestedInvoiceAmount, readInvoiceAmount, onOrderFigure, invoicedInMonthFigure,
   requestedInMonthFigure,
 } from "./jobs/jobFigures.js";
+import { JOBS_ORDER_KEY, JOB_ORDERS, isJobOrder, sortJobs } from "./jobs/jobOrder.js";
 import PdfViewer from "./PdfViewer.jsx";
 import { extractPdfTextItems, parseSigmaNestQuote, browserInflate } from "./lib/sigmanestQuote.js";
 import { rowsForIds } from "./lib/rowsForIds.js";
@@ -1695,6 +1696,25 @@ export default function StockControl() {
   const [jobsSearchQuery, setJobsSearchQuery] = useState("");
   const [jobsCustomerFilter, setJobsCustomerFilter] = useState("");
   const [jobsSalesRepFilter, setJobsSalesRepFilter] = useState("");
+  // The Jobs list's Order box (src/jobs/jobOrder.js), remembered on this
+  // device. Storage can be switched off or full: the list then simply
+  // opens newest first, as it always did.
+  const [jobsOrder, setJobsOrder] = useState(() => {
+    try {
+      const kept = window.localStorage.getItem(JOBS_ORDER_KEY);
+      return isJobOrder(kept) ? kept : "newest";
+    } catch {
+      return "newest";
+    }
+  });
+  function chooseJobsOrder(order) {
+    setJobsOrder(order);
+    try {
+      window.localStorage.setItem(JOBS_ORDER_KEY, order);
+    } catch {
+      // Not remembered, that is all.
+    }
+  }
   const [productionSelectedDept, setProductionSelectedDept] = useState(null);
   // Which specific job card is open within the current department — null
   // shows the compact list (job number, SigmaNest number, customer, sales
@@ -16335,6 +16355,32 @@ export default function StockControl() {
                     </span>
                   )}
 
+                  {/* The due date, only while the list is in due-date order:
+                      an order that the rows do not show cannot be checked by
+                      eye. Red once it has passed, on a job still open. */}
+                  {jobsOrder === "due" &&
+                    (() => {
+                      const due = job.due_date ? new Date(job.due_date) : null;
+                      const known = due && !Number.isNaN(due.getTime());
+                      const open = job.status === "in_progress" || job.status === "complete";
+                      const startOfToday = new Date();
+                      startOfToday.setHours(0, 0, 0, 0);
+                      const late = known && open && due < startOfToday;
+                      return (
+                        <span
+                          style={{
+                            ...S.chip,
+                            flexShrink: 0,
+                            ...(late ? { color: C.danger, borderColor: C.danger, fontWeight: 700 } : {}),
+                            ...(known ? {} : { color: C.muted, fontStyle: "italic" }),
+                          }}
+                          title={known ? (late ? "The due date has passed" : "Due date") : "No due date on this job"}
+                        >
+                          {known ? `Due ${due.toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}` : "no due date"}
+                        </span>
+                      );
+                    })()}
+
                   {/* What it is worth, so the big ones can be picked out of
                       a long list. Rounded to the rand: this is for choosing
                       what to do next, not for quoting off. */}
@@ -16446,7 +16492,8 @@ export default function StockControl() {
                 </button>
               );
 
-              const jobsWith = (status) => jobsList.filter((j) => j.status === status && matchesFilters(j));
+              const jobsWith = (status) =>
+                sortJobs(jobsList.filter((j) => j.status === status && matchesFilters(j)), jobsOrder);
               return (
                 <>
                   <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
@@ -16470,6 +16517,20 @@ export default function StockControl() {
                       onChange={setJobsSalesRepFilter}
                       emptyLabel="All sales reps"
                     />
+                    {/* Three fixed choices, so a plain select and not a
+                        type-to-find box. Every pill below follows it. */}
+                    <select
+                      style={{ ...S.input, flex: 1, minWidth: 130 }}
+                      value={jobsOrder}
+                      onChange={(e) => chooseJobsOrder(e.target.value)}
+                      title="The order the jobs are listed in"
+                    >
+                      {JOB_ORDERS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   {/* What is on the floor, in money. Same reading as the
