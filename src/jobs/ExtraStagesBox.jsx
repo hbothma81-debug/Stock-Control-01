@@ -4,16 +4,19 @@ import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { extraStagesOf, moveInList } from "./extraStages.js";
 
 // A job line's extra stages, in its own order, as numbered chips:
-// "Then: 1. Machining - External  2. Bending". Type to add one (only stages
-// switched to "Extra stage" under Job Process Types are offered), X to take
-// one off, the arrows to swap it with its neighbour.
+// "Then: 1. Machining - External  2. Bending". Type to add one, X to take
+// one off, the arrows to swap it with its neighbour. Always shown on a line
+// and a part (Heinrich, 17 Sep 2026: fewer clicks, never a feature hidden
+// behind a setting on another screen). App.jsx decides what is offered
+// (thenBoxStages) and switches a stage to "Extra stage" the first time a
+// line names it (setJobLineExtraStages).
 //
 // "Not set" means nobody has looked yet: the line goes to every extra stage.
 // "None" saves an empty list: nothing extra. The rules are in
 // extraStages.js.
 //
 //   line      the job line; reads extra_stages
-//   stages    the names on offer: every extra stage, in factory order
+//   stages    the names on offer, in factory order
 //   onJob     the stage names ticked on this job; a chip whose stage is
 //             not among them is shown muted, since nothing lists it yet
 //   onChange  called with the new list: an array, possibly empty
@@ -102,8 +105,13 @@ export default function ExtraStagesBox({ line, stages, onJob, onChange, canEdit 
           value=""
           onChange={(v) => v && onChange([...chosen, v])}
           emptyLabel={chosen.length ? "Then…" : "Add a stage…"}
-          title="Which stages this line goes through after it is cut, in order. Only extra stages are offered."
+          title="Which stages this line goes through after it is cut, in order: the stages on this job that come after cutting."
         />
+      )}
+      {/* Always shown, so say why there is nothing to pick rather than
+          leave an empty row (Heinrich, 17 Sep 2026). */}
+      {canEdit && offer.length === 0 && chosen.length === 0 && (
+        <span style={S.roleHint}>no later stage on this job to send it to</span>
       )}
       {canEdit && list === null && (
         <button

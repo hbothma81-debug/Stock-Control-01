@@ -30,10 +30,19 @@ export function extraStagesOf(line) {
 // stage's own "Cuts:" setting: such a stage can also be a line's first
 // step, as Machining - External is for a part that comes from the supplier
 // already machined. A line with parts is decided by the caller.
+//
+// A line never set goes to every extra stage that has no machine of its
+// own, so nothing is missed. A stage with a machine (CNC Lathe used as a
+// second operation) keeps to what it listed before it became an extra
+// stage -- its own lines and untagged ones -- until a line names it:
+// otherwise switching it on would put every unset laser part on every job
+// in front of the lathe. That is what lets a stage be switched on straight
+// from a line's Then box (Heinrich, 17 Sep 2026: fewer clicks).
 export function markedStageTakes(stageName, tag, line) {
-  if (tag && (line?.made_on || "") === tag) return true;
+  const made = line?.made_on || "";
+  if (tag && made === tag) return true;
   const list = extraStagesOf(line);
-  if (list === null) return true;
+  if (list === null) return tag ? !made : true;
   return list.some((n) => same(n, stageName));
 }
 

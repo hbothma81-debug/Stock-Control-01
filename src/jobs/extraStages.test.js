@@ -119,3 +119,16 @@ test("two extra stages are ordered by their lines only when both count per item"
   assert.equal(orderedByLines(st("Bending", "each"), st("Machining - External"), isMarked), false, "no mode means one tick");
   assert.equal(orderedByLines(st("Bending", "each"), st("Welding", "each"), isMarked), false, "Welding is not an extra stage");
 });
+
+// 17 Sep 2026: the Then box switches a stage on the first time a line names
+// it, so switching one on must change nothing for lines nobody has set.
+test("a machine stage used as an extra stage keeps to its own and untagged lines until a line names it", () => {
+  const laserNeverSet = { made_on: "laser", extra_stages: null };
+  const untaggedNeverSet = { made_on: "", extra_stages: null };
+  assert.equal(markedStageTakes("CNC Lathe", "cnc", laserNeverSet), false, "an unset laser part does not land in front of the lathe");
+  assert.equal(markedStageTakes("CNC Lathe", "cnc", untaggedNeverSet), true, "an untagged line still does, as before the switch");
+  assert.equal(markedStageTakes("CNC Lathe", "cnc", { made_on: "cnc", extra_stages: null }), true, "its own lines, as before");
+  assert.equal(markedStageTakes("CNC Lathe", "cnc", { made_on: "laser", extra_stages: ["Bending", "CNC Lathe"] }), true, "a laser part that names it");
+  assert.equal(markedStageTakes("CNC Lathe", "cnc", { made_on: "laser", extra_stages: [] }), false);
+  assert.equal(markedStageTakes("Bending", "", laserNeverSet), true, "a stage with no machine still takes every unset line");
+});

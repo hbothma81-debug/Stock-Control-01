@@ -7636,6 +7636,27 @@ export default function StockControl() {
     return (master?.jobProcessTypes || []).filter((n) => onlyMarked(n));
   }
 
+  // What a line's Then box offers, in factory order. The box is always
+  // there (Heinrich, 17 Sep 2026: fewer clicks, never a feature hidden
+  // behind a setting on another screen), so it offers every stage already
+  // switched to "Extra stage", and every other stage ticked on this job
+  // that a part can go to after its first cut: not the two lasers' own
+  // stages or the packer, not Invoicing, and nothing from Welding on --
+  // extra stages stay above Welding, where parts merge into their line.
+  // Naming one that is not an extra stage yet switches it on
+  // (setJobLineExtraStages); markedStageTakes keeps that harmless for
+  // every line nobody has set.
+  function thenBoxStages(jobProcesses) {
+    const flow = master?.jobProcessTypes || [];
+    const welding = flow.findIndex((n) => /weld/i.test(n));
+    const onJob = new Set((jobProcesses || []).filter((p) => !p.shortage_id).map((p) => p.process_name));
+    return flow.filter((n, i) => {
+      if (onlyMarked(n)) return true;
+      if (!onJob.has(n) || welding === -1 || i >= welding) return false;
+      return !isLaserProcess(n) && !isTubeLaserProcess(n) && !isPlateNestingProcess(n) && !workedInLaserStatus(n) && !isInvoicingStage(n);
+    });
+  }
+
   // Sets a line's extra stages and remembers them on its stock part, so
   // the next job with that part comes in with them. Unlike the cut
   // method, a stage taken off here comes off the part too (Heinrich,
@@ -7647,6 +7668,13 @@ export default function StockControl() {
     setJobDetail((prev) =>
       prev ? { ...prev, quoteItems: prev.quoteItems.map((q) => (q.id === item.id ? { ...q, extra_stages: list } : q)) } : prev
     );
+    // A stage named for the first time becomes an extra stage here, in the
+    // same pick, instead of sending anyone to Job Process Types first. It
+    // changes nothing for lines nobody has set (markedStageTakes). Its own
+    // failure is said by saveProcessTypeSetting; the line is still saved.
+    for (const name of (list || []).filter((n) => !onlyMarked(n))) {
+      await saveProcessTypeSetting(name, "only_marked", true);
+    }
     try {
       const { error } = await supabase.from("job_quote_items").update({ extra_stages: list }).eq("id", item.id);
       if (error) throw error;
@@ -23727,11 +23755,11 @@ export default function StockControl() {
                           </div>
                           {/* Its extra stages, in order. Not on a line with
                               parts: its parts carry them. */}
-                          {parts.length === 0 && extraStageNames().length > 0 && (
+                          {parts.length === 0 && (
                             <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3 }}>
                               <ExtraStagesBox
                                 line={it}
-                                stages={extraStageNames()}
+                                stages={thenBoxStages(jobDetail.processes)}
                                 onJob={(jobDetail.processes || []).map((p) => p.process_name)}
                                 canEdit={canEditThisJob}
                                 onChange={(list) => setJobLineExtraStages(jobDetail.job, it, list)}
@@ -23896,11 +23924,12 @@ export default function StockControl() {
                                       <SavedCheck fieldKey={`quoteitem-material-${c.id}`} />
                                     </>
                                   )}
-                                  {extraStageNames().length > 0 && (
+                                  {/* Always shown, like the line's own (17 Sep 2026). */}
+                                  {(
                                     <>
                                       <ExtraStagesBox
                                         line={c}
-                                        stages={extraStageNames()}
+                                        stages={thenBoxStages(jobDetail.processes)}
                                         onJob={(jobDetail.processes || []).map((p) => p.process_name)}
                                         canEdit
                                         onChange={(list) => setJobLineExtraStages(jobDetail.job, c, list)}
