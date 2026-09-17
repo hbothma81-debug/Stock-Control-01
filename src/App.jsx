@@ -7356,6 +7356,7 @@ export default function StockControl() {
     try {
       await submitItemsToInvoice(job, itemsWithQty);
       setInvoiceQtyInputs({});
+      await tickInvoicingOnceAllRequested(job);
       refreshJobDetail();
       fetchJobs();
     } catch (err) {
@@ -8742,11 +8743,37 @@ export default function StockControl() {
     try {
       await submitItemsToInvoice(job, eligibleItems);
       setInvoiceQtyInputs({});
+      await tickInvoicingOnceAllRequested(job);
       fetchJobs();
       openMarkInvoicedModal(job);
     } catch (err) {
       console.error("Failed to invoice job:", err);
       alert("Couldn't submit that — check your connection and try again.");
+    }
+  }
+
+  // A request sent from the job page ticks the job's Invoicing stage too,
+  // once nothing is left to request (Heinrich, 17 Sep 2026). The Production
+  // card's "Request invoice" always did; the job page sent the same request
+  // and left the stage open, so the job still read as waiting for somebody
+  // to request its invoice. "Nothing left" is remainingToInvoice, the rule
+  // behind both buttons, so a request for some of the lines ticks nothing.
+  // Read fresh: the request has just changed the lines' invoiced counts.
+  // Never fatal -- the request itself has gone through by now.
+  async function tickInvoicingOnceAllRequested(job) {
+    if (!supabase || !job) return;
+    try {
+      const [lineRead, stageRead] = await Promise.all([
+        supabase.from("job_quote_items").select("*").eq("job_id", job.id),
+        supabase.from("job_processes").select("*").eq("job_id", job.id).eq("is_complete", false).is("shortage_id", null),
+      ]);
+      if (lineRead.error) throw lineRead.error;
+      if (stageRead.error) throw stageRead.error;
+      if (remainingToInvoice(lineRead.data || []).length > 0) return;
+      const stage = (stageRead.data || []).find((p) => isInvoicingStage(p.process_name));
+      if (stage) await toggleJobProcessComplete(stage, job);
+    } catch (err) {
+      console.error("The request went through, but Invoicing could not be ticked:", err);
     }
   }
 
