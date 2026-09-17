@@ -2339,3 +2339,100 @@ None. No SQL, no database change of any kind.
 
 No practice data left: the test note on JOB-0002's welding card was put
 back to empty.
+
+---
+
+## 17 Sep 2026 — Planning (wrap-up): state of play, 16 Sep evening and 17 Sep
+
+Everything below is live unless it says otherwise. The rules are in
+`CLAUDE.md` (the packer bullet, the extra stages bullet, the Production
+bullets, "How to work with me"); this is what happened and what is left.
+
+### Done and live
+
+- **16 Sep evening:** the packer rules (Jobs page) pushed after Planning's
+  own read, 75d8bcf..a0c9c6d. At push they opened only JOB-0068's Bending
+  and CNC Lathe. `setup-material-spellings-2.sql` written, proven, run on
+  live by Heinrich (read back).
+- **17 Sep, Heinrich: "jobs must open as soon as the laser has started":**
+  - bcb6b1f: rule 1's trigger is "cutting has started OR the packer is
+    taken" (the Laser stage's `started_at`, written at the first sheet
+    cut); an untaken packer is released too. The 8 jobs already cutting
+    were marked started by hand through his session.
+  - 9dd61a7: one-tick stages open the same way; their Complete tick is
+    refused until the laser is done (his choice A).
+  - b171761: extra stages switched on (review problems 1–3 fixed), the
+    tube side opens, a per-item card is as ready as its lines.
+  - 4a6f2af, 2526d4f, 5dead4a, b76d860: the Then box always shows, offers
+    every item process above Welding, a pick switches the stage on and
+    adds it to the job per item, a named one-tick stage goes per item, and
+    on a job with any line marked the unmarked lines go to no extra stage.
+- **Set on live by Planning through Heinrich's session** (each the same
+  write the screen makes): Laser - External to "Cuts: Laser - external"
+  (it had never been saved; JOB-0068's Bending then opened); Bending
+  switched to Extra stage; JOB-0068's Drilling stage to per item;
+  Drilling added to Heinrich's own stages under User Management;
+  "Nothing extra on the rest" pressed on JOB-0068 (he had said everything
+  was set). JOB-0068 then read Bending 16 lines, Drilling 26 lines.
+- **Another conversation pushed the whole branch twice on 17 Sep** (09:11
+  and 09:18, 27 commits, about 22 unreviewed; most likely Stock Manager,
+  not proven). b171761 went live that way before Heinrich had said push.
+  Planning health-checked the exact live commit and reviewed the rest
+  after the fact: laser priority (5 commits), the stock form fix, pipe
+  names and Custom Channel, sections step 6, and the section rename SQL's
+  result on live (68 sections with numbers, no old names, no duplicates,
+  77 stock lines all matched). Nothing needed fixing.
+
+### Every setup file this conversation wrote
+
+- `setup-material-spellings-2.sql` (data only: Galvanised / Galv, and CNC
+  bar requests get their full name back). **Live: run, read back 16 Sep**
+  (grades row Galvanised/Galv, plate lines and requests Galv, programs
+  "2mm Galv", the CNC bar request back to Stainless 304). **Practice:**
+  Heinrich said done; practice holds no galvanised material and no CNC
+  bar requests, so its data cannot show it either way (read 17 Sep).
+- Given to Heinrich but not Planning's: `setup-extra-stages.sql` (Jobs
+  page). Its three columns answer 200 on practice and live (17 Sep).
+- No SQL for anything built on 17 Sep.
+
+### Built but not yet tried by Heinrich
+
+1. Stages opening at the first sheet cut, without Take job (seen on live:
+   JOB-0014, JOB-0093, JOB-0091; never tried by him on a fresh job).
+2. A one-tick stage opened early refusing its Complete tick while the
+   laser has work, with its message (never seen on screen by anyone).
+3. The tube side: a mixed plate-and-tube job's Bending opening while the
+   tube nester is busy (JOB-0094), and rule 3 waiting for the tube stages.
+4. A per-item card's label following its lines (Ready / Partly ready /
+   Waiting: the first held line's stage).
+5. The Then box: picking a stage the job lacks (tried on practice
+   JOB-0008 by Planning, not by him on live); the "nobody has it ticked"
+   message; two or more extra stages in a line's own order on the floor.
+6. The marked-job rule on a new job: mark a few lines, check the rest
+   leave Bending; and a new job whose stock parts bring a remembered Then.
+7. From the after-the-fact review: the laser priority on Prince's list
+   and under Cut next; a section's "use N" kg/m button.
+
+### Waiting on Heinrich
+
+- Tick **Drilling** under User Management for whoever drills (only he,
+  Jonathan, Gawie, Mark and Andries have it).
+- A yes or no on three offers: a **push guard** so only Planning can push;
+  **per-item marks from Welding onwards** (needs a parent/part rule);
+  counting only marks made on the job itself, not ones a part brought.
+- Type a kg/m for **CH 120x55** (its type has no thickness box).
+- Start the **Laser quoting** conversation: `/monday Laser quoting`.
+
+### Left on practice
+
+Bending and Drilling added to the stage list above welding, and to the
+Test account's stages; Drilling switched to Extra stage; JOB-0008 has a
+Drilling stage and lines 100 and 101 marked Drilling. From 15 Sep: empty
+program TESTCLAUDE1, two cancelled TEST shortages on JOB-0002.
+
+### Pick up next
+
+1. Whatever Heinrich's tries above turn up.
+2. His answers to the three offers; the push guard first if he says yes.
+3. Review problem 7 (a parts import that links a typed part does not
+   bring the part's remembered Then).
