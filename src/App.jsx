@@ -1703,7 +1703,7 @@ export default function StockControl() {
   // The Jobs list's Order box (src/jobs/jobOrder.js), remembered on this
   // device. Storage can be switched off or full: the list then simply
   // opens newest first, as it always did.
-  const [jobsOrder, setJobsOrder] = useState(() => {
+  const [jobsOrderChoice, setJobsOrder] = useState(() => {
     try {
       const kept = window.localStorage.getItem(JOBS_ORDER_KEY);
       return isJobOrder(kept) ? kept : "newest";
@@ -1832,7 +1832,7 @@ export default function StockControl() {
   // picked, and what the Ready / Waiting split needs for the jobs at it:
   // their stages, lines and per-item counts (loadJobsStageData). Loaded
   // when a stage is picked and after a write, never on a timer.
-  const [jobsStageFilter, setJobsStageFilter] = useState("");
+  const [jobsStagePick, setJobsStageFilter] = useState("");
   const [jobsStageData, setJobsStageData] = useState(null);
   const jobsStageLoadOrderRef = useRef(null);
   if (!jobsStageLoadOrderRef.current) jobsStageLoadOrderRef.current = makeLoadOrder();
@@ -1978,6 +1978,16 @@ export default function StockControl() {
   const [session, setSession] = useState(undefined); // undefined = still checking, null = signed out
   const [authLoading, setAuthLoading] = useState(true);
   const [profile, setProfile] = useState(null);
+  // The Jobs list's stage filter and Order box are for admins only, for
+  // now (Heinrich, 17 Sep 2026, the evening they went live). Everybody
+  // else gets the list as it always was: newest first, every stage. Worked
+  // out here, not only where the two controls are drawn, so a choice an
+  // admin left on a shared PC (the order is kept on the device) cannot
+  // reorder the list for the next person with no box to change it back.
+  // To open them to more people, change these two lines and the two
+  // isAdmin tests beside the controls.
+  const jobsOrder = profile?.isAdmin ? jobsOrderChoice : "newest";
+  const jobsStageFilter = profile?.isAdmin ? jobsStagePick : "";
   // Moved this early deliberately, not left where it naturally first got
   // written — several functions defined well before the old declaration
   // point reference these via closure (fetchNotifications, shortage
@@ -16700,29 +16710,34 @@ export default function StockControl() {
                       emptyLabel="All sales reps"
                     />
                     {/* Stages in factory order, each with how many jobs
-                        have it open, under the filters beside it. */}
-                    <TypeToFind
-                      style={{ flex: 1, minWidth: 130 }}
-                      options={stageOptions}
-                      value={jobsStageFilter}
-                      onChange={setJobsStageFilter}
-                      emptyLabel="All stages"
-                      maxShown={50}
-                    />
+                        have it open, under the filters beside it. Admins
+                        only for now, and the Order box with it. */}
+                    {isAdmin && (
+                      <TypeToFind
+                        style={{ flex: 1, minWidth: 130 }}
+                        options={stageOptions}
+                        value={jobsStageFilter}
+                        onChange={setJobsStageFilter}
+                        emptyLabel="All stages"
+                        maxShown={50}
+                      />
+                    )}
                     {/* Three fixed choices, so a plain select and not a
                         type-to-find box. Every pill below follows it. */}
-                    <select
-                      style={{ ...S.input, flex: 1, minWidth: 130 }}
-                      value={jobsOrder}
-                      onChange={(e) => chooseJobsOrder(e.target.value)}
-                      title="The order the jobs are listed in"
-                    >
-                      {JOB_ORDERS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
+                    {isAdmin && (
+                      <select
+                        style={{ ...S.input, flex: 1, minWidth: 130 }}
+                        value={jobsOrder}
+                        onChange={(e) => chooseJobsOrder(e.target.value)}
+                        title="The order the jobs are listed in"
+                      >
+                        {JOB_ORDERS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </div>
 
                   {/* What is on the floor, in money. Same reading as the
