@@ -2203,3 +2203,65 @@ load begins, `mayShow(n)` before anything is set from it.
    (`laserLoadFailed`).
 2. Leave Complete jobs out of `fetchProductionQueue`, after the two
    checks in the 16 Sep entry.
+
+## 17 Sep 2026 — Laser production: state of play at wrap-up (Laser 4kw priority)
+
+The detail is in the 16 Sep entry "Laser production conversation: Laser
+4kw priority" above. This is where it stands at wrap-up.
+
+### Done and live
+
+All of it, pushed by the Planning conversation; `CHECK-what-is-live.cjs`
+finds "Cut next", "Laser 4kw priority" and "can wait" in the live build
+(17 Sep). Commits `157e372` `a44000a` `79ae7ac` `f62aa95` `9906627`:
+a queue number on the job (1 first, ties allowed, blank ordinary), set by
+plate nesters and admins only ("instead of" sales, his word of 17 Sep);
+To nest sorted by it; the red "Cut next" section on Cutting; cleared when
+the job's own Nesting and Laser close; Refresh re-reads loaded laser data;
+a notice to plate nesters and admins; a "Can wait" re-cut no longer jumps
+To nest.
+
+Also this session, no code: read Stock Manager's section rename for the
+laser side. No old spelling in `src/laser`; the 76-row rename map has no
+duplicate, overlapping or chained names; a live query for tube programs
+or job lines still ending in "mm" returned no rows (Heinrich ran it).
+
+### Every setup file this conversation wrote
+
+- `setup-laser-priority.sql` — `jobs.laser_priority`, `_by`, `_at` and a
+  check (>= 1). Run by Heinrich on practice and live 17 Sep; all three
+  columns answer 200 on both (checked from here). Registered in
+  `build-test-database.sh` and `CHECK-which-setup-files-are-run.sql`.
+
+### Built but not yet tested by Heinrich
+
+Tried on practice by this conversation on 17 Sep (the list is in the
+16 Sep entry); not yet by him, and not at all on live:
+
+1. The box on a job's Overview tab and on Prince's opened To nest row.
+2. Prince's To nest order with a numbered job, an urgent one and a re-cut.
+3. "Cut next" on the operator's screen, with a real program.
+4. The number clearing itself when the last program is cut and Nesting
+   is done.
+5. **Never exercised anywhere:** the notice to plate nesters and admins
+   (practice has one account); a sales person's login not seeing the box;
+   Prince's own login seeing it; a second PC picking a number up on
+   Refresh.
+
+### Waiting on Heinrich
+
+Nothing to run or tick. Tell Prince and the operator what "Cut next" and
+the red "Priority 1" mean. Delete practice job JOB-0013 when convenient.
+
+### Pick up next
+
+1. His first real use on live, and whatever it turns up.
+2. The tube laser, if he wants the same: `hasPriority: true` on
+   `LASER_MACHINES.tubeLaser`, and `jobGoesToPlateLaser` in App.jsx is
+   plate-only.
+3. "Programs waiting to be cut" on the Nesting screen shows no priority
+   tag; only Cutting does.
+4. The first tube nesting report imported after the section rename: every
+   section should match its alias without asking.
+5. Still open from before: the tube program printout sorts TUBING_10
+   before TUBING_2 (`nestingPrint.js`).
