@@ -3995,16 +3995,26 @@ export default function StockControl() {
   }
 
   async function refreshJobStages(jobs) {
-    const ids = (jobs || jobsList || []).filter((j) => j.status !== "invoiced").map((j) => j.id);
+    // Invoiced and cancelled jobs show no stage bar, and nothing settles
+    // them, so their stages are not fetched: they would only lengthen the
+    // id list with every job that has ever finished.
+    const ids = (jobs || jobsList || [])
+      .filter((j) => j.status !== "invoiced" && j.status !== "cancelled")
+      .map((j) => j.id);
     if (ids.length === 0) {
       setJobStagesByJob({});
       return;
     }
     try {
-      const rows = await fetchAllRows("job_processes", {
+      // In batches of ids, each paged in id order (src/lib/rowsForIds.js).
+      // It used to be one list of every id, paged on sort_order. Two
+      // stages can share a sort_order, so where two pages met a stage
+      // could be skipped -- and a job missing an unticked stage reads as
+      // finished to settleFinishedJobs below, which marks it Complete and
+      // tells the rep. The rows' order does not matter here: inFlowOrder
+      // sorts them for the bar.
+      const rows = await fetchRowsForIds("job_processes", "job_id", ids, {
         select: "id, job_id, process_name, is_complete, sort_order, is_urgent, shortage_id",
-        orderBy: "sort_order",
-        filter: (q) => q.in("job_id", ids),
       });
       const byJob = {};
       for (const r of rows) (byJob[r.job_id] = byJob[r.job_id] || []).push(r);
