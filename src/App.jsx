@@ -2434,8 +2434,27 @@ export default function StockControl() {
       // own press, never a timer: the laser load is ten whole tables.
       ...(laser.laserData !== null ? [laser.fetchLaserData()] : []),
       ...(tubeLaser.laserData !== null ? [tubeLaser.fetchLaserData()] : []),
+      // The stage settings (which stage is an extra stage, what it cuts)
+      // loaded once per session, so a floor tablet kept listing every part
+      // at Bending after the office had marked the lines (Heinrich, 17 Sep
+      // 2026, JOB-0068). A small table. The Production list reloads when
+      // they arrive (the effect on processTypeSettings).
+      reloadProcessTypeSettings(),
     ]);
     setIsRefreshing(false);
+  }
+
+  // Quiet: the first load says so when it fails; on a Refresh the settings
+  // already held stay.
+  async function reloadProcessTypeSettings() {
+    try {
+      const rows = await fetchAllRows("process_type_settings", { orderBy: "process_name" });
+      const map = {};
+      for (const r of rows || []) map[r.process_name] = r;
+      setProcessTypeSettings(map);
+    } catch (err) {
+      console.error("Failed to reload process type settings:", err);
+    }
   }
 
   // Retries the initial load several times with a pause before showing the
@@ -3089,6 +3108,15 @@ export default function StockControl() {
   useEffect(() => {
     if (tab === "tubeLaser" && tubeLaser.laserData === null) tubeLaser.fetchLaserData();
   }, [tab, tubeLaser.laserData]);
+
+  // The Production list is built from the stage settings (what a stage
+  // cuts, whether it is an extra stage), so it is rebuilt whenever they
+  // change: a Refresh, or a stage switched on from a line's Then box. From
+  // an effect so the rebuild reads the new settings, not the old render's.
+  useEffect(() => {
+    if (productionQueue !== null) fetchProductionQueue();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [processTypeSettings]);
 
   // Needed before the production queue can decide what is actionable, so
   // it loads with the session rather than with a tab. An empty map means
@@ -7646,15 +7674,48 @@ export default function StockControl() {
   // Naming one that is not an extra stage yet switches it on
   // (setJobLineExtraStages); markedStageTakes keeps that harmless for
   // every line nobody has set.
-  function thenBoxStages(jobProcesses) {
+  // Heinrich, 17 Sep 2026 (later): the box gives every item process,
+  // whether or not the job has it ticked yet -- Bending, Cut To Size, CNC
+  // Lathe, Drilling, Machining - External, Rolling on live: every stage
+  // above Welding that is not a laser's own, the packer, Invoicing or
+  // Buy-out. One the job lacks is added to the job by the same pick
+  // (setJobLineExtraStages).
+  function thenBoxStages() {
     const flow = master?.jobProcessTypes || [];
     const welding = flow.findIndex((n) => /weld/i.test(n));
-    const onJob = new Set((jobProcesses || []).filter((p) => !p.shortage_id).map((p) => p.process_name));
     return flow.filter((n, i) => {
       if (onlyMarked(n)) return true;
-      if (!onJob.has(n) || welding === -1 || i >= welding) return false;
+      if (welding === -1 || i >= welding || /buy/i.test(n)) return false;
       return !isLaserProcess(n) && !isTubeLaserProcess(n) && !isPlateNestingProcess(n) && !workedInLaserStatus(n) && !isInvoicingStage(n);
     });
+  }
+
+  // A stage a line has just named that the job does not carry yet is added
+  // to the job, counting per item, so its card exists on Production without
+  // anyone opening the job's stage list (fewer clicks). Read fresh: the job
+  // page may be behind. Says so when nobody has the stage ticked under User
+  // Management, because then it shows on nobody's Production tab.
+  async function addNamedStagesToJob(job, names) {
+    const wanted = [...new Set((names || []).filter(Boolean))];
+    if (!wanted.length) return;
+    const { data: rows, error } = await supabase.from("job_processes").select("process_name, sort_order, shortage_id").eq("job_id", job.id);
+    if (error) throw error;
+    const own = (rows || []).filter((p) => !p.shortage_id);
+    const missing = wanted.filter((n) => !own.some((p) => sameText(p.process_name, n)));
+    if (!missing.length) return;
+    const maxSort = own.reduce((max, p) => Math.max(max, p.sort_order ?? 0), -1);
+    const { error: addError } = await supabase.from("job_processes").insert(
+      missing.map((name, idx) => ({ job_id: job.id, process_name: name, operator: "", tracking_mode: "each", sort_order: maxSort + 1 + idx }))
+    );
+    if (addError) throw addError;
+    await logJobEvent(job.id, "stage added", `${missing.join(", ")} — named on a line's Then box`);
+    const unseen = missing.filter((n) => !(people || []).some((pn) => (pn.allowedProcessTypes || []).includes(n)));
+    if (unseen.length) {
+      alert(
+        `${unseen.join(" and ")} ${unseen.length === 1 ? "is" : "are"} on the job now, but nobody has ${unseen.length === 1 ? "it" : "them"} ticked under User Management, ` +
+          "so it shows on nobody's Production tab yet. Tick it there for whoever does that work."
+      );
+    }
   }
 
   // Sets a line's extra stages and remembers them on its stock part, so
@@ -7686,7 +7747,10 @@ export default function StockControl() {
         setItems((prev) => (prev ? prev.map((i) => (i.id === item.linked_item_id ? { ...i, extraStages: list } : i)) : prev));
       }
       await logJobEvent(job.id, "item changed", `${item.description} — then ${list.length ? list.join(", ") : "nothing extra"}`);
+      await addNamedStagesToJob(job, list);
       await openJobDetail(job);
+      // The floor's lists follow what was just marked, on this device.
+      if (productionQueue !== null) fetchProductionQueue();
     } catch (err) {
       console.error("Failed to set the extra stages:", err);
       openJobDetail(job);
@@ -7727,6 +7791,7 @@ export default function StockControl() {
       }
       await logJobEvent(job.id, "item changed", `${rest.length} line${rest.length === 1 ? "" : "s"} set to nothing extra`);
       await openJobDetail(job);
+      if (productionQueue !== null) fetchProductionQueue();
     } catch (err) {
       console.error("Failed to set the rest to nothing extra:", err);
       alert(
@@ -23759,7 +23824,7 @@ export default function StockControl() {
                             <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3 }}>
                               <ExtraStagesBox
                                 line={it}
-                                stages={thenBoxStages(jobDetail.processes)}
+                                stages={thenBoxStages()}
                                 onJob={(jobDetail.processes || []).map((p) => p.process_name)}
                                 canEdit={canEditThisJob}
                                 onChange={(list) => setJobLineExtraStages(jobDetail.job, it, list)}
@@ -23929,7 +23994,7 @@ export default function StockControl() {
                                     <>
                                       <ExtraStagesBox
                                         line={c}
-                                        stages={thenBoxStages(jobDetail.processes)}
+                                        stages={thenBoxStages()}
                                         onJob={(jobDetail.processes || []).map((p) => p.process_name)}
                                         canEdit
                                         onChange={(list) => setJobLineExtraStages(jobDetail.job, c, list)}
