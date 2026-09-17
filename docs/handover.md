@@ -2149,3 +2149,57 @@ JOB-0012.
    show for tube stages (`jobGoesToPlateLaser` in App.jsx is plate-only).
 2. "Programs waiting to be cut" on the Nesting screen does not show the
    priority tag; only Cutting does.
+
+---
+
+## 17 Sep 2026 — Production tab: reloads shown in the order they were asked for
+
+Handed over by the Jobs page on 16 Sep: two reloads of one Production card
+could land out of order, the older answer covering the newer, and the next
+count was then refused for a number nobody else had changed. Plan sent;
+his answers, 17 Sep: Production tab only; and yes to a "could not refresh"
+line as its own change afterwards.
+
+### Committed with this entry (not pushed)
+
+- `src/lib/loadOrder.js` (7 tests): each reload takes a number when it
+  starts; its answer, or its failure, goes on screen unless a reload that
+  started later is already showing. Not "only the newest may show": Log
+  waits for its own reload, and dropping that one because another had
+  started would give Log back over the old number.
+- `fetchProductionQueue` in App.jsx uses it for the queue, for the empty
+  and the failed case, and takes "Loading…" down with the newest reload
+  rather than the first one back. Nothing else in the function changed; no
+  new reads, no SQL.
+
+### Checked
+
+150 tests, names 0 problems, build clean. On practice, in the Browser pane
+already signed in as Test: the first reload's `job_processes` answer was
+held for 12 seconds in the page while a second note was saved on JOB-0002's
+welding card; the second reload showed its note, and the held answer
+(carrying the first note) arrived afterwards and was dropped. No console
+errors. The note was put back to empty. The case without the fix was not
+run for comparison.
+
+### Built but not yet tried by Heinrich (practice)
+
+1. An Each card: log two counts quickly on one line; both land, and Log
+   comes back each time with the new number showing.
+2. Tick, Mark urgent, a note: the card reloads as it always did.
+
+### Not covered, by his decision
+
+The same gap in `fetchLaserData` (Laser production; the packer's counts
+on Laser Status go through it) and `refreshJobDetail` (Jobs page).
+`makeLoadOrder` is there for both: one per screen, `start()` when the
+load begins, `mayShow(n)` before anything is set from it.
+
+### Pick up next
+
+1. His yes, 17 Sep: when a reload of the Production tab fails, keep the
+   last good screen and say "could not refresh", instead of an empty tab
+   that reads as no work. The laser screens already say so
+   (`laserLoadFailed`).
+2. Leave Complete jobs out of `fetchProductionQueue`, after the two
+   checks in the 16 Sep entry.

@@ -105,6 +105,7 @@ import RecordRow from "./RecordRow.jsx";
 import PdfViewer from "./PdfViewer.jsx";
 import { extractPdfTextItems, parseSigmaNestQuote, browserInflate } from "./lib/sigmanestQuote.js";
 import { rowsForIds } from "./lib/rowsForIds.js";
+import { makeLoadOrder } from "./lib/loadOrder.js";
 // The tube nesting report's reader, shared with the tube laser tab: the
 // job's Items tab reads the parts off the same file, without the
 // programs.
@@ -1755,6 +1756,10 @@ export default function StockControl() {
   };
   const [shortageModal, setShortageModal] = useState(null);
   const [productionLoading, setProductionLoading] = useState(false);
+  // Two reloads of the Production tab can be out at once; this keeps an
+  // older answer from landing over a newer one (src/lib/loadOrder.js).
+  const productionLoadOrderRef = useRef(null);
+  if (!productionLoadOrderRef.current) productionLoadOrderRef.current = makeLoadOrder();
   const [jobInvoiceRequests, setJobInvoiceRequests] = useState([]);
   // The real invoice, the one out of Sage, filed against the job. It is an
   // ordinary job document tagged Invoicing rather than a table of its own,
@@ -5827,6 +5832,12 @@ export default function StockControl() {
 
   async function fetchProductionQueue() {
     if (!supabase || !profile?.allowedProcessTypes?.length) return;
+    // Every write reloads this tab, so two reloads can be out at once and
+    // the older may answer last. Its old counts on screen would get the
+    // next count refused (submitProcessItemProgress), so an answer goes on
+    // screen only if no reload that started later is showing already.
+    const loadOrder = productionLoadOrderRef.current;
+    const loadNo = loadOrder.start();
     setProductionLoading(true);
     try {
       // Every load here is paged, and the job and stage ids go in batches
@@ -5840,8 +5851,8 @@ export default function StockControl() {
       activeJobs.sort((a, b) => (Date.parse(a.created_at) || 0) - (Date.parse(b.created_at) || 0));
       const jobIds = activeJobs.map((j) => j.id);
       if (jobIds.length === 0) {
-        setProductionQueue({});
-        setProductionLoading(false);
+        if (loadOrder.mayShow(loadNo)) setProductionQueue({});
+        if (loadOrder.isNewest(loadNo)) setProductionLoading(false);
         return;
       }
       // Each load settles to { data, error } the way a plain request did:
@@ -5986,14 +5997,16 @@ export default function StockControl() {
           return new Date(a.job.due_date || "2999-01-01") - new Date(b.job.due_date || "2999-01-01");
         });
       }
-      setProductionQueue(byProcessType);
+      if (loadOrder.mayShow(loadNo)) setProductionQueue(byProcessType);
       // The floor ticking a stage moves the Jobs list's progress bars.
       if (jobsList !== null) refreshJobStages();
     } catch (err) {
       console.error("Failed to load production queue:", err);
-      setProductionQueue({});
+      // An old reload failing late does not blank a newer one's screen.
+      if (loadOrder.mayShow(loadNo)) setProductionQueue({});
     }
-    setProductionLoading(false);
+    // "Loading…" comes down with the newest reload, not the first one back.
+    if (loadOrder.isNewest(loadNo)) setProductionLoading(false);
   }
 
   // Tube nestings are named rather than numbered -- the shop calls a nest
