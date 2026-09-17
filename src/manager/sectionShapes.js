@@ -143,6 +143,51 @@ function pipeName(d) {
   return `PIPE NB${d.nb} ${std} ${mm(d.od)}OD ${mm(d.od - 2 * d.t)}ID ${mm(d.t)}WT`;
 }
 
+// ---------- Weight (sections step 6) ----------
+//
+// kg/m worked out from a section's numbers (Heinrich, 17 Sep 2026: many
+// sizes read 0 kg/m, some are plainly wrong). Cross-section area in mm²
+// on sharp corners, times the material's density in g/cm³, over 1000.
+// Rolled tube and angle have radiused corners, so a supplier's table reads
+// a few percent lighter; this is for costing and cut lists, not for a
+// weighbridge. Beams are rolled to a stated kg/m, which is one of their
+// boxes. PFC, taper flange channel and IPE carry no thickness box, so they
+// have no worked-out weight and keep what was typed.
+
+export const MILD_STEEL_DENSITY = 7.85;
+
+export function sectionArea(dims) {
+  const d = dims || {};
+  const n = (k) => Number(d[k]) || 0;
+  const [a, b, t, od, lip] = [n("a"), n("b"), n("t"), n("od"), n("lip")];
+  switch (d.shape) {
+    case "SHS": return t > 0 && a > 2 * t ? 4 * t * (a - t) : null;
+    case "RHS": return t > 0 && a > 2 * t && b > 2 * t ? 2 * t * (a + b - 2 * t) : null;
+    case "CHS":
+    case "PIPE": return t > 0 && od > 2 * t ? Math.PI * t * (od - t) : null;
+    case "RB": return a > 0 ? (Math.PI * a * a) / 4 : null;
+    case "SB": return a > 0 ? a * a : null;
+    case "FB": return a > 0 && t > 0 ? a * t : null;
+    case "HEX": return a > 0 ? (Math.sqrt(3) / 2) * a * a : null;
+    case "EA": return t > 0 && a > t ? t * (2 * a - t) : null;
+    case "UA":
+    case "T": return t > 0 && a > t && b > t ? t * (a + b - t) : null;
+    case "LC": return t > 0 && a > 2 * t && b > 2 * t ? t * (a + 2 * b + 2 * lip - 4 * t) : null;
+    case "CC": return t > 0 && a > 2 * t && b > t ? t * (a + 2 * b - 2 * t) : null;
+    default: return null;
+  }
+}
+
+// kg/m to two decimals, or null when the shape cannot be worked out.
+export function sectionKgPerMetre(dims, density = MILD_STEEL_DENSITY) {
+  if (!dims) return null;
+  if (dims.shape === "UB" || dims.shape === "UC") return Number(dims.kgm) > 0 ? Number(dims.kgm) : null;
+  const area = sectionArea(dims);
+  if (area == null) return null;
+  const rho = Number(density) > 0 ? Number(density) : MILD_STEEL_DENSITY;
+  return Math.round(((area * rho) / 1000) * 100) / 100;
+}
+
 // ---------- Building a section ----------
 
 // "50.0" and " 50 " are 50; a comma counts as a decimal point. Anything

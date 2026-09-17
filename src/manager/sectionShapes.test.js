@@ -1,6 +1,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SECTION_SHAPES, shapeForType, shapeTitle, buildSection, missingBoxes, cleanNumber, pipeSizes } from "./sectionShapes.js";
+import { SECTION_SHAPES, shapeForType, shapeTitle, buildSection, missingBoxes, cleanNumber, pipeSizes, sectionKgPerMetre } from "./sectionShapes.js";
+
+test("kg/m from the numbers, in mild steel unless told", () => {
+  // 4 x 3 x (50 - 3) = 564 mm2 -> 4.43 kg/m
+  assert.equal(sectionKgPerMetre({ shape: "SHS", a: 50, t: 3 }), 4.43);
+  // pi x 1.6 x (38.1 - 1.6) = 183.5 mm2 -> 1.44 kg/m (live had 0.5)
+  assert.equal(sectionKgPerMetre({ shape: "CHS", od: 38.1, t: 1.6 }), 1.44);
+  assert.equal(sectionKgPerMetre({ shape: "PIPE", od: 26.7, t: 5.56 }), 2.9);
+  assert.equal(sectionKgPerMetre({ shape: "RB", a: 12 }), 0.89);
+  assert.equal(sectionKgPerMetre({ shape: "EA", a: 50, t: 5 }), 3.73);
+  // 6 x (80 + 84 - 12) = 912 mm2 -> 7.16 kg/m
+  assert.equal(sectionKgPerMetre({ shape: "CC", a: 80, b: 42, t: 6 }), 7.16);
+  assert.equal(sectionKgPerMetre({ shape: "UB", a: 254, b: 146, kgm: 37 }), 37);
+  assert.equal(sectionKgPerMetre({ shape: "PFC", a: 100, b: 50 }), null);
+  assert.equal(sectionKgPerMetre(null), null);
+  assert.equal(sectionKgPerMetre({ shape: "SHS", a: 50, t: 3 }, 7.93), 4.47);
+});
 
 const shape = (key) => SECTION_SHAPES.find((s) => s.key === key);
 

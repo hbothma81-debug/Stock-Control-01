@@ -62,7 +62,7 @@ import UserManagement from "./UserManagement.jsx";
 import CompanyDetails from "./manager/CompanyDetails.jsx";
 import {
   SECTION_SHAPES, shapeForType, shapeTitle, buildSection, missingBoxes,
-  PIPE_STANDARDS, SCHEDULES, SANS62_CLASSES, pipeSizes,
+  PIPE_STANDARDS, SCHEDULES, SANS62_CLASSES, pipeSizes, sectionKgPerMetre,
 } from "./manager/sectionShapes.js";
 import CutToSize from "./jobs/CutToSize.jsx";
 import BuyOuts from "./jobs/BuyOuts.jsx";
@@ -11331,7 +11331,24 @@ export default function StockControl() {
     if (hit && hit.factor) return hit.factor;
     const any = ((master && master.sections) || []).find((sec) => sameText(sec.name, name) && sec.factor);
     if (any) return any.factor;
+    // Nothing typed anywhere: work it out from the size's numbers.
+    const shaped = hit?.dimensions ? hit : ((master && master.sections) || []).find((sec) => sameText(sec.name, name) && sec.dimensions);
+    const worked = shaped ? sectionCalcKgPerM(shaped.dimensions, grade) : null;
+    if (worked) return worked;
     return hit ? hit.factor : null;
+  }
+
+  // A material's density in g/cm³ (the Material Types list's factor),
+  // mild steel's when the material is blank or has none.
+  function materialDensity(grade) {
+    const q = (grade || "").trim().toLowerCase();
+    const g = q && ((master && master.grades) || []).find((x) => x.name.toLowerCase() === q || (x.shortName || "").toLowerCase() === q);
+    return g && g.factor > 0 ? g.factor : 7.85;
+  }
+
+  // Sections step 6: kg/m from a section's numbers (src/manager/sectionShapes.js).
+  function sectionCalcKgPerM(dimensions, grade) {
+    return sectionKgPerMetre(dimensions, materialDensity(grade));
   }
 
   // Create-or-update, keyed on the size and the grade together.
@@ -14062,7 +14079,8 @@ export default function StockControl() {
       if (list.some((x) => isSectionRow(x, built.name, grade))) return prev;
       const entry = {
         name: built.name,
-        factor: parseFloat(managerFactor) || 0,
+        // Typed, or worked out from the boxes when left blank.
+        factor: parseFloat(managerFactor) || sectionCalcKgPerM(built.dimensions, grade) || 0,
         price: parseFloat(managerPrice) || 0,
         type: shape.label,
         grade,
@@ -14160,7 +14178,9 @@ export default function StockControl() {
             step="0.01"
             value={managerFactor}
             onChange={(e) => setManagerFactor(e.target.value)}
-            placeholder="kg/m"
+            // Left blank, the worked-out weight is saved.
+            placeholder={built && sectionCalcKgPerM(built.dimensions, grade) ? `kg/m ${sectionCalcKgPerM(built.dimensions, grade)}` : "kg/m"}
+            title="kg/m. Leave blank to use the weight worked out from the size."
           />
           <input
             style={{ ...S.input, flex: 1, minWidth: 80 }}
@@ -21415,6 +21435,26 @@ export default function StockControl() {
                             style={S.managerFactorInput}
                             title="kg/m"
                           />
+                          {/* Sections step 6: the weight worked out from the size, offered
+                              when none is typed or the typed one is more than 10% off.
+                              Nothing changes until "use" is pressed. */}
+                          {(() => {
+                            const worked = entry.dimensions ? sectionCalcKgPerM(entry.dimensions, entry.grade) : null;
+                            if (!worked) return null;
+                            const typed = Number(entry.factor) || 0;
+                            if (typed && Math.abs(typed - worked) / worked <= 0.1) return null;
+                            return (
+                              <button
+                                type="button"
+                                className="stk-btn"
+                                style={{ ...S.managerDelete, width: "auto", padding: "2px 6px", fontSize: 12, color: typed ? C.danger : C.muted }}
+                                title={typed ? `Typed ${typed} kg/m; the size works out at ${worked}. Press to use ${worked}.` : `Works out at ${worked} kg/m. Press to save it.`}
+                                onClick={() => updateFactorField(entry.name, "factor", String(worked), entry.grade)}
+                              >
+                                use {worked}
+                              </button>
+                            );
+                          })()}
                           <input
                             type="number"
                             step="0.01"
