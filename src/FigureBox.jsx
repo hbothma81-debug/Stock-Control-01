@@ -1,10 +1,13 @@
 import { C, S } from "./theme.js";
 
 // One money figure in a box: a label, the rand amount, and a line under
-// it saying what was counted. One file behind every such box, so they
-// cannot drift apart: the Jobs list ("On order", "Invoiced in September"),
-// Procurement -> Purchase Orders ("Still on order", "Ordered in",
-// "Received in") and Records -> Invoicing ("Requested in").
+// it saying what was counted. Used on the Jobs list only ("On order",
+// "Invoice requests in September", "Invoiced in September"): Heinrich,
+// 17 Sep 2026, wants these figures on the Jobs page and nowhere else.
+//
+// Procurement -> Purchase Orders has three boxes that look the same and
+// are drawn by their own few lines in App.jsx. They were moved onto this
+// file and moved back the same day, at his word. Leave them apart.
 //
 // `hint` is the line under the amount ("12 jobs · excluding VAT").
 // `note` is a second, optional line for whatever would otherwise make the

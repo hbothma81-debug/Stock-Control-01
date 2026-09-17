@@ -15927,15 +15927,43 @@ export default function StockControl() {
             const openTotal = open.reduce((s, po) => s + poExclusive(po), 0);
             const monthTotal = raisedThisMonth.reduce((s, po) => s + poExclusive(po), 0);
             const receivedTotal = receivedThisMonth.reduce((s, po) => s + poExclusive(po), 0);
-            // The box itself is src/FigureBox.jsx, shared with the Jobs list.
-            const orders = (n) => `${n} ${n === 1 ? "order" : "orders"} · excluding VAT`;
+            const money = (n) => `R ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+            const figure = (label, value, count, noun) => (
+              <div
+                style={{
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 6,
+                  padding: "10px 14px",
+                  flex: "1 1 220px",
+                }}
+              >
+                <div style={S.label}>{label}</div>
+                <div style={{ fontSize: 20, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                  {money(value)}
+                </div>
+                <div style={S.roleHint}>
+                  {count} {count === 1 ? noun : `${noun}s`} · excluding VAT
+                </div>
+              </div>
+            );
 
             return (
-              <FigureRow>
-                <FigureBox label="Still on order" value={openTotal} hint={orders(open.length)} />
-                <FigureBox label={`Ordered in ${poMonthLabel(thisMonth)}`} value={monthTotal} hint={orders(raisedThisMonth.length)} />
-                <FigureBox label={`Received in ${poMonthLabel(thisMonth)}`} value={receivedTotal} hint={orders(receivedThisMonth.length)} />
-              </FigureRow>
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                {figure("Still on order", openTotal, open.length, "order")}
+                {figure(
+                  `Ordered in ${poMonthLabel(thisMonth)}`,
+                  monthTotal,
+                  raisedThisMonth.length,
+                  "order"
+                )}
+                {figure(
+                  `Received in ${poMonthLabel(thisMonth)}`,
+                  receivedTotal,
+                  receivedThisMonth.length,
+                  "order"
+                )}
+              </div>
             );
           })()}
 
@@ -16722,6 +16750,14 @@ export default function StockControl() {
                       const onOrder = onOrderFigure(shown, jobLineTotals);
                       const thisMonth = monthKeySA(new Date());
                       const invoiced = isAdmin ? invoicedInMonthFigure(shown, thisMonth, jobLineTotals) : null;
+                      // Every invoice request sent this month, added up
+                      // (Heinrich, 17 Sep 2026: on this page, nowhere else).
+                      // Only the requests of the jobs the filters are
+                      // showing, like the other two boxes. Admins only.
+                      const shownIds = new Set(shown.map((j) => j.id));
+                      const requested = isAdmin
+                        ? requestedInMonthFigure(jobInvoiceRequests.filter((r) => shownIds.has(r.job_id)), thisMonth)
+                        : null;
                       const jobsWord = (n) => `${n} ${n === 1 ? "job" : "jobs"}`;
                       return (
                         <FigureRow>
@@ -16731,6 +16767,13 @@ export default function StockControl() {
                             hint={`${jobsWord(onOrder.count)} · excluding VAT`}
                             note={onOrder.unpriced > 0 ? `${onOrder.unpriced} of ${onOrder.count} not priced` : null}
                           />
+                          {requested && (
+                            <FigureBox
+                              label={`Invoice requests in ${poMonthLabel(thisMonth)}`}
+                              value={requested.total}
+                              hint={`${requested.count} ${requested.count === 1 ? "request" : "requests"} on ${jobsWord(requested.jobs)} · excluding VAT`}
+                            />
+                          )}
                           {invoiced && (
                             <FigureBox
                               label={`Invoiced in ${poMonthLabel(thisMonth)}`}
@@ -17934,38 +17977,6 @@ export default function StockControl() {
         </div>
       ) : tab === "invoicing" ? (
         <div style={S.list}>
-          {/* What was sent to accounts this month, added up: every invoice
-              request by the day it was sent (Heinrich, 17 Sep 2026). Admins
-              only, like "Invoiced in <month>" on the Jobs list, which is the
-              other half: that one goes by the day the job was marked
-              invoiced and the amount typed from Sage. Sums in
-              src/jobs/jobFigures.js. */}
-          {isAdmin &&
-            (() => {
-              const thisMonth = monthKeySA(new Date());
-              const requested = requestedInMonthFigure(jobInvoiceRequests, thisMonth);
-              const invoiced = invoicedInMonthFigure(jobsList || [], thisMonth, jobLineTotals);
-              const n = (count, word) => `${count} ${count === 1 ? word : `${word}s`}`;
-              return (
-                <FigureRow>
-                  <FigureBox
-                    label={`Requested in ${poMonthLabel(thisMonth)}`}
-                    value={requested.total}
-                    hint={`${n(requested.count, "request")} on ${n(requested.jobs, "job")} · excluding VAT`}
-                  />
-                  <FigureBox
-                    label={`Invoiced in ${poMonthLabel(thisMonth)}`}
-                    value={invoiced.total}
-                    hint={`${n(invoiced.count, "job")} · excluding VAT`}
-                    note={
-                      invoiced.atQuotedValue > 0
-                        ? `${invoiced.atQuotedValue} of ${invoiced.count} at quoted value: no invoice amount was typed`
-                        : null
-                    }
-                  />
-                </FigureRow>
-              );
-            })()}
           {/* Accounts' side: Outstanding and Invoiced. Somebody who has only
               the "Invoice Requests" view tick (see canView) sees just the
               book of requests at the bottom, which is all the separate
@@ -18213,14 +18224,6 @@ export default function StockControl() {
               return (
                 <>
                   {rows.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
-                  {/* What is listed, added up, so From and To give any
-                      month's total. Admins only, like the box above. */}
-                  {isAdmin && rows.length > 0 && (
-                    <div style={{ ...S.roleHint, marginTop: 8 }}>
-                      {rows.length} {rows.length === 1 ? "request" : "requests"} listed ·{" "}
-                      {rand(rows.reduce((sum, { r }) => sum + (Number(r.total_amount) || 0), 0))} excluding VAT
-                    </div>
-                  )}
                   {rows.map(({ r, job }) => (
                     <RecordRow
                       key={r.id}
