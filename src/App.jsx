@@ -110,6 +110,7 @@ import {
   requestedInMonthFigure,
 } from "./jobs/jobFigures.js";
 import { JOBS_ORDER_KEY, JOB_ORDERS, isJobOrder, sortJobs } from "./jobs/jobOrder.js";
+import { stageReadiness, readinessLabel } from "./jobs/stageReadiness.js";
 import PdfViewer from "./PdfViewer.jsx";
 import { extractPdfTextItems, parseSigmaNestQuote, browserInflate } from "./lib/sigmanestQuote.js";
 import { rowsForIds } from "./lib/rowsForIds.js";
@@ -5846,6 +5847,13 @@ export default function StockControl() {
       .sort((a, b) => flowRank(a.process_name) - flowRank(b.process_name));
   }
 
+  // The three rules src/jobs/stageReadiness.js adds a stage's lines up
+  // with. A declaration, so it can be handed on from anywhere in this
+  // component.
+  function readinessRules() {
+    return { blockingStages, stageTakesItem, itemFlowLimit };
+  }
+
   function isProcessActionable(process, jobProcesses) {
     return blockingStages(process, jobProcesses).length === 0;
   }
@@ -6023,46 +6031,24 @@ export default function StockControl() {
         const jobItemProgress = allItemProgress.filter((ip) => jobProcesses.some((jp) => jp.id === ip.job_process_id));
         for (const p of jobProcesses) {
           if (p.is_complete || !byProcessType[p.process_name]) continue;
-          const blockers = blockingStages(p, jobProcesses);
-          let isReady = blockers.length === 0;
-          // A stage that counts per item is as ready as its lines are: the
-          // pieces its earlier stages have let through are real work now,
-          // whatever the stage as a whole still waits for. Ready when every
-          // piece still to do may go, partly ready when some may, waiting
-          // when none may -- so a card never reads Ready with every line
-          // held at nought (review, 16 Sep 2026), and a stage whose own lines
-          // are all clear does not read Waiting for a stage that only holds
-          // somebody else's lines (the tube laser, for a stage with no tube
-          // parts on it). A stage on one tick goes by its blockers alone.
-          let readyQty = 0;
-          let totalQty = 0;
-          let remainingQty = 0;
-          let lineWaitsOn = null;
-          if ((p.tracking_mode || "batch") === "each") {
-            for (const it of jobQuoteItems) {
-              if (!stageTakesItem(p.process_name, it, jobQuoteItems)) continue;
-              const qty = Number(it.qty) || 0;
-              totalQty += qty;
-              const { allowed, waitingOn: heldBy } = itemFlowLimit(p, jobProcesses, jobItemProgress, it, jobQuoteItems);
-              const doneHere = Number(
-                jobItemProgress.find((ip) => ip.job_process_id === p.id && ip.job_quote_item_id === it.id)?.qty_complete
-              ) || 0;
-              const toDo = Math.max(0, qty - doneHere);
-              const mayGo = Math.min(toDo, Math.max(0, allowed - doneHere));
-              remainingQty += toDo;
-              readyQty += mayGo;
-              if (toDo > 0 && mayGo <= 0 && heldBy && !lineWaitsOn) lineWaitsOn = heldBy;
-            }
-            if (remainingQty > 0) isReady = readyQty >= remainingQty;
-          }
+          // Ready, partly ready or waiting, and on what: one rule, in
+          // src/jobs/stageReadiness.js, shared with the Jobs list's stage
+          // filter so the two screens cannot disagree. It was written out
+          // here until 17 Sep 2026. A stage on one tick goes by its
+          // blockers; a stage that counts per item is as ready as its lines.
+          const { isReady, partlyReady, readyQty, totalQty, waitingOn } = stageReadiness(
+            p,
+            { jobProcesses, jobQuoteItems, jobItemProgress },
+            readinessRules()
+          );
           byProcessType[p.process_name].push({
             job,
             process: p,
             isReady,
-            partlyReady: !isReady && readyQty > 0,
+            partlyReady,
             readyQty,
             totalQty,
-            waitingOn: lineWaitsOn || blockers[0]?.process_name || null,
+            waitingOn,
             quoteItems: jobQuoteItems,
             documents: (allDocs || []).filter((d) => d.job_id === job.id && d.process_name === p.process_name),
             itemProgress: allItemProgress.filter((ip) => ip.job_process_id === p.id),
@@ -17597,13 +17583,7 @@ export default function StockControl() {
                                 the job. Partly ready ones say how much can
                                 go now. */}
                             <span style={{ ...S.reqStatusTag, ...(isReady || partlyReady ? S.reqStatus_received : S.reqStatus_ordered) }}>
-                              {isReady
-                                ? "Ready"
-                                : partlyReady
-                                  ? `Partly ready: ${readyQty} of ${partTotal}`
-                                  : waitingOn
-                                    ? `Waiting: ${waitingOn}`
-                                    : "Waiting"}
+                              {readinessLabel({ isReady, partlyReady, readyQty, totalQty: partTotal, waitingOn })}
                             </span>
                           </div>
                           {standing && (
