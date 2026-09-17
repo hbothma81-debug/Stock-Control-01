@@ -2088,14 +2088,46 @@ the three columns (checked from here with a one-off select, the way
 
 ### Built but not yet tested by Heinrich
 
-Nothing was tried in a browser: the job page needs a login. To try on
-practice, after the SQL: set a number on a job's Overview tab (as a
-sales person, then as Prince), see the chip on the Jobs list and the
-History line; open Laser 4kw > Nesting and see the row on top with its
-red "Priority 1" chip; put the job on a program and see it under "Cut
-next" on Cutting; mark every program cut and tick Nesting done, then
-see the number gone and the History line; press Refresh on a second PC
-and see a number set on the first arrive.
+**Tried on practice 17 Sep by this conversation** (his "you test"),
+signed in as the one practice account, Test (admin), no console errors:
+
+- New job JOB-0013 with nesting + laser aaaa (Packer ticked itself). The
+  box appeared only once the plate stages were on. Set 1: header "Laser
+  priority 1", hint "Set by Test", the Jobs list chip, History "laser
+  priority — set to 1".
+- Laser 4kw > Nesting: JOB-0013 on top with "Priority 1", above the
+  Marked urgent JOB-0003, "2 need nesting now"; the opened row's box read
+  1 with "Set by Test".
+- Made program TESTPRIO1 from the row. Cutting: "Cut next (1)" on top
+  with TESTPRIO1, "Priority 1", "JOB-0013 · P1"; TESTCLAUDE1 stayed in its
+  3mm group.
+- Marked it cut (time popup skipped), then Done nesting: the job left To
+  nest, the chip left the Jobs list with no reload, the box and header
+  line went, History "laser priority — cleared — the laser is done with
+  the job".
+- Refresh (with the laser tab loaded) re-read laser_programs,
+  laser_program_jobs, job_processes, laser_program_events and the rest.
+- On JOB-0012's job page: set 2; typed "2e" (the box reports "" with
+  badInput) and left it: nothing sent, still 2; blanked it: cleared, with
+  its History line.
+- Flagged a plate shortage on JOB-0008 with Priority unticked: it sat at
+  the bottom of To nest with the muted "Re-cut — can wait" chip. Cancelled
+  it afterwards.
+
+**Not exercised:** the notice. Practice has one account, so there was
+nobody to tell (`tell` was empty; no request to job_notifications). It
+shares `sendNotifications` and the recipient rule with the stop report.
+Also not tried: a sales person's or Prince's own login (only the admin
+exists on practice), and a second PC picking a number up on Refresh.
+The Browser pane stopped taking clicks partway (its known habit), so the
+later steps were driven by script-dispatched clicks and focus plus real
+typing; screenshots came back blank, so every result above was read off
+the page text.
+
+Practice leftovers: JOB-0013 "TEST laser priority (Claude, 17 Sep) —
+delete after" (nesting and laser done, Packer open), program TESTPRIO1
+(cut), one cancelled TEST shortage on JOB-0008, two History lines on
+JOB-0012.
 
 ### Waiting on Heinrich
 
