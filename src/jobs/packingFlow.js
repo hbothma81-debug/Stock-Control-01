@@ -6,11 +6,17 @@
 // released Nesting, and could close packing with programs still to cut.
 //
 // 1. A stage after the packer that counts per item stops waiting for the
-//    plate Laser stage once the packer has taken the job AND Nesting is
-//    ticked (nothing more to nest). Only the Laser stage is released, never
-//    Nesting; never a stage on one tick (it could be ticked done, or
-//    invoiced, with parts still on the laser); never Invoicing; never a
-//    re-cut's run.
+//    plate Laser stage once cutting has started on the job, or the packer
+//    has taken it, AND Nesting is ticked (nothing more to nest). Cutting has
+//    started when the first sheet of any of the job's programs is ticked
+//    cut: the laser hook keeps that on the Laser stage as started_at
+//    (useLaserPrograms.js, syncLaserStagesFor). Once cutting has started
+//    the packer stops holding those stages too, taken or not: Take job then
+//    only says who is packing (Heinrich, 17 Sep 2026: jobs open as soon as
+//    the laser starts, without waiting for Take job; JOB-0014). Only Laser
+//    and the packer are released, never Nesting; never a stage on one tick
+//    (it could be ticked done, or invoiced, with parts still on the laser);
+//    never Invoicing; never a re-cut's run.
 //
 // 2. A part counted at a stage after the packer that has no machine of its
 //    own (Bending, Drilling, Welding -- not Laser - External, not the tube
@@ -54,19 +60,36 @@ export function laserWorkDone(jobProcesses, ctx) {
     .every((p) => !!p.is_complete);
 }
 
+// Cutting has started on the job's own plate work: its Laser stage carries
+// a start, or is done. The laser hook writes the start when the first sheet
+// of any of the job's programs is ticked cut, and takes it back if every
+// sheet is un-cut (useLaserPrograms.js, syncLaserStagesFor).
+export function cuttingStarted(jobProcesses, ctx) {
+  return (jobProcesses || []).some(
+    (p) => ownRun(p) && ctx.isLaserCutStage(p.process_name) && !ctx.isPackingStage(p.process_name) && (!!p.started_at || !!p.is_complete)
+  );
+}
+
 // Rule 1. Whether `earlier`, a stage that would otherwise hold `process`
-// back, is the plate Laser stage released by the job's taken packer.
+// back, is released: the plate Laser stage once cutting has started or the
+// packer has taken the job, and the packer itself once cutting has started.
 export function packerReleases(earlier, process, jobProcesses, ctx) {
   if (!ownRun(earlier) || !ownRun(process)) return false;
   if ((process.tracking_mode || "batch") !== "each") return false;
   if (ctx.neverRelease && ctx.neverRelease(process.process_name)) return false;
-  if (!ctx.isLaserCutStage(earlier.process_name) || ctx.isPackingStage(earlier.process_name)) return false;
   const packing = ownPackingStage(jobProcesses, ctx);
-  if (!packing || packing.id === process.id || packing.id === earlier.id) return false;
+  if (!packing || packing.id === process.id) return false;
+  const isPacker = earlier.id === packing.id;
+  if (!isPacker && (!ctx.isLaserCutStage(earlier.process_name) || ctx.isPackingStage(earlier.process_name))) return false;
   if (![earlier, packing, process].every((p) => knownRank(ctx, p.process_name))) return false;
   const [e, pk, pr] = [earlier, packing, process].map((p) => ctx.flowRank(p.process_name));
-  if (!(e < pk && pk < pr)) return false;
-  return !!ctx.stageIsCleared(packing) && nestingDone(jobProcesses, ctx);
+  if (!(pk < pr) || (!isPacker && !(e < pk))) return false;
+  if (!nestingDone(jobProcesses, ctx)) return false;
+  const started = cuttingStarted(jobProcesses, ctx);
+  // A packer nobody has taken holds the stages after it only until the
+  // laser starts; a taken one is already cleared (stageIsCleared).
+  if (isPacker) return started;
+  return started || !!ctx.stageIsCleared(packing);
 }
 
 // Rule 2. The packing stage a count or tick at `stage` carries through to,

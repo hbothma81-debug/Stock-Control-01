@@ -4,6 +4,7 @@ import {
   ownPackingStage,
   nestingDone,
   laserWorkDone,
+  cuttingStarted,
   packerReleases,
   packingCarriedFrom,
   packingRaises,
@@ -77,6 +78,31 @@ test("rule 1: nothing released while more may be nested, or before the packer is
   assert.equal(packerReleases(by(notNested, "l"), by(notNested, "b"), notNested, ctx), false);
   const notTaken = job68({ taken: false });
   assert.equal(packerReleases(by(notTaken, "l"), by(notTaken, "b"), notTaken, ctx), false);
+});
+
+// JOB-0014 as Heinrich described it on 17 Sep 2026: cutting has started,
+// nobody has pressed Take job, and Bending must open.
+test("rule 1: cutting started opens the stages after the packer without Take job", () => {
+  const cutting = (list) => list.map((x) => (x.id === "l" ? { ...x, started_at: "2026-09-17T06:00:00Z" } : x));
+  assert.equal(cuttingStarted(job68({ taken: false }), ctx), false, "no sheet cut yet");
+  const s = cutting(job68({ taken: false }));
+  assert.equal(cuttingStarted(s, ctx), true);
+  assert.equal(packerReleases(by(s, "l"), by(s, "b"), s, ctx), true, "Laser no longer holds Bending");
+  assert.equal(packerReleases(by(s, "p"), by(s, "b"), s, ctx), true, "nor does a packer nobody has taken");
+  assert.equal(packerReleases(by(s, "p"), by(s, "d"), s, ctx), true, "any per-item stage after the packer");
+  assert.equal(packerReleases(by(s, "x"), by(s, "b"), s, ctx), false, "Laser - External still holds");
+  assert.equal(packerReleases(by(s, "l"), by(s, "p"), s, ctx), false, "the packer still waits for Laser");
+  assert.equal(packerReleases(by(s, "p"), by(s, "i"), s, ctx), false, "never Invoicing");
+  const batch = cutting(job68({ taken: false, bendingMode: "batch" }));
+  assert.equal(packerReleases(by(batch, "l"), by(batch, "b"), batch, ctx), false, "never a stage on one tick");
+  assert.equal(packerReleases(by(batch, "p"), by(batch, "b"), batch, ctx), false);
+  const notNested = cutting(job68({ taken: false, nested: false }));
+  assert.equal(packerReleases(by(notNested, "l"), by(notNested, "b"), notNested, ctx), false, "Nesting must be ticked first");
+  assert.equal(packerReleases(by(notNested, "p"), by(notNested, "b"), notNested, ctx), false);
+  const laserDone = job68({ taken: false }).map((x) => (x.id === "l" ? { ...x, is_complete: true } : x));
+  assert.equal(packerReleases(by(laserDone, "p"), by(laserDone, "b"), laserDone, ctx), true, "a finished Laser has started");
+  const recut = [...s, stage("rp", "Packer", { shortage_id: "s1" }), stage("rb", "Bending", { shortage_id: "s1", tracking_mode: "each" })];
+  assert.equal(packerReleases(by(recut, "rp"), by(recut, "rb"), recut, ctx), false, "a re-cut keeps today's behaviour");
 });
 
 test("rule 1: never a stage on one tick, never Invoicing, never a re-cut, never with no packer", () => {

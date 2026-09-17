@@ -885,6 +885,7 @@ export default function useLaserPrograms(deps) {
     if (machine.cutStageIsPacking) return 0;
     const live = d.programs.filter((p) => !p.is_cancelled);
     const changes = [];
+    const starts = [];
     for (const jobId of new Set(jobIds)) {
       // filter, not find: a job carrying the same stage twice (which the
       // process-type check script reports) would otherwise have only one of
@@ -900,9 +901,23 @@ export default function useLaserPrograms(deps) {
         d.links.some((l) => l.program_id === pg.id && l.job_id === jobId)
       );
       const done = !!nesting?.is_complete && mine.length > 0 && mine.every((pg) => pg.is_complete);
+      // Cutting has started once any sheet of any of the job's programs is
+      // ticked cut. Kept on the Laser stage as started_at: that is what opens
+      // the per-item stages after the packer, without waiting for Take job
+      // (src/jobs/packingFlow.js, rule 1; Heinrich, 17 Sep 2026). Taken back
+      // if every sheet is un-cut. Nothing else writes a start on this stage.
+      const started = mine.some((pg) => pg.is_complete || (Number(pg.sheets_cut) || 0) > 0);
       for (const laser of laserStages) {
         if (done !== !!laser.is_complete) changes.push({ id: laser.id, done, jobId });
+        if (started !== !!laser.started_at) starts.push({ row: laser, started });
       }
+    }
+    for (const s of starts) {
+      const fields = { started_at: s.started ? new Date().toISOString() : null, started_by: s.started ? roleLabel : null };
+      const { error } = await supabase.from("job_processes").update(fields).eq("id", s.row.id);
+      if (error) throw error;
+      // Kept on the row just loaded, so the next sync does not write it again.
+      Object.assign(s.row, fields);
     }
     for (const c of changes) {
       const { error } = await supabase
