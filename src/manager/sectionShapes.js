@@ -26,7 +26,10 @@ export const SECTION_SHAPES = [
   { key: "UA", label: "Unequal Angle", old: ["Unequal Angle"], boxes: [["a", "Long leg"], ["b", "Short leg"], ["t", "Thickness"]], name: (d) => `UA ${d.a}x${d.b}x${d.t}` },
   { key: "PFC", label: "Parallel Flange Channel", old: ["Parallel Flange Channel", "PFC"], boxes: [["a", "Height"], ["b", "Width"]], name: (d) => `PFC ${d.a}x${d.b}` },
   { key: "LC", label: "Lipped Channel", old: ["Lipped Channel"], boxes: [["a", "Height"], ["b", "Width"], ["lip", "Lip"], ["t", "Thickness"]], name: (d) => `LC ${d.a}x${d.b}x${d.lip}x${d.t}` },
-  { key: "CH", label: "Taper Flange Channel", old: ["Taper Flange Channel", "Channel"], boxes: [["a", "Height"], ["b", "Width"]], name: (d) => `CH ${d.a}x${d.b}` },
+  { key: "CH", label: "Taper Flange Channel", old: ["Taper Flange Channel"], boxes: [["a", "Height"], ["b", "Width"]], name: (d) => `CH ${d.a}x${d.b}` },
+  // Laser cut and bent in the shop, then cut on the tube laser; any size
+  // (Heinrich, 17 Sep 2026). "Channel" was the stored type of the first one.
+  { key: "CC", label: "Custom Channel", old: ["Custom Channel", "Channel"], boxes: [["a", "Height"], ["b", "Width"], ["t", "Thickness"]], name: (d) => `CC ${d.a}x${d.b}x${d.t}` },
   { key: "UB", label: "I-Beam", old: ["I-Beam"], boxes: [["a", "Depth"], ["b", "Width"], ["kgm", "kg/m"]], name: (d) => `UB ${d.a}x${d.b}x${d.kgm}` },
   { key: "UC", label: "H-Beam", old: ["H-Beam"], boxes: [["a", "Depth"], ["b", "Width"], ["kgm", "kg/m"]], name: (d) => `UC ${d.a}x${d.b}x${d.kgm}` },
   { key: "IPE", label: "IPE Beam", old: ["IPE Beam", "IPE"], boxes: [["a", "Depth"]], name: (d) => `IPE ${d.a}` },
@@ -125,11 +128,19 @@ export function pipeSize(d) {
   return null;
 }
 
+// Two decimals at most, no trailing zeros: 15.58, 16.
+const mm = (n) => String(Math.round(n * 100) / 100);
+
+// The floor identifies a pipe by what it measures, so the outside
+// diameter, inside diameter and wall are written into the name, after the
+// NB and standard (Heinrich, 17 Sep 2026): "PIPE NB20 SCH160 26.7OD
+// 15.58ID 5.56WT". Worked out from the tables, never typed, except
+// SABS 719, whose OD and wall are typed.
 function pipeName(d) {
-  // SCH40, but STD / XS / XXS on their own, as they are said.
-  if (d.std === "SCH") return `PIPE NB${d.nb} ${/^\d+$/.test(d.sch) ? "SCH" : ""}${d.sch}`;
-  if (d.std === "SANS62") return `PIPE NB${d.nb} SANS62 ${d.cls}`;
-  return `PIPE NB${d.nb} SABS719 ${d.t}`;
+  // SCH40, but STD / XS on their own, as they are said.
+  const std =
+    d.std === "SCH" ? `${/^\d+$/.test(d.sch) ? "SCH" : ""}${d.sch}` : d.std === "SANS62" ? `SANS62 ${d.cls}` : "SABS719";
+  return `PIPE NB${d.nb} ${std} ${mm(d.od)}OD ${mm(d.od - 2 * d.t)}ID ${mm(d.t)}WT`;
 }
 
 // ---------- Building a section ----------

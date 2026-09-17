@@ -14102,7 +14102,6 @@ export default function StockControl() {
     const grade = managerSectionGrade.trim();
     const clash = built && (master.sections || []).some((x) => isSectionRow(x, built.name, grade));
     const boxes = sectionBoxInputs(shape, d, setSectionBoxes);
-    const size = built && shape.key === "PIPE" ? ` (${built.dimensions.od} x ${built.dimensions.t})` : "";
     return (
       <div style={{ marginBottom: 10 }}>
         <div style={{ ...S.managerAddRow, flexWrap: "wrap", alignItems: "flex-end" }}>{boxes}</div>
@@ -14149,7 +14148,6 @@ export default function StockControl() {
           ) : built ? (
             <>
               Adds <b>{built.name}</b>
-              {size}
               {grade ? ` in ${grade}` : ""}.
             </>
           ) : (

@@ -4,9 +4,14 @@ import { SECTION_SHAPES, shapeForType, shapeTitle, buildSection, missingBoxes, c
 
 const shape = (key) => SECTION_SHAPES.find((s) => s.key === key);
 
-test("seventeen types, each key once", () => {
-  assert.equal(SECTION_SHAPES.length, 17);
-  assert.equal(new Set(SECTION_SHAPES.map((s) => s.key)).size, 17);
+test("eighteen types, each key once", () => {
+  assert.equal(SECTION_SHAPES.length, 18);
+  assert.equal(new Set(SECTION_SHAPES.map((s) => s.key)).size, 18);
+});
+
+test("a custom channel is typed to any size", () => {
+  assert.equal(buildSection(shape("CC"), { a: 80, b: 42, t: 6 }).name, "CC 80x42x6");
+  assert.equal(shapeForType("Channel").key, "CC");
 });
 
 test("old stored type words find their shape", () => {
@@ -44,23 +49,23 @@ test("a missing or bad box names itself and builds nothing", () => {
 
 test("pipe to schedule takes its size from the table", () => {
   const s = buildSection(shape("PIPE"), { std: "SCH", sch: "160", nb: "20" });
-  assert.equal(s.name, "PIPE NB20 SCH160");
+  assert.equal(s.name, "PIPE NB20 SCH160 26.7OD 15.58ID 5.56WT");
   assert.deepEqual(s.dimensions, { shape: "PIPE", std: "SCH", nb: 20, sch: "160", od: 26.7, t: 5.56 });
-  assert.equal(buildSection(shape("PIPE"), { std: "SCH", sch: "XS", nb: 25 }).name, "PIPE NB25 XS");
+  assert.equal(buildSection(shape("PIPE"), { std: "SCH", sch: "XS", nb: 25 }).name, "PIPE NB25 XS 33.4OD 24.3ID 4.55WT");
   assert.equal(buildSection(shape("PIPE"), { std: "SCH", sch: "120", nb: 150 }).dimensions.t, 14.27);
   assert.deepEqual(missingBoxes(shape("PIPE"), { std: "SCH", sch: "XXS", nb: 25 }), ["Schedule"]);
 });
 
 test("pipe to SANS 62 takes its size from the class", () => {
   const s = buildSection(shape("PIPE"), { std: "SANS62", cls: "Medium", nb: 15 });
-  assert.equal(s.name, "PIPE NB15 SANS62 Medium");
+  assert.equal(s.name, "PIPE NB15 SANS62 Medium 21.3OD 16ID 2.65WT");
   assert.equal(s.dimensions.od, 21.3);
   assert.equal(s.dimensions.t, 2.65);
 });
 
 test("pipe to SABS 719 is typed", () => {
   const s = buildSection(shape("PIPE"), { std: "SABS719", nb: 200, od: 219.1, t: 6 });
-  assert.equal(s.name, "PIPE NB200 SABS719 6");
+  assert.equal(s.name, "PIPE NB200 SABS719 219.1OD 207.1ID 6WT");
   assert.deepEqual(missingBoxes(shape("PIPE"), { std: "SABS719", nb: 200 }), ["Outside dia", "Wall"]);
 });
 
