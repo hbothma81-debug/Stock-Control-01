@@ -4055,6 +4055,8 @@ alter table public.master_factor_items
 
 -- ============ PART 1 ============
 create table if not exists public.section_rename_map (old text primary key, new text not null, type text not null, dims jsonb not null);
+-- No rules: the app never reads it, only this SQL (run as the owner) does.
+alter table public.section_rename_map enable row level security;
 
 insert into public.section_rename_map (old, new, type, dims) values
   ('SHS 25X25X1.9', 'SHS 25x25x1.9', 'Square Tube', '{"shape":"SHS","a":25,"t":1.9}'::jsonb),

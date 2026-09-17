@@ -124,7 +124,7 @@ let out = `-- Sections step 5: every existing section converted to the new names
 chunks.forEach((chunk, i) => {
   out += `
 -- ============ PART ${i + 1} ============
-${i === 0 ? "create table if not exists public.section_rename_map (old text primary key, new text not null, type text not null, dims jsonb not null);\n\n" : ""}insert into public.section_rename_map (old, new, type, dims) values
+${i === 0 ? "create table if not exists public.section_rename_map (old text primary key, new text not null, type text not null, dims jsonb not null);\n-- No rules: the app never reads it, only this SQL (run as the owner) does.\nalter table public.section_rename_map enable row level security;\n\n" : ""}insert into public.section_rename_map (old, new, type, dims) values
 ${chunk.join(",\n")}
 on conflict (old) do update set new = excluded.new, type = excluded.type, dims = excluded.dims;
 `;
