@@ -108,6 +108,7 @@ import PdfViewer from "./PdfViewer.jsx";
 import { extractPdfTextItems, parseSigmaNestQuote, browserInflate } from "./lib/sigmanestQuote.js";
 import { rowsForIds } from "./lib/rowsForIds.js";
 import { makeLoadOrder } from "./lib/loadOrder.js";
+import { makeSaveQueue } from "./lib/saveQueue.js";
 // The tube nesting report's reader, shared with the tube laser tab: the
 // job's Items tab reads the parts off the same file, without the
 // programs.
@@ -1584,7 +1585,12 @@ export default function StockControl() {
   // — and every place that touches them needs to close over the same
   // ref, regardless of where in the file it's defined.
   const lastSavedItemsRef = useRef(null);
-  const lastSavedMasterRef = useRef(null);
+  // The master lists' "last saved" copy lives in their save queue
+  // (masterSaveQueueRef, made beside saveMasterToTables); the ids of rows a
+  // save is adding are kept here until it succeeds.
+  const masterSaveQueueRef = useRef(null);
+  const saveMasterRef = useRef(null);
+  const pendingMasterIdsRef = useRef(new Map());
   const lastSavedRequisitionsRef = useRef(null);
   const lastSavedPurchaseOrdersRef = useRef(null);
   const lastSavedUsageLogRef = useRef(null);
@@ -2301,13 +2307,22 @@ export default function StockControl() {
     try {
       // A background refresh takes the master lists only every ten
       // minutes. First load and the Refresh button always take them.
-      if (!incremental || Date.now() - lastMasterLoadRef.current >= MASTER_REFRESH_MS) {
+      // Never while a master save is in flight or owed: the database's copy
+      // is then older than the screen, and taking it would drop the change
+      // from the screen (and from the queue). The same if a change was made
+      // while the answer was on its way. Skipped without moving
+      // lastMasterLoadRef, so the next beat or Refresh tries again.
+      const masterQueue = masterSaveQueueRef.current;
+      if ((!incremental || Date.now() - lastMasterLoadRef.current >= MASTER_REFRESH_MS) && !masterQueue.busy()) {
+        const changesBefore = masterQueue.changes();
         const { master: loadedMaster } = await loadMasterFromTables();
-        // Same reasoning as items above — a real set of tables now, so an
-        // empty result is trustworthy on its own, not something to refuse.
-        setMaster(loadedMaster);
-        lastSavedMasterRef.current = loadedMaster;
-        lastMasterLoadRef.current = Date.now();
+        if (!masterQueue.busy() && masterQueue.changes() === changesBefore) {
+          // Same reasoning as items above — a real set of tables now, so an
+          // empty result is trustworthy on its own, not something to refuse.
+          setMaster(loadedMaster);
+          masterQueue.reset(loadedMaster);
+          lastMasterLoadRef.current = Date.now();
+        }
       }
       setLoadError((prev) => ({ ...prev, master: false }));
     } catch (err) {
@@ -2728,14 +2743,20 @@ export default function StockControl() {
       });
   }, [items]);
 
-  async function saveMasterToTables(prevRef, newMaster) {
-    const prev = prevRef.current;
-    if (prev === null) {
-      prevRef.current = newMaster;
-      return;
-    }
-    prevRef.current = newMaster;
+  // Sends what differs between `prev` (what the database holds) and
+  // `newMaster`. Called only by masterSaveQueue (src/lib/saveQueue.js), one
+  // save at a time; a save that fails is sent again with the same `prev`,
+  // so everything here must be safe to repeat. The two lists that make
+  // their own ids keep them in pendingMasterIdsRef until the save has
+  // succeeded and add by upsert: a repeat rewrites the row it already
+  // added instead of adding it twice.
+  async function saveMasterToTables(prev, newMaster) {
     const ops = [];
+    const pendingIds = pendingMasterIdsRef.current;
+    const idFor = (key) => {
+      if (!pendingIds.has(key)) pendingIds.set(key, uid());
+      return pendingIds.get(key);
+    };
 
     // Simple string lists: identity is the value itself within its list —
     // added values get a fresh row, removed values get deleted by match.
@@ -2753,8 +2774,8 @@ export default function StockControl() {
         // stored number never decides what anyone sees. Only the two
         // ORDERED_STRING_LISTS are read back in stored order.
         ops.push(
-          supabase.from("master_string_lists").insert(
-            added.map((v) => ({ id: uid(), list_name: listName, value: v, sort_order: nextList.indexOf(v) }))
+          supabase.from("master_string_lists").upsert(
+            added.map((v) => ({ id: idFor(`s ${listName} ${v}`), list_name: listName, value: v, sort_order: nextList.indexOf(v) }))
           )
         );
       }
@@ -2804,9 +2825,9 @@ export default function StockControl() {
       );
       if (added.length) {
         ops.push(
-          supabase.from("master_factor_items").insert(
+          supabase.from("master_factor_items").upsert(
             added.map((e) => ({
-              id: uid(),
+              id: idFor(`f ${listName} ${rowKey(listName, e)}`),
               list_name: listName,
               name: e.name,
               factor: e.factor || 0,
@@ -2934,18 +2955,28 @@ export default function StockControl() {
       const { error } = await op;
       if (error) throw error;
     }
+    pendingIds.clear();
+  }
+  // One master save at a time, in order; a failed one is owed and retried
+  // (src/lib/saveQueue.js). The queue keeps the "last saved" copy that
+  // lastSavedMasterRef used to hold.
+  saveMasterRef.current = saveMasterToTables;
+  if (masterSaveQueueRef.current === null) {
+    masterSaveQueueRef.current = makeSaveQueue({
+      save: (prev, next) => saveMasterRef.current(prev, next),
+      onSaved: () => {
+        setSaveState("saved");
+        flashSaved("core");
+      },
+      onError: (err) => {
+        console.error("Failed to save master data:", err);
+        setSaveState("error");
+      },
+    });
   }
   useEffect(() => {
     if (master === null) return;
-    saveMasterToTables(lastSavedMasterRef, master)
-      .then(() => {
-        setSaveState("saved");
-        flashSaved("core");
-      })
-      .catch((err) => {
-        console.error("Failed to save master data:", err);
-        setSaveState("error");
-      });
+    masterSaveQueueRef.current.request(master);
   }, [master]);
 
   // requisitions is a real table now — same reasoning and same pattern as
@@ -3294,7 +3325,7 @@ export default function StockControl() {
   useEffect(() => {
     function flushAll() {
       if (itemsRef.current !== null) saveItemsToDb(lastSavedItemsRef, itemsRef.current).catch(() => {});
-      if (masterRef.current !== null) saveMasterToTables(lastSavedMasterRef, masterRef.current).catch(() => {});
+      if (masterRef.current !== null) masterSaveQueueRef.current.request(masterRef.current);
       if (requisitionsRef.current !== null)
         saveRequisitionsToDb(lastSavedRequisitionsRef, requisitionsRef.current).catch(() => {});
       if (purchaseOrdersRef.current !== null)
