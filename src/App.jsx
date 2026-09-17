@@ -68,7 +68,7 @@ import CutToSize from "./jobs/CutToSize.jsx";
 import BuyOuts from "./jobs/BuyOuts.jsx";
 import Materials from "./jobs/Materials.jsx";
 import { addStockFromStores } from "./jobs/stockFromStores.js";
-import { markedStageTakes, comesBeforeForLine, orderedByLines, extraStagesOf, routeText, renameInList } from "./jobs/extraStages.js";
+import { markedStageTakes, jobIsMarked, comesBeforeForLine, orderedByLines, extraStagesOf, routeText, renameInList } from "./jobs/extraStages.js";
 import ExtraStagesBox from "./jobs/ExtraStagesBox.jsx";
 import {
   packerReleases,
@@ -5673,14 +5673,16 @@ export default function StockControl() {
   // without it a parent is treated as a plain line.
   function stageTakesItem(processName, quoteItem, allItems) {
     const tag = cutsMadeOn(processName);
-    // An extra stage lists the lines whose extra stages name it, lines
-    // nobody has set yet (so nothing is missed), and lines whose first
-    // step it is -- Machining - External for a part that comes from the
-    // supplier. Never a line with parts: its parts are what get bent or
-    // drilled before they are welded into it. src/jobs/extraStages.js.
+    // An extra stage lists the lines whose extra stages name it, and lines
+    // whose first step it is -- Machining - External for a part that comes
+    // from the supplier. On a job nobody has marked it lists every line
+    // (so nothing is missed); once any line on the job has a list, the
+    // unset ones count as nothing extra (Heinrich, 17 Sep 2026). Never a
+    // line with parts: its parts are what get bent or drilled before they
+    // are welded into it. src/jobs/extraStages.js.
     if (onlyMarked(processName)) {
       if (allItems && hasChildLines(quoteItem, allItems)) return false;
-      return markedStageTakes(processName, tag, quoteItem);
+      return markedStageTakes(processName, tag, quoteItem, { jobMarked: jobIsMarked(allItems) });
     }
     const made = quoteItem?.made_on || "";
     if (isChildLine(quoteItem)) return !!tag && (!made || made === tag);
@@ -23625,10 +23627,12 @@ export default function StockControl() {
                     </div>
                   );
                 })()}
-                {/* Extra stages. Lines nobody has set go to every extra
-                    stage on the job, so once one is ticked the count is
-                    here to be noticed and the button settles the rest in
-                    one press. src/jobs/extraStages.js. */}
+                {/* Extra stages. On a job nobody has marked, every line goes
+                    to every extra stage on it, and the button says "none of
+                    them" in one press. Once any line is marked, the unset
+                    ones count as nothing extra (Heinrich, 17 Sep 2026), so
+                    the count is only there to be seen: no button, nothing
+                    to press. src/jobs/extraStages.js. */}
                 {(() => {
                   if (!canEditThisJob) return null;
                   const onJob = (jobDetail.processes || []).filter((p) => onlyMarked(p.process_name)).map((p) => p.process_name);
@@ -23636,10 +23640,17 @@ export default function StockControl() {
                   const takers = jobDetail.quoteItems.filter((it) => !hasChildLines(it, jobDetail.quoteItems));
                   const unset = takers.filter((it) => extraStagesOf(it) === null).length;
                   if (unset === 0) return null;
+                  if (jobIsMarked(jobDetail.quoteItems)) {
+                    return (
+                      <div style={{ ...S.roleHint, marginTop: 6 }}>
+                        {unset} of {takers.length} not marked: they go to no extra stage. Mark the ones that need one.
+                      </div>
+                    );
+                  }
                   return (
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
                       <span style={{ ...S.roleHint, color: C.accentRaw, fontWeight: 600 }}>
-                        {unset} of {takers.length} not set, so they go to {[...new Set(onJob)].join(" and ")}
+                        Nothing marked yet, so all {takers.length} go to {[...new Set(onJob)].join(" and ")}. Mark the ones that need it, and the rest drop off.
                       </span>
                       <button
                         type="button"
@@ -23840,6 +23851,7 @@ export default function StockControl() {
                               <ExtraStagesBox
                                 line={it}
                                 stages={thenBoxStages()}
+                                jobMarked={jobIsMarked(jobDetail.quoteItems)}
                                 onJob={(jobDetail.processes || []).map((p) => p.process_name)}
                                 canEdit={canEditThisJob}
                                 onChange={(list) => setJobLineExtraStages(jobDetail.job, it, list)}
@@ -24010,6 +24022,7 @@ export default function StockControl() {
                                       <ExtraStagesBox
                                         line={c}
                                         stages={thenBoxStages()}
+                                jobMarked={jobIsMarked(jobDetail.quoteItems)}
                                         onJob={(jobDetail.processes || []).map((p) => p.process_name)}
                                         canEdit
                                         onChange={(list) => setJobLineExtraStages(jobDetail.job, c, list)}

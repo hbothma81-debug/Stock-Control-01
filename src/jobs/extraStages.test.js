@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   extraStagesOf,
   markedStageTakes,
+  jobIsMarked,
   routePosition,
   comesBeforeForLine,
   orderedByLines,
@@ -131,4 +132,26 @@ test("a machine stage used as an extra stage keeps to its own and untagged lines
   assert.equal(markedStageTakes("CNC Lathe", "cnc", { made_on: "laser", extra_stages: ["Bending", "CNC Lathe"] }), true, "a laser part that names it");
   assert.equal(markedStageTakes("CNC Lathe", "cnc", { made_on: "laser", extra_stages: [] }), false);
   assert.equal(markedStageTakes("Bending", "", laserNeverSet), true, "a stage with no machine still takes every unset line");
+});
+
+// Heinrich, 17 Sep 2026: he marks the lines that need a stage; the rest need
+// nothing. JOB-0068: 16 marked Bending, 26 Drilling, 36 left unset.
+test("once any line on the job is marked, the unset lines go to no extra stage", () => {
+  const bend = { made_on: "laser", extra_stages: ["Bending"] };
+  const drill = { made_on: "laser", extra_stages: ["Drilling"] };
+  const unset = { made_on: "laser", extra_stages: null };
+  assert.equal(jobIsMarked([unset, unset]), false, "a job nobody has marked");
+  assert.equal(jobIsMarked([unset, bend]), true);
+  assert.equal(jobIsMarked([unset, { made_on: "laser", extra_stages: [] }]), true, "nothing extra is an answer too");
+  assert.equal(jobIsMarked(null), false);
+  const marked = { jobMarked: true };
+  assert.equal(markedStageTakes("Bending", "", unset, marked), false, "the unset line leaves Bending");
+  assert.equal(markedStageTakes("Drilling", "", unset, marked), false);
+  assert.equal(markedStageTakes("Bending", "", bend, marked), true);
+  assert.equal(markedStageTakes("Bending", "", drill, marked), false);
+  assert.equal(markedStageTakes("Bending", "", unset, { jobMarked: false }), true, "a job nobody has marked keeps every line");
+  assert.equal(markedStageTakes("Bending", "", unset), true, "and so does a caller that does not say");
+  // A stage with its own machine keeps its own and untagged lines either way.
+  assert.equal(markedStageTakes("Machining - External", "machining_external", { made_on: "machining_external", extra_stages: null }, marked), true);
+  assert.equal(markedStageTakes("CNC Lathe", "cnc", { made_on: "", extra_stages: null }, marked), true, "an untagged line is about the cut method, not the Then box");
 });

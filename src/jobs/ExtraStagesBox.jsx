@@ -21,6 +21,8 @@ import { extraStagesOf, moveInList } from "./extraStages.js";
 //             not among them is shown muted, since nothing lists it yet
 //   onChange  called with the new list: an array, possibly empty
 //   canEdit   false shows the chips and nothing to press
+//   jobMarked any line on the job has a list already, so an unset line
+//             goes to no extra stage (jobIsMarked in extraStages.js)
 const same = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
 
 const iconBtn = {
@@ -34,7 +36,7 @@ const iconBtn = {
   alignItems: "center",
 };
 
-export default function ExtraStagesBox({ line, stages, onJob, onChange, canEdit }) {
+export default function ExtraStagesBox({ line, stages, onJob, onChange, canEdit, jobMarked = false }) {
   const list = extraStagesOf(line);
   const chosen = list || [];
   const offer = (stages || []).filter((s) => !chosen.some((c) => same(c, s)));
@@ -43,12 +45,21 @@ export default function ExtraStagesBox({ line, stages, onJob, onChange, canEdit 
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
       <span style={S.roleHint}>Then:</span>
-      {list === null && canEdit && (
+      {/* Not set means two things (17 Sep 2026). On a job nobody has marked,
+          the line goes to every extra stage, so it is said in the accent
+          colour. Once any line on the job is marked, an unset one goes to
+          none: muted, and nothing to press. */}
+      {list === null && canEdit && !jobMarked && (
         <span
           style={{ ...S.roleHint, color: C.accentRaw, fontWeight: 600 }}
-          title="Nobody has said which extra stages this line goes to, so it goes to every one. Add the ones it needs, or press None."
+          title="Nothing on this job is marked yet, so every line goes to every extra stage on it. Mark the lines that need one and the rest drop off."
         >
           not set
+        </span>
+      )}
+      {list === null && canEdit && jobMarked && (
+        <span style={S.roleHint} title="Other lines on this job are marked, so this one goes to no extra stage. Add one here if it needs it.">
+          nothing extra
         </span>
       )}
       {list !== null && chosen.length === 0 && <span style={S.roleHint}>nothing extra</span>}
@@ -116,7 +127,7 @@ export default function ExtraStagesBox({ line, stages, onJob, onChange, canEdit 
       {canEdit && offer.length === 0 && chosen.length === 0 && (
         <span style={S.roleHint}>no later stage on this job to send it to</span>
       )}
-      {canEdit && list === null && (
+      {canEdit && list === null && !jobMarked && (
         <button
           type="button"
           className="stk-btn"

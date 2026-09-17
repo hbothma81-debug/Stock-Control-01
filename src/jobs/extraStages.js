@@ -9,9 +9,11 @@
 // only_marked) lists only the lines that name it in extra_stages
 // (job_quote_items, remembered on stock_items). The list is ordered:
 // ["Machining - External", "Bending"] means machined first, then bent.
-// A list never set (null) sends the line to every such stage, so nothing
-// is missed before somebody has looked at it; an empty list means nothing
-// extra. A line with parts under it never goes to one: its parts do.
+// On a job nobody has marked, a list never set (null) sends the line to
+// every such stage, so nothing is missed before somebody has looked at it;
+// once any line on the job has a list, the unset ones count as nothing
+// extra (17 Sep 2026). An empty list means nothing extra. A line with parts
+// under it never goes to one: its parts do.
 //
 // App.jsx asks these through stageTakesItem (who lists a line),
 // itemFlowLimit (how many of a line may pass: the line's own order wins
@@ -38,12 +40,26 @@ export function extraStagesOf(line) {
 // otherwise switching it on would put every unset laser part on every job
 // in front of the lathe. That is what lets a stage be switched on straight
 // from a line's Then box (Heinrich, 17 Sep 2026: fewer clicks).
-export function markedStageTakes(stageName, tag, line) {
+//
+// Once anybody has given any line on the job a list, the job's unset lines
+// count as nothing extra (Heinrich, 17 Sep 2026, reversing part of 14 Sep:
+// he marks the lines that need a stage, and the rest need nothing; three
+// times running he left "Nothing extra on the rest" unpressed and saw every
+// unmarked line still listed). A job nobody has marked keeps the old
+// safety: every line goes to every extra stage with no machine. `jobMarked`
+// is jobIsMarked(the job's lines); left out, the old rule applies.
+export function markedStageTakes(stageName, tag, line, { jobMarked = false } = {}) {
   const made = line?.made_on || "";
   if (tag && made === tag) return true;
   const list = extraStagesOf(line);
-  if (list === null) return tag ? !made : true;
+  if (list === null) return tag ? !made : !jobMarked;
   return list.some((n) => same(n, stageName));
+}
+
+// Whether anybody has given any line or part on the job a list: an empty
+// list ("nothing extra") counts, it is an answer too.
+export function jobIsMarked(lines) {
+  return (lines || []).some((it) => extraStagesOf(it) !== null);
 }
 
 // Where a stage sits on this line's own route, or null when the line does
