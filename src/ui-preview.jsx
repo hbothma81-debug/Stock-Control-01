@@ -14,6 +14,7 @@ import PdfViewer from "./PdfViewer.jsx";
 import InfoRequestModal, { InfoAnswerModal } from "./InfoRequestModal.jsx";
 import ExtraStagesBox from "./jobs/ExtraStagesBox.jsx";
 import TwoPriceBoxes from "./manager/TwoPriceBoxes.jsx";
+import NumberBox from "./manager/NumberBox.jsx";
 import { jsPDF } from "jspdf";
 import { FileText } from "lucide-react";
 
@@ -151,6 +152,23 @@ function TwoPriceDemo() {
   );
 }
 
+// Stock Manager's save-once number box: the text is the typist's until the
+// box is left; "saves" counts hand-overs. The button changes the stored
+// value from outside, which the box must show and never write back.
+function NumberBoxDemo() {
+  const [kg, setKg] = React.useState(4.37);
+  const [saves, setSaves] = React.useState(0);
+  return (
+    <Section title="Number box, saved on leaving" count={1}>
+      <NumberBox value={kg} onCommit={(v) => { setKg(v); setSaves((n) => n + 1); }} style={S.managerFactorInput} title="kg/m" />
+      <button type="button" className="stk-btn" style={S.reqActionBtn} data-testid="nb-outside" onClick={() => setKg(9.99)}>
+        Someone else sets 9.99
+      </button>
+      <div style={S.roleHint} data-testid="nb-state">stored {kg} | saves {saves}</div>
+    </Section>
+  );
+}
+
 function PdfViewerDemo() {
   const [url] = React.useState(makeSamplePdf);
   // Not a PDF at all, to see the message a device gets when one cannot be drawn.
@@ -250,6 +268,8 @@ function Preview() {
         <ExtraStagesDemo />
 
         <TwoPriceDemo />
+
+        <NumberBoxDemo />
 
         <PdfViewerDemo />
 

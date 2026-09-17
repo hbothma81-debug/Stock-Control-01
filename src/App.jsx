@@ -91,6 +91,7 @@ import { planBars, barsOnShelf, barsSetAside, barsOnOrder, matchingStock, materi
 import EditableName from "./EditableName.jsx";
 import TypeToFind from "./TypeToFind.jsx";
 import TwoPriceBoxes from "./manager/TwoPriceBoxes.jsx";
+import NumberBox from "./manager/NumberBox.jsx";
 import LaserStatus from "./laser/LaserStatus.jsx";
 import LaserTab from "./laser/LaserTab.jsx";
 import CancelShortage from "./laser/CancelShortage.jsx";
@@ -13140,13 +13141,10 @@ export default function StockControl() {
                   Current price ({r.mainCat === "plate" || r.mainCat === "cncBar" ? "R/kg" : r.mainCat === "structural" ? "R/m" : "R/ea"})
                   {price === 0 ? " — not set" : ""}:
                 </span>
-                <input
-                  type="number"
-                  step="0.01"
+                <NumberBox
                   style={{ ...S.managerFactorInput, ...(price === 0 ? S.reqPriceMissing : {}) }}
-                  value={price === 0 ? "" : price}
-                  placeholder="0"
-                  onChange={(e) => updateReqPrice(r, e.target.value)}
+                  value={price}
+                  onCommit={(v) => updateReqPrice(r, v)}
                 />
               </div>
             )}
@@ -21458,12 +21456,9 @@ export default function StockControl() {
                           ) : (
                             <EditableName value={entry.name} onCommit={(v) => renameMasterEntry(managerTab, entry.name, v)} />
                           )}
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={entry.factor === 0 ? "" : entry.factor}
-                            placeholder="0"
-                            onChange={(e) => updateFactorField(entry.name, "factor", e.target.value, entry.grade)}
+                          <NumberBox
+                            value={entry.factor}
+                            onCommit={(v) => updateFactorField(entry.name, "factor", v, entry.grade)}
                             style={S.managerFactorInput}
                             title="kg/m"
                           />
@@ -21487,12 +21482,9 @@ export default function StockControl() {
                               </button>
                             );
                           })()}
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={!entry.price ? "" : entry.price}
-                            placeholder="0"
-                            onChange={(e) => updateFactorField(entry.name, "price", e.target.value, entry.grade)}
+                          <NumberBox
+                            value={entry.price}
+                            onCommit={(v) => updateFactorField(entry.name, "price", v, entry.grade)}
                             style={S.managerFactorInput}
                             title="R/m"
                           />
@@ -21633,21 +21625,15 @@ export default function StockControl() {
                         .map((entry) => (
                           <div key={entry.name} style={S.managerRow}>
                             <EditableName value={entry.name} onCommit={(v) => renameMasterEntry(managerTab, entry.name, v)} />
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={entry.factor === 0 ? "" : entry.factor}
-                              placeholder="0"
-                              onChange={(e) => updateFactorField(entry.name, "factor", e.target.value)}
+                            <NumberBox
+                              value={entry.factor}
+                              onCommit={(v) => updateFactorField(entry.name, "factor", v)}
                               style={S.managerFactorInput}
                               title="Density g/cm³"
                             />
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={!entry.price ? "" : entry.price}
-                              placeholder="0"
-                              onChange={(e) => updateFactorField(entry.name, "price", e.target.value)}
+                            <NumberBox
+                              value={entry.price}
+                              onCommit={(v) => updateFactorField(entry.name, "price", v)}
                               style={S.managerFactorInput}
                               title="R/kg"
                             />
