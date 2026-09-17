@@ -90,6 +90,7 @@ import { materialText } from "./laser/stockOptions.js";
 import { planBars, barsOnShelf, barsSetAside, barsOnOrder, matchingStock, materialName, offcutIsKeepable, KERF_MM, TRIM_MM, MIN_OFFCUT_MM } from "./jobs/cutToSize.js";
 import EditableName from "./EditableName.jsx";
 import TypeToFind from "./TypeToFind.jsx";
+import TwoPriceBoxes from "./manager/TwoPriceBoxes.jsx";
 import LaserStatus from "./laser/LaserStatus.jsx";
 import LaserTab from "./laser/LaserTab.jsx";
 import CancelShortage from "./laser/CancelShortage.jsx";
@@ -2104,7 +2105,6 @@ export default function StockControl() {
   // looks exactly like one that was. This is what lets the screen say so.
   const [previewNotFiled, setPreviewNotFiled] = useState(false);
   const [allowDuplicate, setAllowDuplicate] = useState(false);
-  const [priceUnitMode, setPriceUnitMode] = useState("perUnit"); // "perUnit" (sheet/metre) or "perKg"
 
   const [showFilters, setShowFilters] = useState(false);
   const [showCustomerChips, setShowCustomerChips] = useState(false);
@@ -19683,45 +19683,21 @@ export default function StockControl() {
                     </div>
                     {effectiveGrade && form.thickness.trim() && effectiveSize && (
                       <div style={{ marginTop: 10 }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                          <label style={S.label}>Price</label>
-                          <div style={S.segRow}>
-                            {[
-                              { key: "perUnit", label: "R/sheet" },
-                              { key: "perKg", label: "R/kg" },
-                            ].map((m) => (
-                              <button
-                                type="button"
-                                key={m.key}
-                                className="stk-btn"
-                                onClick={() => setPriceUnitMode(m.key)}
-                                style={{
-                                  ...S.segBtn,
-                                  ...(priceUnitMode === m.key ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
-                                }}
-                              >
-                                {m.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
                         {(() => {
                           const weight = plateWeight({ size: effectiveSize, thickness: form.thickness, grade: effectiveGrade, qty: 1 });
                           const perSheetWeight = weight?.perSheet || 0;
                           const currentPerKg = findPrice("grades", effectiveGrade);
-                          const displayValue = priceUnitMode === "perKg" ? currentPerKg : currentPerKg * perSheetWeight;
                           return (
                             <>
-                              <input
-                                type="number"
-                                step="0.01"
-                                style={S.input}
-                                value={displayValue === 0 ? "" : displayValue}
-                                placeholder="0"
-                                onChange={(e) => {
-                                  const v = parseFloat(e.target.value) || 0;
-                                  const newPerKg = priceUnitMode === "perKg" ? v : perSheetWeight > 0 ? v / perSheetWeight : 0;
-                                  setMaterialPrice("grades", effectiveGrade, newPerKg, { factor: 7.85 });
+                              <TwoPriceBoxes
+                                key={`${effectiveGrade}|${effectiveSize}|${form.thickness}`}
+                                unitLabel="R/sheet"
+                                kgPerUnit={perSheetWeight}
+                                perUnit={currentPerKg * perSheetWeight}
+                                perKg={currentPerKg}
+                                unitOff={perSheetWeight > 0 ? "" : "No sheet weight yet, so price it by weight."}
+                                onCommit={(p) => {
+                                  if (p.perKg != null) setMaterialPrice("grades", effectiveGrade, p.perKg, { factor: 7.85 });
                                 }}
                               />
                               <div style={S.roleHint}>
@@ -19783,56 +19759,24 @@ export default function StockControl() {
                     </div>
                     {effectiveGrade && form.diameter.trim() && (
                       <div style={{ marginTop: 10 }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                          <label style={S.label}>Price</label>
-                          <div style={S.segRow}>
-                            {[
-                              { key: "perUnit", label: "R/m" },
-                              { key: "perKg", label: "R/kg" },
-                            ].map((m) => (
-                              <button
-                                type="button"
-                                key={m.key}
-                                className="stk-btn"
-                                onClick={() => setPriceUnitMode(m.key)}
-                                style={{
-                                  ...S.segBtn,
-                                  ...(priceUnitMode === m.key ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
-                                }}
-                              >
-                                {m.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
                         {(() => {
                           const d = parseFloat(form.diameter) || 0;
                           const perM = d ? (Math.PI / 4000) * d * d * findFactor("cncGrades", effectiveGrade) : 0;
                           const currentPerKg = findPrice("cncGrades", effectiveGrade);
-                          const displayValue = priceUnitMode === "perKg" ? currentPerKg : currentPerKg * perM;
-                          // Same trap as the sections above: without a weight per
-                          // metre there is nothing to divide by, and writing the
-                          // zero would wipe the grade rate everywhere it is used.
-                          if (priceUnitMode === "perUnit" && !(perM > 0)) {
-                            return (
-                              <div style={{ ...S.roleHint, color: C.danger }}>
-                                Enter a diameter first — without it there is no weight per metre to price against. Or
-                                switch to R/kg and enter the rate by weight.
-                              </div>
-                            );
-                          }
+                          // Without a weight per metre there is nothing to divide by, and
+                          // writing the zero would wipe the grade rate everywhere it is
+                          // used: the R/m box stays off until there is one.
                           return (
                             <>
-                              <input
-                                type="number"
-                                step="0.01"
-                                style={S.input}
-                                value={displayValue === 0 ? "" : displayValue}
-                                placeholder="0"
-                                onChange={(e) => {
-                                  const v = parseFloat(e.target.value) || 0;
-                                  const newPerKg = priceUnitMode === "perKg" ? v : v / perM;
-                                  setMaterialPrice("cncGrades", effectiveGrade, newPerKg, { factor: 7.85 });
+                              <TwoPriceBoxes
+                                key={`${effectiveGrade}|${form.diameter}`}
+                                unitLabel="R/m"
+                                kgPerUnit={perM}
+                                perUnit={currentPerKg * perM}
+                                perKg={currentPerKg}
+                                unitOff={perM > 0 ? "" : "No weight per metre for this diameter and grade, so price it by weight."}
+                                onCommit={(p) => {
+                                  if (p.perKg != null) setMaterialPrice("cncGrades", effectiveGrade, p.perKg, { factor: 7.85 });
                                 }}
                               />
                               <div style={S.roleHint}>
@@ -19861,28 +19805,6 @@ export default function StockControl() {
                     />
                     {effectiveSection && (
                       <div style={{ marginTop: 10 }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                          <label style={S.label}>Price</label>
-                          <div style={S.segRow}>
-                            {[
-                              { key: "perUnit", label: "R/m" },
-                              { key: "perKg", label: "R/kg" },
-                            ].map((m) => (
-                              <button
-                                type="button"
-                                key={m.key}
-                                className="stk-btn"
-                                onClick={() => setPriceUnitMode(m.key)}
-                                style={{
-                                  ...S.segBtn,
-                                  ...(priceUnitMode === m.key ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
-                                }}
-                              >
-                                {m.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
                         {(() => {
                           // Setting a price creates the section row when there is
                           // none, so a value that is not on the lists would slip
@@ -19896,40 +19818,27 @@ export default function StockControl() {
                           }
                           const kgPerM = findSectionFactor(effectiveSection, effectiveGrade);
                           const currentPerM = findSectionPrice(effectiveSection, effectiveGrade);
-                          const currentPerKg = kgPerM ? currentPerM / kgPerM : 0;
-                          const displayValue = priceUnitMode === "perKg" ? currentPerKg : currentPerM;
-                          // Pricing by weight needs a kg/m to convert with. Without
-                          // one the conversion is a multiply by zero, and the old
-                          // behaviour wrote that zero straight over the rate -- so
-                          // typing a price by weight silently wiped the price per
-                          // metre for that section everywhere it was used. Say what
-                          // is missing instead of offering a box that destroys data.
-                          if (priceUnitMode === "perKg" && !kgPerM) {
-                            return (
-                              <div style={{ ...S.roleHint, color: C.danger }}>
-                                {effectiveSection} has no kg/m set, so it cannot be priced by weight. Set it under Stock
-                                Manager → Sections, or switch to R/m and enter the rate per metre.
-                              </div>
-                            );
-                          }
+                          // Pricing by weight needs a kg/m to convert with. Without one
+                          // the conversion is a multiply by zero, which once wiped the
+                          // price per metre everywhere the section was used: the R/kg
+                          // box stays off until the section has a kg/m.
                           return (
                             <>
-                              <input
-                                type="number"
-                                step="0.01"
-                                style={S.input}
-                                value={displayValue === 0 ? "" : displayValue}
-                                placeholder="0"
-                                onChange={(e) => {
-                                  const v = parseFloat(e.target.value) || 0;
-                                  const newPerM = priceUnitMode === "perKg" ? v * kgPerM : v;
-                                  setSectionPrice(effectiveSection, effectiveGrade, newPerM, effectiveSectionType);
+                              <TwoPriceBoxes
+                                key={`${effectiveSection}|${effectiveGrade}`}
+                                unitLabel="R/m"
+                                kgPerUnit={kgPerM || 0}
+                                perUnit={currentPerM}
+                                perKg={kgPerM ? currentPerM / kgPerM : 0}
+                                kgOff={kgPerM ? "" : "No kg/m for this section yet (Stock Manager → Sections), so price it per metre."}
+                                onCommit={(p) => {
+                                  if (p.perUnit != null) setSectionPrice(effectiveSection, effectiveGrade, p.perUnit, effectiveSectionType);
                                 }}
                               />
                               <div style={S.roleHint}>
                                 {kgPerM
                                   ? `${kgPerM.toFixed(2)}kg per metre — this updates the rate for ${effectiveSection} in ${effectiveGrade || "no grade"}, everywhere it's used. Other grades keep their own price.`
-                                  : `Priced per metre. ${effectiveSection} has no kg/m set in Stock Manager, so it cannot be priced by weight.`}
+                                  : `This updates the rate for ${effectiveSection} in ${effectiveGrade || "no grade"}, everywhere it's used.`}
                               </div>
                             </>
                           );

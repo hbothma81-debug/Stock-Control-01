@@ -13,6 +13,7 @@ import TypeToFind from "./TypeToFind.jsx";
 import PdfViewer from "./PdfViewer.jsx";
 import InfoRequestModal, { InfoAnswerModal } from "./InfoRequestModal.jsx";
 import ExtraStagesBox from "./jobs/ExtraStagesBox.jsx";
+import TwoPriceBoxes from "./manager/TwoPriceBoxes.jsx";
 import { jsPDF } from "jspdf";
 import { FileText } from "lucide-react";
 
@@ -128,6 +129,28 @@ function ExtraStagesDemo() {
   );
 }
 
+// The add-stock form's two price boxes: a section with a kg/m (stores R/m),
+// one without (R/kg off), and a plate (stores R/kg). "commits" counts how
+// often a price was handed over: once per box left, never per keystroke.
+function TwoPriceDemo() {
+  const [perM, setPerM] = React.useState(109.25);
+  const [bare, setBare] = React.useState(0);
+  const [perKg, setPerKg] = React.useState(0);
+  const [commits, setCommits] = React.useState(0);
+  const count = () => setCommits((n) => n + 1);
+  return (
+    <Section title="Two price boxes" count={3}>
+      <div style={S.roleHint}>SHS 50x50x3, 4.37 kg/m. Stores R/m.</div>
+      <TwoPriceBoxes unitLabel="R/m" kgPerUnit={4.37} perUnit={perM} perKg={perM / 4.37} onCommit={(p) => { setPerM(p.perUnit); count(); }} />
+      <div style={{ ...S.roleHint, marginTop: 10 }}>A section with no kg/m: R/kg is off.</div>
+      <TwoPriceBoxes unitLabel="R/m" kgPerUnit={0} perUnit={bare} perKg={0} kgOff="No kg/m for this section yet, so price it per metre." onCommit={(p) => { setBare(p.perUnit); count(); }} />
+      <div style={{ ...S.roleHint, marginTop: 10 }}>A plate, 188.4 kg a sheet. Stores R/kg.</div>
+      <TwoPriceBoxes unitLabel="R/sheet" kgPerUnit={188.4} perUnit={perKg * 188.4} perKg={perKg} onCommit={(p) => { setPerKg(p.perKg); count(); }} />
+      <div style={S.roleHint} data-testid="two-price">stored: R/m {perM} | bare R/m {bare} | plate R/kg {perKg} | commits {commits}</div>
+    </Section>
+  );
+}
+
 function PdfViewerDemo() {
   const [url] = React.useState(makeSamplePdf);
   // Not a PDF at all, to see the message a device gets when one cannot be drawn.
@@ -225,6 +248,8 @@ function Preview() {
         <TypeToFindDemo />
 
         <ExtraStagesDemo />
+
+        <TwoPriceDemo />
 
         <PdfViewerDemo />
 
