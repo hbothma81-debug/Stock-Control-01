@@ -1314,8 +1314,8 @@ function NestRow({
 
               {/* The job's place in this laser's queue (jobs.laser_priority),
                   the same box the job page has: 1 is cut first, blank is
-                  ordinary work. Whoever nests has the final say over the
-                  number sales gave it. */}
+                  ordinary work. Only whoever nests, and admins, set it;
+                  sales ask, and see the number on the job. */}
               {machine.hasPriority && actions.onSetPriority && (
                 <div>
                   <label style={S.label}>Laser priority</label>

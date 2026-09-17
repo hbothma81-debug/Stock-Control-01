@@ -1,6 +1,6 @@
 -- A job's place in the plate laser's queue.
 --
--- Sales, the nester and admins set it on the job (decided 16 Sep 2026):
+-- The nester and admins set it on the job (decided 16-17 Sep 2026):
 -- 1 is cut first, two jobs may share a number, blank is ordinary work.
 -- The laser screens read it (src/laser); every change is written to the
 -- job's History. Who set it and when ride along on the job so a nesting

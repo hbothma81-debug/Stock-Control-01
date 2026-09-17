@@ -121,8 +121,9 @@ admin flag. The two rules sit near the top of App.jsx:
   them waits for both. `isTubeLaserProcess` in App.jsx is that rule.
 - **The queue (16 September 2026).** A job carries a laser priority
   (`jobs.laser_priority`, with `_by` and `_at`): 1 is cut first, two jobs
-  may share a number, blank is ordinary work. Sales people, plate nesters
-  and admins set it, on the job page's Overview tab or on the opened To
+  may share a number, blank is ordinary work. Plate nesters and admins
+  set it (not sales people, by Heinrich's word of 17 September: they ask
+  Prince and see the number), on the job page's Overview tab or on the opened To
   nest row (`setLaserPriority` in App.jsx, gated by `canSetLaserPriority`,
   never by "can edit jobs"); everyone sees it on the job header and as a
   red "Laser P1" chip on the Jobs list. Every change goes to the job's

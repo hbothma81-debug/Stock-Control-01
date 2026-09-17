@@ -9703,8 +9703,8 @@ export default function StockControl() {
   }
 
   // The plate laser's queue number on a job (jobs.laser_priority): 1 is
-  // cut first, two jobs may share a number, blank is ordinary work. Sales,
-  // the nester and admins set it (canSetLaserPriority). Who and when are
+  // cut first, two jobs may share a number, blank is ordinary work. The
+  // nester and admins set it (canSetLaserPriority). Who and when are
   // kept on the job so Prince's row can say them, and every change goes
   // into the job's History. The row is asked for back: a refused update
   // would otherwise look like a save.
@@ -10932,11 +10932,11 @@ export default function StockControl() {
   const canEditThisJob = canEditQty("jobs") && (!jobIsLocked || isAdmin);
 
   // Who may put a job in the plate laser's queue (jobs.laser_priority):
-  // sales, whoever nests on that laser, and admins. Decided 16 Sep 2026.
-  // Its own gate, not canEditThisJob, because Prince need not be able to
-  // edit jobs to say what he cuts next. The operator only sees it.
-  const canSetLaserPriority =
-    isAdmin || !!profile?.isSalesPerson || !!profile?.allowedProcessTypes?.some(isPlateNestingProcess);
+  // whoever nests on that laser, and admins. Not sales: Heinrich, 17 Sep
+  // 2026, "instead of" -- they ask Prince, and see the number like
+  // everyone else. Its own gate, not canEditThisJob, because Prince need
+  // not be able to edit jobs to say what he cuts next.
+  const canSetLaserPriority = isAdmin || !!profile?.allowedProcessTypes?.some(isPlateNestingProcess);
   // The box only makes sense on a job the plate laser still has to cut:
   // a number given once Nesting and Laser are both ticked reaches no
   // list. The tube laser has no queue number, by decision.

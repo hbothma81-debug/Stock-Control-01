@@ -103,7 +103,7 @@ export const LASER_MACHINE = "Laser 4kw";
 //                 and says how many are left, instead of a running total
 //   printsNests   each program has a Print button for the floor sheet
 //   hasPriority   the laser has a queue: a job's number (jobs.laser_priority,
-//                 1 first, set by sales, the nester or an admin) sorts the
+//                 1 first, set by the nester or an admin) sorts the
 //                 To nest list and puts the programs carrying it in a "Cut
 //                 next" section on the Cutting screen; and a re-cut flagged
 //                 "Can wait" stops jumping the list. Plate only, by decision
