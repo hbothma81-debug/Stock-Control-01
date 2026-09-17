@@ -76,6 +76,7 @@ ORDER=(
   setup-material-spellings.sql
   setup-material-spellings-2.sql
   setup-section-dimensions.sql
+  setup-section-names.sql
 
   # --- extra columns and permissions on profiles
   setup-production-access.sql
