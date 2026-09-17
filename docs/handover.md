@@ -2514,3 +2514,87 @@ Read-only checks: `CHECK-material-spellings.sql`, `CHECK-section-names-in-use.sq
    (decided 16 Sep, not built).
 3. Fasteners (answers in memory `fasteners-database-plan`; tell Quoting first).
 4. Suppliers steps 3–4 (Tel per contact, categories) when he asks.
+
+---
+
+## 17 Sep 2026 (evening) — Stock Manager: price boxes and the master save queue, state of play
+
+### Done and live (pushed by THIS conversation on Heinrich's "push", not through Planning)
+
+Planning: the live tip moved 99f1d7f → 5643fcc → 21f7ef5 → d2953b4. Before
+each push the tip was printed and unchanged, the queue held only this
+conversation's one commit, and a fresh clone passed tests, names and build.
+After each, CHECK-what-is-live found it and the live page loaded with no
+console errors. Nothing was typed on live.
+
+- **5643fcc — two price boxes on the add-stock form** (structural, plate,
+  CNC bar): R/m or R/sheet beside R/kg, typing one shows the other, saved
+  once on leaving the box. Replaces the R/m | R/kg toggle box that wrote
+  the price on every keystroke (text jumped, a leading 0 blanked it, each
+  keystroke its own save). `src/manager/TwoPriceBoxes.jsx`, `twoPrice.js`.
+- **21f7ef5 — save-once number boxes** (`src/manager/NumberBox.jsx`):
+  Sections kg/m and R/m, Material Types and CNC grades density and R/kg,
+  the Procurement requisition price. Same fault, same cure. Heinrich said
+  yes to including the requisition box (Procurement's screen).
+- **d2953b4 — master-list saves queue up** (`src/lib/saveQueue.js`): one at
+  a time in order, a failed save retried after 30 s and at the next
+  change, a master refresh skipped while a save is in flight or owed.
+  Rules in CLAUDE.md under "Loading data". `lastSavedMasterRef` is gone.
+
+### SQL this conversation wrote
+
+None this session. (Earlier files: see the 17 Sep Stock Manager entry above.)
+
+### Tried on practice by this conversation (Test account), not by Heinrich
+
+Sections kg/m and R/m, Material Types R/kg (leading "0,5", then cleared),
+add-stock structural (R/kg 80 → R/m 260) and plate as an offcut (R/sheet
+1570 → R/kg 20), a requisition price: each one save on leaving the box,
+values there after a reload. The queue: a save held 4 s with two changes
+made meanwhile (one catch-up save after it), a save failed on purpose
+(Refresh kept the screen's value, retry by itself at 30 s, read back from
+the database).
+
+### Built but not yet tested by Heinrich (all live)
+
+1. Stock → add → Structural / Plate / CNC bar: the two price boxes; type
+   in either, Tab, save the item, reload, price still there.
+2. **CNC bar form: tried by nobody** (practice has no CNC bar grades).
+3. **Clicking Save straight from a price box: tried by nobody** on the real
+   form (leaving the box saves; a click on Save leaves it first).
+4. A section with no kg/m (CH 120x55): R/kg greyed out with its reason.
+5. Stock Manager → Sections and Material Types rows; a requisition price.
+6. The queue has nothing to look at unless a save fails: the header shows
+   the save error and the app retries by itself every 30 s. **A failed
+   save that adds a new row (the upsert repeat) was never exercised.** A
+   save that can never succeed leaves the device in error, retrying, and
+   Refresh will not replace the master lists; a page reload is the way out.
+
+### Waiting on Heinrich
+
+- Still from the morning: confirm the NB100 pipe rename ran; a kg/m for
+  CH 120x55 and the other PFC/CH/IPE sizes; the five fastener questions.
+
+### Left on practice
+
+Two section rows made by testing (practice sections carry no material, so
+pricing one for MS makes its own row): "SHS 50x50x2 / MS" 3.25 kg/m R260,
+"75x75x6 / MS" R425.75 (that requisition now reads R425.75, was R410). The
+original SHS 50x50x2 row is back to blank kg/m, R250 (read from the database).
+
+### Seen in the folder, not this conversation's
+
+Uncommitted at wrap-up: `setup-jobs-invoiced-amount.sql`, `src/FigureBox.jsx`,
+`src/jobs/jobFigures.js` + test, and changes in `src/App.jsx`,
+`src/ui-preview.jsx`, `build-test-database.sh`, `setup-ALL.sql`,
+`CHECK-which-setup-files-are-run.sql` (by the names, Jobs page). Also one
+stray blank line in this file's 16 Sep Copy job entry. None touched.
+
+### Pick up next
+
+1. Whatever Heinrich's tries turn up.
+2. The same save queue for stock items, requisitions, purchase orders and
+   the usage log, one at a time (agreed 17 Sep, after this one has run a while).
+3. Changing a material's short name rewrites every row that stores it
+   (decided 16 Sep, not built).
+4. Fasteners; Suppliers steps 3–4 when he asks.
