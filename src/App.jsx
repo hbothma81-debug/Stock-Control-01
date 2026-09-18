@@ -615,6 +615,11 @@ function sortMaster(m) {
 // table per field — this is the only place that needs to know that. Once
 // assembled, the rest of the app sees the exact same master shape it
 // always has.
+// Rows read in pages come back in id order. These put them back in the
+// order they were added, which is what one plain request used to give.
+const addedOrder = (a, b) => String(a.created_at || "").localeCompare(String(b.created_at || ""));
+const wholeList = (rows) => ({ data: (rows || []).sort(addedOrder) });
+
 async function loadMasterFromTables() {
   const [stringLists, factorItems, suppliers, supplierContacts, storesCatalog, customerContacts, companyRows, counters] = await Promise.all([
     // Explicitly ordered: without an ORDER BY, Postgres makes no promise
@@ -622,18 +627,30 @@ async function loadMasterFromTables() {
     // reshuffle between loads. created_at is the tiebreak so lists that
     // have never been ordered still come back in the order they were
     // added, exactly as before.
-    supabase.from("master_string_lists").select("*").order("sort_order").order("created_at"),
-    supabase.from("master_factor_items").select("*"),
-    supabase.from("master_suppliers").select("*"),
-    supabase.from("master_supplier_contacts").select("*"),
-    supabase.from("master_stores_catalog").select("*"),
-    supabase.from("master_customer_contacts").select("*"),
+    //
+    // The six lists that grow are read in pages (fetchAllRows, by id): one
+    // plain request stops at 1000 rows with no error, and a section or a
+    // stores item past that would simply not be in any picker. Paging
+    // needs a unique column, so the order asked for above is put back
+    // afterwards, below. Company details is one row and the counters a
+    // fixed handful, so those two stay one request each.
+    fetchAllRows("master_string_lists").then(wholeList),
+    fetchAllRows("master_factor_items").then(wholeList),
+    fetchAllRows("master_suppliers").then(wholeList),
+    fetchAllRows("master_supplier_contacts").then(wholeList),
+    fetchAllRows("master_stores_catalog").then(wholeList),
+    fetchAllRows("master_customer_contacts").then(wholeList),
     supabase.from("master_company_details").select("*"),
     supabase.from("master_counters").select("*"),
   ]);
-  for (const r of [stringLists, factorItems, suppliers, supplierContacts, storesCatalog, customerContacts, companyRows, counters]) {
+  for (const r of [companyRows, counters]) {
     if (r.error) throw r.error;
   }
+  // Stored order first (a blank sort_order last, as the database sorts
+  // it), then the order things were added in.
+  stringLists.data.sort(
+    (a, b) => (a.sort_order ?? Infinity) - (b.sort_order ?? Infinity) || addedOrder(a, b)
+  );
 
   const result = {};
   for (const listName of MASTER_STRING_LISTS) {
@@ -3508,17 +3525,32 @@ export default function StockControl() {
       setDrawingSearchResults([]);
       return;
     }
+    // Nothing is listed until a customer is picked or something is typed
+    // (Heinrich, 18 Sep 2026): the whole table, every revision of every
+    // part, was the load that grows without end.
+    const term = (query || "").trim().replace(/[%,]/g, "");
+    if (!term && !customer) {
+      setDrawingSearchResults([]);
+      setDrawingSearchFailed(false);
+      return;
+    }
     setDrawingSearchLoading(true);
     try {
-      let q = supabase.from("drawings").select("*").order("part_number").order("internal_revision", { ascending: false });
-      if (query && query.trim()) {
-        const term = query.trim().replace(/[%,]/g, "");
-        q = q.or(`part_number.ilike.%${term}%,description.ilike.%${term}%`);
-      }
-      if (customer === "__internal__") q = q.is("customer", null);
-      else if (customer) q = q.eq("customer", customer);
-      const { data, error } = await q;
-      if (error) throw error;
+      // In pages, by id: one customer can pass the 1000 rows a single
+      // request stops at. The order for the screen is put back below.
+      const data = await fetchAllRows("drawings", {
+        filter: (q) => {
+          if (term) q = q.or(`part_number.ilike.%${term}%,description.ilike.%${term}%`);
+          if (customer === "__internal__") q = q.is("customer", null);
+          else if (customer) q = q.eq("customer", customer);
+          return q;
+        },
+      });
+      data.sort(
+        (a, b) =>
+          String(a.part_number).localeCompare(String(b.part_number), undefined, { numeric: true, sensitivity: "base" }) ||
+          b.internal_revision - a.internal_revision
+      );
       // Group by part number so each part shows its current revision plus
       // any older ones tucked away in a collapsible history.
       const grouped = {};
@@ -3542,11 +3574,12 @@ export default function StockControl() {
   async function loadDrawingLookup() {
     if (!supabase) return;
     try {
-      const { data, error } = await supabase
-        .from("drawings")
-        .select("id, part_number, description, internal_revision, customer_revision")
-        .eq("status", "current");
-      if (error) throw error;
+      // In pages: past 1000 current drawings a single request would leave
+      // parts off, and their rows would lose the drawing button.
+      const data = await fetchAllRows("drawings", {
+        select: "id, part_number, description, internal_revision, customer_revision",
+        filter: (q) => q.eq("status", "current"),
+      });
       const map = {};
       (data || []).forEach((d) => {
         map[d.part_number.trim()] = {
@@ -10535,11 +10568,11 @@ export default function StockControl() {
   async function batchDeleteDrawingsForCustomer(customer) {
     if (!supabase) return;
     try {
-      let q = supabase.from("drawings").select("id, storage_path");
-      if (customer === "__internal__") q = q.is("customer", null);
-      else q = q.eq("customer", customer);
-      const { data, error } = await q;
-      if (error) throw error;
+      // Listed in pages, so the count in the question below is the real one.
+      const data = await fetchAllRows("drawings", {
+        select: "id, storage_path",
+        filter: (q) => (customer === "__internal__" ? q.is("customer", null) : q.eq("customer", customer)),
+      });
       if (!data || data.length === 0) {
         alert(`No drawings found for ${customer === "__internal__" ? "internal drawings" : customer}.`);
         return;
@@ -10550,16 +10583,25 @@ export default function StockControl() {
         }? This permanently removes the files too — can't be undone.`
       );
       if (!ok) return;
-      const paths = data.map((d) => d.storage_path).filter(Boolean);
-      if (paths.length) await supabase.storage.from("drawings").remove(paths);
-      let delQ = supabase.from("drawings").delete();
-      delQ = customer === "__internal__" ? delQ.is("customer", null) : delQ.eq("customer", customer);
-      const { error: delError } = await delQ;
-      if (delError) throw delError;
+      // Files and their rows go together, 200 at a time, and only the rows
+      // that were listed: deleting "everything for this customer" in one
+      // sweep took rows whose files had never been listed, and left those
+      // files behind in storage with nothing pointing at them.
+      for (let i = 0; i < data.length; i += 200) {
+        const batch = data.slice(i, i + 200);
+        const paths = batch.map((d) => d.storage_path).filter(Boolean);
+        if (paths.length) {
+          const { error: fileError } = await supabase.storage.from("drawings").remove(paths);
+          if (fileError) throw fileError;
+        }
+        const { error: delError } = await supabase.from("drawings").delete().in("id", batch.map((d) => d.id));
+        if (delError) throw delError;
+      }
       refreshDrawings(drawingSearchQuery, drawingCustomerFilter);
     } catch (err) {
       console.error("Failed to batch delete drawings:", err);
-      alert("Couldn't delete those drawings — check your connection and try again.");
+      alert("Couldn't delete all of those drawings — check your connection and try again. The list shows what is left.");
+      refreshDrawings(drawingSearchQuery, drawingCustomerFilter);
     }
   }
 
@@ -18627,8 +18669,10 @@ export default function StockControl() {
                     Couldn't load the drawings — check your signal and search again. This is not the same as
                     there being none.
                   </div>
+                ) : !drawingSearchQuery.trim() && !drawingCustomerFilter ? (
+                  <div style={S.empty}>Pick a customer, or type a part number or description, to see drawings.</div>
                 ) : (
-                  <div style={S.empty}>Nothing here yet — upload one to get started.</div>
+                  <div style={S.empty}>No drawings match — check the spelling, or upload one.</div>
                 ))}
               {drawingSearchResults.map(([partNumber, revisions]) => {
                 const current = revisions.find((r) => r.status === "current") || revisions[0];
