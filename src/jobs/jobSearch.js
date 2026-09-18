@@ -25,7 +25,14 @@ export function poMatchesSearch(job, query) {
   if (!q || !po) return false;
   if (po.includes(q)) return true;
   const bareQ = bare(q);
-  return bareQ !== "" && bare(po).includes(bareQ);
+  if (bareQ === "") return false;
+  const barePo = bare(po);
+  if (barePo.includes(bareQ)) return true;
+  // "PO 4500123" typed, "4500123" on the job: the PO said in front of a
+  // number is dropped. Only in front of a number, or the first letters of
+  // "Porsche" would find every PO with an "r" in it.
+  const afterPo = /^po(\d.*)$/.exec(bareQ);
+  return !!afterPo && barePo.includes(afterPo[1]);
 }
 
 // The words for that row label: "PO 4500123". A PO that was typed onto
