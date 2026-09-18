@@ -43,6 +43,17 @@ test("a PO is found however its spaces, dashes and strokes were typed", () => {
   assert.equal(jobMatchesSearch({ ...job, customer_po: "4500123" }, "4500 123"), true);
 });
 
+test("PO typed in front of the number, none on the job", () => {
+  const plain = { ...job, customer_po: "4500 123/A" };
+  assert.equal(jobMatchesSearch(plain, "PO 4500123"), true);
+  assert.equal(jobMatchesSearch(plain, "po4500-123"), true);
+  assert.equal(jobMatchesSearch(plain, "P.O. 4500"), true);
+  assert.equal(jobMatchesSearch(plain, "po 9999"), false);
+  // Only in front of a number: "por" is somebody typing a customer's name.
+  assert.equal(poMatchesSearch({ customer_po: "R-77" }, "por"), false);
+  assert.equal(poMatchesSearch({ customer_po: "R-77" }, "po"), false);
+});
+
 test("punctuation alone finds no PO", () => {
   assert.equal(poMatchesSearch(job, "-"), false);
   assert.equal(poMatchesSearch(job, "//"), false);
