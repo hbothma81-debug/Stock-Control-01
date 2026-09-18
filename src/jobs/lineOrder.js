@@ -10,8 +10,11 @@
 //     rows side by side;
 //   - a finished part keeps its place, so nobody loses theirs.
 //
-// The Items tab, delivery notes and invoice requests keep quote order
-// (sort_order). That is the customer's order, not the floor's.
+// Delivery notes and invoice requests keep quote order (sort_order):
+// that is the customer's order, not the floor's. The job page's Items
+// tab kept it too until 18 Sep 2026, when Heinrich asked for it A to Z
+// like the floor, by description (`heldLineOrder` below). Only the
+// drawing is sorted: the stored quote order is untouched.
 
 // Mirrors byText in App.jsx, the app's one ordering rule for names: case
 // ignored, numbers inside the text read as numbers. Change both together.
@@ -34,6 +37,32 @@ export function compareLines(a, b, name = shownName) {
     (Number(a?.sort_order) || 0) - (Number(b?.sort_order) || 0) ||
     String(a?.id ?? "").localeCompare(String(b?.id ?? ""))
   );
+}
+
+// The Items tab's order: the same A to Z, but held still while somebody
+// is typing on it. Its boxes save when left and the job is read again, so
+// a renamed line re-sorted at once would move under the cursor of whoever
+// is tabbing along its row (a row React moves loses its focus). So the
+// order is worked out once and kept until a line or part is added or
+// removed, a line is moved under another or back out, or the job or the
+// tab is opened again.
+//
+//   held    what this returned last time, or null to work it out afresh
+//   jobId   the job on screen
+//   items   the whole job's lines and parts
+//   name    the text a row shows, when it is not the description
+//
+// Returns { key, rank }: rank is a Map of id to place, over lines and
+// parts alike. Sorting a line's parts by it gives them A to Z among
+// themselves. The same object comes back while nothing above has changed.
+export function heldLineOrder(held, jobId, items, name = shownName) {
+  const list = (items || []).filter(Boolean);
+  const key = `${jobId ?? ""}|${list.map((it) => `${it.id}>${it.parent_quote_item_id || ""}`).sort().join(",")}`;
+  if (held && held.key === key) return held;
+  // Each row's name is read once, not once per comparison.
+  const shown = new Map(list.map((it) => [it.id, name(it)]));
+  const ordered = [...list].sort((a, b) => compareLines(a, b, (it) => shown.get(it.id)));
+  return { key, rank: new Map(ordered.map((it, i) => [it.id, i])) };
 }
 
 // A list of lines and parts, grouped the way the floor reads them.

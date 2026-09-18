@@ -82,7 +82,7 @@ import {
   stageCoversPacking,
   countedAfterPacking,
 } from "./jobs/packingFlow.js";
-import { groupJobLines, compareLines } from "./jobs/lineOrder.js";
+import { groupJobLines, compareLines, heldLineOrder } from "./jobs/lineOrder.js";
 // The tube laser's own wording for a material. Shared, not copied: the
 // job line's material and the nesting import's section must be the same
 // words, or the import's match finds nothing.
@@ -1872,6 +1872,11 @@ export default function StockControl() {
   // Which sub-section of the job detail page is showing — a full page now,
   // not a popup, broken into tabs given how much lives on one job.
   const [jobDetailTab, setJobDetailTab] = useState("overview");
+  // The Items tab's A to Z order, held still while somebody types on it
+  // (heldLineOrder in src/jobs/lineOrder.js). Let go whenever the tab is
+  // not showing, so coming back to it, or to the job, sorts it afresh.
+  const itemsTabOrderRef = useRef(null);
+  if (!jobDetail || jobDetailTab !== "items") itemsTabOrderRef.current = null;
   const [jobDetailLoading, setJobDetailLoading] = useState(false);
   const [showNewJob, setShowNewJob] = useState(false);
   const [newStockItemModal, setNewStockItemModal] = useState(null);
@@ -4325,6 +4330,25 @@ export default function StockControl() {
     const code = jobLineCode(line, linked);
     const prefix = code ? `${code} — ` : "";
     return prefix && text.startsWith(prefix) ? text.slice(prefix.length) : text;
+  }
+
+  // The Items tab lists the job's lines, and each line's parts, A to Z by
+  // the description its row shows (Heinrich, 18 Sep 2026), by the floor's
+  // own rule. Only the drawing: jobDetail.quoteItems stays in quote order,
+  // which delivery notes and invoice requests go by. The order is held
+  // while somebody types (heldLineOrder says why), and the job's list is
+  // only looked through again when a fresh one has been loaded.
+  function inItemsTabOrder(list) {
+    const all = jobDetail?.quoteItems;
+    let held = itemsTabOrderRef.current;
+    if (!held || held.items !== all) {
+      const shownName = (it) =>
+        jobLineDescription(it, it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null) || "Item";
+      held = { ...heldLineOrder(held, jobDetail?.job?.id, all, shownName), items: all };
+      itemsTabOrderRef.current = held;
+    }
+    const place = (it) => held.rank.get(it.id) ?? 0;
+    return [...(list || [])].sort((a, b) => place(a) - place(b));
   }
 
   // Typing a stock code onto a line is how a part is attached: the code
@@ -24011,15 +24035,17 @@ export default function StockControl() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
                   {/* Parents only on the list; each one's parts follow it,
                       indented. A part is cut and packed, never invoiced
-                      or delivered on its own, so it gets no boxes. */}
-                  {billableLines(jobDetail.quoteItems).map((it) => {
+                      or delivered on its own, so it gets no boxes. Lines
+                      A to Z, and each line's parts A to Z under it
+                      (inItemsTabOrder). */}
+                  {inItemsTabOrder(billableLines(jobDetail.quoteItems)).map((it) => {
                     const remaining = Number(it.qty) - Number(it.qty_invoiced);
                     const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
                     const revision = linkedItem?.partNumber ? drawingLookup[linkedItem.partNumber.trim()] : null;
                     const status = it.item_status || "on_floor";
                     const openDeliveryNote = jobDetail.deliveryNotes.find((dn) => dn.quote_item_id === it.id && !dn.checked_back_in_at);
                     const canActOnThis = canEditThisJob && remaining > 0 && status !== "out_external";
-                    const parts = childLinesOf(it, jobDetail.quoteItems);
+                    const parts = inItemsTabOrder(childLinesOf(it, jobDetail.quoteItems));
                     // Only for the line whose Add part form is open: this
                     // runs inside the map, once per line on the job.
                     const customerParts =
