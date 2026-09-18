@@ -15,6 +15,7 @@
 - Never type a password on my behalf. If something needs signing in, I do it myself in the browser pane.
 - Fewer clicks for the people using the app, never more (17 Sep 2026). A control is shown where the work is done, always: never hidden until a setting on another screen is flipped. If something has to be set up first, the same action sets it up. Count the clicks of the common path when proposing a design.
 - When I say a screen still shows the wrong thing, read the live job first (its lines, stages, settings, my own ticks under User Management) before designing anything. On 17 Sep three reports of "nothing has changed" were a setting never saved, a stage not ticked for me, and a button I never pressed.
+- A new figure, filter or button goes on the screen I named, and nowhere else (18 Sep 2026). If another screen looks like the better home, ask in one line first, naming both screens. Do not ask me to decide code-only matters (whether two screens share a piece of code, which file something lives in): decide them, and leave other screens' code alone unless the work needs it. When I answer "?" I did not follow the question: put it in screen terms or drop it, and do not take a later reluctant yes as a go-ahead. When my "this" could mean two things (the money boxes, or the filters beside them), ask which before hiding or showing anything.
 
 ## Working on this app
 - This app (Stock Control — East Rand Supplies) is already live and in daily use by staff. Treat it like production — don't break it.
@@ -42,6 +43,11 @@ at for five minutes.
   first. For every other conversation this overrides the low-risk push rule
   under "Working on this app". (Decided 14 Sep 2026: untested work kept
   going live whenever any conversation pushed.)
+  The one exception is my own word in that conversation ("push from here",
+  first on 17 Sep 2026, Jobs page). It then does everything Planning would:
+  the live tip and the queue read as their own step, a clean clone built,
+  tested and name-checked, the live site checked afterwards, and the push
+  written into `docs/handover.md` so Planning's record of pushes stays right.
 - **Before pushing, run `git log --oneline origin/main..HEAD`.** If there is a
   commit you did not make, stop and tell me what it is and what it does. Do not
   push somebody else's work live on my say-so about yours — I may not know it
@@ -107,6 +113,7 @@ after asking me.
 ## Checking what is live
 
 - `node CHECK-what-is-live.cjs "text"` — pass text that exists only in the new build, each as its own argument (plain text, not a pattern). The build strips comments and renames code, so a comment-only or behaviour-only change has to be checked by reading the deployed code. It matches capitals exactly: text a PDF prints in capitals is written in capitals in the code ("DRAW FROM STORES"). A style-only change is found by its style's name (`reqActionBtnAlertOn`): the keys of `S` survive the build.
+- A change with no new words on screen (who sees a control, a rule) is proven live by waiting for the bundle's name to change (`CHECK-what-is-live.cjs` prints it as "Live now: App-….js") and then searching the downloaded bundle with a pattern that survives the build: property names and quoted strings do (`isAdmin\?\w+:"newest"`), variable names do not. A commit that puts a file back exactly as an earlier commit had it builds to that earlier bundle's name again (App-r5kOsneM.js on 17 and 18 Sep), which is its own proof.
 - `node CHECK-live-table.cjs table` — whether a table answers on live. A column can be checked the same way without signing in (`"job_quote_items?select=extra_stages"`): selecting it answers 200 if it exists, 400 if not. The script prints "yes" for a 400 too: read the number, not the word.
 - A row count cannot be read without signing in: the public key sees no rows, so every count through it reads 0. Counts come from a `CHECK-*.sql` pasted on live (`CHECK-production-queue-size.sql` shows how close the Production tab's loads are to both limits under "Loading data").
 - `node CHECK-undefined-names.cjs` after every change — a missing name blanks the whole app even though the build passes.
@@ -223,6 +230,7 @@ after asking me.
 - When the Browser pane stops taking clicks, a script `.click()` on a button or tick box, `.focus()` then the pane's `type`, and `.blur()` drive the same React handlers; a save-on-blur box with `defaultValue` also reads a value set straight on the element. `read_page` with the interactive filter can come back with four elements on a big screen: use `find` per control, or list `input` elements by placeholder from script. The page's resource-timing list fills at 250 entries and then records nothing: `performance.clearResourceTimings()` before counting which tables a button re-read.
 - To make a slow or out-of-order answer happen on purpose, wrap `window.fetch` in the page: call the real one, and for the first GET whose address matches (`/rest/v1/job_processes?` with `job_id=in.` is the Production reload) wait some seconds before handing the answer back. The answer still holds what the database said when it was asked. Saving a stage note twice on a Production card gives two reloads with nothing else written; put the note back and reload the page afterwards. A controlled `textarea` (the stage note) did take a script-set value (native setter plus an `input` event), unlike the number box above.
 - Practice has one account (Test, admin). Anything that tells other people, or that a non-admin must not see, cannot be exercised there; say so rather than calling it tested.
+- A non-admin's view can still be seen on practice, page only and with the database untouched: wrap `window.fetch` so the answer to the `profiles?` GET comes back with `is_admin: false` (and whatever ticks the case needs: `can_see_value`, `permissions.jobs.view`), then `window.dispatchEvent(new Event("focus"))`: the profile is re-read on focus. A reload undoes it. It proves what the screen shows that person, never what the database would let them read.
 - The Browser pane's console keeps messages from before a reload, and the dev server hot-reloads between two edits of one change, throwing errors that are not in the finished code ("jobMarked is not defined", 17 Sep). To prove an error is new: reload, then wrap `console.error` (and `window.fetch` for failed requests) in the page and drive the screens; an empty list is the proof. A value kept on `window` is lost on every reload.
 - With me signed in on the live tab, the live database can be read through the page: the address and public key are in the built bundle (as `CHECK-live-table.cjs` finds them) and my token is in `localStorage` under the `...-auth-token` key. Read only, unless I have asked for a change; a change is made with the same write the screen makes, and said in the reply.
 - Practice's stage list has Bending and Drilling above welding since 17 Sep 2026 (added for a test); before that nothing but laser stages sat above welding, so no item process could be offered there.

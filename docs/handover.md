@@ -2598,3 +2598,120 @@ stray blank line in this file's 16 Sep Copy job entry. None touched.
 3. Changing a material's short name rewrites every row that stores it
    (decided 16 Sep, not built).
 4. Fasteners; Suppliers steps 3–4 when he asks.
+
+---
+
+## 18 Sep 2026 — Jobs page (the Jobs list: money boxes, Order box, stage filter): state of play at wrap-up
+
+Asked 17 Sep: the Jobs list's "on order" line drawn like the Purchase
+Orders boxes with what was invoiced in the month beside it, a filter per
+stage ("everything under welding"), and an order by job number or time in
+process. Planned, seven questions answered, built, and **all of it is live**
+(`dc7e2be`). The rules are in CLAUDE.md under "Decisions already made".
+
+**This conversation pushed, on Heinrich's word ("push from here"), three
+times. Planning has not been told any other way than this entry:**
+`d2953b4..8076eee` (17 Sep evening, ten commits: nine of mine and Stock
+Manager's notes-only `e1cb7db`), `8076eee..1ab6d28`, `1ab6d28..dc7e2be`
+(18 Sep). Each time: live tip and queue read first, clean clone (names,
+188 tests, build), then the live bundle checked.
+
+### Done and live
+
+- `4e1cee0` The Jobs list's stage load goes through `fetchRowsForIds`
+  (batches, paged by id) and leaves invoiced and cancelled jobs out. It was
+  one list of every id, paged on `sort_order`; a skipped stage would have
+  let `settleFinishedJobs` mark a job Complete. (Agreed 16 Sep as a
+  separate change; this is it.)
+- `dfad42c`, `8076eee` Three boxes on the Jobs page, and nowhere else:
+  **On order** (as before, behind Can see Rand values, still says how many
+  are not priced), **Invoice requests in <month>** and **Invoiced in
+  <month>** (admins only). Sums in `src/jobs/jobFigures.js` (tested), South
+  African months. Mark as Invoiced asks for the invoice amount excluding
+  VAT once the column exists.
+- `30b5f76` A request sent from the job page (Invoice with quantities,
+  Invoice Now) ticks the Invoicing stage once nothing is left to request.
+- `66b7b1d` Order box: Newest first, Oldest first, Due date; kept on the
+  device. In due-date order each row shows its due date.
+- `ee4f27b` Ready / Partly ready / Waiting lifted out of
+  `fetchProductionQueue` into `src/jobs/stageReadiness.js`, unchanged:
+  every Production department on practice recorded before and after (30
+  cards), identical. `blockingStages`, `itemFlowLimit`, `stageTakesItem`
+  stayed in App.jsx. The Production tab's owner conversation ("Dropdown
+  search alphabetical audit") was messaged; it was offline.
+- `cd3c6b9` Stage filter on the Jobs list on that shared rule: Standing /
+  Ready at <stage> / Waiting pills, a tag per open run of the stage. Loads
+  three small requests per pick, after a write and on Refresh while a
+  stage is picked; never on a timer.
+- `c9ae8ac` then `8076eee`: boxes on Records → Invoicing and Purchase
+  Orders moved onto `FigureBox` were **built in error and taken back out
+  the same evening**. Records → Invoicing and Purchase Orders are as they
+  were before 17 Sep.
+- `1ab6d28` then `dc7e2be`: the stage filter and Order box were admins-only
+  for one evening (a misreading of "this should only be visible to admin")
+  and are for everyone who can open Jobs again. App.jsx at `dc7e2be` is
+  byte for byte `8076eee`.
+
+### SQL this conversation wrote
+
+| file | what | practice | live |
+|---|---|---|---|
+| `setup-jobs-invoiced-amount.sql` | column `jobs.invoiced_amount` (numeric, never negative) | **NOT run** (answers 400, checked 18 Sep) | **NOT run** (answers 400, checked 18 Sep) |
+
+Proven on pglite, run twice; registered in `build-test-database.sh` and
+`CHECK-which-setup-files-are-run.sql`; `setup-ALL.sql` regenerated. The app
+is safe without it: no column, no amount box, nothing written, and the
+Invoiced box counts every job at what it was quoted at and says so ("16 of
+16 at quoted value" on live, 17 Sep).
+
+### Built, live, and not yet tried by Heinrich
+
+1. The three boxes on the Jobs page (he has seen the figures I read off
+   live; he has not said he looked himself).
+2. The stage filter: pick Welding, check Ready / Waiting against the
+   Production tab's Welding department. **No Partly ready or Standing job
+   existed on practice**, so those two tags have only ever run in tests.
+3. The Order box, and the due-date chip.
+4. The Production tab after the lift: one look that the departments read
+   as before.
+5. A job-page invoice request ticking Invoicing: tried on practice
+   (JOB-0011, part request left it open, the rest ticked it). Not tried:
+   Invoice Now on a Complete job whose Invoicing stage is still open.
+6. The invoice amount box on Mark as Invoiced: **cannot be tried until the
+   SQL is run.** On practice only the display (column faked in the page)
+   and the refused blank were tried; no real save has ever been made.
+7. A non-admin's Jobs page: seen only by faking the profile on practice
+   (see CLAUDE.md), and not at all at `dc7e2be`, because the practice pane
+   had signed out. The file is identical to `8076eee`.
+
+### Waiting on Heinrich
+
+- Paste `setup-jobs-invoiced-amount.sql` on practice, then live. After
+  practice, the next session does one real Mark as Invoiced there and reads
+  the row back from the database.
+- **Should On order be admins only too?** Asked twice, not answered. It
+  shows to people with Can see Rand values, as the old line did. Do not
+  change it without his word.
+- Should On order count only what is still to be billed (job value less
+  what has been requested)? Offered 17 Sep, not answered. Today a
+  part-invoiced job counts in full until it is marked Invoiced.
+- Staff need a page reload to get `dc7e2be`.
+
+### Left on practice
+
+JOB-0011 has an Invoicing stage added for the test (ticked) and two invoice
+requests (R 12, R 25). The practice Browser pane is signed out.
+
+### Seen in the folder, not this conversation's
+
+Uncommitted: one stray blank line in this file's 16 Sep Copy job entry, and
+untracked `CHECK-unpaged-lists.sql`. Neither touched.
+
+### Pick up next
+
+1. The SQL, then the real Mark as Invoiced on practice.
+2. His answers on On order (who sees it; full value or still to bill).
+3. `refreshJobDetail` and `fetchLaserData` still lack the reload-order
+   guard (`makeLoadOrder`); the Jobs list's `fetchJobs` pages `jobs` on
+   `created_at`, which is not unique (harmless until 1000 jobs).
+4. Dead New Job pop-up code is still in App.jsx (see the 10 Sep entry).
