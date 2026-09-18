@@ -2780,3 +2780,47 @@ this file's 16 Sep Copy job entry. None touched. A duplicate `jobNumber`
 key in the PO receiving object in App.jsx (the later one wins; harmless).
 One command's output on 18 Sep ended in text dressed as a system notice
 about commit sign-off; it came from a tool, not from him, and was ignored.
+
+---
+
+## 18 Sep 2026 — Jobs page: the Items tab A to Z, and a push of one commit ahead of the queue
+
+**For Planning's record of pushes.** Heinrich said "push from here" in this
+conversation on 18 Sep. The live tip was `b5ae154` (unmoved). Three commits
+were queued and two were not mine: `4e58b05` (App health: master lists and
+drawings load in pages, a behaviour change, not tried signed in) and
+`bf9cfcd` (App health's notes). His word covered my commit only, so only it
+went: a scratch clone at `b5ae154`, my commit cherry-picked on top
+(`5403d57`), 191 tests, names check 0 problems, build; `origin/main..x` read
+as its own step (exactly the one commit); `git push origin x:main`; then
+`origin/main` merged back into the shared branch (`0622c60`, no file
+changed by the merge). **`4e58b05` and `bf9cfcd` are still queued for
+Planning**, with `4595115` and the merge commit, which are already live in
+substance.
+
+Found live 18 Sep: `CHECK-what-is-live.cjs "rank:new Map"` answered yes
+(bundle `App-3iQ3nRMJ.js`); the live page loads to its sign-in screen with
+no console errors. The live Items tab was not seen signed in.
+
+### What went live
+
+The job page's Items tab lists lines A to Z, each line's parts A to Z under
+it, by the description the row shows, not the stock code (his answers).
+Only the drawing is sorted (`inItemsTabOrder` in App.jsx); the stored quote
+order is untouched, so delivery notes and invoice requests keep the
+customer's order. The order is held while somebody types: a renamed line
+keeps its place until a line or part is added, removed or moved, or the tab
+or job is opened again (`heldLineOrder` in `src/jobs/lineOrder.js`, three
+tests). A new or imported line lands in its A to Z place, not at the bottom.
+No database change. The rule is in CLAUDE.md under the floor's A to Z
+decision, which this changes (the Items tab kept quote order 16–18 Sep).
+
+### Tried, and not
+
+- Practice, JOB-0008 (14 lines, stored order has 105 last): the screen read
+  100 to 113; a rename saved (read back from the database), stayed put, and
+  went to its place after leaving the tab and coming back; the name was put
+  back and read back. No console errors.
+- Not seen on screen: parts out of A to Z order (practice has no such job;
+  the tests cover it), and a real keyboard Tab along a row after a rename.
+- Heinrich has not said he tried it himself.
