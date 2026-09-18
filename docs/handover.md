@@ -2915,3 +2915,38 @@ type a part number or description, to see drawings." and to `rank:new Map`
 - Nothing on live was seen signed in by this conversation.
 
 The queue is empty after this push except this entry.
+
+---
+
+## 18 Sep 2026 — Jobs page conversation: today's two pushes seen on live, signed in, read only
+
+Heinrich signed in on the live tab of the Browser pane himself (bundle
+`App-CXe6lMZD.js`). Everything below was read, nothing written, and no
+console error or failed request the whole way. This closes most of the "not
+tried anywhere" list in the entry above.
+
+**`4e58b05` (App health: paged master lists and drawings), on live:**
+
+- Stock Manager against the database: Customers 54 of 54 on screen,
+  Suppliers 30 of 30, Job Process Types 22 in the stored order, Stores
+  Catalog 173 of 173 with all 22 category counts equal. (The catalogue lists
+  shut category pills: a check that looks for item names finds none.)
+- Records → Drawings: nothing until asked, then BPW 171 of 171 in part
+  number order; HPE reads 627 for 628 rows, which is right: DHT 0901 327 0A
+  has rev 1 superseded and rev 2 current and shows once, at REV 2; a typed
+  search ("ramshorn" within HPE) 10 of 10.
+- A Customer Stock row (HPE, DHL 0300 180 00) shows its Drawing button and
+  the drawing opens in the viewer, 1 page, drawn.
+- Live row counts that day: drawings 806 (804 current), string lists 197,
+  factor items 94, stores catalogue 173, suppliers 30, supplier contacts 9,
+  customer contacts 25. Nothing is near 1000, so a second page has still
+  never been fetched for these tables.
+- **Still never run anywhere: Delete for customer.** Deliberately not
+  pressed; how to try it is Heinrich's call.
+
+**`5403d57` (the Items tab A to Z), on live:** JOB-0078 (3 lines, 15 parts;
+stored order has "Single" before "Double"): all 18 rows on screen, lines and
+each line's parts exactly in `compareLines` order, which is the parts case
+practice could not show. JOB-0075: all 120 lines exactly A to Z, where the
+stored order is not. Still not tried: a real keyboard Tab along a row after
+a rename.
