@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compareLines, groupJobLines } from "./lineOrder.js";
+import { compareLines, groupJobLines, heldLineOrder } from "./lineOrder.js";
 
 const names = (list) => list.map((it) => it.description);
 const sorted = (list) => names([...list].sort(compareLines));
@@ -147,4 +147,53 @@ test("nothing handed in is changed", () => {
   assert.deepEqual(listed.map((it) => it.id), before);
   assert.deepEqual(groupJobLines([], job), []);
   assert.deepEqual(groupJobLines(null, null), []);
+});
+
+// The job page's Items tab (18 Sep 2026).
+const rankOf = (order, list) => [...list].sort((a, b) => order.rank.get(a.id) - order.rank.get(b.id)).map((it) => it.description);
+
+test("the Items tab reads A to Z, a line's parts A to Z among themselves", () => {
+  const lines = [
+    { id: "l1", description: "Tressel P-10", sort_order: 0 },
+    { id: "l2", description: "bracket", sort_order: 1 },
+    { id: "l3", description: "Tressel P-2", sort_order: 2 },
+  ];
+  const parts = [
+    { id: "p1", description: "Leg", parent_quote_item_id: "l1", sort_order: 3 },
+    { id: "p2", description: "Brace", parent_quote_item_id: "l1", sort_order: 4 },
+  ];
+  const order = heldLineOrder(null, "job-1", [...lines, ...parts]);
+  assert.deepEqual(rankOf(order, lines), ["bracket", "Tressel P-2", "Tressel P-10"]);
+  assert.deepEqual(rankOf(order, parts), ["Brace", "Leg"]);
+});
+
+test("a renamed line keeps its place until a line is added, removed or moved", () => {
+  const a = { id: "a", description: "Angle" };
+  const b = { id: "b", description: "Bracket" };
+  const c = { id: "c", description: "Cleat" };
+  const first = heldLineOrder(null, "job-1", [a, b, c]);
+  // Renamed, and the job read again: new objects, the same ids.
+  const renamed = [{ ...a, description: "Zed bar" }, { ...b }, { ...c }];
+  const second = heldLineOrder(first, "job-1", renamed);
+  assert.equal(second, first);
+  assert.deepEqual(rankOf(second, renamed), ["Zed bar", "Bracket", "Cleat"]);
+  // A line added: worked out again, and the renamed one goes to its place.
+  const added = [...renamed, { id: "d", description: "Door" }];
+  assert.deepEqual(rankOf(heldLineOrder(second, "job-1", added), added), ["Bracket", "Cleat", "Door", "Zed bar"]);
+  // A line removed, a line moved under another, another job: all afresh.
+  assert.notEqual(heldLineOrder(first, "job-1", [a, b]), first);
+  assert.notEqual(heldLineOrder(first, "job-1", [a, b, { ...c, parent_quote_item_id: "a" }]), first);
+  assert.notEqual(heldLineOrder(first, "job-2", [a, b, c]), first);
+  // The order the database handed the rows back in does not matter.
+  assert.equal(heldLineOrder(first, "job-1", [c, a, b]), first);
+});
+
+test("the Items tab sorts on the text its row shows", () => {
+  const list = [{ id: "a", description: "X-1 — Bracket" }, { id: "b", description: "Angle" }];
+  const shown = { a: "Bracket", b: "Angle" };
+  let calls = 0;
+  const order = heldLineOrder(null, "job-1", list, (it) => (calls++, shown[it.id]));
+  assert.deepEqual(rankOf(order, list), ["Angle", "X-1 — Bracket"]);
+  assert.equal(calls, 2);
+  assert.deepEqual([...heldLineOrder(null, "job-1", null).rank], []);
 });
