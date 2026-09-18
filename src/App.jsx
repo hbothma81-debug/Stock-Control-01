@@ -110,6 +110,7 @@ import {
   requestedInMonthFigure,
 } from "./jobs/jobFigures.js";
 import { JOBS_ORDER_KEY, JOB_ORDERS, isJobOrder, sortJobs } from "./jobs/jobOrder.js";
+import { jobMatchesSearch, poMatchesSearch, poLabel } from "./jobs/jobSearch.js";
 import {
   stageReadiness, readinessLabel, readinessGroup, jobGroupAtStage,
   READINESS_STAGE_COLUMNS, READINESS_LINE_COLUMNS, READINESS_COUNT_COLUMNS,
@@ -1735,17 +1736,12 @@ export default function StockControl() {
   // One place for what the Production tab's search and dropdowns mean,
   // read by the department list and by the department itself, so the
   // count on the pill and the length of the list can never disagree.
+  // What the typed text finds a job by is the Jobs page's own rule
+  // (src/jobs/jobSearch.js), customer PO number included.
   const productionJobMatches = (job) => {
-    const q = productionSearchQuery.trim().toLowerCase();
     if (productionCustomerFilter && job.customer !== productionCustomerFilter) return false;
     if (productionSalesRepFilter && job.sales_rep !== productionSalesRepFilter) return false;
-    if (!q) return true;
-    return (
-      (job.job_number || "").toLowerCase().includes(q) ||
-      (job.laser_job_reference || "").toLowerCase().includes(q) ||
-      (job.customer || "").toLowerCase().includes(q) ||
-      (job.sales_rep || "").toLowerCase().includes(q)
-    );
+    return jobMatchesSearch(job, productionSearchQuery);
   };
   // The dropdowns offer only what is on the floor: the customers and
   // sales reps of the jobs in the queue, not every name the app knows.
@@ -1772,7 +1768,7 @@ export default function StockControl() {
           style={{ ...S.input, flex: 2, minWidth: 160 }}
           value={productionSearchQuery}
           onChange={(e) => setProductionSearchQuery(e.target.value)}
-          placeholder="Search job number, SigmaNest number, customer, or sales rep…"
+          placeholder="Search job number, SigmaNest number, customer PO, customer, or sales rep…"
         />
         <TypeToFind
           style={{ flex: 1, minWidth: 130 }}
@@ -16412,17 +16408,13 @@ export default function StockControl() {
             (() => {
               const customers = [...new Set(jobsList.map((j) => j.customer).filter(Boolean))].sort();
               const salesReps = [...new Set(jobsList.map((j) => j.sales_rep).filter(Boolean))].sort();
-              const q = jobsSearchQuery.trim().toLowerCase();
+              // What the typed text finds a job by, customer PO number
+              // included, is one rule shared with the Production tab's
+              // search (src/jobs/jobSearch.js).
               const matchesFilters = (j) =>
                 (!jobsCustomerFilter || j.customer === jobsCustomerFilter) &&
                 (!jobsSalesRepFilter || j.sales_rep === jobsSalesRepFilter) &&
-                (!q ||
-                  (j.job_number || "").toLowerCase().includes(q) ||
-                  // The SigmaNest number is what the laser side quotes
-                  // back, so it has to find the job as readily as ours.
-                  (j.laser_job_reference || "").toLowerCase().includes(q) ||
-                  (j.customer || "").toLowerCase().includes(q) ||
-                  (j.sales_rep || "").toLowerCase().includes(q));
+                jobMatchesSearch(j, jobsSearchQuery);
               // How long this job has been with us. Counted from when it was
               // created, which is the only moment every job has -- a stage
               // being started is not, since plenty of jobs sit a while before
@@ -16461,6 +16453,15 @@ export default function StockControl() {
                   <span style={{ fontSize: 15, color: C.text }}>{job.laser_job_reference || "No SigmaNest #"}</span>
                   <span style={{ fontSize: 15, color: C.text }}>{job.customer || "No customer"}</span>
                   <span style={{ fontSize: 15, color: C.text }}>{job.sales_rep || "No sales rep"}</span>
+
+                  {/* The customer's PO, only while it is what the search box
+                      found the job by: otherwise a job comes up and nothing
+                      on its row says why. */}
+                  {poMatchesSearch(job, jobsSearchQuery) && (
+                    <span style={{ ...S.chip, flexShrink: 0 }} title="Customer PO number, from the job's Overview">
+                      {poLabel(job)}
+                    </span>
+                  )}
 
                   {/* The plate laser's queue number, so the sales desk can
                       see what is already pushed forward before asking for
@@ -16707,7 +16708,7 @@ export default function StockControl() {
                       style={{ ...S.input, flex: 2, minWidth: 160 }}
                       value={jobsSearchQuery}
                       onChange={(e) => setJobsSearchQuery(e.target.value)}
-                      placeholder="Search job number, SigmaNest number, customer, or sales rep…"
+                      placeholder="Search job number, SigmaNest number, customer PO, customer, or sales rep…"
                     />
                     <TypeToFind
                       style={{ flex: 1, minWidth: 130 }}
@@ -17908,6 +17909,9 @@ export default function StockControl() {
                             )}
                             {job.sales_rep && <span>Sales: {job.sales_rep}</span>}
                             {job.laser_job_reference && <span>SigmaNest: {job.laser_job_reference}</span>}
+                            {/* The customer's PO, only while the search box
+                                found the job by it, as on the Jobs list. */}
+                            {poMatchesSearch(job, productionSearchQuery) && <span>{poLabel(job)}</span>}
                             {totalQty > 0 ? (
                               <span>Qty: {totalQty}</span>
                             ) : (
