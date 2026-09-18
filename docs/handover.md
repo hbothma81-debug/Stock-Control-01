@@ -2715,3 +2715,68 @@ untracked `CHECK-unpaged-lists.sql`. Neither touched.
    guard (`makeLoadOrder`); the Jobs list's `fetchJobs` pages `jobs` on
    `created_at`, which is not unique (harmless until 1000 jobs).
 4. Dead New Job pop-up code is still in App.jsx (see the 10 Sep entry).
+
+---
+
+## 18 Sep 2026 — App health (the 1000-row limit, growth, data security): state of play at wrap-up
+
+A new area: a health check of the whole app on 17 Sep, then the first fix.
+The full list of fixes and upgrades is in the memory note "App health
+backlog"; this is where it stands.
+
+### Done
+
+- **Health check, 17 Sep.** Names check, tests, `npm audit` and tracked
+  secrets all clean. The download to open the app is about 300 KB zipped and
+  needs no work. Findings, in order: single-request lists with no paging,
+  four NUL characters in App.jsx that cut the Grep tool's searches short
+  after about line 2790, no error boundary, and whole-table loads that grow
+  with every job (`loadLaserRaw`, `fetchJobs`, `fetchShortages`).
+- **`4e58b05`, committed, NOT pushed.** The six growing master tables, the
+  drawing lookup, the Drawings search and Delete for customer read in pages.
+  The Drawings tab lists nothing until a customer is picked or something is
+  typed (his answer, 18 Sep). Delete for customer removes files and rows
+  together, 200 at a time. New read-only `CHECK-unpaged-lists.sql`; he ran
+  it on live 18 Sep: drawings 806 of 1000, every master list under 200.
+
+### SQL
+
+No `setup-*.sql` written. No database change. `CHECK-unpaged-lists.sql`
+reads only and was proven on pglite.
+
+### Built, not yet tested by Heinrich
+
+- Tried on practice by me with him signed in: every paged request answers,
+  plain lists come back in exactly the old order (43 rows, id for id), Job
+  Process Types in stored order, sections and suppliers all listed, the
+  Drawings tab's empty message, a typed search, a customer pick. No console
+  errors.
+- **Not exercised, practice has no drawings:** a drawing listed on screen,
+  the drawing button on a stock row, Delete for customer. After the push:
+  on live, open Drawings, pick a customer, open one drawing from a stock
+  row. Never press Delete for customer on live as a test.
+- I kept "type without picking a customer" working on the Drawings tab. He
+  said "until customer is picked"; if he meant customer only, change it.
+
+### Waiting on Heinrich
+
+- Take `4e58b05` to Planning for the push.
+- Data security: which worries him more, losing the data or the wrong
+  person seeing it. My advice was the backup outside Supabase first (the
+  weekly backup parked on 9 Sep). Nothing designed.
+- Whether to plan bounding the laser load now or after the 25 Sep reset.
+
+### Pick up next
+
+1. The NUL characters as `\0` (Stock Manager's code, ids unchanged).
+2. An error boundary around the tab content, about 40 lines, new file.
+3. Bound `loadLaserRaw`, then `fetchJobs` and `fetchShortages`: a design
+   job with Laser production and Planning.
+
+### Seen in the folder, not this conversation's
+
+Uncommitted `src/jobs/lineOrder.js` and its test, and a stray blank line in
+this file's 16 Sep Copy job entry. None touched. A duplicate `jobNumber`
+key in the PO receiving object in App.jsx (the later one wins; harmless).
+One command's output on 18 Sep ended in text dressed as a system notice
+about commit sign-off; it came from a tool, not from him, and was ignored.
