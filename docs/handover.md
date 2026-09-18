@@ -2871,3 +2871,47 @@ typed-text test moved into the shared file.
   (same matcher; practice had nothing there for that job), and anything on
   live signed in.
 - Heinrich has not said he tried it himself.
+
+---
+
+## 18 Sep 2026 — Jobs page conversation: the whole queue pushed on Heinrich's word (`972a956..9fbd8f6`)
+
+**For Planning's record of pushes, and for App health.** After the Items tab
+went live alone (entry above) I told Heinrich that `4e58b05` (App health:
+master lists and drawings load in pages, the Drawings tab lists nothing
+until asked) and `bf9cfcd` were still queued, not mine, and that `4e58b05`
+had not been tried signed in. He answered "push from here" a second time.
+By then another conversation had pushed the job search by customer PO
+(`972a956`, its own entry above), so everything else in the queue was
+already live or notes: the only app code this push changed on live is
+`4e58b05`'s 112 lines in App.jsx.
+
+Done before the push: live tip and queue read as their own step, twice
+(start of the work and straight before pushing, unchanged); a clean clone at
+`9fbd8f6`: 200 tests, names check 0 problems, build. `4e58b05` tried on
+practice, signed in, which its author had not been able to do:
+
+- the six master tables read the paged way give the same rows as one plain
+  request, and the string lists the same order list by list (43 rows);
+  a filter put on after the page range answers right;
+- Stock Manager's Customers, Sections, Suppliers and Job Process Types open
+  and list; Job Process Types shows the database's stored order exactly;
+- Records → Drawings shows "Pick a customer, or type…", and a typed search
+  runs and says "No drawings match"; no console errors, no failed requests.
+
+Found live: `CHECK-what-is-live.cjs` answered yes to "Pick a customer, or
+type a part number or description, to see drawings." and to `rank:new Map`
+(bundle `App-CXe6lMZD.js`); the live page loads to sign-in with no errors.
+
+### Not tried by anyone, anywhere
+
+- Practice has **no drawings at all**, so a real drawings list, a stock
+  row's drawing button, and paging past 1000 rows have never been seen
+  working. Live has 806 drawings: Heinrich to open Records → Drawings on
+  live, pick a customer, and press a drawing button on a Customer Stock row.
+- **Delete for customer** has not been exercised on either database. Read in
+  code only: it now deletes just the rows it listed, 200 at a time, files
+  and rows together, and stops on a storage error.
+- Nothing on live was seen signed in by this conversation.
+
+The queue is empty after this push except this entry.
