@@ -2824,3 +2824,50 @@ decision, which this changes (the Items tab kept quote order 16–18 Sep).
 - Not seen on screen: parts out of A to Z order (practice has no such job;
   the tests cover it), and a real keyboard Tab along a row after a rename.
 - Heinrich has not said he tried it himself.
+
+## 18 Sep 2026 — Job search finds the customer's PO number, and a push of two commits ahead of the queue
+
+**For Planning's record of pushes.** Heinrich said "push from here, need
+this working now" in a new conversation on 18 Sep (his ask: "need to be able
+to search the PO number also"). The live tip was `5403d57` (unmoved). Seven
+commits were queued and five were not mine: `4e58b05` (App health: master
+lists and drawings load in pages, not tried signed in), `bf9cfcd` (its
+notes), and `4595115`, `0622c60`, `6af9408` (already live in substance, or
+notes). His word covered my two only, so only they went: a scratch clone at
+`5403d57`, `05d7242` and `cbef9d2` cherry-picked on top with CLAUDE.md left
+out (`7c5cffb`, `972a956`), clean install, build, 200 tests, names check 0
+problems; `origin/main..x` read as its own step (exactly the two);
+`git push origin x:main`; `origin/main` merged back (`bff6dbd`).
+**`4e58b05` and `bf9cfcd` are still queued for Planning.**
+
+Found live 18 Sep: `CHECK-what-is-live.cjs "customer PO, customer, or sales
+rep"` answered yes (bundle `App-D6A7tM7B.js`); the live page loads to its
+sign-in screen with no console errors. Not seen signed in on live.
+
+### What went live
+
+The search box on the Jobs page and on the Production tab finds a job by
+the customer's PO number (`jobs.customer_po`, the Overview box; not our
+purchase orders, by his answer), part of it being enough, and with spaces,
+dashes and strokes ignored; "PO" typed in front of a number is dropped. Both
+boxes now share one rule, `src/jobs/jobSearch.js` (tested): each screen had
+its own copy of the four-field test. A Jobs list row and a Production list
+card show "PO 4500123" only while the typed text is found in the PO. Nothing
+new is loaded: both screens already hold whole job rows. No database
+change. The rule is in CLAUDE.md beside the Production search decision.
+This touched `productionJobMatches`, which belongs to the Dropdowns and
+Production tab conversation: its two filters are untouched, only the
+typed-text test moved into the shared file.
+
+### Tried, and not
+
+- Practice, Heinrich signed in, JOB-0011 given the PO "4500 123/A" and put
+  back to empty afterwards (read back from the database): Jobs search found
+  it by "4500123", "4500 1" and "po4500-123" and showed the PO on the row;
+  no label for "bpw"; nothing for "9999999". Production search narrowed the
+  departments to that job's stages and its welding card showed the PO. No
+  console errors.
+- Not seen: Laser Status and the nesting shortage block under a PO search
+  (same matcher; practice had nothing there for that job), and anything on
+  live signed in.
+- Heinrich has not said he tried it himself.
