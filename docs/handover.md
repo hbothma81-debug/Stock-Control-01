@@ -2950,3 +2950,51 @@ each line's parts exactly in `compareLines` order, which is the parts case
 practice could not show. JOB-0075: all 120 lines exactly A to Z, where the
 stored order is not. Still not tried: a real keyboard Tab along a row after
 a rename.
+
+---
+
+## 19 Sep 2026 — Jobs page conversation: Invoicing always sends its request; pushed on Heinrich's word (`9fbd8f6..199ef59`)
+
+**For Planning's record of pushes.** Heinrich said "Push" in this
+conversation. Live tip `9fbd8f6` (unmoved since my last push), queue read as
+its own step twice: three commits, all mine (`199ef59` the fix, `5381094`
+and `a6bed45` notes). Clean clone at `199ef59`: 203 tests, names check 0
+problems, build. Found live by "so Invoicing is not ticked".
+
+**What was wrong (read from live, 18 Sep):** seven jobs ticked at Invoicing
+by Mark Bezuidenhout that morning had every line still to request and no
+request. Two routes ticked Invoicing with nothing sent: the plain tick in
+the job page's stage list, and the Production card of an Invoicing stage set
+to count per item, which drew counting boxes where Request invoice belongs
+(five of the seven were `each`).
+
+**What went live:** closing a job's own Invoicing stage sends the request
+for everything left first, by any route, no question asked; if it cannot be
+sent the stage stays open and says so. The card shows Request invoice on an
+open Invoicing stage whatever its counting mode. `submitItemsToInvoice`
+saves the PDF and the request row first and marks the lines after, and
+throws when the PDF is not stored. A job with no Invoicing stage gets no
+request by itself (his answer). Rule in CLAUDE.md and
+`src/jobs/invoiceOnClose.js`.
+
+**Tried on practice, read back from the database:** tick on the job page
+(one tick, and per item), re-tick makes no second request, the per-item card
+shows the button and no counting boxes, a forced PDF failure marks and ticks
+nothing and the retry goes through, Invoice with a typed quantity. **Not
+pressed:** the Production card's Request invoice after the change (greyed
+out on practice), Invoice Now on practice. Practice now has Invoicing stages
+on JOB-0005, 0006, 0009 and a R 20.39 request on JOB-0008.
+
+**On live:** Chanté marked six of the seven Invoiced on 18 Sep (Sage
+20600–20616) before any request existed. JOB-0125's request was made from
+Heinrich's signed-in tab with Invoice Now, on his word (R 1,210.82).
+
+**Waiting on Heinrich: JOB-0088.** Its three lines were marked requested on
+15 Sep 14:11 and the document never stored (the old order of the code), so
+no request exists and no button finds anything to send. A direct write from
+this session was refused by its safety rules, rightly. He pastes
+`FIX-job-0088-half-made-invoice-request.sql` on live (one job, safe twice),
+then Invoice Now on the job's Overview tab makes the request: three lines of
+150, R 10,113.00.
+
+Also waiting: his four answers on the Records -> Invoicing search bar.
