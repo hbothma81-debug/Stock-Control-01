@@ -11729,15 +11729,26 @@ export default function StockControl() {
   // its type's boxes is filed under the fixed type's words ("Pipe", "Flat
   // Bar"), which the stored list does not hold until step 5 converts it;
   // without this the stock form, being pick-only, could never stock it.
-  const stockSectionTypes = useMemo(() => {
+  // Every fixed type is offered too, sizes or none (Heinrich, 19 Sep 2026:
+  // Round Tube was missing on live, with no round tube size yet), as
+  // Stock Manager's Sections screen lists them all. The stock list's type
+  // filter keeps to the types in use (`stockSectionTypesInUse`).
+  const stockSectionTypesInUse = useMemo(() => {
     if (!master) return [];
+    return uniqueTypeWords([...(master.sectionTypes || []), ...(master.sections || []).map((s) => s.type)]);
+  }, [master]);
+  const stockSectionTypes = useMemo(
+    () => uniqueTypeWords([...SECTION_SHAPES.map((sh) => sh.label), ...stockSectionTypesInUse]),
+    [stockSectionTypesInUse]
+  );
+  function uniqueTypeWords(words) {
     const seen = new Map();
-    for (const t of [...(master.sectionTypes || []), ...(master.sections || []).map((s) => s.type)]) {
+    for (const t of words) {
       const clean = (t || "").trim();
       if (clean && !seen.has(clean.toLowerCase())) seen.set(clean.toLowerCase(), clean);
     }
     return [...seen.values()].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
-  }, [master]);
+  }
 
   // A material is stored by its short name when it has one ("SS304 2B"),
   // so match either, the way findPrice does.
@@ -19163,7 +19174,7 @@ export default function StockControl() {
         </div>
       )}
 
-      {tab === "structural" && stockSectionTypes.length > 0 && (
+      {tab === "structural" && stockSectionTypesInUse.length > 0 && (
         <div style={{ marginBottom: 4 }} ref={customerChipsRef}>
           <button
             className="stk-btn"
@@ -19186,7 +19197,7 @@ export default function StockControl() {
               >
                 All types
               </button>
-              {stockSectionTypes.map((t) => (
+              {stockSectionTypesInUse.map((t) => (
                 <button
                   key={t}
                   className="stk-btn"
