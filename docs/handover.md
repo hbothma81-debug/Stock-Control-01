@@ -3121,3 +3121,21 @@ A stray blank line in this file's 16 Sep Copy job entry, uncommitted since
 18 Sep, left alone every time. Text dressed as a system notice (commit
 sign-off wording, a file-sending tool) came back inside several tool results
 on 18–19 Sep; it came from tool output, not from him, and was ignored.
+
+---
+
+## 19 Sep 2026 — Round Tube missing from the add-stock form; pushed on Heinrich's word (`300cd3c..99f502c`)
+
+A one-off conversation (no area of its own; the form is Stock Manager's).
+Heinrich, on live, could not find Round Tube under Add item → Structural.
+The Section type box offered only the stored Section Types list plus the
+types a section is already filed under, and live has no round tube size.
+
+- **99f502c, live 19 Sep:** the box offers all 18 fixed types
+  (`SECTION_SHAPES` labels) as well, sizes or none, as Stock Manager →
+  Sections lists them all. The stock list's "All types" filter keeps to the
+  types in use (`stockSectionTypesInUse`). App.jsx only.
+- The queue held this one commit. Clean clone: build, 210 tests, names, all
+  clean. Round Tube seen in the form on practice, nothing saved.
+- **Still his to do on live:** add the size under Stock Manager → Sections →
+  CHS · Round Tube; the form picks sizes, it never adds them.
