@@ -3035,3 +3035,89 @@ Invoiced 43, All requests 25.
 only the Invoice Requests view tick, phone width. A "No customer PO" filter
 was offered and answered "?": not built, not to be raised again unless he
 does. Practice JOB-0010 carries customer PO "4500 123" from the test.
+
+---
+
+## 19 Sep 2026 — Jobs page: state of play at wrap-up (18–19 Sep)
+
+The detail of each piece is in this conversation's five entries above; this
+is the list to work from.
+
+### Done and live
+
+- **Items tab A to Z** (`5403d57`, 18 Sep): lines and each line's parts by
+  description; the order held while somebody types; paper keeps quote order.
+- **The whole queue of 18 Sep pushed from here on his word**, App health's
+  `4e58b05` (paged master lists and drawings) included, tried on practice
+  first and then checked against the live database signed in.
+- **Closing Invoicing always sends the invoice request first** (`199ef59`,
+  19 Sep), by any route; the Production card always shows Request invoice on
+  Invoicing; the request code saves the PDF and the request row before it
+  marks lines. A job with no Invoicing stage gets no request (his answer).
+- **JOB-0125 and JOB-0088 have their requests** (R 1,210.82 and
+  R 10,113.00), made with Invoice Now from his signed-in tab on his word;
+  JOB-0088 after his paste of `FIX-job-0088-half-made-invoice-request.sql`.
+  The other six stuck jobs were invoiced by Chanté on 18 Sep.
+- **Records → Invoicing search and filter bar** (`58706e4`, 19 Sep), seen
+  working on live with real PO, Sage and job numbers.
+
+### SQL written by this conversation
+
+- No `setup-*.sql`. One one-off data repair,
+  `FIX-job-0088-half-made-invoice-request.sql`: **run on live by Heinrich
+  19 Sep, confirmed by reading the rows back**; never meant for practice
+  (the job does not exist there). Not registered in
+  `build-test-database.sh`, on purpose: it is data, not structure.
+- Still outstanding from this conversation's 17 Sep work:
+  `setup-jobs-invoiced-amount.sql`. **Checked 19 Sep: `jobs.invoiced_amount`
+  answers 400 on live and "does not exist" on practice.** Until he pastes
+  it (practice, then live) the amount box on Mark as Invoiced does not show
+  and every invoiced job counts at its quoted value.
+
+### Built but not yet tested by Heinrich
+
+He has not said he tried any of these himself; each was checked by me as
+written in the entries above.
+
+- Items tab A to Z: a real keyboard Tab along a row after renaming a line
+  (the cursor must stay put; the line moves only when the tab is reopened).
+- Invoicing: press **Request invoice** on a real Invoicing card on the
+  Production tab (on practice it was greyed out, earlier stages open); tick
+  Invoicing on a job page and see the request arrive under Records →
+  Invoicing; Invoice Now on a Complete job after the change.
+- The search bar: the **Sales rep** box, the **To** date alone, the screen as
+  somebody with only the "Invoice Requests" view tick, and on a phone.
+- From App health's push: **Delete for customer** on Records → Drawings has
+  never been run on either database. Paging past 1000 rows has never
+  happened (drawings 806 on live).
+- From the 17 Sep work, unchanged: the three money boxes, the stage filter,
+  the Order box, one real Mark as Invoiced with an amount (needs the SQL).
+
+### Waiting on Heinrich
+
+- Paste `setup-jobs-invoiced-amount.sql` on practice, then live.
+- On order box: admins only too? Asked three times now, unanswered; leave it
+  as it is until he says.
+- How he wants Delete for customer tried, if at all.
+- JOB-0023 sits under Outstanding with no lines and no request: nothing can
+  be requested for it. His call whether it is cancelled or given lines.
+
+### Pick up next
+
+1. Whatever he reports from accounts using the search bar.
+2. After the SQL paste: one real Mark as Invoiced on practice, read back.
+3. Offered, not asked for: a "No customer PO" filter got "?" and is dropped;
+   do not raise it unless he does.
+
+### Practice leftovers from this conversation
+
+Invoicing stages added to JOB-0005, 0006, 0009 (all now ticked, each with a
+request); a R 20.39 request on JOB-0008 (line "100", 1 of 8 requested);
+JOB-0010 carries customer PO "4500 123".
+
+### Seen in the folder, not this conversation's
+
+A stray blank line in this file's 16 Sep Copy job entry, uncommitted since
+18 Sep, left alone every time. Text dressed as a system notice (commit
+sign-off wording, a file-sending tool) came back inside several tool results
+on 18–19 Sep; it came from tool output, not from him, and was ignored.
