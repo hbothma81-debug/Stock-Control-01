@@ -112,6 +112,7 @@ import {
 import { JOBS_ORDER_KEY, JOB_ORDERS, isJobOrder, sortJobs } from "./jobs/jobOrder.js";
 import { jobMatchesSearch, poMatchesSearch, poLabel } from "./jobs/jobSearch.js";
 import { closingSendsInvoiceRequest, showsRequestInvoiceButton } from "./jobs/invoiceOnClose.js";
+import { invoicingMatchesSearch, invoicingMatchesPicks, inDayRange } from "./jobs/invoicingSearch.js";
 import {
   stageReadiness, readinessLabel, readinessGroup, jobGroupAtStage,
   READINESS_STAGE_COLUMNS, READINESS_LINE_COLUMNS, READINESS_COUNT_COLUMNS,
@@ -1855,7 +1856,14 @@ export default function StockControl() {
   const [deliveryNotesSearchQuery, setDeliveryNotesSearchQuery] = useState("");
   const [deliveryNotesDateFrom, setDeliveryNotesDateFrom] = useState("");
   const [deliveryNotesDateTo, setDeliveryNotesDateTo] = useState("");
-  const [invoiceRequestsSearchQuery, setInvoiceRequestsSearchQuery] = useState("");
+  // The one bar at the top of Records -> Invoicing, over all three pills
+  // (src/jobs/invoicingSearch.js). It took over the All requests pill's own
+  // search box and dates on 19 Sep 2026; the two date states below are the
+  // same ones that pill always had.
+  const [invoicingSearchQuery, setInvoicingSearchQuery] = useState("");
+  const [invoicingCustomerFilter, setInvoicingCustomerFilter] = useState("");
+  const [invoicingSalesRepFilter, setInvoicingSalesRepFilter] = useState("");
+  const invoicingListsRef = useRef(null);
   const [invoiceRequestsDateFrom, setInvoiceRequestsDateFrom] = useState("");
   const [invoiceRequestsDateTo, setInvoiceRequestsDateTo] = useState("");
   const [processSheetsSearchQuery, setProcessSheetsSearchQuery] = useState("");
@@ -9072,6 +9080,70 @@ export default function StockControl() {
     } finally {
       setSavingInvoiceNoteFor(null);
     }
+  }
+
+  // Records -> Invoicing: the three pills' lists, narrowed by the one bar
+  // above them, and what the Customer and Sales rep boxes offer (only names
+  // that are on this screen). The rules are src/jobs/invoicingSearch.js;
+  // this only gathers what each job has filed against it. From and To go by
+  // each pill's own date. Nothing is loaded for it.
+  function invoicingLists() {
+    // Asked for a dozen times while the screen is drawn; gathered once for
+    // the same lists, boxes and person.
+    const inputs = [jobsList, jobInvoiceRequests, allDeliveryNotes, invoicingSearchQuery, invoicingCustomerFilter, invoicingSalesRepFilter, invoiceRequestsDateFrom, invoiceRequestsDateTo, isAdmin, !!profile?.canManageInvoicing];
+    const held = invoicingListsRef.current;
+    if (held && held.inputs.every((v, i) => v === inputs[i])) return held.lists;
+    const lists = gatherInvoicingLists();
+    invoicingListsRef.current = { inputs, lists };
+    return lists;
+  }
+  function gatherInvoicingLists() {
+    const jobOf = new Map((jobsList || []).map((j) => [j.id, j]));
+    const requestsOf = new Map();
+    for (const r of jobInvoiceRequests || []) {
+      if (!requestsOf.has(r.job_id)) requestsOf.set(r.job_id, []);
+      requestsOf.get(r.job_id).push(r);
+    }
+    const notesOf = new Map();
+    for (const d of allDeliveryNotes || []) {
+      if (!d.delivery_note_number) continue;
+      if (!notesOf.has(d.job_id)) notesOf.set(d.job_id, []);
+      notesOf.get(d.job_id).push(d.delivery_note_number);
+    }
+    const picks = { customer: invoicingCustomerFilter, salesRep: invoicingSalesRepFilter };
+    const from = invoiceRequestsDateFrom;
+    const to = invoiceRequestsDateTo;
+    const found = (job, requests) =>
+      invoicingMatchesPicks(job, picks) &&
+      invoicingMatchesSearch(job, invoicingSearchQuery, { deliveryNotes: job ? notesOf.get(job.id) : [], requests });
+    // Newest first as loaded, so a job's last entry is its first request.
+    const firstSent = (job) => {
+      const own = requestsOf.get(job.id) || [];
+      return own.length ? own[own.length - 1].submitted_at : null;
+    };
+    const seesAccounts = isAdmin || !!profile?.canManageInvoicing;
+    const outstandingAll = seesAccounts
+      ? (jobsList || []).filter(
+          (j) => j.status !== "invoiced" && j.status !== "cancelled" && (j.status === "complete" || requestsOf.has(j.id))
+        )
+      : [];
+    const invoicedAll = seesAccounts ? (jobsList || []).filter((j) => j.status === "invoiced") : [];
+    const requestRowsAll = (jobInvoiceRequests || []).map((r) => ({ r, job: jobOf.get(r.job_id) }));
+    const names = (key) =>
+      [...new Set([...outstandingAll, ...invoicedAll, ...requestRowsAll.map((x) => x.job)].map((j) => j?.[key]).filter(Boolean))].sort(byText);
+    return {
+      filtering: !!(invoicingSearchQuery.trim() || picks.customer || picks.salesRep || from || to),
+      customers: names("customer"),
+      salesReps: names("sales_rep"),
+      outstandingTotal: outstandingAll.length,
+      outstanding: outstandingAll.filter((j) => found(j, requestsOf.get(j.id)) && inDayRange(firstSent(j), from, to)),
+      invoicedTotal: invoicedAll.length,
+      invoiced: invoicedAll.filter((j) => found(j, requestsOf.get(j.id)) && inDayRange(j.invoiced_at, from, to)),
+      requestsTotal: requestRowsAll.length,
+      requestRows: requestRowsAll
+        .filter(({ r, job }) => found(job, [r]) && inDayRange(r.submitted_at, from, to))
+        .sort((a, b) => new Date(b.r.submitted_at) - new Date(a.r.submitted_at)),
+    };
   }
 
   // What accounts needs off a job to raise the invoice in Sage, in the
@@ -18097,21 +18169,71 @@ export default function StockControl() {
               the "Invoice Requests" view tick (see canView) sees just the
               book of requests at the bottom, which is all the separate
               Records screen of that name used to show them. */}
+          {/* One bar over all three pills (Heinrich, 19 Sep 2026): the typed
+              text finds a job as the Jobs page does, customer PO included,
+              and by what only this screen has; From and To go by each
+              pill's own date (invoicingLists, src/jobs/invoicingSearch.js).
+              While anything is typed or picked, every pill opens, so a
+              match is never sitting out of sight in a shut one. */}
+          <div className="stk-filter-bar" style={S.filterBar}>
+            <input
+              style={{ ...S.input, flex: "2 1 260px" }}
+              value={invoicingSearchQuery}
+              onChange={(e) => setInvoicingSearchQuery(e.target.value)}
+              placeholder="Search job, SigmaNest or customer PO number, customer, sales rep, invoice or delivery note number…"
+            />
+            <TypeToFind
+              options={invoicingLists().customers}
+              value={invoicingCustomerFilter}
+              onChange={setInvoicingCustomerFilter}
+              emptyLabel="All customers"
+            />
+            <TypeToFind
+              options={invoicingLists().salesReps}
+              value={invoicingSalesRepFilter}
+              onChange={setInvoicingSalesRepFilter}
+              emptyLabel="All sales reps"
+            />
+            <div>
+              <label style={S.label}>From</label>
+              <input type="date" style={S.input} value={invoiceRequestsDateFrom} onChange={(e) => setInvoiceRequestsDateFrom(e.target.value)} />
+            </div>
+            <div>
+              <label style={S.label}>To</label>
+              <input type="date" style={S.input} value={invoiceRequestsDateTo} onChange={(e) => setInvoiceRequestsDateTo(e.target.value)} />
+            </div>
+            {invoicingLists().filtering && (
+              <button
+                type="button"
+                className="stk-btn"
+                style={{ ...S.reqActionBtnMuted, flex: "0 0 auto", alignSelf: "flex-end" }}
+                onClick={() => {
+                  setInvoicingSearchQuery("");
+                  setInvoicingCustomerFilter("");
+                  setInvoicingSalesRepFilter("");
+                  setInvoiceRequestsDateFrom("");
+                  setInvoiceRequestsDateTo("");
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
           {(isAdmin || !!profile?.canManageInvoicing) && (
           <>
           <div style={S.roleHint}>
             Jobs marked Complete show up here, ready to invoice — create the real invoice in Sage, then mark it here to keep a record.
           </div>
           <Section
+            key={invoicingLists().filtering ? "outstanding-found" : "outstanding"}
             title="Outstanding"
-            count={(jobsList || []).filter((j) => j.status !== "invoiced" && j.status !== "cancelled" && (j.status === "complete" || jobInvoiceRequests.some((r) => r.job_id === j.id))).length}
+            count={invoicingLists().filtering ? `${invoicingLists().outstanding.length} of ${invoicingLists().outstandingTotal}` : invoicingLists().outstandingTotal}
           >
-            {(jobsList || []).filter((j) => j.status !== "invoiced" && j.status !== "cancelled" && (j.status === "complete" || jobInvoiceRequests.some((r) => r.job_id === j.id))).length === 0 && (
-              <div style={S.empty}>Nothing waiting to be invoiced.</div>
+            {invoicingLists().outstanding.length === 0 && (
+              <div style={S.empty}>{invoicingLists().filtering ? "Nothing matches that." : "Nothing waiting to be invoiced."}</div>
             )}
             <div style={S.gradeItems}>
-            {(jobsList || [])
-              .filter((j) => j.status !== "invoiced" && j.status !== "cancelled" && (j.status === "complete" || jobInvoiceRequests.some((r) => r.job_id === j.id)))
+            {invoicingLists().outstanding
               .map((job) => (
                 <div key={job.id} style={S.reqCard}>
                   <div style={S.reqCardTop}>
@@ -18221,13 +18343,14 @@ export default function StockControl() {
           </Section>
 
           <Section
+            key={invoicingLists().filtering ? "invoiced-found" : "invoiced"}
             title="Invoiced"
-            defaultOpen={false}
-            count={(jobsList || []).filter((j) => j.status === "invoiced").length}
+            defaultOpen={invoicingLists().filtering}
+            count={invoicingLists().filtering ? `${invoicingLists().invoiced.length} of ${invoicingLists().invoicedTotal}` : invoicingLists().invoicedTotal}
           >
+            {invoicingLists().filtering && invoicingLists().invoiced.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
             <div style={S.gradeItems}>
-              {(jobsList || [])
-                .filter((j) => j.status === "invoiced")
+              {invoicingLists().invoiced
                 .map((job) => (
                   <div key={job.id} style={S.reqCard}>
                     <div style={S.reqCardTop}>
@@ -18245,6 +18368,16 @@ export default function StockControl() {
                           seen. Blank on jobs invoiced before the box existed. */}
                       {job.invoiced_amount != null && <span>{rand(job.invoiced_amount)} excl. VAT</span>}
                       <span>By {job.invoiced_by}</span>
+                    </div>
+                    {/* The same lines an Outstanding card carries, customer
+                        PO first, so a job the search found by its PO or its
+                        SigmaNest number shows why it came up. */}
+                    <div className="stk-meta-row" style={S.rowMeta}>
+                      {invoiceHeaderLines(job).map(([label, value]) => (
+                        <span key={label}>
+                          {label}: {value}
+                        </span>
+                      ))}
                     </div>
                     <div style={S.reqActions}>
                       {jobInvoiceRequests.find((r) => r.job_id === job.id) ? (
@@ -18313,30 +18446,16 @@ export default function StockControl() {
               Records screen, "Invoice Requests", until 15 Sep 2026, when it
               was folded in here so invoicing lives in one place. The view
               tick of that name still decides who else may see it. */}
-          <Section title="All requests" defaultOpen={false} count={jobInvoiceRequests.length}>
-            <div className="stk-filter-bar" style={S.filterBar}>
-              <div>
-                <label style={S.label}>From</label>
-                <input type="date" style={S.input} value={invoiceRequestsDateFrom} onChange={(e) => setInvoiceRequestsDateFrom(e.target.value)} />
-              </div>
-              <div>
-                <label style={S.label}>To</label>
-                <input type="date" style={S.input} value={invoiceRequestsDateTo} onChange={(e) => setInvoiceRequestsDateTo(e.target.value)} />
-              </div>
-              <input
-                style={S.input}
-                value={invoiceRequestsSearchQuery}
-                onChange={(e) => setInvoiceRequestsSearchQuery(e.target.value)}
-                placeholder="Search job number…"
-              />
-            </div>
+          <Section
+            key={invoicingLists().filtering ? "requests-found" : "requests"}
+            title="All requests"
+            defaultOpen={invoicingLists().filtering}
+            count={invoicingLists().filtering ? `${invoicingLists().requestRows.length} of ${invoicingLists().requestsTotal}` : invoicingLists().requestsTotal}
+          >
+            {/* Its own search box and dates moved up into the bar at the top
+                of the screen on 19 Sep 2026; they narrow this list as before. */}
             {(() => {
-              const rows = jobInvoiceRequests
-                .map((r) => ({ r, job: (jobsList || []).find((j) => j.id === r.job_id) }))
-                .filter(({ r }) => !invoiceRequestsDateFrom || new Date(r.submitted_at) >= new Date(invoiceRequestsDateFrom))
-                .filter(({ r }) => !invoiceRequestsDateTo || new Date(r.submitted_at) <= new Date(invoiceRequestsDateTo + "T23:59:59"))
-                .filter(({ job }) => !invoiceRequestsSearchQuery.trim() || (job?.job_number || "").toLowerCase().includes(invoiceRequestsSearchQuery.trim().toLowerCase()))
-                .sort((a, b) => new Date(b.r.submitted_at) - new Date(a.r.submitted_at));
+              const rows = invoicingLists().requestRows;
               return (
                 <>
                   {rows.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
