@@ -2998,3 +2998,40 @@ then Invoice Now on the job's Overview tab makes the request: three lines of
 150, R 10,113.00.
 
 Also waiting: his four answers on the Records -> Invoicing search bar.
+
+---
+
+## 19 Sep 2026 — Jobs page conversation: Records → Invoicing search bar pushed on Heinrich's word (`199ef59..58706e4`); JOB-0088 done
+
+**For Planning's record of pushes.** Heinrich said "push from here". Live
+tip `199ef59` (my own push of that morning, unmoved), queue read as its own
+step twice: two commits, both mine (`58706e4` the bar, `56e154b` notes and
+the JOB-0088 SQL file). Clean clone at `58706e4`: 210 tests, names check 0
+problems, build. Found live by "Search job, SigmaNest or customer PO number"
+(bundle `App-Dux3ZdMa.js`), the morning's Invoicing fix still in it.
+
+**Correction to the entry above: JOB-0088 is done.** Heinrich pasted
+`FIX-job-0088-half-made-invoice-request.sql` on live (read back: three lines
+0 of 150, the three orphan log rows gone); Invoice Now was then pressed from
+his signed-in tab on the new code, on his word: request R 10,113.00, three
+lines 150 of 150 requested, read back. Mark as Invoiced left to accounts.
+
+**What went live:** one bar over Outstanding, Invoiced and All requests:
+search (the Jobs page's rule, customer PO included, plus Sage invoice
+number, description, delivery note numbers, request document name, who
+submitted or invoiced), Customer and Sales rep type-to-find boxes, From and
+To by each pill's own date in South African days, Clear. Pills open and
+count "1 of 7" while anything is typed or picked. The All requests pill's
+own search box and dates moved up into the bar (his answer). Invoiced cards
+carry the header lines, customer PO first. Rule text in CLAUDE.md,
+`src/jobs/invoicingSearch.js`. No database change, nothing loaded for it.
+
+**Seen on live, signed in, read only:** PO "18074" finds JOB-0088; Sage
+"20616" finds JOB-0042 under Invoiced; "JOB-0125" finds its job and its
+request; Clear resets; no console errors. Live that moment: Outstanding 5,
+Invoiced 43, All requests 25.
+
+**Not tried anywhere:** the Sales rep box, the To date alone, a person with
+only the Invoice Requests view tick, phone width. A "No customer PO" filter
+was offered and answered "?": not built, not to be raised again unless he
+does. Practice JOB-0010 carries customer PO "4500 123" from the test.
