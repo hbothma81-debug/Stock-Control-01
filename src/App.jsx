@@ -111,6 +111,7 @@ import {
 } from "./jobs/jobFigures.js";
 import { JOBS_ORDER_KEY, JOB_ORDERS, isJobOrder, sortJobs } from "./jobs/jobOrder.js";
 import { jobMatchesSearch, poMatchesSearch, poLabel } from "./jobs/jobSearch.js";
+import { closingSendsInvoiceRequest, showsRequestInvoiceButton } from "./jobs/invoiceOnClose.js";
 import {
   stageReadiness, readinessLabel, readinessGroup, jobGroupAtStage,
   READINESS_STAGE_COLUMNS, READINESS_LINE_COLUMNS, READINESS_COUNT_COLUMNS,
@@ -6821,7 +6822,13 @@ export default function StockControl() {
       const packerWaitsForLaser =
         allItemsDone && !process.shortage_id && workedInLaserStatus(process.process_name) && !(await laserDoneForJob(job.id));
 
-      if (allItemsDone && !packerWaitsForLaser) {
+      // An Invoicing stage counted per item: its last count closes it, so
+      // the request goes first here too. If it cannot be sent the count is
+      // kept and the stage stays open (src/jobs/invoiceOnClose.js).
+      const requestFailed =
+        allItemsDone && !packerWaitsForLaser && closingSendsInvoiceRequest(process) && !(await sendInvoiceRequestBeforeClosing(job));
+
+      if (allItemsDone && !packerWaitsForLaser && !requestFailed) {
         // Only the save that actually closes the stage tells the rep and
         // settles the job: two last lines saved at the same moment both see
         // it full, and the second finds it already closed.
@@ -6846,7 +6853,7 @@ export default function StockControl() {
       // A part counted after the plate packer has been packed; a stage that
       // closed by its counts carries through as a tick does.
       await packingFollowsCount(process, job, quoteItem, newDone);
-      if (allItemsDone && !packerWaitsForLaser) await packingFollowsTick(process, job);
+      if (allItemsDone && !packerWaitsForLaser && !requestFailed) await packingFollowsTick(process, job);
       // Waited for, so the card's Log comes back only once the new count is
       // on screen; otherwise a quick second count is compared with the old
       // number and refused.
@@ -7259,6 +7266,10 @@ export default function StockControl() {
       }
     }
 
+    // Closing Invoicing hands the job to accounts, so the request goes
+    // first, whichever screen the tick came from (src/jobs/invoiceOnClose.js).
+    if (nowComplete && closingSendsInvoiceRequest(process) && !(await sendInvoiceRequestBeforeClosing(job))) return;
+
     try {
       const { data: changedRows, error } = await supabase
         .from("job_processes")
@@ -7404,7 +7415,53 @@ export default function StockControl() {
   // which may be less than the full remaining amount, not always "invoice
   // everything left on this line".
   async function submitItemsToInvoice(job, itemsWithQty) {
-    const lines = [];
+    // The document and the request row are saved first, the lines marked
+    // after (19 Sep 2026). The other way round, a PDF that failed to save
+    // left every line reading "requested" with no request behind it, and a
+    // second try found nothing left to send. This way a failure part way
+    // leaves a request accounts can see and lines still to mark, never
+    // marked lines with nothing sent.
+    const lines = itemsWithQty.map(({ item: it, qty }) => {
+      // A quoted line has no part number of its own -- it comes from the
+      // stock item the line was linked to. A line typed straight in with no
+      // link has none, which the document shows as a dash rather than
+      // leaving the column looking broken.
+      const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
+      return {
+        partNumber: jobLineCode(it, linkedItem),
+        description: jobLineDescription(it, linkedItem),
+        qty,
+        unitPrice: Number(it.unit_price),
+      };
+    });
+    // Stored as a real document accounts can open when ready — never
+    // downloaded automatically. Visible from both the job itself and
+    // the Invoicing tab, since accounts works from there.
+    const doc = await buildDraftInvoiceDoc(job, lines);
+    const totalAmount = lines.reduce((sum, li) => sum + li.qty * li.unitPrice, 0);
+    const fileName = `Invoice-Request-${job.job_number}-${Date.now()}.pdf`;
+    const path = `${job.id}/${fileName}`;
+    const stored = await generateAndStoreDocument({
+      doc,
+      documentType: "invoice_request",
+      bucket: "job-invoices",
+      path,
+      fileName,
+      jobId: job.id,
+      showPreview: false,
+    });
+    // Not stored means no request: said out loud, so nothing that follows a
+    // request (ticking Invoicing, Mark as Invoiced) goes ahead without one.
+    if (!stored) throw new Error("The invoice request document could not be stored.");
+    const { error: reqError } = await supabase.from("job_invoice_requests").insert({
+      job_id: job.id,
+      storage_path: path,
+      file_name: fileName,
+      total_amount: totalAmount,
+      submitted_by: roleLabel,
+    });
+    if (reqError) throw reqError;
+
     for (const { item: it, qty } of itemsWithQty) {
       const newTotal = Number(it.qty_invoiced) + qty;
       // Submitting only ever means "requested" — it never becomes actually
@@ -7422,17 +7479,6 @@ export default function StockControl() {
         invoiced_by: roleLabel,
       });
       if (logError) throw logError;
-      // A quoted line has no part number of its own -- it comes from the
-      // stock item the line was linked to. A line typed straight in with no
-      // link has none, which the document shows as a dash rather than
-      // leaving the column looking broken.
-      const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
-      lines.push({
-        partNumber: jobLineCode(it, linkedItem),
-        description: jobLineDescription(it, linkedItem),
-        qty,
-        unitPrice: Number(it.unit_price),
-      });
     }
     if (job.sales_rep) {
       await sendNotifications({
@@ -7442,31 +7488,6 @@ export default function StockControl() {
         message: `${lines.length} item(s) submitted to invoice on ${job.job_number} (${job.customer || "no customer"}) by ${roleLabel}`,
       });
     }
-    // Stored as a real document accounts can open when ready — never
-    // downloaded automatically. Visible from both the job itself and
-    // the Invoicing tab, since accounts works from there.
-    const doc = await buildDraftInvoiceDoc(job, lines);
-    const totalAmount = lines.reduce((sum, li) => sum + li.qty * li.unitPrice, 0);
-    const fileName = `Invoice-Request-${job.job_number}-${Date.now()}.pdf`;
-    const path = `${job.id}/${fileName}`;
-    const stored = await generateAndStoreDocument({
-      doc,
-      documentType: "invoice_request",
-      bucket: "job-invoices",
-      path,
-      fileName,
-      jobId: job.id,
-      showPreview: false,
-    });
-    if (!stored) return;
-    const { error: reqError } = await supabase.from("job_invoice_requests").insert({
-      job_id: job.id,
-      storage_path: path,
-      file_name: fileName,
-      total_amount: totalAmount,
-      submitted_by: roleLabel,
-    });
-    if (reqError) throw reqError;
   }
 
   function submitInvoiceForEnteredQuantities(job, quoteItems) {
@@ -8915,6 +8936,31 @@ export default function StockControl() {
       if (stage) await toggleJobProcessComplete(stage, job);
     } catch (err) {
       console.error("The request went through, but Invoicing could not be ticked:", err);
+    }
+  }
+
+  // Before a job's Invoicing stage is closed, by any route: the invoice
+  // request for everything not yet requested (remainingToInvoice). True when
+  // the stage may be closed: the request went, or nothing was left to send
+  // (the Request invoice button or the job page got there first, or the job
+  // has no lines). False when it could not be sent; the person has been
+  // told, and the stage stays open. No question asked: closing Invoicing
+  // means "send it to accounts" (Heinrich, 18 Sep 2026). The PDF is stored,
+  // never shown, so no prices reach anyone who may not see them.
+  async function sendInvoiceRequestBeforeClosing(job) {
+    try {
+      const { data, error } = await supabase.from("job_quote_items").select("*").eq("job_id", job.id);
+      if (error) throw error;
+      const eligible = remainingToInvoice(data || []);
+      if (eligible.length === 0) return true;
+      await submitItemsToInvoice(job, eligible);
+      return true;
+    } catch (err) {
+      console.error("Failed to send the invoice request before closing Invoicing:", err);
+      alert(
+        `The invoice request for ${job.job_number} didn't go through, so Invoicing is not ticked — check your connection and try again.`
+      );
+      return false;
     }
   }
 
@@ -17745,7 +17791,7 @@ export default function StockControl() {
                               </div>
                             )}
                             <div style={{ marginTop: 6 }}>
-                              {process.tracking_mode === "each" && !stageHasNothingToCut(process.process_name, quoteItems) ? (
+                              {process.tracking_mode === "each" && !showsRequestInvoiceButton(process) && !stageHasNothingToCut(process.process_name, quoteItems) ? (
                                 <>
                                   <QtyProgressControl
                                     process={process}
@@ -17781,7 +17827,7 @@ export default function StockControl() {
                                     </button>
                                   )}
                                 </>
-                              ) : isInvoicingStage(process.process_name) && !process.is_complete ? (
+                              ) : showsRequestInvoiceButton(process) ? (
                                 // The Invoicing stage sends the job to accounts
                                 // and ticks itself, where a plain tick used to
                                 // send nothing (requestInvoiceFromProduction).
