@@ -245,8 +245,17 @@ function dbRowToItem(row) {
   // where it changes: setJobLineExtraStages, setRestNoExtraStages, and a
   // stage rename. The catalogue Replace import carries it in state.
   item.extraStages = Array.isArray(row.extra_stages) ? row.extra_stages : null;
+  // What was paid for this plate, section or bar row, in the price list's
+  // units (R/kg, R/m); null reads the list (setup-stock-paid-price.sql).
+  // Also out of ITEM_DB_FIELDS: it is written only once a loaded row has
+  // shown the column is there, so a database without it saves as before.
+  if ("paid_price" in row) {
+    stockHasPaidPrice = true;
+    item.paidPrice = row.paid_price == null ? null : Number(row.paid_price);
+  }
   return item;
 }
+let stockHasPaidPrice = false;
 function itemToDbRow(item) {
   const row = { id: item.id };
   for (const [jsKey, dbKey, type] of ITEM_DB_FIELDS) {
@@ -254,8 +263,11 @@ function itemToDbRow(item) {
     const fallback = type === "num" ? 0 : type === "bool" ? false : type === "list" ? null : "";
     row[dbKey] = v === undefined || v === null ? fallback : v;
   }
+  if (stockHasPaidPrice) row.paid_price = Number(item.paidPrice) > 0 ? Number(item.paidPrice) : null;
   return row;
 }
+// A stock row's own price when it has one, else the list's.
+const paidOr = (it, list) => (Number(it?.paidPrice) > 0 ? Number(it.paidPrice) : list);
 
 const MASTER_STRING_LISTS = [
   "sizes", "sectionTypes", "salesPeople", "customers", "staffDepartments", "jobProcessTypes",
@@ -1034,6 +1046,8 @@ const DEFAULT_MASTER = {
 
 const emptyForm = {
   id: "",
+  // What was paid for the row being edited (R/kg or R/m); "" on a new item.
+  paidPrice: "",
   mainCat: "plate",
   grade: "",
   customGrade: "",
@@ -12361,7 +12375,12 @@ export default function StockControl() {
 
   // The price the form's boxes show: the picked supplier's (nothing when
   // that supplier has none yet), or the no-supplier price with none picked.
+  // Editing a row that is already in stock: the boxes are that row's paid
+  // price, kept on the form and saved with the item, never the price list
+  // (Heinrich, 21 Sep 2026). Only on a database that has the column.
+  const editingPaidPrice = !!editingId && stockHasPaidPrice;
   function formUnitPrice() {
+    if (editingPaidPrice) return canSeeValue ? Number(form.paidPrice) || 0 : 0;
     if (!formMat) return 0;
     if (!effectiveSupplier || !Array.isArray(master.supplierPrices)) return formMat.base;
     const line = formMat.lines.find((p) => sameText(supplierNameOf(p.supplierId), effectiveSupplier));
@@ -12372,6 +12391,10 @@ export default function StockControl() {
   // material gets its row if it has none); with none, or on a database
   // without the table, it is the no-supplier price, as before.
   function commitFormPrice(price, extra = {}) {
+    if (editingPaidPrice) {
+      if (canSeeValue) setForm((f) => ({ ...f, paidPrice: price }));
+      return;
+    }
     if (!formMat) return;
     if (!effectiveSupplier || !Array.isArray(master.supplierPrices)) {
       if (formMat.listKey === "sections") setSectionPrice(formMat.name, formMat.grade, price, effectiveSectionType);
@@ -12409,7 +12432,7 @@ export default function StockControl() {
   // Under the price boxes: each supplier's price for the material, a tap
   // picks that supplier. Whoever sees the price boxes sees these.
   function formSupplierChoices(unit) {
-    if (!formMat || formMat.lines.length === 0) return null;
+    if (editingPaidPrice || !formMat || formMat.lines.length === 0) return null;
     const best = cheapestPrice(formMat.lines);
     return (
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
@@ -12457,7 +12480,13 @@ export default function StockControl() {
       </div>
     );
   }
-  const formPriceIsFor = effectiveSupplier && Array.isArray(master?.supplierPrices) ? `${effectiveSupplier}'s price` : "the price with no supplier";
+  const formPriceIsFor = editingPaidPrice
+    ? canSeeValue
+      ? "what was paid for this stock row only, not the price list,"
+      : "nothing (only people who can see Rand values change what was paid)"
+    : effectiveSupplier && Array.isArray(master?.supplierPrices)
+      ? `${effectiveSupplier}'s price`
+      : "the price with no supplier";
 
   function findSectionType(name) {
     if (!master) return "";
@@ -12485,7 +12514,8 @@ export default function StockControl() {
   function plateValue(it) {
     const w = plateWeight(it);
     if (!w) return null;
-    const pricePerKg = findPrice("grades", it.grade);
+    // Stock on hand is worth what was paid (paidOr), not today's list price.
+    const pricePerKg = paidOr(it, findPrice("grades", it.grade));
     return { total: w.total * pricePerKg };
   }
 
@@ -12496,7 +12526,7 @@ export default function StockControl() {
   }
 
   function structuralValue(it) {
-    const pricePerM = findSectionPrice(it.name, it.grade);
+    const pricePerM = paidOr(it, findSectionPrice(it.name, it.grade));
     const totalM = Number(it.qty || 0) * Number(it.length || 0);
     return { total: totalM * pricePerM };
   }
@@ -12517,7 +12547,7 @@ export default function StockControl() {
   function cncBarValue(it) {
     const w = cncBarWeight(it);
     if (!w) return null;
-    const pricePerKg = findPrice("cncGrades", it.grade);
+    const pricePerKg = paidOr(it, findPrice("cncGrades", it.grade));
     return { total: w.total * pricePerKg };
   }
 
@@ -12556,6 +12586,10 @@ export default function StockControl() {
     if (!master) return null;
     const catalog = specCatalog.filter((it) => it.id !== editingId);
     const g = effectiveGrade.toLowerCase();
+    // Plate, sections and bar: the same item from another supplier is its
+    // own stock row, always (Heinrich, 21 Sep 2026), so the supplier is
+    // part of what makes a row "the same item".
+    const sameSupplier = (it) => (it.supplier || "").trim().toLowerCase() === effectiveSupplier.toLowerCase();
     if (form.mainCat === "plate") {
       if (!effectiveSize || !form.thickness.trim()) return null;
       // Full sheets and offcuts of the same size/grade/thickness are still
@@ -12566,7 +12600,8 @@ export default function StockControl() {
           it.grade.trim().toLowerCase() === g &&
           (it.size || "").trim().toLowerCase() === effectiveSize.toLowerCase() &&
           (it.thickness || "").trim().toLowerCase() === form.thickness.trim().toLowerCase() &&
-          (it.stockType || "full") === (form.stockType || "full")
+          (it.stockType || "full") === (form.stockType || "full") &&
+          sameSupplier(it)
       );
     }
     if (form.mainCat === "structural") {
@@ -12579,7 +12614,8 @@ export default function StockControl() {
         (it) =>
           it.grade.trim().toLowerCase() === g &&
           it.name.trim().toLowerCase() === effectiveSection.toLowerCase() &&
-          Number(it.length || 0) === formLen
+          Number(it.length || 0) === formLen &&
+          sameSupplier(it)
       );
     }
     if (form.mainCat === "cncBar") {
@@ -12592,7 +12628,8 @@ export default function StockControl() {
         (it) =>
           it.grade.trim().toLowerCase() === g &&
           Number(it.diameter) === Number(form.diameter) &&
-          Number(it.length || 0) === formLen
+          Number(it.length || 0) === formLen &&
+          sameSupplier(it)
       );
     }
     if (form.mainCat === "custom") {
@@ -12612,7 +12649,7 @@ export default function StockControl() {
       );
     }
     return null;
-  }, [specCatalog, editingId, effectiveGrade, effectiveSize, effectiveSection, effectiveCustomer, form.thickness, form.partNumber, form.name, form.mainCat, form.length, form.trackLength, form.stockType, form.diameter, master]);
+  }, [specCatalog, editingId, effectiveGrade, effectiveSize, effectiveSection, effectiveCustomer, effectiveSupplier, form.thickness, form.partNumber, form.name, form.mainCat, form.length, form.trackLength, form.stockType, form.diameter, master]);
 
   function ensureStringEntry(listKey, value) {
     setMaster((prev) => {
@@ -12869,18 +12906,18 @@ export default function StockControl() {
     if (!item) return 0;
     if (item.mainCat === "plate") {
       const w = plateWeight(item);
-      const pricePerKg = findPrice("grades", item.grade);
+      const pricePerKg = paidOr(item, findPrice("grades", item.grade));
       return w ? qty * w.perSheet * pricePerKg : 0;
     }
     if (item.mainCat === "structural") {
-      const pricePerM = findSectionPrice(item.name, item.grade);
+      const pricePerM = paidOr(item, findSectionPrice(item.name, item.grade));
       const metresPerPiece = item.trackLength ? Number(item.length || 0) : 1;
       return qty * metresPerPiece * pricePerM;
     }
     if (item.mainCat === "cncBar") {
       // qty here is the cut length in mm, not a piece count.
       const w = cncBarWeight(item);
-      const pricePerKg = findPrice("cncGrades", item.grade);
+      const pricePerKg = paidOr(item, findPrice("cncGrades", item.grade));
       return w ? (qty / 1000) * w.perM * pricePerKg : 0;
     }
     return qty * Number(item.value || 0);
@@ -14710,6 +14747,13 @@ export default function StockControl() {
       };
     }
 
+    // Plate, sections and bar keep what was paid on the row: a new row at
+    // the price the form shows (the picked supplier's), an edited row at
+    // what its boxes now read. Stock value and job costs go by it.
+    if (stockHasPaidPrice && ["plate", "structural", "cncBar"].includes(form.mainCat)) {
+      payload.paidPrice = (editingId ? Number(form.paidPrice) : formUnitPrice()) || null;
+    }
+
     if (editingId) {
       const before = items.find((it) => it.id === editingId);
       setItems((prev) => prev.map((it) => (it.id === editingId ? { ...before, ...payload, id: editingId } : it)));
@@ -14764,6 +14808,7 @@ export default function StockControl() {
       qty: duplicate ? "" : String(it.qty || ""),
       comment: it.comment || "",
       sellPrice: String(it.sellPrice || ""),
+      paidPrice: Number(it.paidPrice) > 0 ? Number(it.paidPrice) : "",
     };
     // Accept either the full name or short name as a valid match — older
     // items may have the full name stored from before short names existed.
@@ -20286,13 +20331,19 @@ export default function StockControl() {
                             {tab === "buyouts" && it.partNumber && <span>{it.partNumber}</span>}
                             {tab === "assets" && canSeeValue && Number(it.value || 0) > 0 && <span>R{Number(it.value).toFixed(2)}</span>}
                             {tab === "plate" && canSeeValue && pw && (
-                              <span>R{(plateValue(it)?.total || 0).toFixed(2)} value</span>
+                              <span>
+                                R{paidOr(it, findPrice("grades", it.grade)).toFixed(2)}/kg · R{(plateValue(it)?.total || 0).toFixed(2)} value
+                              </span>
                             )}
                             {tab === "structural" && canSeeValue && sw && (
-                              <span>R{(structuralValue(it)?.total || 0).toFixed(2)} value</span>
+                              <span>
+                                R{paidOr(it, findSectionPrice(it.name, it.grade)).toFixed(2)}/m · R{(structuralValue(it)?.total || 0).toFixed(2)} value
+                              </span>
                             )}
                             {tab === "cncBar" && canSeeValue && cw && (
-                              <span>R{(cncBarValue(it)?.total || 0).toFixed(2)} value</span>
+                              <span>
+                                R{paidOr(it, findPrice("cncGrades", it.grade)).toFixed(2)}/kg · R{(cncBarValue(it)?.total || 0).toFixed(2)} value
+                              </span>
                             )}
                             {low && (
                               <span style={S.lowTag}>

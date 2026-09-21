@@ -141,7 +141,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-jobs-invoiced-amount.sql',  'column jobs.invoiced_amount',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'jobs' and column_name = 'invoiced_amount')),
     ('setup-supplier-prices.sql',       'table master_supplier_prices',
-      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'master_supplier_prices'))
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'master_supplier_prices')),
+    ('setup-stock-paid-price.sql',      'column stock_items.paid_price',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'stock_items' and column_name = 'paid_price'))
 )
 select
   setup_file,

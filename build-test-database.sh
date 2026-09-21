@@ -81,6 +81,7 @@ ORDER=(
   setup-section-dimensions.sql
   setup-section-names.sql
   setup-supplier-prices.sql
+  setup-stock-paid-price.sql
 
   # --- extra columns and permissions on profiles
   setup-production-access.sql
