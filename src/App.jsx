@@ -112,6 +112,7 @@ import {
 import { JOBS_ORDER_KEY, JOB_ORDERS, isJobOrder, sortJobs } from "./jobs/jobOrder.js";
 import { jobMatchesSearch, poMatchesSearch, poLabel } from "./jobs/jobSearch.js";
 import { closingSendsInvoiceRequest, showsRequestInvoiceButton } from "./jobs/invoiceOnClose.js";
+import { makeOneAtATime, stillToSend, invoiceRequestRefusal } from "./jobs/invoiceRequestOnce.js";
 import {
   mayForceComplete,
   forcedBy,
@@ -1822,6 +1823,11 @@ export default function StockControl() {
   const productionLoadOrderRef = useRef(null);
   if (!productionLoadOrderRef.current) productionLoadOrderRef.current = makeLoadOrder();
   const [jobInvoiceRequests, setJobInvoiceRequests] = useState([]);
+  // One invoice request per job at a time (src/jobs/invoiceRequestOnce.js).
+  // The ref is the rule; the state only turns the buttons to "Sending…".
+  const invoiceRequestLockRef = useRef(null);
+  if (!invoiceRequestLockRef.current) invoiceRequestLockRef.current = makeOneAtATime();
+  const [invoiceSendingFor, setInvoiceSendingFor] = useState([]);
   // The real invoice, the one out of Sage, filed against the job. It is an
   // ordinary job document tagged Invoicing rather than a table of its own,
   // so it also turns up on the job's Files tab where anyone looking at the
@@ -7628,7 +7634,41 @@ export default function StockControl() {
   // Takes { item, qty } pairs — qty is whatever was actually typed in,
   // which may be less than the full remaining amount, not always "invoice
   // everything left on this line".
+  //
+  // Sent once (src/jobs/invoiceRequestOnce.js, from JOB-0036): one request
+  // per job at a time on this device, and the pairs are checked against the
+  // lines as the database holds them now, not as the screen read them before
+  // an "OK?" box. Either refusal is thrown; the button that was pressed says
+  // it in words (invoiceRequestRefusal).
   async function submitItemsToInvoice(job, itemsWithQty) {
+    return invoiceRequestLockRef.current.run(job.id, async () => {
+      setInvoiceSendingFor((ids) => [...ids, job.id]);
+      try {
+        const { data, error } = await supabase.from("job_quote_items").select("*").eq("job_id", job.id);
+        if (error) throw error;
+        const check = stillToSend(itemsWithQty, data || []);
+        if (!check.ok) {
+          if (jobDetail?.job?.id === job.id) refreshJobDetail();
+          const err = new Error("The lines changed before the invoice request was sent.");
+          err.linesChanged = check.changed;
+          throw err;
+        }
+        await storeAndMarkInvoiceRequest(job, check.items);
+      } finally {
+        setInvoiceSendingFor((ids) => ids.filter((id) => id !== job.id));
+      }
+    });
+  }
+
+  // True, and said, when a request for this job is still being sent: asked
+  // before any "OK?" box, so nobody answers a question for nothing.
+  function invoiceRequestUnderWay(job) {
+    if (!invoiceRequestLockRef.current.busy(job.id)) return false;
+    alert(invoiceRequestRefusal({ alreadyRunning: true }, job.job_number));
+    return true;
+  }
+
+  async function storeAndMarkInvoiceRequest(job, itemsWithQty) {
     // The document and the request row are saved first, the lines marked
     // after (19 Sep 2026). The other way round, a PDF that failed to save
     // left every line reading "requested" with no request behind it, and a
@@ -7727,6 +7767,7 @@ export default function StockControl() {
   }
 
   async function submitSelectedItemsToInvoice(job, quoteItems) {
+    if (invoiceRequestUnderWay(job)) return;
     const itemsWithQty = submitInvoiceForEnteredQuantities(job, quoteItems);
     if (!itemsWithQty) return;
     try {
@@ -7737,7 +7778,7 @@ export default function StockControl() {
       fetchJobs();
     } catch (err) {
       console.error("Failed to submit invoice:", err);
-      alert("Couldn't submit that — check your connection and try again.");
+      alert(invoiceRequestRefusal(err, job.job_number) || "Couldn't submit that — check your connection and try again.");
     }
   }
 
@@ -9098,6 +9139,7 @@ export default function StockControl() {
   // Called from the Jobs list, where a job's quote items aren't already
   // loaded (only Job Detail fetches those) — pulls them fresh first.
   async function invoiceNowFromList(job) {
+    if (invoiceRequestUnderWay(job)) return;
     try {
       const { data, error } = await supabase.from("job_quote_items").select("*").eq("job_id", job.id);
       if (error) throw error;
@@ -9124,7 +9166,7 @@ export default function StockControl() {
       openMarkInvoicedModal(job);
     } catch (err) {
       console.error("Failed to invoice job:", err);
-      alert("Couldn't submit that — check your connection and try again.");
+      alert(invoiceRequestRefusal(err, job.job_number) || "Couldn't submit that — check your connection and try again.");
     }
   }
 
@@ -9171,8 +9213,11 @@ export default function StockControl() {
       return true;
     } catch (err) {
       console.error("Failed to send the invoice request before closing Invoicing:", err);
+      const refusal = invoiceRequestRefusal(err, job.job_number);
       alert(
-        `The invoice request for ${job.job_number} didn't go through, so Invoicing is not ticked — check your connection and try again.`
+        refusal
+          ? `${refusal}\n\nInvoicing is not ticked.`
+          : `The invoice request for ${job.job_number} didn't go through, so Invoicing is not ticked — check your connection and try again.`
       );
       return false;
     }
@@ -9189,6 +9234,7 @@ export default function StockControl() {
   // Unlike invoiceEntireJob it never opens Mark as Invoiced -- that is
   // accounts' step, once the invoice exists in Sage.
   async function requestInvoiceFromProduction(process, job) {
+    if (invoiceRequestUnderWay(job)) return;
     let quoteItems;
     try {
       const { data, error } = await supabase.from("job_quote_items").select("*").eq("job_id", job.id);
@@ -9229,7 +9275,12 @@ export default function StockControl() {
         await submitItemsToInvoice(job, eligible);
       } catch (err) {
         console.error("Failed to request the invoice:", err);
-        alert("The invoice request didn't go through — check your connection and try again. Invoicing is not ticked.");
+        const refusal = invoiceRequestRefusal(err, job.job_number);
+        alert(
+          refusal
+            ? `${refusal}\n\nInvoicing is not ticked.`
+            : "The invoice request didn't go through — check your connection and try again. Invoicing is not ticked."
+        );
         return;
       }
     }
@@ -18157,11 +18208,11 @@ export default function StockControl() {
                                 <button
                                   type="button"
                                   className="stk-btn"
-                                  style={{ ...S.reqActionBtn, ...(isReady ? {} : { opacity: 0.5, cursor: "not-allowed" }) }}
-                                  disabled={!isReady}
+                                  style={{ ...S.reqActionBtn, ...(isReady && !invoiceSendingFor.includes(job.id) ? {} : { opacity: 0.5, cursor: "not-allowed" }) }}
+                                  disabled={!isReady || invoiceSendingFor.includes(job.id)}
                                   onClick={() => requestInvoiceFromProduction(process, job)}
                                 >
-                                  <FileText size={13} /> Request invoice
+                                  <FileText size={13} /> {invoiceSendingFor.includes(job.id) ? "Sending…" : "Request invoice"}
                                 </button>
                               ) : (
                                 <label style={{ ...S.checkRow, fontWeight: 600 }}>
@@ -23997,10 +24048,11 @@ export default function StockControl() {
                       <button
                         type="button"
                         className="stk-btn"
-                        style={S.reqActionBtnMuted}
+                        style={{ ...S.reqActionBtnMuted, ...(invoiceSendingFor.includes(jobDetail.job.id) ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}
+                        disabled={invoiceSendingFor.includes(jobDetail.job.id)}
                         onClick={() => invoiceNowFromList(jobDetail.job)}
                       >
-                        <Check size={13} /> Invoice Now (all remaining)
+                        <Check size={13} /> {invoiceSendingFor.includes(jobDetail.job.id) ? "Sending…" : "Invoice Now (all remaining)"}
                       </button>
                     )}
                     <button
@@ -25283,10 +25335,11 @@ export default function StockControl() {
                     <button
                       type="button"
                       className="stk-btn"
-                      style={{ ...S.submitBtn, flex: 1 }}
+                      style={{ ...S.submitBtn, flex: 1, ...(invoiceSendingFor.includes(jobDetail.job.id) ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}
+                      disabled={invoiceSendingFor.includes(jobDetail.job.id)}
                       onClick={() => submitSelectedItemsToInvoice(jobDetail.job, jobDetail.quoteItems)}
                     >
-                      Invoice
+                      {invoiceSendingFor.includes(jobDetail.job.id) ? "Sending…" : "Invoice"}
                     </button>
                     <button
                       type="button"
