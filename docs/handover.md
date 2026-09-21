@@ -3186,3 +3186,60 @@ types a section is already filed under, and live has no round tube size.
   up to 18 Sep have no amount and count at what they were quoted at; the
   Invoiced box says how many. Nobody has made a real Mark as Invoiced with
   an amount yet, on either database.
+
+---
+
+## 21 Sep 2026 — JOB-0036: two invoice requests, one document missing; pushed on Heinrich's word (87bb752..65f2aa7)
+
+Heinrich, from a fresh conversation: "job 36 under records shows 2
+requests ... I think one document is not there". He was right.
+
+- **What had happened** (read from live through his signed-in tab, both
+  PDFs opened): on 17 Sep 15:42 the request was pressed three times in 40
+  seconds. Press 1, on the old lines-first order, marked ten lines
+  (R 6,582.98) and died: in no document. Press 2 made R 9,852.88. Press 3
+  landed while 2 ran: **a second press's `window.confirm` freezes the first
+  run until it is answered, then both run side by side**, and it made a
+  duplicate R 6,161.28 wholly inside press 2's. Two requests adding to
+  R 16,014.16 on a job worth R 16,435.86.
+- **JOB-0036 repaired on live, 21 Sep 09:39.** His paste of
+  `FIX-job-0036-missing-and-doubled-invoice-request.sql` (proven on pglite,
+  its 16 ids read back from live first), then Invoice Now pressed once from
+  his signed-in tab on his word. Read back: R 9,852.88 + R 6,582.98 =
+  R 16,435.86, 29 of 29 lines requested, one log row each, the new PDF holds
+  exactly the ten lines. Mark as Invoiced closed with its ×; accounts' step.
+- **Pushed from this conversation on his word ("push from here"), alone,
+  ahead of the queue:** live took `9192c1e` (the card) and `65f2aa7` (send
+  once), which are `f1d51d0` and `77a0ccf` of this branch placed on
+  `87bb752`. One conflict both ways, the import lines beside
+  `forceComplete.js`'s; merged back as `0db14ef`, no file changed. Clean
+  clone: names 0, 216 tests, build. Live went `App-DLey-lHp.js` →
+  `App-Br_WaXlq.js`; "is already being sent", "Open request " and "Nothing
+  was sent for" found in it; the page loads with no console errors.
+  - **The card** (Records → Invoicing, Outstanding and Invoiced): a job
+    with more than one request gets a button per request, oldest first, day
+    and amount (`renderOpenRequestButtons`); one request keeps the plain
+    "Open request". **Seen on live signed in:** JOB-0036 shows "Open request
+    1 of 2: 17 Sept 2026, R 9,852.88" and "2 of 2: 21 Sept 2026,
+    R 6,582.98", and each asks storage for its own file.
+  - **Send once** (`src/jobs/invoiceRequestOnce.js`, tested): one request
+    per job at a time on the device, inside `submitItemsToInvoice` so every
+    route is covered, and asked before any "OK?" box
+    (`invoiceRequestUnderWay`); the three buttons read "Sending…". The
+    pairs are checked against the job's lines read at that moment
+    (`stillToSend`); a stale list is refused whole and the person told
+    which lines. **Tried by nobody on a screen**: practice was not signed in
+    in this conversation's pane, and on live it would mean a real request.
+- **Held back, still queued, not mine:** `9c669e6` (Jobs page: Force
+  complete, Mark whole job urgent, closing Invoicing with stages open warns
+  and closes them) and `07bc651` (the `CHECK-live-table.cjs` column check
+  fix). Heinrich has been told.
+- **A read-only scan of live** (every job with requests or requested
+  lines, 23): 18 clean. JOB-0014 (invoiced "Cash", his own presses, 18 Sep
+  11:43): P-004 reads 317 pieces (R 878.09) more requested than any
+  document holds, the same failed-press trace; told, left alone.
+  JOB-0002, 0003, 0005: early invoiced jobs with no request.
+- **Still open, told to him:** the request row and the line marks are
+  separate saves, so a page closed mid-request leaves a request whose later
+  lines are unmarked, and "everything left" sends those again. The cure is
+  one database function doing both (SQL on both databases); not planned yet.
