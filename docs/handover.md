@@ -3356,3 +3356,44 @@ already made" (Emailing a document); the one-off Microsoft setup is
 - **Next, in his order:** Send on the app's delivery note (to the customer),
   then the invoice request emailed to an accounts address kept in a settings
   box, only when the person pressing has a mailbox connected.
+
+---
+
+## 21 Sep 2026 — Email: the delivery note, to the customer or the supplier; pushed on Heinrich's word (`4ecca3e..700aca5`)
+
+- **Pushed on his word ("push from here"), alone, ahead of the queue:**
+  step 3, cherry-picked onto the live tip in a scratch clone (fresh install,
+  234 tests, names check, built with the IDs and without) and pushed as
+  `700aca5`. Live went from `App-D6wlktU7.js` to `App-BYou4mJf.js`, loads
+  with no console errors. Merged back clean (the same commit sits in the
+  queue as `8bef3e2`).
+- **Held back, not mine, still not live:** `07bc651`, `9c669e6` (Force
+  complete and Mark whole job urgent), `8b241be`, `7b725b5` and now
+  `d6f5b1d` (Supplier prices, steps 1 to 3), `f245239`, and this
+  conversation's own handover commits.
+- **What step 3 is:** "Email to customer" or "Email to supplier" beside
+  "View document" on the note's row on Records → Delivery Notes and on its
+  card under the job's Delivery tab. His answers: both kinds of note; both
+  screens; the invoice's people, and for a supplier's note also whoever may
+  raise a purchase order. It attaches the PDF as it was filed. To is
+  wherever that party's last delivery note went, remembered apart from
+  their invoices. The message lists no items: a note's rows hold no
+  quantities, only the PDF does. No database change. Two insertions in the
+  Jobs page conversation's screens, one line after each "View document".
+- **Seen on live, signed in, nothing sent:** five notes listed, no Email
+  button and nothing asked while the rows are shut; DN-0004 (to the
+  customer FSS) and DN-0005 (to the supplier "QJ Paint") both open a window
+  with the right subject and their own PDF named; both cancelled. DN-0005's
+  To was empty because "QJ Paint" is not on the supplier list under that
+  name (read from live), which is the window behaving as designed.
+- **Proven on practice (DN-0001, to the customer HPE):** a real send
+  answered 202 and addressed to the sender alone with DN-0001.pdf, the
+  record, the Emailed line on both screens, and the window reopening with
+  the stores address rather than the creditors addresses used for HPE's
+  invoice earlier the same day.
+- **Not tried by anybody:** a send on live of any of the three documents,
+  the pop-up way in, a phone, a note with no PDF on file, a non-admin on
+  the delivery note screens.
+- **Next, the last of his four:** the invoice request emailed to an
+  accounts address kept in a settings box, only when the person pressing
+  has a mailbox connected; the request itself made as today either way.
