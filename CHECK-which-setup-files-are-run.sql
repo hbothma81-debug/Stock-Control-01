@@ -135,7 +135,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-laser-priority.sql',        'column jobs.laser_priority',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'jobs' and column_name = 'laser_priority')),
     ('setup-jobs-invoiced-amount.sql',  'column jobs.invoiced_amount',
-      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'jobs' and column_name = 'invoiced_amount'))
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'jobs' and column_name = 'invoiced_amount')),
+    ('setup-supplier-prices.sql',       'table master_supplier_prices',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'master_supplier_prices'))
 )
 select
   setup_file,
