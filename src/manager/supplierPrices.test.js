@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   priceId, pricesFor, isStale, cheapest, setPrice, removePrice, changeSupplier, movePrices, dropPrices,
-  priceFromRow, priceToRow,
+  priceFromRow, priceToRow, listPrice, sectionLines,
 } from "./supplierPrices.js";
 
 const now = new Date("2026-09-21T10:00:00Z");
@@ -97,6 +97,25 @@ test("remove one line, drop a material's lines", () => {
   p = add(p, "A", "SS304", "s1", 30);
   assert.equal(removePrice(p, priceId("sections", "A", "", "s2")).length, 2);
   assert.deepEqual(dropPrices(p, "sections", "A", "").map((x) => x.grade), ["SS304"]);
+});
+
+test("the price every screen reads: lowest of the suppliers and the no-supplier price", () => {
+  assert.equal(listPrice([], 25), 25);
+  assert.equal(listPrice(null, 0), 0);
+  let p = add([], "A", "", "s1", 27);
+  p = add(p, "A", "", "s2", 24);
+  assert.equal(listPrice(p, 0), 24);
+  assert.equal(listPrice(p, 30), 24);
+  assert.equal(listPrice(p, 20), 20);
+  assert.equal(listPrice(add([], "A", "", "s1", 0), 12), 12);
+});
+
+test("a section with no lines in its material borrows the no-material ones", () => {
+  let p = add([], "A", "", "s1", 10);
+  assert.equal(sectionLines(p, "A", "SS304")[0].price, 10);
+  p = add(p, "A", "SS304", "s2", 30);
+  assert.deepEqual(sectionLines(p, "A", "SS304").map((x) => x.price), [30]);
+  assert.deepEqual(sectionLines(p, "A", "").map((x) => x.price), [10]);
 });
 
 test("to the table and back", () => {

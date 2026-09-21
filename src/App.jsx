@@ -95,7 +95,7 @@ import NumberBox from "./manager/NumberBox.jsx";
 import SupplierPriceLines from "./manager/SupplierPriceLines.jsx";
 import {
   pricesFor, setPrice as setSupplierPriceIn, removePrice as removeSupplierPriceIn, changeSupplier as changePriceSupplierIn,
-  movePrices, dropPrices, priceFromRow, priceToRow,
+  movePrices, dropPrices, priceFromRow, priceToRow, listPrice, sectionLines, cheapest as cheapestPrice, isStale as priceIsStale,
 } from "./manager/supplierPrices.js";
 import LaserStatus from "./laser/LaserStatus.jsx";
 import LaserTab from "./laser/LaserTab.jsx";
@@ -12142,11 +12142,27 @@ export default function StockControl() {
     return hit ? hit.factor : null;
   }
 
+  // A material's row on Material Types or CNC Bar Grades, by full or short name.
+  function findMaterialEntry(listKey, name) {
+    if (!master) return null;
+    const q = (name || "").trim().toLowerCase();
+    if (!q) return null;
+    return (master[listKey] || []).find((e) => e.name.toLowerCase() === q || (e.shortName || "").toLowerCase() === q) || null;
+  }
+
+  // Supplier price lines are filed under the material's full name.
+  function materialSupplierLines(listKey, name) {
+    const hit = findMaterialEntry(listKey, name);
+    return pricesFor(master?.supplierPrices, listKey, hit ? hit.name : name, "");
+  }
+
+  // What every screen reads as the price: the cheapest of the supplier
+  // prices and the no-supplier price on the row (listPrice, 21 Sep 2026).
+  // Stock Manager's own boxes show the row's price itself.
   function findPrice(listKey, name) {
     if (!master) return 0;
-    const q = (name || "").toLowerCase();
-    const hit = (master[listKey] || []).find((e) => e.name.toLowerCase() === q || (e.shortName || "").toLowerCase() === q);
-    return hit ? hit.price || 0 : 0;
+    const hit = findMaterialEntry(listKey, name);
+    return listPrice(materialSupplierLines(listKey, name), hit ? hit.price : 0);
   }
 
   // Used by the R/unit ⇄ R/kg price toggle on the Add/Edit form — writes
@@ -12208,7 +12224,7 @@ export default function StockControl() {
 
   function findSectionPrice(name, grade) {
     const hit = findSectionEntry(name, grade);
-    return hit ? hit.price || 0 : 0;
+    return listPrice(sectionLines(master?.supplierPrices, name, grade), hit ? hit.price : 0);
   }
 
   // Weight is geometry, not grade -- a 50x50x5 angle weighs the same
@@ -12261,6 +12277,146 @@ export default function StockControl() {
       };
     });
   }
+
+  // ---- The add-stock form and supplier prices (step 3, 21 Sep 2026) ----
+  // The material on the form, as the supplier prices know it: which list,
+  // the row's own name, a section's material, its price lines and the
+  // no-supplier price on its row. null until enough is picked.
+  function formMaterial() {
+    if (!master) return null;
+    if (form.mainCat === "plate" || form.mainCat === "cncBar") {
+      const listKey = form.mainCat === "plate" ? "grades" : "cncGrades";
+      if (!effectiveGrade) return null;
+      const hit = findMaterialEntry(listKey, effectiveGrade);
+      return { listKey, name: hit ? hit.name : effectiveGrade, grade: "", lines: materialSupplierLines(listKey, effectiveGrade), base: hit ? hit.price || 0 : 0 };
+    }
+    if (form.mainCat === "structural") {
+      if (!effectiveSection || form.section === CUSTOM || form.grade === CUSTOM) return null;
+      const hit = findSectionEntry(effectiveSection, effectiveGrade);
+      return { listKey: "sections", name: effectiveSection, grade: effectiveGrade, lines: sectionLines(master.supplierPrices, effectiveSection, effectiveGrade), base: hit ? hit.price || 0 : 0 };
+    }
+    return null;
+  }
+  const formMat = formMaterial();
+  const formMatKey = formMat ? [formMat.listKey, formMat.name, formMat.grade].join("|") : "";
+  const supplierNameOf = (id) => (master?.suppliers || []).find((s) => s.id === id)?.name || "";
+  // The supplier to fill in: the cheapest line's, unless the no-supplier
+  // price beats it, which has no supplier to name.
+  const formCheapest = formMat ? cheapestPrice(formMat.lines) : null;
+  const formCheapestSupplier =
+    formCheapest && !(formMat.base > 0 && formMat.base < formCheapest.price) ? supplierNameOf(formCheapest.supplierId) : "";
+  // Fills the Supplier box for a new item when the material is picked. A
+  // supplier picked by hand is kept across a change of material (his
+  // answer); one this filled in follows the material.
+  const autoSupplierRef = useRef("");
+  useEffect(() => {
+    if (!showAdd || editingId || !formMatKey) return;
+    setForm((f) => {
+      if (f.supplier && f.supplier !== autoSupplierRef.current) return f;
+      autoSupplierRef.current = formCheapestSupplier;
+      return f.supplier === formCheapestSupplier ? f : { ...f, supplier: formCheapestSupplier };
+    });
+  }, [showAdd, editingId, formMatKey, formCheapestSupplier]);
+
+  // The price the form's boxes show: the picked supplier's (nothing when
+  // that supplier has none yet), or the no-supplier price with none picked.
+  function formUnitPrice() {
+    if (!formMat) return 0;
+    if (!effectiveSupplier || !Array.isArray(master.supplierPrices)) return formMat.base;
+    const line = formMat.lines.find((p) => sameText(supplierNameOf(p.supplierId), effectiveSupplier));
+    return line ? line.price : 0;
+  }
+  // A price typed on the form. With a supplier in the box it is that
+  // supplier's price (a supplier typed new joins the list here, and the
+  // material gets its row if it has none); with none, or on a database
+  // without the table, it is the no-supplier price, as before.
+  function commitFormPrice(price, extra = {}) {
+    if (!formMat) return;
+    if (!effectiveSupplier || !Array.isArray(master.supplierPrices)) {
+      if (formMat.listKey === "sections") setSectionPrice(formMat.name, formMat.grade, price, effectiveSectionType);
+      else setMaterialPrice(formMat.listKey, formMat.name, price, extra);
+      return;
+    }
+    const { listKey, name, grade } = formMat;
+    setMaster((prev) => {
+      if (!Array.isArray(prev.supplierPrices)) return prev;
+      let suppliers = prev.suppliers || [];
+      let sup = suppliers.find((s) => sameText(s.name, effectiveSupplier));
+      if (!sup) {
+        sup = { id: uid(), name: effectiveSupplier, email: "", phone: "", address: "" };
+        suppliers = [...suppliers, sup];
+      }
+      let list = prev[listKey] || [];
+      const there = listKey === "sections" ? list.some((x) => isSectionRow(x, name, grade)) : list.some((x) => sameText(x.name, name));
+      if (!there) {
+        const lend = listKey === "sections" ? list.find((x) => sameText(x.name, name) && x.factor) : null;
+        list = [
+          ...list,
+          listKey === "sections"
+            ? { name, grade, factor: lend ? lend.factor : 0, price: 0, type: effectiveSectionType || "" }
+            : { name, factor: 0, price: 0, ...extra },
+        ];
+      }
+      return {
+        ...prev,
+        suppliers,
+        [listKey]: list,
+        supplierPrices: setSupplierPriceIn(prev.supplierPrices, { listName: listKey, name, grade, supplierId: sup.id, price, setBy: roleLabel }),
+      };
+    });
+  }
+  // Under the price boxes: each supplier's price for the material, a tap
+  // picks that supplier. Whoever sees the price boxes sees these.
+  function formSupplierChoices(unit) {
+    if (!formMat || formMat.lines.length === 0) return null;
+    const best = cheapestPrice(formMat.lines);
+    return (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+        {[...formMat.lines]
+          .sort((a, b) => a.price - b.price)
+          .map((p) => {
+            const name = supplierNameOf(p.supplierId);
+            const on = sameText(name, effectiveSupplier);
+            const old = priceIsStale(p.setAt);
+            return (
+              <button
+                key={p.id}
+                type="button"
+                className="stk-btn"
+                onClick={() => setForm((f) => ({ ...f, supplier: name }))}
+                title={old ? "This price is older than 3 months." : `Use ${name}`}
+                style={{
+                  padding: "4px 10px", borderRadius: 999, fontSize: 13, cursor: "pointer", background: "transparent",
+                  border: `1px solid ${on ? C.text : C.border}`, color: old ? C.danger : C.text, fontWeight: on ? 600 : 400,
+                }}
+              >
+                {name} R{Number(p.price).toFixed(2)}
+                {unit}
+                {best && best.id === p.id && formMat.lines.length > 1 ? " · cheapest" : ""}
+              </button>
+            );
+          })}
+      </div>
+    );
+  }
+  // The Supplier box, shown above the price boxes on the three material forms.
+  function formSupplierField() {
+    return (
+      <div style={{ marginTop: 10 }}>
+        <LibraryField
+          label="Supplier"
+          options={master.suppliers.map((s) => s.name)}
+          value={form.supplier}
+          onChange={(v) => setForm((f) => ({ ...f, supplier: v }))}
+          customValue={form.customSupplier}
+          onCustomChange={(v) => setForm((f) => ({ ...f, customSupplier: v }))}
+          placeholder="e.g. Macsteel"
+          allowNone
+        />
+      </div>
+    );
+  }
+  const formPriceIsFor = effectiveSupplier && Array.isArray(master?.supplierPrices) ? `${effectiveSupplier}'s price` : "the price with no supplier";
 
   function findSectionType(name) {
     if (!master) return "";
@@ -20817,28 +20973,30 @@ export default function StockControl() {
                         placeholder="e.g. 3mm"
                       />
                     </div>
+                    {formSupplierField()}
                     {effectiveGrade && form.thickness.trim() && effectiveSize && (
                       <div style={{ marginTop: 10 }}>
                         {(() => {
                           const weight = plateWeight({ size: effectiveSize, thickness: form.thickness, grade: effectiveGrade, qty: 1 });
                           const perSheetWeight = weight?.perSheet || 0;
-                          const currentPerKg = findPrice("grades", effectiveGrade);
+                          const currentPerKg = formUnitPrice();
                           return (
                             <>
                               <TwoPriceBoxes
-                                key={`${effectiveGrade}|${effectiveSize}|${form.thickness}`}
+                                key={`${effectiveGrade}|${effectiveSize}|${form.thickness}|${effectiveSupplier}`}
                                 unitLabel="R/sheet"
                                 kgPerUnit={perSheetWeight}
                                 perUnit={currentPerKg * perSheetWeight}
                                 perKg={currentPerKg}
                                 unitOff={perSheetWeight > 0 ? "" : "No sheet weight yet, so price it by weight."}
                                 onCommit={(p) => {
-                                  if (p.perKg != null) setMaterialPrice("grades", effectiveGrade, p.perKg, { factor: 7.85 });
+                                  if (p.perKg != null) commitFormPrice(p.perKg, { factor: 7.85 });
                                 }}
                               />
+                              {formSupplierChoices("/kg")}
                               <div style={S.roleHint}>
                                 {perSheetWeight > 0
-                                  ? `${perSheetWeight.toFixed(1)}kg per sheet — this updates the ${effectiveGrade} rate everywhere it's used.`
+                                  ? `${perSheetWeight.toFixed(1)}kg per sheet. A price typed here is saved as ${formPriceIsFor} for ${effectiveGrade}.`
                                   : "Enter a valid size and thickness to calculate weight."}
                               </div>
                             </>
@@ -20893,31 +21051,33 @@ export default function StockControl() {
                         placeholder="e.g. 3000"
                       />
                     </div>
+                    {formSupplierField()}
                     {effectiveGrade && form.diameter.trim() && (
                       <div style={{ marginTop: 10 }}>
                         {(() => {
                           const d = parseFloat(form.diameter) || 0;
                           const perM = d ? (Math.PI / 4000) * d * d * findFactor("cncGrades", effectiveGrade) : 0;
-                          const currentPerKg = findPrice("cncGrades", effectiveGrade);
+                          const currentPerKg = formUnitPrice();
                           // Without a weight per metre there is nothing to divide by, and
                           // writing the zero would wipe the grade rate everywhere it is
                           // used: the R/m box stays off until there is one.
                           return (
                             <>
                               <TwoPriceBoxes
-                                key={`${effectiveGrade}|${form.diameter}`}
+                                key={`${effectiveGrade}|${form.diameter}|${effectiveSupplier}`}
                                 unitLabel="R/m"
                                 kgPerUnit={perM}
                                 perUnit={currentPerKg * perM}
                                 perKg={currentPerKg}
                                 unitOff={perM > 0 ? "" : "No weight per metre for this diameter and grade, so price it by weight."}
                                 onCommit={(p) => {
-                                  if (p.perKg != null) setMaterialPrice("cncGrades", effectiveGrade, p.perKg, { factor: 7.85 });
+                                  if (p.perKg != null) commitFormPrice(p.perKg, { factor: 7.85 });
                                 }}
                               />
+                              {formSupplierChoices("/kg")}
                               <div style={S.roleHint}>
                                 {perM > 0
-                                  ? `${perM.toFixed(2)}kg per metre — this updates the ${effectiveGrade} rate everywhere it's used.`
+                                  ? `${perM.toFixed(2)}kg per metre. A price typed here is saved as ${formPriceIsFor} for ${effectiveGrade}.`
                                   : "Enter a diameter to calculate weight."}
                               </div>
                             </>
@@ -20939,6 +21099,7 @@ export default function StockControl() {
                       onCustomChange={(v) => setForm({ ...form, customSection: v })}
                       placeholder="e.g. 50x50x5mm"
                     />
+                    {formSupplierField()}
                     {effectiveSection && (
                       <div style={{ marginTop: 10 }}>
                         {(() => {
@@ -20953,7 +21114,7 @@ export default function StockControl() {
                             );
                           }
                           const kgPerM = findSectionFactor(effectiveSection, effectiveGrade);
-                          const currentPerM = findSectionPrice(effectiveSection, effectiveGrade);
+                          const currentPerM = formUnitPrice();
                           // Pricing by weight needs a kg/m to convert with. Without one
                           // the conversion is a multiply by zero, which once wiped the
                           // price per metre everywhere the section was used: the R/kg
@@ -20961,20 +21122,21 @@ export default function StockControl() {
                           return (
                             <>
                               <TwoPriceBoxes
-                                key={`${effectiveSection}|${effectiveGrade}`}
+                                key={`${effectiveSection}|${effectiveGrade}|${effectiveSupplier}`}
                                 unitLabel="R/m"
                                 kgPerUnit={kgPerM || 0}
                                 perUnit={currentPerM}
                                 perKg={kgPerM ? currentPerM / kgPerM : 0}
                                 kgOff={kgPerM ? "" : "No kg/m for this section yet (Stock Manager → Sections), so price it per metre."}
                                 onCommit={(p) => {
-                                  if (p.perUnit != null) setSectionPrice(effectiveSection, effectiveGrade, p.perUnit, effectiveSectionType);
+                                  if (p.perUnit != null) commitFormPrice(p.perUnit);
                                 }}
                               />
+                              {formSupplierChoices("/m")}
                               <div style={S.roleHint}>
-                                {kgPerM
-                                  ? `${kgPerM.toFixed(2)}kg per metre — this updates the rate for ${effectiveSection} in ${effectiveGrade || "no grade"}, everywhere it's used. Other grades keep their own price.`
-                                  : `This updates the rate for ${effectiveSection} in ${effectiveGrade || "no grade"}, everywhere it's used.`}
+                                {kgPerM ? `${kgPerM.toFixed(2)}kg per metre. ` : ""}
+                                A price typed here is saved as {formPriceIsFor} for {effectiveSection} in {effectiveGrade || "no grade"}. Other
+                                grades keep their own price.
                               </div>
                             </>
                           );
@@ -21178,18 +21340,21 @@ export default function StockControl() {
                   />
                 </div>
 
-                <div style={{ marginTop: 10 }}>
-                  <LibraryField
-                    label="Supplier"
-                    options={master.suppliers.map((s) => s.name)}
-                    value={form.supplier}
-                    onChange={(v) => setForm({ ...form, supplier: v })}
-                    customValue={form.customSupplier}
-                    onCustomChange={(v) => setForm({ ...form, customSupplier: v })}
-                    placeholder="e.g. Macsteel"
-                    allowNone
-                  />
-                </div>
+                {/* Plate, sections and CNC bar have theirs above the price boxes. */}
+                {!["plate", "structural", "cncBar"].includes(form.mainCat) && (
+                  <div style={{ marginTop: 10 }}>
+                    <LibraryField
+                      label="Supplier"
+                      options={master.suppliers.map((s) => s.name)}
+                      value={form.supplier}
+                      onChange={(v) => setForm({ ...form, supplier: v })}
+                      customValue={form.customSupplier}
+                      onCustomChange={(v) => setForm({ ...form, customSupplier: v })}
+                      placeholder="e.g. Macsteel"
+                      allowNone
+                    />
+                  </div>
+                )}
 
                 {form.mainCat !== "custom" && form.mainCat !== "stores" && (
                   <div style={{ marginTop: 10 }}>

@@ -65,6 +65,25 @@ export function cheapest(list) {
   return best;
 }
 
+// What a material costs, for every screen that reads a price: the lowest
+// of its supplier prices and the price with no supplier (`basePrice`, the
+// material's own row), nothing-prices left out. With no supplier lines it
+// is the material's own price, as it always was.
+export function listPrice(lines, basePrice) {
+  const base = Number(basePrice) || 0;
+  const best = cheapest(lines);
+  if (!best) return base;
+  return base > 0 && base < best.price ? base : best.price;
+}
+
+// A section's lines: its own material's, or, when that material has none,
+// the ones filed under no material, which stand in for any (as the
+// section rows themselves do, findSectionEntry in App.jsx).
+export function sectionLines(prices, name, grade) {
+  const exact = pricesFor(prices, "sections", name, grade);
+  return exact.length || !norm(grade) ? exact : pricesFor(prices, "sections", name, "");
+}
+
 // Adds the supplier's price for a material, or changes it. Every change
 // restamps who and when, which is what the red age goes by.
 export function setPrice(prices, { listName, name, grade = "", supplierId, price, setBy = "", now = new Date() }) {
