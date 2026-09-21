@@ -2,7 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { Mail, X } from "lucide-react";
 import { C, S } from "../theme.js";
 import { supabase } from "../lib/supabaseClient.js";
-import { emailIsSetUp, connectedMailbox, connectMailbox, disconnectMailbox, sendOutlookMail, outlookErrorText } from "./outlook.js";
+import {
+  emailIsSetUp,
+  connectedMailbox,
+  connectMailbox,
+  connectMailboxOnThisPage,
+  popupWasBlocked,
+  takeReturnProblem,
+  disconnectMailbox,
+  sendOutlookMail,
+  outlookErrorText,
+} from "./outlook.js";
 import { MAX_ATTACHMENT_BYTES, goesToSelf, checkAddresses, actualRecipients, graphMessage, sentLine } from "./emailRules.js";
 
 // "Email …" on a document, and the window it opens: To, Cc, subject and
@@ -63,6 +73,8 @@ function SendEmailModal({ heading, appUser, defaults, buildAttachment, record, o
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [sentNote, setSentNote] = useState("");
+  // The browser would not open Microsoft's pop-up: offer the page way in.
+  const [blocked, setBlocked] = useState(false);
   // A second press while the first is still on its way must not send the
   // order twice; state alone is a render too late for a fast double tap.
   const sendingRef = useRef(false);
@@ -71,7 +83,12 @@ function SendEmailModal({ heading, appUser, defaults, buildAttachment, record, o
   useEffect(() => {
     let alive = true;
     connectedMailbox(appUser?.id)
-      .then((m) => alive && setMailbox(m))
+      .then((m) => {
+        if (!alive) return;
+        setMailbox(m);
+        const problem = takeReturnProblem();
+        if (problem && !m) setError(problem);
+      })
       .catch((err) => {
         if (!alive) return;
         setMailbox(null);
@@ -93,9 +110,23 @@ function SendEmailModal({ heading, appUser, defaults, buildAttachment, record, o
     setBusy("Waiting for the Microsoft sign-in…");
     try {
       setMailbox(await connectMailbox(appUser?.id));
+      setBlocked(false);
     } catch (err) {
+      setBlocked(popupWasBlocked(err));
       setError(outlookErrorText(err));
     } finally {
+      setBusy("");
+    }
+  }
+
+  async function connectOnThisPage() {
+    setError("");
+    setBusy("Going to Microsoft…");
+    try {
+      // The page leaves here; nothing after this line runs when it works.
+      await connectMailboxOnThisPage(appUser?.id);
+    } catch (err) {
+      setError(outlookErrorText(err));
       setBusy("");
     }
   }
@@ -190,6 +221,17 @@ function SendEmailModal({ heading, appUser, defaults, buildAttachment, record, o
                 <Mail size={13} /> Connect Outlook
               </button>
             </div>
+            {blocked && (
+              <div style={{ marginTop: 8 }}>
+                <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={connectOnThisPage} disabled={!!busy}>
+                  <Mail size={13} /> Sign in on this page instead
+                </button>
+                <div style={{ marginTop: 4 }}>
+                  The app goes to Microsoft and comes back. Open this document and press Email again afterwards; anything typed here is
+                  not kept.
+                </div>
+              </div>
+            )}
           </div>
         )}
         {mailbox && (

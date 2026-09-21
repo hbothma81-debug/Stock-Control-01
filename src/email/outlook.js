@@ -21,6 +21,13 @@ const SCOPES = ["Mail.Send"];
 // it, so it is thrown away as soon as a different app login asks for it.
 const OWNER_KEY = "stk-outlook-owner";
 
+// Set just before the whole page goes to Microsoft to sign in (the way in
+// for a browser that blocks the pop-up), holding the app login that asked.
+// Found again when the page comes back, so the returning sign-in is
+// finished and tied to that login. Kept per tab: another tab is not the
+// one that went.
+const PENDING_KEY = "stk-outlook-signing-in";
+
 export function emailIsSetUp() {
   return !!(CLIENT_ID && TENANT_ID);
 }
@@ -46,6 +53,17 @@ function getClient() {
         cache: { cacheLocation: "localStorage" },
       });
       await client.initialize();
+      // Microsoft's rule: a sign-in that left by the whole page must be
+      // finished before anything else is asked of the library. Costs
+      // nothing when no such sign-in is on its way back.
+      const pending = readPending();
+      try {
+        const back = await client.handleRedirectPromise();
+        if (back?.account && pending) writeOwner(pending);
+      } catch (err) {
+        returnProblem = outlookErrorText(err);
+      }
+      writePending("");
       return client;
     })().catch((err) => {
       clientPromise = null;
@@ -69,6 +87,31 @@ function writeOwner(id) {
   } catch {
     // A browser with storage switched off just asks for the sign-in again.
   }
+}
+
+function readPending() {
+  try {
+    return window.sessionStorage.getItem(PENDING_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+function writePending(id) {
+  try {
+    if (id) window.sessionStorage.setItem(PENDING_KEY, id);
+    else window.sessionStorage.removeItem(PENDING_KEY);
+  } catch {
+    // Without storage the page sign-in cannot be finished; the pop-up way still works.
+  }
+}
+
+// What went wrong with a page sign-in on its way back, said once in the
+// next send window that opens.
+let returnProblem = "";
+export function takeReturnProblem() {
+  const text = returnProblem;
+  returnProblem = "";
+  return text;
 }
 
 // The mailbox connected on this device for this app login, or null.
@@ -95,6 +138,25 @@ export async function connectMailbox(appUserId) {
   return { name: result.account?.name || "", address: result.account?.username || "" };
 }
 
+export function popupWasBlocked(err) {
+  return err?.errorCode === "popup_window_error" || err?.errorCode === "empty_window_error";
+}
+
+// The other way in, for a browser that will not open the pop-up (a phone,
+// a tablet, the app installed to a home screen): the whole page goes to
+// Microsoft and comes back to where it was. The app reloads, so whatever
+// was open has to be opened again; once per device, like the pop-up.
+export async function connectMailboxOnThisPage(appUserId) {
+  const client = await getClient();
+  writePending(String(appUserId || ""));
+  try {
+    await client.loginRedirect({ scopes: SCOPES, prompt: "select_account" });
+  } catch (err) {
+    writePending("");
+    throw err;
+  }
+}
+
 export async function disconnectMailbox() {
   const client = await getClient();
   await client.clearCache();
@@ -106,7 +168,7 @@ export function outlookErrorText(err) {
   const code = err?.errorCode || "";
   if (code === "user_cancelled") return "The Microsoft sign-in window was closed before it finished.";
   if (code === "popup_window_error" || code === "empty_window_error")
-    return "The browser blocked the Microsoft sign-in window. Allow pop-ups for this site, then press Connect Outlook again.";
+    return "The browser blocked the Microsoft sign-in window. Sign in on this page instead, or allow pop-ups for this site and press Connect Outlook again.";
   if (code === "interaction_in_progress") return "A Microsoft sign-in window is already open. Finish or close it first.";
   if (code === "timed_out" || code === "monitor_window_timeout") return "Microsoft's sign-in took too long. Try again.";
   return err?.message || String(err);
@@ -149,4 +211,11 @@ export async function sendOutlookMail(appUserId, payload) {
     // No readable answer: the number is all there is.
   }
   throw new Error(reason);
+}
+
+// A page sign-in on its way back is finished as the app loads, not when
+// somebody next opens a send window. Nothing is loaded otherwise. Kept at
+// the very end: everything it touches is declared above it.
+if (typeof window !== "undefined" && emailIsSetUp() && readPending()) {
+  getClient().catch(() => {});
 }
