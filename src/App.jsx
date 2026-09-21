@@ -12414,10 +12414,12 @@ export default function StockControl() {
       const there = listKey === "sections" ? list.some((x) => isSectionRow(x, name, grade)) : list.some((x) => sameText(x.name, name));
       if (!there) {
         const lend = listKey === "sections" ? list.find((x) => sameText(x.name, name) && x.factor) : null;
+        // The size's numbers go onto its row in a new material too.
+        const shaped = listKey === "sections" ? list.find((x) => sameText(x.name, name) && x.dimensions) : null;
         list = [
           ...list,
           listKey === "sections"
-            ? { name, grade, factor: lend ? lend.factor : 0, price: 0, type: effectiveSectionType || "" }
+            ? { name, grade, factor: lend ? lend.factor : 0, price: 0, type: effectiveSectionType || "", ...(shaped ? { dimensions: shaped.dimensions } : {}) }
             : { name, factor: 0, price: 0, ...extra },
         ];
       }
@@ -12480,6 +12482,116 @@ export default function StockControl() {
       </div>
     );
   }
+  // ---- Save price only, and a new size from the form (step 4, 21 Sep 2026) ----
+  // A price typed in the form's boxes is saved when the box is left. This
+  // button says so, needs nothing but the material, supplier and price,
+  // and leaves the form open for the next price with the supplier, type
+  // and material kept (his answer). Pressing it blurs the box first, and
+  // that save has not been drawn yet when the click arrives, so the check
+  // runs a moment later from the newest render (savePriceOnlyRef).
+  const [priceSavedNote, setPriceSavedNote] = useState("");
+  const savePriceOnlyRef = useRef(null);
+  savePriceOnlyRef.current = () => {
+    if (!formMat) {
+      setPriceSavedNote(form.mainCat === "structural" ? "Pick the section type, size and material first." : "Pick the material first.");
+      return;
+    }
+    const price = formUnitPrice();
+    if (!(price > 0)) {
+      setPriceSavedNote("Type a price first.");
+      return;
+    }
+    const unit = formMat.listKey === "sections" ? "/m" : "/kg";
+    const what = [formMat.name, formMat.grade].filter(Boolean).join(" ");
+    setPriceSavedNote(`Saved: ${effectiveSupplier || "no supplier"}, ${what}, R${price.toFixed(2)}${unit}. Nothing was added to stock.`);
+    setFormNewSize(null);
+    setForm((f) => ({
+      ...emptyForm,
+      mainCat: f.mainCat,
+      trackLength: f.trackLength,
+      sectionType: f.sectionType, customSectionType: f.customSectionType,
+      grade: f.grade, customGrade: f.customGrade,
+      supplier: f.supplier, customSupplier: f.customSupplier,
+    }));
+  };
+  // A size that is not on the list yet, made on the form from its type's
+  // fixed boxes as Stock Manager makes it, by the people who can open
+  // Stock Manager (his answers: both buttons, same people). null is shut.
+  const [formNewSize, setFormNewSize] = useState(null);
+  const formNewSizeShape = shapeForType(effectiveSectionType) || null;
+  function takeFormNewSize() {
+    const built = formNewSizeShape && formNewSize && buildSection(formNewSizeShape, formNewSize);
+    if (!built) return;
+    const grade = form.grade === CUSTOM ? "" : effectiveGrade;
+    setMaster((prev) => {
+      const list = prev.sections || [];
+      if (list.some((x) => isSectionRow(x, built.name, grade))) return prev;
+      const lend = list.find((x) => sameText(x.name, built.name) && x.factor);
+      return {
+        ...prev,
+        sections: [
+          ...list,
+          {
+            name: built.name, grade, price: 0, type: formNewSizeShape.label, dimensions: built.dimensions,
+            factor: lend ? lend.factor : sectionCalcKgPerM(built.dimensions, grade) || 0,
+          },
+        ],
+      };
+    });
+    // Filed under the type's own words, so the Section box offers it.
+    setForm((f) => ({ ...f, sectionType: formNewSizeShape.label, customSectionType: "", section: built.name, customSection: "" }));
+    setFormNewSize(null);
+  }
+  function formNewSizeBlock() {
+    if (editingId || !canAccessStockManager || !formNewSizeShape) return null;
+    if (!formNewSize) {
+      return (
+        <button
+          type="button"
+          className="stk-btn"
+          onClick={() => setFormNewSize({})}
+          style={{ marginTop: 6, padding: 0, border: "none", background: "transparent", color: C.muted, fontSize: 13, textDecoration: "underline", cursor: "pointer" }}
+        >
+          Size not on the list? New size
+        </button>
+      );
+    }
+    // The material first: a size made without one leaves a "no material"
+    // row in Sections beside the one its price then makes.
+    const needsMaterial = !effectiveGrade || form.grade === CUSTOM;
+    const built = needsMaterial ? null : buildSection(formNewSizeShape, formNewSize);
+    const onList = built && (master.sections || []).some((x) => sameText(x.name, built.name));
+    return (
+      <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ ...S.managerAddRow, flexWrap: "wrap", alignItems: "flex-end" }}>
+          {sectionBoxInputs(formNewSizeShape, formNewSize, (fn) => setFormNewSize((p) => fn(p || {})))}
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", fontSize: 13, color: C.muted }}>
+          <span style={{ flex: 1 }}>
+            {built ? (
+              <>
+                {onList ? "Already on the list: " : "Adds "}
+                <b>{built.name}</b>
+                {onList ? "" : " to Stock Manager → Sections"}.
+              </>
+            ) : needsMaterial ? (
+              "Pick the material grade above first, from the list."
+            ) : (
+              `Still needed: ${missingBoxes(formNewSizeShape, formNewSize).join(", ")}.`
+            )}
+          </span>
+          <button type="button" className="stk-btn" style={{ ...S.addBtn, opacity: built ? 1 : 0.5 }} disabled={!built} onClick={takeFormNewSize}>
+            <Check size={15} strokeWidth={2.5} />
+            Use this size
+          </button>
+          <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => setFormNewSize(null)} title="Cancel">
+            <X size={13} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const formPriceIsFor = editingPaidPrice
     ? canSeeValue
       ? "what was paid for this stock row only, not the price list,"
@@ -14955,6 +15067,8 @@ export default function StockControl() {
     setEditingId(null);
     setAllowDuplicate(false);
     setShowAdd(false);
+    setPriceSavedNote("");
+    setFormNewSize(null);
     setAddingServiceConsumableQty(null);
     setAddingItemForRequisition(false);
   }
@@ -21067,7 +21181,9 @@ export default function StockControl() {
                       />
                     </div>
                     {formSupplierField()}
-                    {effectiveGrade && form.thickness.trim() && effectiveSize && (
+                    {/* The plate price is per material, so its boxes show as soon
+                        as the material is known; R/sheet waits for a size. */}
+                    {effectiveGrade && (
                       <div style={{ marginTop: 10 }}>
                         {(() => {
                           const weight = plateWeight({ size: effectiveSize, thickness: form.thickness, grade: effectiveGrade, qty: 1 });
@@ -21145,7 +21261,7 @@ export default function StockControl() {
                       />
                     </div>
                     {formSupplierField()}
-                    {effectiveGrade && form.diameter.trim() && (
+                    {effectiveGrade && (
                       <div style={{ marginTop: 10 }}>
                         {(() => {
                           const d = parseFloat(form.diameter) || 0;
@@ -21192,6 +21308,7 @@ export default function StockControl() {
                       onCustomChange={(v) => setForm({ ...form, customSection: v })}
                       placeholder="e.g. 50x50x5mm"
                     />
+                    {formNewSizeBlock()}
                     {formSupplierField()}
                     {effectiveSection && (
                       <div style={{ marginTop: 10 }}>
@@ -21474,6 +21591,20 @@ export default function StockControl() {
             >
               {editingId ? "Save changes" : allowDuplicate ? "Add duplicate" : "Add to stock"}
             </button>
+            {/* Plate, sections and bar: the price alone, no stock added. */}
+            {!editingId && ["plate", "structural", "cncBar"].includes(form.mainCat) && (
+              <>
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={{ ...S.submitBtn, marginTop: 8, background: "transparent", color: C.text, border: `1px solid ${C.border}` }}
+                  onClick={() => setTimeout(() => savePriceOnlyRef.current(), 0)}
+                >
+                  Save price only
+                </button>
+                {priceSavedNote && <div style={{ ...S.roleHint, marginTop: 6 }}>{priceSavedNote}</div>}
+              </>
+            )}
           </form>
         </div>
       )}
