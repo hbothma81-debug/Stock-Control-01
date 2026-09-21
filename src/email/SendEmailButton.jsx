@@ -306,7 +306,7 @@ function SendEmailModal({ heading, appUser, defaults, buildAttachment, attachmen
         {(defaults.suggestions || []).length === 0 && !to.trim() && (
           <div style={S.roleHint}>
             {partyWord === "customer"
-              ? "No email address is saved for this customer. Type one here; the app remembers where this customer's last invoice went. Contacts are added under Stock Manager → Customers."
+              ? "No email address is saved for this customer. Type one here, and the window opens with it next time for this customer. Contacts are added under Stock Manager → Customers."
               : "No email address is saved for this supplier. Type one here; add it under Stock Manager → Suppliers to have it filled in next time."}
           </div>
         )}

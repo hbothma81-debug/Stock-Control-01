@@ -105,6 +105,7 @@ import { poEmailDefaults } from "./email/emailRules.js";
 import { emailIsSetUp } from "./email/outlook.js";
 import { sentEmailsFor } from "./email/sentEmails.js";
 import { SAGE_INVOICE, invoiceWindowDefaults, jobFileAttachment } from "./email/invoiceEmail.js";
+import { DELIVERY_NOTE, deliveryNoteWindowDefaults, deliveryNoteAttachment } from "./email/deliveryNoteEmail.js";
 import { programTitle } from "./laser/programTitle.js";
 import useLaserPrograms from "./laser/useLaserPrograms.js";
 import InfoRequestModal, { InfoAnswerModal } from "./InfoRequestModal.jsx";
@@ -11878,6 +11879,46 @@ export default function StockControl() {
     };
   }, [tab, mayEmailInvoice, invoiceDocs, emailSentTick]);
 
+  // A delivery note's Email button and the "Emailed ..." lines under it, for
+  // the note's row on Records -> Delivery Notes and its card on the job page.
+  // A note goes to a customer or to the supplier the work went out to, and
+  // both kinds can be emailed (Heinrich, 21 Sep 2026). The same people as
+  // the invoice, and for a supplier's note also whoever may raise a purchase
+  // order. `first` is any of the note's rows (one per item, one number).
+  // The lines are read when the row or card is drawn: a Records row draws
+  // its contents only once opened, so a shut book asks for nothing.
+  function renderDeliveryNoteEmail(job, first) {
+    const toSupplier = first?.direction === "to_supplier";
+    if (!first?.job_id || !(mayEmailInvoice || (toSupplier && canRaisePO))) return null;
+    return (
+      <>
+        <SendEmailButton
+          label={toSupplier ? "Email to supplier" : "Email to customer"}
+          title={`Send ${first.delivery_note_number} from your Outlook`}
+          style={{ ...S.reqActionBtnMuted, marginTop: 8, marginLeft: 8 }}
+          partyWord={toSupplier ? "supplier" : "customer"}
+          attachmentNote={`Attached: ${first.delivery_note_number}.pdf, the delivery note as it was filed.`}
+          appUser={{ id: currentUser?.id, name: roleLabel }}
+          getDefaults={() =>
+            deliveryNoteWindowDefaults({
+              note: first,
+              job,
+              supplier: toSupplier ? master.suppliers.find((sup) => sup.name === first.recipient_name) : undefined,
+              contacts: toSupplier ? [] : master.customerContacts?.[first.recipient_name] || master.customerContacts?.[job?.customer] || [],
+              company: master.companyDetails || {},
+              senderName: roleLabel,
+              appUserId: currentUser?.id,
+            })
+          }
+          buildAttachment={() => deliveryNoteAttachment(first)}
+          record={{ documentType: DELIVERY_NOTE, relatedId: first.delivery_note_number, jobId: first.job_id, partyName: first.recipient_name }}
+          onSent={() => setEmailSentTick((n) => n + 1)}
+        />
+        <SentEmailLines documentType={DELIVERY_NOTE} relatedId={first.delivery_note_number} refresh={emailSentTick} />
+      </>
+    );
+  }
+
   // "Email invoice to customer" for one uploaded invoice: a plain function,
   // not a component (one declared in here would remount on every render).
   // Used by both Records -> Invoicing cards and the job's Files tab, so the
@@ -19208,6 +19249,7 @@ export default function StockControl() {
                     >
                       <FileText size={13} /> View document
                     </button>
+                    {renderDeliveryNoteEmail(job, first)}
                   </RecordRow>
                 ))}
               </Section>
@@ -25789,6 +25831,7 @@ export default function StockControl() {
                         >
                           <FileText size={13} /> View document
                         </button>
+                        {renderDeliveryNoteEmail(jobDetail.job, first)}
                       </div>
                     );
                   })}
