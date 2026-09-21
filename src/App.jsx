@@ -93,6 +93,7 @@ import TypeToFind from "./TypeToFind.jsx";
 import TwoPriceBoxes from "./manager/TwoPriceBoxes.jsx";
 import NumberBox from "./manager/NumberBox.jsx";
 import SupplierPriceLines from "./manager/SupplierPriceLines.jsx";
+import { MATERIAL_CATS, landDelivery, rateFromLinePrice } from "./manager/receiving.js";
 import {
   pricesFor, setPrice as setSupplierPriceIn, removePrice as removeSupplierPriceIn, changeSupplier as changePriceSupplierIn,
   movePrices, dropPrices, priceFromRow, priceToRow, listPrice, sectionLines, cheapest as cheapestPrice, isStale as priceIsStale,
@@ -12434,22 +12435,28 @@ export default function StockControl() {
   // Under the price boxes: each supplier's price for the material, a tap
   // picks that supplier. Whoever sees the price boxes sees these.
   function formSupplierChoices(unit) {
-    if (editingPaidPrice || !formMat || formMat.lines.length === 0) return null;
-    const best = cheapestPrice(formMat.lines);
+    if (editingPaidPrice || !formMat) return null;
+    return supplierPriceChips(formMat.lines, unit, effectiveSupplier, (name) => setForm((f) => ({ ...f, supplier: name })));
+  }
+  // The chips themselves, shared with the requisition form. `thisRow` is
+  // the supplier of the stock row a requisition was opened from.
+  function supplierPriceChips(lines, unit, picked, onPick, thisRow = "") {
+    if (!lines || lines.length === 0) return null;
+    const best = cheapestPrice(lines);
     return (
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-        {[...formMat.lines]
+        {[...lines]
           .sort((a, b) => a.price - b.price)
           .map((p) => {
             const name = supplierNameOf(p.supplierId);
-            const on = sameText(name, effectiveSupplier);
+            const on = sameText(name, picked);
             const old = priceIsStale(p.setAt);
             return (
               <button
                 key={p.id}
                 type="button"
                 className="stk-btn"
-                onClick={() => setForm((f) => ({ ...f, supplier: name }))}
+                onClick={() => onPick(name)}
                 title={old ? "This price is older than 3 months." : `Use ${name}`}
                 style={{
                   padding: "4px 10px", borderRadius: 999, fontSize: 13, cursor: "pointer", background: "transparent",
@@ -12458,7 +12465,8 @@ export default function StockControl() {
               >
                 {name} R{Number(p.price).toFixed(2)}
                 {unit}
-                {best && best.id === p.id && formMat.lines.length > 1 ? " · cheapest" : ""}
+                {best && best.id === p.id && lines.length > 1 ? " · cheapest" : ""}
+                {thisRow && sameText(name, thisRow) ? " · this row" : ""}
               </button>
             );
           })}
@@ -13215,7 +13223,18 @@ export default function StockControl() {
     setEditingRequisitionId(null);
     setRequisitionQty("");
     setRequisitionNotes("");
-    setRequisitionSupplier(it.supplier || "");
+    // The cheapest supplier is filled in (his answer, 21 Sep 2026), unless
+    // the no-supplier price beats every supplier's; the row's own
+    // supplier when the material has no supplier prices.
+    const lines = reqTargetLines(it);
+    const best = cheapestPrice(lines);
+    const mat = stockItemMaterial(it);
+    const base = !mat ? 0 : mat.listKey === "sections" ? findSectionEntry(mat.name, mat.grade)?.price || 0 : findMaterialEntry(mat.listKey, mat.name)?.price || 0;
+    setRequisitionSupplier(best && !(base > 0 && base < best.price) ? supplierNameOf(best.supplierId) || it.supplier || "" : it.supplier || "");
+  }
+  // The price lines for the stock row a requisition is being made for.
+  function reqTargetLines(it) {
+    return reqSupplierLines({ mainCat: it.mainCat, itemRawName: it.name, itemGrade: it.grade });
   }
 
   // Corrects an existing pending request — same form, but updates the
@@ -13311,6 +13330,47 @@ export default function StockControl() {
     closeRequisition();
   }
 
+  // ---- Receiving and supplier prices (step 5, 21 Sep 2026) ----
+  // Writes the rows landDelivery changed or made into the stock list.
+  function applyLanded(next) {
+    const before = new Map((items || []).map((it) => [it.id, it]));
+    const changed = new Map(next.filter((it) => before.get(it.id) !== it).map((it) => [it.id, it]));
+    if (changed.size === 0) return;
+    setItems((prev) => {
+      const seen = new Set(prev.map((it) => it.id));
+      return [...prev.map((it) => changed.get(it.id) || it), ...[...changed.values()].filter((it) => !seen.has(it.id))];
+    });
+  }
+  // One sheet's or one bar's weight, for working a PO price back to R/kg.
+  function kgEachOf(it) {
+    if (!it) return 0;
+    if (it.mainCat === "plate") return plateWeight({ ...it, qty: 1 })?.perSheet || 0;
+    if (it.mainCat === "cncBar") return (cncBarWeight({ ...it, qty: 1 })?.perM || 0) * ((Number(it.length) || 0) / 1000);
+    return 0;
+  }
+  // A plate, section or bar row's material, as the supplier prices file it.
+  function stockItemMaterial(it) {
+    if (!it || !MATERIAL_CATS.includes(it.mainCat)) return null;
+    if (it.mainCat === "structural") return { listKey: "sections", name: it.name, grade: it.grade || "" };
+    const listKey = it.mainCat === "plate" ? "grades" : "cncGrades";
+    const hit = findMaterialEntry(listKey, it.grade);
+    return (hit ? hit.name : it.grade) ? { listKey, name: hit ? hit.name : it.grade, grade: "" } : null;
+  }
+  const supplierIdByName = (name) => (master?.suppliers || []).find((s) => sameText(s.name, name))?.id || "";
+  // A delivery's price becomes that supplier's list price, dated today
+  // even when it has not changed: a delivery proves the price is current.
+  function recordReceivedPrice(it, supplierName, rate) {
+    const mat = stockItemMaterial(it);
+    const supplierId = supplierIdByName(supplierName);
+    if (mat && supplierId && rate > 0) setSupplierPrice(mat.listKey, mat.name, mat.grade, supplierId, Math.round(rate * 100) / 100);
+  }
+  // The price lines for what a requisition asks for.
+  function reqSupplierLines(req) {
+    if (!master || !MATERIAL_CATS.includes(req.mainCat)) return [];
+    if (req.mainCat === "structural") return sectionLines(master.supplierPrices, req.itemRawName, req.itemGrade);
+    return materialSupplierLines(req.mainCat === "plate" ? "grades" : "cncGrades", req.itemGrade);
+  }
+
   function updateRequisition(id, fields) {
     setRequisitions((prev) => prev.map((r) => (r.id === id ? { ...r, ...fields } : r)));
   }
@@ -13328,12 +13388,18 @@ export default function StockControl() {
     if (!req) return;
     const qtyToAdd = parseFloat(req.qty);
     if (!isNaN(qtyToAdd) && qtyToAdd > 0) {
-      setItems((prev) => prev.map((it) => (it.id === req.itemId ? { ...it, qty: Number(it.qty || 0) + qtyToAdd } : it)));
+      // Plate, sections and bar land on the requisition's supplier's row,
+      // averaged at the requisition's price (src/manager/receiving.js).
+      // No PO price was agreed here, so the price list is left alone.
+      const landed = landDelivery(items, {
+        itemId: req.itemId, qty: qtyToAdd, supplier: req.supplier, rate: resolveReqPrice(req), newId: uid(), keepPaid: stockHasPaidPrice,
+      });
+      applyLanded(landed.items);
       setUsageLog((prev) => [
         ...prev,
         {
           id: uid(),
-          itemId: req.itemId,
+          itemId: landed.targetId || req.itemId,
           itemName: req.itemLabel,
           mainCat: req.mainCat,
           qty: qtyToAdd,
@@ -13614,6 +13680,8 @@ export default function StockControl() {
       return {
         description: li.description,
         orderedQty: li.qty,
+        // Per sheet, length or piece, as the PO has it: the received price.
+        unitPrice: Number(li.unitPrice) || 0,
         receivedQty: String(li.qty),
         linkedRequisitionId: linkedReq?.id || null,
         linkedItemId: linkedItem?.id || null,
@@ -13694,11 +13762,29 @@ export default function StockControl() {
       return;
     }
     const timestamp = new Date().toISOString();
-    receivingLines.forEach((line) => {
+    // Plate, sections and bar land on the PO supplier's row, averaged at
+    // the PO's price, and that price becomes the supplier's list price,
+    // dated today (src/manager/receiving.js; Heinrich, 21 Sep 2026: the
+    // PO price is the received price for now). Lines are worked through
+    // one copy of the stock list, so two lines for one row add up.
+    let working = items;
+    const landedLines = receivingLines.map((line) => {
+      const receivedQty = parseFloat(line.receivedQty) || 0;
+      if (receivedQty <= 0 || !line.linkedItemId) return line;
+      const from = working.find((it) => it.id === line.linkedItemId);
+      const rate = rateFromLinePrice(from, line.unitPrice, kgEachOf(from));
+      const landed = landDelivery(working, {
+        itemId: line.linkedItemId, qty: receivedQty, supplier: receivingPo.supplierName, rate, newId: uid(), keepPaid: stockHasPaidPrice,
+      });
+      working = landed.items;
+      if (from && rate > 0) recordReceivedPrice(from, receivingPo.supplierName, rate);
+      return { ...line, linkedItemId: landed.targetId || line.linkedItemId };
+    });
+    applyLanded(working);
+    landedLines.forEach((line) => {
       const receivedQty = parseFloat(line.receivedQty) || 0;
       if (receivedQty <= 0) return;
       if (line.linkedItemId) {
-        setItems((prev) => prev.map((it) => (it.id === line.linkedItemId ? { ...it, qty: Number(it.qty) + receivedQty } : it)));
         setUsageLog((prev) => [
           ...prev,
           {
@@ -13748,7 +13834,7 @@ export default function StockControl() {
           : p
       )
     );
-    allocateReceivedToJob(receivingPo, receivingLines, timestamp);
+    allocateReceivedToJob(receivingPo, landedLines, timestamp);
     closeReceiving();
   }
 
@@ -14386,6 +14472,10 @@ export default function StockControl() {
   // keeping instead. See ARCHIVE_STATUSES below.
   function resolveReqPrice(req) {
     if (!master) return 0;
+    // Its own supplier's price first; the cheapest when that supplier has
+    // none, or the requisition names nobody.
+    const own = req.supplier ? reqSupplierLines(req).find((p) => p.supplierId === supplierIdByName(req.supplier)) : null;
+    if (own && own.price > 0) return own.price;
     if (req.mainCat === "plate") return findPrice("grades", req.itemGrade);
     if (req.mainCat === "structural") return findSectionPrice(req.itemRawName, req.itemGrade);
     if (req.mainCat === "cncBar") return findPrice("cncGrades", req.itemGrade);
@@ -14395,6 +14485,18 @@ export default function StockControl() {
 
   function updateReqPrice(req, newPriceStr) {
     const price = parseFloat(newPriceStr) || 0;
+    // A price typed on a requisition that names a supplier is that
+    // supplier's price. Without one, or without the table, it is the
+    // no-supplier price below, as it always was.
+    const supplierId = req.supplier ? supplierIdByName(req.supplier) : "";
+    if (supplierId && Array.isArray(master?.supplierPrices) && MATERIAL_CATS.includes(req.mainCat)) {
+      const it = (items || []).find((i) => i.id === req.itemId);
+      const mat = stockItemMaterial(it || { mainCat: req.mainCat, name: req.itemRawName, grade: req.itemGrade });
+      if (mat) {
+        setSupplierPrice(mat.listKey, mat.name, mat.grade, supplierId, price);
+        return;
+      }
+    }
     // A material is stored by its short name when it has one ("SS304"),
     // so match either, the way findPrice reads it.
     const q = (req.itemGrade || "").toLowerCase();
@@ -27664,6 +27766,23 @@ export default function StockControl() {
                 onChange={setRequisitionSupplier}
                 emptyLabel="No supplier chosen yet"
               />
+              {/* Each supplier's price for this material; a tap picks one. What
+                  is delivered lands on that supplier's own stock row. */}
+              {(() => {
+                const lines = reqTargetLines(requisitionTarget);
+                if (lines.length === 0) return null;
+                const rowSupplier = requisitionTarget.supplier || "";
+                return (
+                  <>
+                    {supplierPriceChips(lines, requisitionTarget.mainCat === "structural" ? "/m" : "/kg", requisitionSupplier, setRequisitionSupplier, rowSupplier)}
+                    {requisitionSupplier && rowSupplier && !sameText(requisitionSupplier, rowSupplier) && (
+                      <div style={S.roleHint}>
+                        This row is {rowSupplier}'s. Stock from {requisitionSupplier} will land on {requisitionSupplier}'s own row when it is received.
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
             <div style={{ marginTop: 10 }}>
               <label style={S.label}>Notes (optional)</label>
