@@ -3519,3 +3519,64 @@ commits under their old numbers, identical to what is live.
   tests, a small `<thing>Email.js` beside `invoiceEmail.js`, and
   `SendEmailButton` next to that document's View button.
 - The invoice request to accounts only if he raises it.
+
+---
+
+## 21 Sep 2026 — Jobs page conversation: the whole queue pushed on Heinrich's word (`700aca5..5dc2c50`), with a save point
+
+**For Planning's record of pushes, and for the Supplier prices, Email and
+Force complete conversations: your queued commits are live.** Heinrich, in
+this conversation: "check that everything is ready and push everything
+outstanding from here. make a save point if something goes wrong. check
+everything". 24 commits were queued; one was mine (`07bc651`, the column
+check fix). The rest, not already live in substance: `9c669e6` Force
+complete and Mark whole job urgent; Supplier prices steps 1–5 (`8b241be`,
+`7b725b5`, `d6f5b1d`, `2165605`, `5dc2c50`); `ed8f426` the paid price; the
+Email wrap-up notes.
+
+**Save point:** tag `savepoint-2026-09-21-live-700aca5`, pushed to GitHub,
+is exactly what was live before. To go back: `git push origin
++savepoint-2026-09-21-live-700aca5^{commit}:main` is a forced rewrite and
+needs Heinrich's word; the gentler way is Vercel's own "Redeploy" of the
+700aca5 deployment, or `git revert` of the range. Neither database change
+(the prices table, the paid price column) needs undoing for the old code:
+it ran beside both already.
+
+**Checked before the push**
+
+- Live tip and queue read as their own step, twice, unmoved.
+- Database, with the fixed check beside a known and a made-up column:
+  `master_supplier_prices` and `stock_items.paid_price` answer on **live and
+  practice**. (`jobs.invoiced_amount`: live yes, practice no.)
+- Clean clone at `5dc2c50`: 267 tests, names check 0 problems, build.
+  `CHECK-unchecked-writes.cjs` lists 4 writes that do not look at their
+  result: the same 4 are in what was already live, the queue adds none.
+- **Force complete, never tried on a screen by its author, tried on
+  practice (JOB-0005), read from the database:** the two buttons show under
+  Status; Mark whole job urgent set the three open stages urgent and
+  Unmark cleared them; Force complete asked its one question naming the
+  three stages, closed them as "Test (forced)", the job went to Complete,
+  no second invoice request was made, the buttons went away.
+- **The paid price, never tried with its column, tried on practice:** the
+  stock screens load and value; an opened row shows "R425.75/m"; Add 1 and
+  Use 1 on that row both saved (3 → 4 → 3) with the paid price untouched
+  and the usage log written.
+- Every main screen opened on the queue's code (Jobs, Production, both
+  lasers, six Stock screens, Procurement's three, Records' five, Stock
+  Manager → Sections with its "Whose price?" box): no console errors, no
+  failed requests. The one warning, a button inside a button in `ReqFlag`,
+  is in what was already live and untouched by the queue.
+
+**After the push:** found live by "Force complete", "Mark whole job urgent",
+"Whose price?", "Save price only" and the two Invoicing strings (bundle
+`App-6v8LMDr_.js`). Live opened signed in: Jobs, Production and Structural
+Steel load, header value R 5,993,336, no errors, no failed requests.
+
+**Still not tried by anyone, from the authors' own notes:** closing
+Invoicing with a stage open as somebody who may not force; Request invoice
+on a Production card with a stage open; a forced job with a program still
+to cut; the plate and CNC bar add-stock and requisition forms (practice has
+no sheet sizes or bar grades); receiving onto an existing row at another
+price (the average), the one-tap received flag, a PO with a job; a login
+without Stock Manager on "New size". Practice JOB-0005 is now Complete
+(forced) from this check.
