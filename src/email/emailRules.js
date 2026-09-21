@@ -89,6 +89,40 @@ export function poEmailDefaults({ po, supplier, company, senderName }) {
   };
 }
 
+// Where this customer's last invoice went, from their sent_emails rows
+// (any order): the To addresses of the newest one. Nothing yet gives [].
+export function lastSentTo(rows) {
+  const newest = [...(rows || [])].sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
+  return (newest?.to_addresses || []).filter(isEmail);
+}
+
+// What the send window opens with for the invoice accounts uploaded from
+// Sage. The app does not know which of a customer's contacts gets the
+// invoices (often a creditors address, not the buyer), so To starts with
+// wherever this customer's last invoice went; the first time it is empty
+// and the contacts are one-press buttons. The sales rep is offered for Cc
+// by a button, never put there unasked (Heinrich, 21 Sep 2026).
+export function invoiceEmailDefaults({ job, contacts, lastTo, salesRep, ownAddress, company, senderName }) {
+  const known = knownAddresses({ name: "", email: "", contacts });
+  const to = (lastTo || []).filter(isEmail);
+  const number = String(job.invoice_number || "").trim();
+  const po = String(job.customer_po || "").trim();
+  const subject = [
+    number ? `Invoice ${number}` : `Invoice for ${job.job_number}`,
+    po ? `your order ${po}` : "",
+    number ? job.job_number : "",
+    company?.name || "",
+  ]
+    .filter(Boolean)
+    .join(" - ");
+  const lines = ["Good day,", "", number ? `Please find attached our invoice ${number}.` : "Please find our invoice attached."];
+  if (po) lines.push(`Your order number: ${po}`);
+  lines.push(`Our reference: ${job.job_number}`);
+  lines.push("", signOff(senderName, company));
+  const rep = salesRep && isEmail(salesRep.email) && String(salesRep.email).toLowerCase() !== String(ownAddress || "").toLowerCase() ? [{ name: salesRep.name || "Sales rep", email: salesRep.email }] : [];
+  return { to: to.join("; "), cc: "", subject, body: lines.join("\n"), suggestions: known, ccSuggestions: rep };
+}
+
 // Who the email really goes to. On the practice copy that is the sender
 // alone, whatever the boxes say.
 export function actualRecipients({ to, cc, toSelf, ownAddress }) {
@@ -140,5 +174,5 @@ export function whenSA(iso) {
 export function sentLine(row) {
   const when = whenSA(row.sent_at);
   const to = (row.to_addresses || []).join(", ") || "nobody";
-  return `Emailed ${when} to ${to}${row.sent_by ? ` by ${row.sent_by}` : ""}${row.test_mode ? " (practice: went to the sender only)" : ""}`;
+  return `Emailed ${when} to ${to}${row.sent_by ? ` by ${row.sent_by}` : ""}${row.test_mode ? " (practice: it went to the sender only)" : ""}`;
 }
