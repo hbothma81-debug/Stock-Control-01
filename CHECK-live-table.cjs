@@ -58,11 +58,17 @@ async function get(url) {
 
   let allThere = true;
   for (const t of tables) {
-    const r = await fetch(url + "/rest/v1/" + t + "?select=*&limit=1", {
+    // A bare table name asks for any one row. "jobs?select=invoiced_amount"
+    // asks for a column: it keeps its own select, and a column that is not
+    // there answers 400. Until 21 Sep 2026 "?select=*" was added to that
+    // too, which made a broken address that answered 400 whether the column
+    // existed or not, and was read as "missing" for four days.
+    const asksColumn = t.includes("?");
+    const r = await fetch(url + "/rest/v1/" + t + (asksColumn ? "&limit=1" : "?select=*&limit=1"), {
       headers: { apikey: key, Authorization: "Bearer " + key },
     });
     const body = await r.text();
-    const there = r.status !== 404;
+    const there = r.status !== 404 && !(asksColumn && r.status === 400);
     if (!there) allThere = false;
     console.log("  " + (there ? "yes  " : "NO   ") + t + "   (" + r.status + ")" + (there ? "" : "  " + body.slice(0, 120)));
   }

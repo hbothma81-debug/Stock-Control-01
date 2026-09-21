@@ -3161,3 +3161,28 @@ types a section is already filed under, and live has no round tube size.
   list, used by the filter only.
 - CLAUDE.md gained the rule above and one line under "Checking what is
   live": live's bundle name is never the local build's.
+
+---
+
+## 21 Sep 2026 — Jobs page: `invoiced_amount` is on live; the column check was broken
+
+- Heinrich ran `setup-jobs-invoiced-amount.sql` on **live** (his paste of its
+  closing check: 20 invoiced jobs, every amount blank, as the file says they
+  would be). Confirmed with the fixed check below: 200. **Not on practice
+  yet** (asked through the app's own connection: "column
+  jobs.invoiced_amount does not exist"), so the box still cannot be tried
+  there first. Announced for the other conversations: `jobs` has a new
+  column `invoiced_amount` (number, blank or 0 and up) on live.
+- `CHECK-live-table.cjs` added `?select=*&limit=1` to a column check too
+  (`"jobs?select=invoiced_amount"`), which made a broken address answering
+  400 whether the column existed or not. **Every "400, not on live" I
+  reported for this column on 17, 18 and 19 Sep proved nothing**; so may any
+  other conversation's column check on live before today. Fixed: a column
+  check keeps its own select and a missing column reads NO with the
+  database's message. Proved beside a known column (200) and a made-up one
+  (400). CLAUDE.md says so under "Checking what is live".
+- On live now: Mark as Invoiced shows the amount box (excluding VAT,
+  required, 0 allowed, filled in from the job's requests). The jobs invoiced
+  up to 18 Sep have no amount and count at what they were quoted at; the
+  Invoiced box says how many. Nobody has made a real Mark as Invoiced with
+  an amount yet, on either database.
