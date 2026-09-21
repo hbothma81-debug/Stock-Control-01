@@ -112,6 +112,15 @@ import {
 import { JOBS_ORDER_KEY, JOB_ORDERS, isJobOrder, sortJobs } from "./jobs/jobOrder.js";
 import { jobMatchesSearch, poMatchesSearch, poLabel } from "./jobs/jobSearch.js";
 import { closingSendsInvoiceRequest, showsRequestInvoiceButton } from "./jobs/invoiceOnClose.js";
+import {
+  mayForceComplete,
+  forcedBy,
+  openStages,
+  forceWarningText,
+  forceRefusedText,
+  forceHistoryText,
+  wholeJobUrgent,
+} from "./jobs/forceComplete.js";
 import { invoicingMatchesSearch, invoicingMatchesPicks, inDayRange } from "./jobs/invoicingSearch.js";
 import {
   stageReadiness, readinessLabel, readinessGroup, jobGroupAtStage,
@@ -7197,20 +7206,186 @@ export default function StockControl() {
     }
   }
 
-  async function toggleJobProcessComplete(process, job) {
+  // opts.forceAccepted: the caller has already shown the warning about the
+  // job's other open stages and been told to carry on (Request invoice puts
+  // it in its own question, so nobody answers two pop-ups).
+  async function toggleJobProcessComplete(process, job, opts = {}) {
     if (!supabase || !job) return;
     // A second tap while the first is still saving is ignored, or both would
     // write, notify the rep twice and settle the job twice.
     if (TICKING_STAGE_IDS.has(process.id)) return;
     TICKING_STAGE_IDS.add(process.id);
     try {
-      return await toggleJobProcessCompleteOnce(process, job);
+      return await toggleJobProcessCompleteOnce(process, job, opts);
     } finally {
       TICKING_STAGE_IDS.delete(process.id);
     }
   }
 
-  async function toggleJobProcessCompleteOnce(process, job) {
+  // Every stage on the job, read fresh: the job's own in flow order, then
+  // the re-cut runs, which the Jobs list row does not show at all.
+  async function stagesOnJobInOrder(job) {
+    const { data, error } = await supabase.from("job_processes").select("*").eq("job_id", job.id);
+    if (error) throw error;
+    const all = data || [];
+    return [...inFlowOrder(all.filter((p) => !p.shortage_id), job), ...inFlowOrder(all.filter((p) => p.shortage_id), job)];
+  }
+
+  // Programs still to cut that carry this job, for the force warning. Never
+  // stops a force (Heinrich, 21 Sep 2026: "someone could have found the lost
+  // parts"), so a failed read is logged and the warning goes without it.
+  async function uncutProgramsForJob(jobId) {
+    try {
+      const { data: links, error } = await supabase.from("laser_program_jobs").select("program_id").eq("job_id", jobId);
+      if (error) throw error;
+      const ids = [...new Set((links || []).map((l) => l.program_id))];
+      if (ids.length === 0) return [];
+      const { data, error: programsError } = await supabase
+        .from("laser_programs")
+        .select("program_number, is_complete, is_cancelled")
+        .in("id", ids);
+      if (programsError) throw programsError;
+      return (data || []).filter((p) => !p.is_cancelled && !p.is_complete).map((p) => p.program_number);
+    } catch (err) {
+      console.error("Could not read the job's laser programs for the force warning:", err);
+      return [];
+    }
+  }
+
+  // The question before a force (src/jobs/forceComplete.js). True to carry
+  // on. Somebody who may not force is told what is open and who can.
+  async function confirmForce(job, open, { withInvoicing = false } = {}) {
+    if (!mayForceComplete({ isAdmin, isSalesPerson: profile?.isSalesPerson })) {
+      alert(forceRefusedText({ jobNumber: job.job_number, open, salesRep: job.sales_rep }));
+      return false;
+    }
+    const ids = new Set(open.map((p) => p.id));
+    const reserved = (allocationsList || [])
+      .filter((a) => ids.has(a.process_id) && a.status !== "released" && Number(a.qty_allocated) - Number(a.qty_used) > 0)
+      .map((a) => `${a.item_name}: ${Number(a.qty_allocated) - Number(a.qty_used)} still reserved`);
+    return window.confirm(
+      forceWarningText({
+        jobNumber: job.job_number,
+        open,
+        actor: roleLabel,
+        withInvoicing,
+        uncutPrograms: await uncutProgramsForJob(job.id),
+        reserved,
+      })
+    );
+  }
+
+  // Closes the given open stages in one go, as "<name> (forced)". Only rows
+  // still open are touched, so two people forcing at once close each stage
+  // once. A re-cut whose run is now all done is settled by the rule every
+  // other tick uses (refreshShortageStatus). One History line, one notice to
+  // the sales rep. Does not settle the job: the caller does, last.
+  async function closeStagesByForce(job, open) {
+    try {
+      const { data: closed, error } = await supabase
+        .from("job_processes")
+        .update({ is_complete: true, completed_by: forcedBy(roleLabel), completed_at: new Date().toISOString() })
+        .in("id", open.map((p) => p.id))
+        .eq("is_complete", false)
+        .select("id, process_name, shortage_id");
+      if (error) throw error;
+      const done = open.filter((p) => (closed || []).some((c) => c.id === p.id));
+      if (done.length === 0) return true;
+
+      for (const shortageId of new Set(done.map((p) => p.shortage_id).filter(Boolean))) {
+        const { data: sh, error: shError } = await supabase.from("shortages").select("*").eq("id", shortageId).single();
+        if (shError) throw shError;
+        if (sh) await refreshShortageStatus(sh);
+      }
+
+      await logJobEvent(job.id, "Force completed", forceHistoryText(done));
+      if (job.sales_rep) {
+        await sendNotifications({
+          job_id: job.id,
+          job_number: job.job_number,
+          sales_rep: job.sales_rep,
+          message: `${job.job_number} (${job.customer || "no customer"}) force completed by ${roleLabel}. ${forceHistoryText(done)}`,
+        });
+      }
+      return true;
+    } catch (err) {
+      console.error("Failed to force the open stages complete:", err);
+      alert("That didn't save — check your connection and try again.");
+      return false;
+    }
+  }
+
+  // The Force complete button on the job page (Overview, under Status):
+  // every open stage closed, the invoice request sent first when the job has
+  // an Invoicing stage (closing a job hands it to accounts, and a job with no
+  // Invoicing stage gets no request by itself: src/jobs/invoiceOnClose.js),
+  // then the job completes by its usual rule.
+  async function forceCompleteJob(job) {
+    if (!supabase || !job) return;
+    if (TICKING_STAGE_IDS.has(job.id)) return;
+    TICKING_STAGE_IDS.add(job.id);
+    try {
+      let open;
+      let hasInvoicing;
+      try {
+        const all = await stagesOnJobInOrder(job);
+        open = openStages(all);
+        // Ticked already or not: JOB-0055's Invoicing was ticked by hand
+        // before a tick sent anything, so its request was still owed.
+        hasInvoicing = all.some((p) => closingSendsInvoiceRequest(p));
+      } catch (err) {
+        console.error("Could not read the job's stages before forcing it complete:", err);
+        alert("Couldn't load this job's stages — check your connection and try again.");
+        return;
+      }
+      if (open.length === 0) {
+        await settleJobAfterTick(job.id);
+        await refreshJobDetail();
+        return;
+      }
+      if (!(await confirmForce(job, open, { withInvoicing: open.some((p) => closingSendsInvoiceRequest(p)) }))) return;
+      if (hasInvoicing && !(await sendInvoiceRequestBeforeClosing(job))) return;
+      if (!(await closeStagesByForce(job, open))) return;
+      // Clears the laser's queue number and settles the job, as a hand tick
+      // of Nesting or Laser does.
+      await afterLaserStagesDone([job.id]);
+      if (jobDetail?.job.id === job.id) await refreshJobDetail();
+      if (productionQueue !== null) await fetchProductionQueue();
+      if (laserData !== null) await fetchLaserData();
+      fetchShortages();
+      fetchJobs();
+    } finally {
+      TICKING_STAGE_IDS.delete(job.id);
+    }
+  }
+
+  // The whole job urgent in one press, instead of stage by stage: every
+  // open stage, re-cut runs included, since urgent lives on the stage and
+  // that is what the Production cards and the Jobs list read.
+  async function setWholeJobUrgent(job) {
+    if (!supabase || !job) return;
+    try {
+      const { data, error } = await supabase.from("job_processes").select("id, is_complete, is_urgent").eq("job_id", job.id);
+      if (error) throw error;
+      const plan = wholeJobUrgent(data || []);
+      if (!plan || plan.ids.length === 0) return;
+      const { error: upError } = await supabase
+        .from("job_processes")
+        .update({ is_urgent: plan.on })
+        .in("id", plan.ids)
+        .eq("is_complete", false);
+      if (upError) throw upError;
+      await logJobEvent(job.id, plan.on ? "Marked urgent" : "Urgent removed", `Whole job, ${plan.ids.length} open stage${plan.ids.length === 1 ? "" : "s"}`);
+      if (jobDetail?.job.id === job.id) await refreshJobDetail();
+      if (productionQueue !== null) fetchProductionQueue();
+      if (laserData !== null) fetchLaserData();
+    } catch (err) {
+      console.error("Failed to mark the whole job urgent:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  async function toggleJobProcessCompleteOnce(process, job, opts = {}) {
     const nowComplete = !process.is_complete;
 
     // The job's own plate packer is not ticked done while the laser still has
@@ -7274,9 +7449,34 @@ export default function StockControl() {
       }
     }
 
+    // Closing Invoicing with other stages still open, a re-cut's run
+    // included, used to leave the job on Active with every chip green and
+    // accounts never seeing it (JOB-0055). Now it warns, names them, and
+    // carrying on closes them with it (src/jobs/forceComplete.js; Heinrich,
+    // 21 Sep 2026). Whichever screen the tick came from.
+    let closeWithInvoicing = [];
+    if (nowComplete && closingSendsInvoiceRequest(process)) {
+      try {
+        closeWithInvoicing = openStages(await stagesOnJobInOrder(job), process);
+      } catch (err) {
+        console.error("Could not read the job's other stages before closing Invoicing:", err);
+        alert("That didn't save — check your connection and try again.");
+        return;
+      }
+      if (closeWithInvoicing.length > 0 && !opts.forceAccepted && !(await confirmForce(job, closeWithInvoicing, { withInvoicing: true }))) return;
+    }
+
     // Closing Invoicing hands the job to accounts, so the request goes
     // first, whichever screen the tick came from (src/jobs/invoiceOnClose.js).
     if (nowComplete && closingSendsInvoiceRequest(process) && !(await sendInvoiceRequestBeforeClosing(job))) return;
+    if (closeWithInvoicing.length > 0) {
+      if (!(await closeStagesByForce(job, closeWithInvoicing))) return;
+      // A forced Nesting or Laser has served the laser's queue number, as a
+      // hand tick of either does.
+      if (closeWithInvoicing.some((p) => !p.shortage_id && (isPlateNestingProcess(p.process_name) || isProgramLaserProcess(p.process_name)))) {
+        await afterLaserStagesDone([job.id]);
+      }
+    }
 
     try {
       const { data: changedRows, error } = await supabase
@@ -7344,6 +7544,12 @@ export default function StockControl() {
       // Waited for, so the tick stays guarded until the screen shows it.
       if (jobDetail?.job.id === job.id) await refreshJobDetail();
       if (productionQueue !== null) await fetchProductionQueue();
+      // A force may have closed a re-cut's run, which the laser screens and
+      // the Shortages screen hold their own copies of.
+      if (closeWithInvoicing.some((p) => p.shortage_id)) {
+        fetchShortages();
+        if (laserData !== null) await fetchLaserData();
+      }
     } catch (err) {
       console.error("Failed to update process:", err);
       alert("Couldn't update that — check your connection and try again.");
@@ -8997,7 +9203,19 @@ export default function StockControl() {
     const withSupplier = billableLines(quoteItems).filter(
       (it) => it.item_status === "out_external" && Number(it.qty) - Number(it.qty_invoiced) > 0
     ).length;
-    if (eligible.length > 0) {
+    // Other stages still open: the one question is the force warning, which
+    // says the request goes and Invoicing is ticked, so nobody answers two
+    // pop-ups (src/jobs/forceComplete.js).
+    let others = [];
+    try {
+      others = openStages(await stagesOnJobInOrder(job), process);
+    } catch (err) {
+      console.error("Could not read the job's other stages before requesting the invoice:", err);
+      alert("Couldn't load this job's stages — check your connection and try again.");
+      return;
+    }
+    if (others.length > 0 && !(await confirmForce(job, others, { withInvoicing: true }))) return;
+    if (eligible.length > 0 && others.length === 0) {
       const ok = window.confirm(
         `Send ${job.job_number} to accounts?\n\n` +
           `This makes the invoice request for the ${eligible.length} line${eligible.length === 1 ? "" : "s"} not yet invoiced, ` +
@@ -9015,7 +9233,9 @@ export default function StockControl() {
         return;
       }
     }
-    await toggleJobProcessComplete(process, job);
+    // With other stages open the tick sends the request itself, after the
+    // warning above and before anything is closed (toggleJobProcessComplete).
+    await toggleJobProcessComplete(process, job, { forceAccepted: others.length > 0 });
     if (eligible.length === 0) {
       alert(`Invoicing ticked on ${job.job_number}. No request was made: nothing on this job is left to request.`);
     }
@@ -23738,6 +23958,41 @@ export default function StockControl() {
                   <option value="complete">Complete</option>
                   <option value="cancelled">Cancelled</option>
                 </select>
+                {/* The whole job in one press, while any stage is open, a
+                    re-cut's run included: urgent on every open stage, and
+                    every open stage closed (src/jobs/forceComplete.js). */}
+                {(jobDetail.job.status === "in_progress" || jobDetail.job.status === "complete") &&
+                  (() => {
+                    const open = openStages(jobDetail.processes);
+                    const urgent = wholeJobUrgent(jobDetail.processes);
+                    if (open.length === 0) return null;
+                    return (
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                        {urgent && (
+                          <button
+                            type="button"
+                            className="stk-btn"
+                            style={urgent.on ? S.reqActionBtnAlert : S.reqActionBtnAlertOn}
+                            title={`${urgent.urgentCount} of ${urgent.openCount} open stage${urgent.openCount === 1 ? "" : "s"} marked urgent`}
+                            onClick={() => setWholeJobUrgent(jobDetail.job)}
+                          >
+                            {urgent.label}
+                          </button>
+                        )}
+                        {mayForceComplete({ isAdmin, isSalesPerson: profile?.isSalesPerson }) && (
+                          <button
+                            type="button"
+                            className="stk-btn"
+                            style={S.reqActionBtnMuted}
+                            title="Marks every open stage complete, after a warning that names them"
+                            onClick={() => forceCompleteJob(jobDetail.job)}
+                          >
+                            <Check size={13} /> Force complete ({open.length} stage{open.length === 1 ? "" : "s"} open)
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
                 {jobDetail.job.status === "complete" && (
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
                     {(isAdmin || !!profile?.canManageInvoicing) && (
