@@ -3243,3 +3243,61 @@ requests ... I think one document is not there". He was right.
   separate saves, so a page closed mid-request leaves a request whose later
   lines are unmarked, and "everything left" sends those again. The cure is
   one database function doing both (SQL on both databases); not planned yet.
+
+---
+
+## 21 Sep 2026 — Email (a new conversation): purchase orders by Outlook; pushed on Heinrich's word (`65f2aa7..3accf60`)
+
+A new conversation, "Email", owning `src/email` and the Send button on each
+document that gets one. The rule text is in `CLAUDE.md` under "Decisions
+already made" (Emailing a document); the one-off Microsoft setup is
+`docs/EMAIL-SETUP-MICROSOFT.md`.
+
+- **Pushed on his word ("push from here"), alone, ahead of the queue:**
+  three commits cherry-picked onto the live tip in a scratch clone (fresh
+  install, 226 tests, names check, build) and pushed as `3accf60`: the setup
+  document, step 1 (a purchase order emailed to the supplier from the
+  sender's own Microsoft 365 mailbox, recorded in `sent_emails`), and the
+  way in for a browser that blocks Microsoft's pop-up ("Sign in on this
+  page instead"). Live went from `App-Br_WaXlq.js` to `App-BaSeTstq.js`;
+  the live page loads with no console errors and
+  `/outlook-signin.html` answers. Merged back into the shared branch clean
+  (the same commits sit in the queue under their old numbers `7d5a30e`,
+  `5a4593d`, `f081d99`, identical to live).
+- **Held back, not mine, still not live:** `07bc651` (the
+  `CHECK-live-table.cjs` column check fix), `9c669e6` (Force complete and
+  Mark whole job urgent), `8b241be` and `7b725b5` (Supplier prices, steps 1
+  and 2), and the handover commit `f245239`. Heinrich has been told.
+- **Inert on live for now.** No Email button is drawn until
+  `VITE_MS_CLIENT_ID` and `VITE_MS_TENANT_ID` are in Vercel's environment
+  variables and a deploy has run after that; checked on live, signed in: an
+  opened purchase order shows View PDF, Copy, Cancel and nothing new. He
+  adds the two values himself (an account setting); the values are in the
+  practice `.env`.
+- **Database:** new table `sent_emails` (`setup-sent-emails.sql`, read and
+  add only), on practice and live, checked 21 Sep beside a made-up table
+  and column. His first paste on live had not landed; the second did.
+- **Build change others should know:** `vite.config.js` now builds two
+  pages (`index.html` and `outlook-signin.html`, the page Microsoft's
+  sign-in comes back to). The app's entry keeps the name `index` because
+  `CHECK-what-is-live.cjs` and `CHECK-live-table.cjs` look for
+  `assets/index-….js`. New dependency `@azure/msal-browser` 5.22, loaded
+  only when a send window opens.
+- **Proven on practice, 21 Sep 11:43, from PO-0002 in the Browser pane:**
+  the page sign-in there and back (IT first had to correct the four return
+  addresses in Entra, which now end in `/outlook-signin.html`), a real send
+  answered 202 by Microsoft, addressed to the sender alone although To held
+  a made-up supplier (off the live address every email goes to the sender
+  and says PRACTICE), the `sent_emails` row read back, the "Emailed 21 Sep
+  11:43 to … by Test" line on the order, and both copies found in his
+  mailbox, Inbox and Sent Items, with the PDF.
+- **Not tried by anybody:** the pop-up way in (the Browser pane blocks
+  every pop-up; his own Chrome does not), a phone, a second app login on
+  the same device, a supplier with saved addresses on a real order, and
+  anything at all on live, where an email really goes to the To box.
+- **Next, in his order:** Send on the uploaded Sage invoice (to the
+  customer, for sales and accounts; a PDF over 3 MB will need Microsoft's
+  upload session), Send on the app's delivery note, then the invoice
+  request emailed to an accounts address kept in a settings box, only when
+  the person pressing has a mailbox connected. The invoice request never
+  goes to a customer.
