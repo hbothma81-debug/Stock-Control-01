@@ -12,6 +12,7 @@ import {
   sentLine,
   lastSentTo,
   invoiceEmailDefaults,
+  deliveryNoteEmailDefaults,
 } from "./emailRules.js";
 
 test("only the live site sends to the real people", () => {
@@ -183,4 +184,58 @@ test("a Sage invoice's email: no invoice number yet, and the rep who is sending 
   assert.ok(!/undefined|null/.test(d.body + d.subject));
   assert.deepEqual(d.ccSuggestions, []);
   assert.deepEqual(d.suggestions, []);
+});
+
+test("a customer's delivery note: To empty the first time, the order number in the subject, no item list", () => {
+  const d = deliveryNoteEmailDefaults({
+    note: { delivery_note_number: "DN-0042", direction: "to_customer", recipient_name: "Greenzone" },
+    job: { job_number: "JOB-0088", customer_po: "18074", customer: "Greenzone" },
+    supplier: undefined,
+    contacts: [{ name: "Stores", email: "stores@greenzone.co.za" }],
+    lastTo: [],
+    salesRep: { name: "Mark", email: "mark@ersupplies.co.za" },
+    ownAddress: "drawings@ersupplies.co.za",
+    company: { name: "East Rand Supplies", phone: "011 000 0000" },
+    senderName: "Heinrich",
+  });
+  assert.equal(d.to, "");
+  assert.deepEqual(d.suggestions, [{ name: "Stores", email: "stores@greenzone.co.za" }]);
+  assert.deepEqual(d.ccSuggestions, [{ name: "Mark", email: "mark@ersupplies.co.za" }]);
+  assert.equal(d.subject, "Delivery note DN-0042 - your order 18074 - JOB-0088 - East Rand Supplies");
+  assert.match(d.body, /our delivery note DN-0042\.\nYour order number: 18074\nOur reference: JOB-0088/);
+  assert.match(d.body, /Kind regards,\nHeinrich\nEast Rand Supplies\n011 000 0000$/);
+});
+
+test("a customer's delivery note: next time To is where their last delivery note went", () => {
+  const d = deliveryNoteEmailDefaults({
+    note: { delivery_note_number: "DN-0050", direction: "to_customer" },
+    job: { job_number: "JOB-0090", customer_po: "" },
+    contacts: [],
+    lastTo: ["stores@greenzone.co.za", "buyer@greenzone.co.za"],
+    company: {},
+    senderName: "Heinrich",
+  });
+  assert.equal(d.to, "stores@greenzone.co.za; buyer@greenzone.co.za");
+  assert.equal(d.subject, "Delivery note DN-0050 - JOB-0090");
+  assert.ok(!/order number/.test(d.body));
+});
+
+test("a supplier's delivery note: their saved address, no customer order number, and the last address wins once there is one", () => {
+  const supplier = { name: "Coaters", email: "jobs@coaters.co.za", contacts: [{ name: "Piet", email: "piet@coaters.co.za" }] };
+  const job = { job_number: "JOB-0088", customer_po: "18074" };
+  const first = deliveryNoteEmailDefaults({ note: { delivery_note_number: "DN-0043", direction: "to_supplier" }, job, supplier, contacts: [{ name: "Wrong", email: "customer@x.co.za" }], lastTo: [], company: { name: "East Rand Supplies" }, senderName: "Heinrich" });
+  assert.equal(first.to, "jobs@coaters.co.za");
+  assert.deepEqual(first.suggestions.map((s) => s.email), ["jobs@coaters.co.za", "piet@coaters.co.za"]);
+  assert.equal(first.subject, "Delivery note DN-0043 - JOB-0088 - East Rand Supplies");
+  assert.match(first.body, /for the work sent to you\./);
+  assert.ok(!/18074/.test(first.subject + first.body));
+  const later = deliveryNoteEmailDefaults({ note: { delivery_note_number: "DN-0044", direction: "to_supplier" }, job, supplier, lastTo: ["piet@coaters.co.za"], company: {}, senderName: "Heinrich" });
+  assert.equal(later.to, "piet@coaters.co.za");
+});
+
+test("a delivery note whose job is gone still gets a window, with nothing blank printed", () => {
+  const d = deliveryNoteEmailDefaults({ note: { delivery_note_number: "DN-0001", direction: "to_customer" }, job: undefined, contacts: undefined, lastTo: undefined, company: undefined, senderName: "" });
+  assert.equal(d.subject, "Delivery note DN-0001");
+  assert.ok(!/undefined|null/.test(d.subject + d.body));
+  assert.equal(d.to, "");
 });

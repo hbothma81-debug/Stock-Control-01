@@ -123,6 +123,31 @@ export function invoiceEmailDefaults({ job, contacts, lastTo, salesRep, ownAddre
   return { to: to.join("; "), cc: "", subject, body: lines.join("\n"), suggestions: known, ccSuggestions: rep };
 }
 
+// What the send window opens with for a delivery note. A note goes to a
+// customer (finished goods) or to a supplier (work sent out), and the
+// stored PDF is attached either way. To is wherever this party's last
+// DELIVERY NOTE went, remembered apart from their invoices: the person who
+// receives goods is rarely the creditors clerk. With nothing remembered, a
+// supplier gets their first saved address, like a purchase order, and a
+// customer's To starts empty with the contacts as one-press buttons. The
+// message does not list the items: a note's rows hold no quantities, only
+// the PDF does. (Heinrich, 21 Sep 2026: both kinds, rep as a Cc button.)
+export function deliveryNoteEmailDefaults({ note, job, supplier, contacts, lastTo, salesRep, ownAddress, company, senderName }) {
+  const toSupplier = note.direction === "to_supplier";
+  const known = toSupplier ? knownAddresses(supplier) : knownAddresses({ name: "", email: "", contacts });
+  const remembered = (lastTo || []).filter(isEmail);
+  const to = remembered.length ? remembered.join("; ") : toSupplier ? known[0]?.email || "" : "";
+  const number = note.delivery_note_number;
+  const po = toSupplier ? "" : String(job?.customer_po || "").trim();
+  const subject = [`Delivery note ${number}`, po ? `your order ${po}` : "", job?.job_number || "", company?.name || ""].filter(Boolean).join(" - ");
+  const lines = ["Good day,", "", toSupplier ? `Please find attached our delivery note ${number} for the work sent to you.` : `Please find attached our delivery note ${number}.`];
+  if (po) lines.push(`Your order number: ${po}`);
+  if (job?.job_number) lines.push(`Our reference: ${job.job_number}`);
+  lines.push("", signOff(senderName, company));
+  const rep = salesRep && isEmail(salesRep.email) && String(salesRep.email).toLowerCase() !== String(ownAddress || "").toLowerCase() ? [{ name: salesRep.name || "Sales rep", email: salesRep.email }] : [];
+  return { to, cc: "", subject, body: lines.join("\n"), suggestions: known, ccSuggestions: rep };
+}
+
 // Who the email really goes to. On the practice copy that is the sender
 // alone, whatever the boxes say.
 export function actualRecipients({ to, cc, toSelf, ownAddress }) {
