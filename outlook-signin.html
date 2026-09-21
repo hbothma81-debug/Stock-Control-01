@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Microsoft sign-in</title>
+  </head>
+  <body style="font-family: system-ui, sans-serif; padding: 24px; color: #444">
+    <!-- Microsoft's sign-in pop-up comes back to this page. It hands the
+         answer to the app's own window and closes. Nothing else lives here:
+         it must not load the app, which would read the answer in the
+         address as its own. Its address is registered with Microsoft
+         (docs/EMAIL-SETUP-MICROSOFT.md): renaming this file breaks the
+         sign-in until the registration is changed to match. -->
+    <p id="msg">Finishing the Microsoft sign-in…</p>
+    <script type="module" src="/src/email/signinBridge.js"></script>
+  </body>
+</html>

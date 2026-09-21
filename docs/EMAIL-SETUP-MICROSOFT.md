@@ -20,12 +20,17 @@ that person's own mailbox and shows in their own Sent Items.
    - **Name:** Stock Control email
    - **Supported account types:** Accounts in this organizational directory only (single tenant)
    - **Redirect URI:** choose the platform **Single-page application (SPA)** and enter
-     `https://stock-control-01.vercel.app`
+     `https://stock-control-01.vercel.app/outlook-signin.html`
 4. Press **Register**.
-5. On the app's page, open **Authentication** and add two more Single-page
+5. On the app's page, open **Authentication** and add three more Single-page
    application redirect URIs (these are for testing on the practice copy):
-   - `http://localhost:5173`
-   - `http://localhost:5174`
+   - `http://localhost:5173/outlook-signin.html`
+   - `http://localhost:5174/outlook-signin.html`
+   - `http://localhost:5175/outlook-signin.html`
+
+   Each address must be typed exactly as written, ending in
+   `/outlook-signin.html`: that is the small page the Microsoft sign-in window
+   comes back to. Microsoft refuses the sign-in if one letter differs.
    Leave every tick box under "Implicit grant" **off**. Save.
 6. Open **API permissions → Add a permission → Microsoft Graph → Delegated permissions**
    and tick:
@@ -37,6 +42,14 @@ that person's own mailbox and shows in their own Sent Items.
 8. Open **Overview** and copy two values to Heinrich:
    - **Application (client) ID**
    - **Directory (tenant) ID**
+
+## Where the two IDs go (Claude does this with Heinrich)
+
+- Practice: two lines in the file `.env.local` in the app folder,
+  `VITE_MS_CLIENT_ID=...` and `VITE_MS_TENANT_ID=...`, then restart the dev server.
+- Live: the same two names under Vercel → the project → Settings →
+  Environment Variables, then a redeploy. Until they are there the live app
+  shows no Email button at all, so the code can go live before the setup is done.
 
 ## What to send back
 

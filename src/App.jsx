@@ -95,6 +95,8 @@ import NumberBox from "./manager/NumberBox.jsx";
 import LaserStatus from "./laser/LaserStatus.jsx";
 import LaserTab from "./laser/LaserTab.jsx";
 import CancelShortage from "./laser/CancelShortage.jsx";
+import SendEmailButton, { SentEmailLines } from "./email/SendEmailButton.jsx";
+import { poEmailDefaults } from "./email/emailRules.js";
 import { programTitle } from "./laser/programTitle.js";
 import useLaserPrograms from "./laser/useLaserPrograms.js";
 import InfoRequestModal, { InfoAnswerModal } from "./InfoRequestModal.jsx";
@@ -1649,6 +1651,9 @@ export default function StockControl() {
   // every PO as a single line (number, value, status); tapping one opens
   // the real detail (raised by, lines, notes, actions) in place.
   const [expandedPoId, setExpandedPoId] = useState(null);
+  // Goes up by one when an email has just been sent, so the opened card
+  // re-reads its "Emailed ..." lines.
+  const [emailSentTick, setEmailSentTick] = useState(0);
   const [receivingSearchQuery, setReceivingSearchQuery] = useState("");
   // Same compact-line, tap-to-expand pattern as Purchase Orders and
   // Requisitions.
@@ -16376,6 +16381,29 @@ export default function StockControl() {
                         <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => viewPoPdf(po)}>
                           <FileText size={13} /> View PDF
                         </button>
+                        {/* Sent from the person's own Outlook mailbox, PDF
+                            attached (src/email). Anyone who may raise an
+                            order may send one; a cancelled order is not
+                            sent. Draws nothing until the Microsoft setup's
+                            IDs are in the build. */}
+                        {canRaisePO && po.status !== "cancelled" && (
+                          <SendEmailButton
+                            label="Email to supplier"
+                            title="Send this order to the supplier from your Outlook"
+                            appUser={{ id: currentUser?.id, name: roleLabel }}
+                            getDefaults={() =>
+                              poEmailDefaults({
+                                po,
+                                supplier: master.suppliers.find((s) => s.id === po.supplierId),
+                                company: master.companyDetails || {},
+                                senderName: roleLabel,
+                              })
+                            }
+                            buildAttachment={async () => ({ fileName: `${po.poNumber}.pdf`, blob: (await buildPoDoc(po)).output("blob") })}
+                            record={{ documentType: "purchase_order", relatedId: po.poNumber, jobId: po.jobId }}
+                            onSent={() => setEmailSentTick((n) => n + 1)}
+                          />
+                        )}
                         {canRaisePO && (
                           <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => copyPurchaseOrder(po)}>
                             <Copy size={13} /> Copy
@@ -16395,6 +16423,7 @@ export default function StockControl() {
                           </button>
                         )}
                       </div>
+                      <SentEmailLines documentType="purchase_order" relatedId={po.poNumber} refresh={emailSentTick} />
                     </>
                   )}
                 </div>

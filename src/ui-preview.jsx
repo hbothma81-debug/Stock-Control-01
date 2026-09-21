@@ -16,6 +16,9 @@ import ExtraStagesBox from "./jobs/ExtraStagesBox.jsx";
 import TwoPriceBoxes from "./manager/TwoPriceBoxes.jsx";
 import NumberBox from "./manager/NumberBox.jsx";
 import FigureBox, { FigureRow } from "./FigureBox.jsx";
+import SendEmailButton from "./email/SendEmailButton.jsx";
+import { emailIsSetUp } from "./email/outlook.js";
+import { poEmailDefaults } from "./email/emailRules.js";
 import { jsPDF } from "jspdf";
 import { FileText } from "lucide-react";
 
@@ -187,6 +190,37 @@ function FigureBoxDemo() {
   );
 }
 
+// The send window, opened from a made-up purchase order. The button draws
+// only when the Microsoft IDs are in the build (VITE_MS_CLIENT_ID and
+// VITE_MS_TENANT_ID), so without them this section says so instead.
+// Nothing here can reach a supplier: off the live address every email
+// goes to the sender's own mailbox.
+function SendEmailDemo() {
+  const po = { poNumber: "PO-0123", deliveryDate: "2026-09-30", reference: "JOB-0042" };
+  const supplier = {
+    name: "Made-up Steel",
+    email: "sales@madeupsteel.example",
+    contacts: [
+      { name: "Anna", email: "anna@madeupsteel.example" },
+      { name: "No address", email: "" },
+    ],
+  };
+  return (
+    <Section title="Email a document" count={1}>
+      <div style={S.reqActions}>
+        <SendEmailButton
+          label="Email to supplier"
+          appUser={{ id: "preview", name: "Preview person" }}
+          getDefaults={() => poEmailDefaults({ po, supplier, company: { name: "East Rand Supplies", phone: "011 000 0000" }, senderName: "Preview person" })}
+          buildAttachment={async () => ({ fileName: "PO-0123.pdf", blob: await (await fetch(makeSamplePdf())).blob() })}
+          record={{ documentType: "purchase_order", relatedId: "PO-0123" }}
+        />
+      </div>
+      {!emailIsSetUp() && <div style={S.roleHint}>No button: the Microsoft IDs are not in this build.</div>}
+    </Section>
+  );
+}
+
 function PdfViewerDemo() {
   const [url] = React.useState(makeSamplePdf);
   // Not a PDF at all, to see the message a device gets when one cannot be drawn.
@@ -289,6 +323,8 @@ function Preview() {
 
         <NumberBoxDemo />
         <FigureBoxDemo />
+
+        <SendEmailDemo />
 
         <PdfViewerDemo />
 

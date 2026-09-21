@@ -55,6 +55,8 @@ with checks (setup_file, looks_for, found) as (
       exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'shift_access')),
     ('setup-buyouts.sql',               'column stock_items.sell_price',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'stock_items' and column_name = 'sell_price')),
+    ('setup-sent-emails.sql',           'table sent_emails',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'sent_emails')),
     ('setup-invoice-notes.sql',         'table job_invoice_notes',
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'job_invoice_notes')),
     ('setup-stock-items-updated-at.sql', 'trigger stock_items_set_updated_at',
