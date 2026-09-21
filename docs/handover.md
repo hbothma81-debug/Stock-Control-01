@@ -3301,3 +3301,58 @@ already made" (Emailing a document); the one-off Microsoft setup is
   request emailed to an accounts address kept in a settings box, only when
   the person pressing has a mailbox connected. The invoice request never
   goes to a customer.
+
+---
+
+## 21 Sep 2026 — Email: the Sage invoice to the customer; pushed on Heinrich's word (`3accf60..4ecca3e`); purchase orders switched on
+
+- **Purchase orders are switched on, live.** Heinrich put `VITE_MS_TENANT_ID`
+  and `VITE_MS_CLIENT_ID` into Vercel (project → Environment Variables, Type
+  **Config**, not Secret: Vercel warns about a public `VITE_` prefix on a
+  Secret, and the prefix must stay) and redeployed. His first "redeploy
+  done" had not started: the menu's Redeploy opens a window whose own
+  Redeploy button must be pressed; read from the Deployments list. Seen on
+  live, signed in, nothing sent: PO-0039 shows "Email to supplier", the
+  window opens with the supplier's saved address. Everyone with Can raise PO
+  has the button from that moment. Nobody has signed in or sent on live yet.
+- **Pushed on his word ("push from here"), alone, ahead of the queue:**
+  step 2, cherry-picked onto the live tip in a scratch clone (fresh install,
+  230 tests, names check, built with the IDs and without) and pushed as
+  `4ecca3e`. Live went from `App-BvgDGARR.js` to `App-D6wlktU7.js`, loads
+  with no console errors. Merged back clean (the same commit sits in the
+  queue as `3e307ae`).
+- **Held back, not mine, still not live:** `07bc651`, `9c669e6` (Force
+  complete and Mark whole job urgent), `8b241be` and `7b725b5` (Supplier
+  prices, steps 1 and 2), `f245239`, and this conversation's own handover
+  commits. At the merge another conversation had unsaved work in `App.jsx`
+  and `src/manager/supplierPrices*`: left alone.
+- **What step 2 is:** "Email invoice to customer" beside "Open the invoice"
+  on both Records → Invoicing cards and on the invoice file under the job's
+  Files tab → Invoicing pill (where a sales person reaches it); admins,
+  Invoicing managers, sales people. His answers: both screens; To opens with
+  wherever that customer's last invoice went, empty the first time with the
+  contacts as one-press buttons; the sales rep is a one-press Cc button.
+  Touches the Jobs page conversation's screens by four insertions (the
+  button and the line on two cards and one file row), nothing of theirs
+  changed.
+- **Database:** `sent_emails.party_name` and an index
+  (`setup-sent-emails-party.sql`), on practice and live, checked 21 Sep
+  beside a made-up column. The code also works without it.
+- **Seen on live, signed in, nothing sent:** 44 invoiced jobs, 5 with an
+  invoice on file, each with the new button; JOB-0088's window opens with
+  subject "Invoice 20621 - your order 18074 - JOB-0088 - East Rand
+  Supplies", the real Sage file named, To empty (first invoice for that
+  customer). Cancelled.
+- **Proven on practice:** upload with the app's own button (JOB-0010, the
+  test file `TEST-sage-invoice-practice.pdf` is still there), a real send
+  answered 202 and addressed to the sender alone, the record saved without
+  the column (before the paste) and with `party_name` (after), the window
+  reopening with To already holding where the last one went, the Emailed
+  line on the card and on the Files tab, the button for a pretend non-admin
+  sales person.
+- **Not tried by anybody:** a send on live of either document, the pop-up
+  way in, a phone, a customer with saved contacts, an image instead of a
+  PDF, a second app login on one device.
+- **Next, in his order:** Send on the app's delivery note (to the customer),
+  then the invoice request emailed to an accounts address kept in a settings
+  box, only when the person pressing has a mailbox connected.
