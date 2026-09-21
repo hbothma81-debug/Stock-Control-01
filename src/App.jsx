@@ -92,6 +92,11 @@ import EditableName from "./EditableName.jsx";
 import TypeToFind from "./TypeToFind.jsx";
 import TwoPriceBoxes from "./manager/TwoPriceBoxes.jsx";
 import NumberBox from "./manager/NumberBox.jsx";
+import SupplierPriceLines from "./manager/SupplierPriceLines.jsx";
+import {
+  pricesFor, setPrice as setSupplierPriceIn, removePrice as removeSupplierPriceIn, changeSupplier as changePriceSupplierIn,
+  movePrices, dropPrices, priceFromRow, priceToRow,
+} from "./manager/supplierPrices.js";
 import LaserStatus from "./laser/LaserStatus.jsx";
 import LaserTab from "./laser/LaserTab.jsx";
 import CancelShortage from "./laser/CancelShortage.jsx";
@@ -634,7 +639,7 @@ const addedOrder = (a, b) => String(a.created_at || "").localeCompare(String(b.c
 const wholeList = (rows) => ({ data: (rows || []).sort(addedOrder) });
 
 async function loadMasterFromTables() {
-  const [stringLists, factorItems, suppliers, supplierContacts, storesCatalog, customerContacts, companyRows, counters] = await Promise.all([
+  const [stringLists, factorItems, suppliers, supplierContacts, storesCatalog, customerContacts, companyRows, counters, supplierPrices] = await Promise.all([
     // Explicitly ordered: without an ORDER BY, Postgres makes no promise
     // about row order, so the factory process sequence could quietly
     // reshuffle between loads. created_at is the tiebreak so lists that
@@ -655,6 +660,13 @@ async function loadMasterFromTables() {
     fetchAllRows("master_customer_contacts").then(wholeList),
     supabase.from("master_company_details").select("*"),
     supabase.from("master_counters").select("*"),
+    // A database that has not had setup-supplier-prices.sql yet answers
+    // "no such table": that reads as null, the supplier lines stay off the
+    // screen and nothing is saved to it. Any other failure fails the load.
+    fetchAllRows("master_supplier_prices").catch((err) => {
+      if (err && (err.code === "42P01" || err.code === "PGRST205")) return null;
+      throw err;
+    }),
   ]);
   for (const r of [companyRows, counters]) {
     if (r.error) throw r.error;
@@ -697,6 +709,9 @@ async function loadMasterFromTables() {
   result.storesCatalog = (storesCatalog.data || []).map((r) => ({
     id: r.id, code: r.code, name: r.name, category: r.category, supplier: r.supplier, price: Number(r.price),
   }));
+
+  // One price per material per supplier (src/manager/supplierPrices.js).
+  result.supplierPrices = supplierPrices ? supplierPrices.map(priceFromRow) : null;
 
   const contactsByCustomer = {};
   for (const c of customerContacts.data || []) {
@@ -2987,6 +3002,24 @@ export default function StockControl() {
       const toRow = (r) => ({ id: r.id, code: r.code || "", name: r.name || "", category: r.category || "", supplier: r.supplier || "", price: r.price || 0 });
       if (added.length || modified.length) ops.push(supabase.from("master_stores_catalog").upsert([...added, ...modified].map(toRow)));
       if (removedIds.length) ops.push(supabase.from("master_stores_catalog").delete().in("id", removedIds));
+    }
+
+    // Supplier prices. null means this database has no such table yet
+    // (see loadMasterFromTables): nothing is sent. An id is made from what
+    // the line is for (priceId), so a repeat of this save is the same save.
+    // Removals go first: a line handed to another supplier is one line out
+    // and one in.
+    if (Array.isArray(prev.supplierPrices) && JSON.stringify(prev.supplierPrices) !== JSON.stringify(newMaster.supplierPrices)) {
+      const prevList = prev.supplierPrices;
+      const nextList = newMaster.supplierPrices || [];
+      const prevById = new Map(prevList.map((r) => [r.id, r]));
+      const nextById = new Map(nextList.map((r) => [r.id, r]));
+      const changed = nextList.filter((r) => JSON.stringify(prevById.get(r.id)) !== JSON.stringify(r));
+      const removedIds = prevList.filter((r) => !nextById.has(r.id)).map((r) => r.id);
+      for (let i = 0; i < removedIds.length; i += 100) {
+        ops.push(supabase.from("master_supplier_prices").delete().in("id", removedIds.slice(i, i + 100)));
+      }
+      if (changed.length) ops.push(supabase.from("master_supplier_prices").upsert(changed.map(priceToRow)));
     }
 
     // Customer contacts — a dictionary of arrays; flatten to a single list
@@ -12494,7 +12527,18 @@ export default function StockControl() {
         listKey === "sectionTypes"
           ? (prev.sections || []).map((s) => (s.type === oldValue ? { ...s, type: newValue } : s))
           : prev.sections;
-      return { ...prev, [listKey]: updated, sections: cascaded };
+      // A renamed material or size takes its supplier prices along.
+      const supplierPrices =
+        isFactor && Array.isArray(prev.supplierPrices)
+          ? movePrices(prev.supplierPrices, listKey, { name: oldValue }, { name: newValue })
+          : prev.supplierPrices;
+      // `sections` is set second only for a section type: written after
+      // [listKey] for every list, it put the old sections straight back
+      // over a renamed size (both keys were "sections"), as removeMasterEntry
+      // once did.
+      const next = { ...prev, [listKey]: updated, supplierPrices };
+      if (listKey === "sectionTypes") next.sections = cascaded;
+      return next;
     });
     setItems((prev) =>
       prev.map((it) => {
@@ -14794,6 +14838,10 @@ export default function StockControl() {
             : x.name !== entry.name
       );
       const next = { ...prev, [managerTab]: filtered };
+      // A removed material or size takes its supplier prices with it.
+      if (FACTOR_TABLES.includes(managerTab) && typeof entry !== "string" && Array.isArray(prev.supplierPrices)) {
+        next.supplierPrices = dropPrices(prev.supplierPrices, managerTab, entry.name, managerTab === "sections" ? entry.grade : "");
+      }
       // Removing a section type leaves its sections behind: they lose the
       // group they were filed under, not their kg/m or their price.
       //
@@ -14819,6 +14867,76 @@ export default function StockControl() {
           : x
       ),
     }));
+  }
+
+  // Supplier prices: one price per material per supplier, rules in
+  // src/manager/supplierPrices.js. master.supplierPrices is null on a
+  // database without the table, and then none of these does anything.
+  function changeSupplierPrices(fn) {
+    setMaster((prev) => (Array.isArray(prev.supplierPrices) ? { ...prev, supplierPrices: fn(prev.supplierPrices) } : prev));
+  }
+  function setSupplierPrice(listName, name, grade, supplierId, price) {
+    changeSupplierPrices((list) => setSupplierPriceIn(list, { listName, name, grade, supplierId, price, setBy: roleLabel }));
+  }
+  // A supplier picked on the material's own row: the price in its box (the
+  // one with no supplier) becomes that supplier's line and the box empties,
+  // ready for the next supplier. With the box empty the line starts at 0.
+  function givePriceToSupplier(listName, entry, supplierId) {
+    const grade = listName === "sections" ? entry.grade || "" : "";
+    if (pricesFor(master.supplierPrices, listName, entry.name, grade).some((p) => p.supplierId === supplierId)) {
+      alert("That supplier already has a price line for this one. Change the price on its line.");
+      return;
+    }
+    setMaster((prev) => {
+      if (!Array.isArray(prev.supplierPrices)) return prev;
+      const isRow = (x) => (listName === "sections" ? isSectionRow(x, entry.name, entry.grade) : x.name === entry.name);
+      const row = (prev[listName] || []).find(isRow);
+      return {
+        ...prev,
+        supplierPrices: setSupplierPriceIn(prev.supplierPrices, {
+          listName, name: entry.name, grade, supplierId, price: row ? row.price : 0, setBy: roleLabel,
+        }),
+        [listName]: (prev[listName] || []).map((x) => (isRow(x) ? { ...x, price: 0 } : x)),
+      };
+    });
+  }
+  // The supplier box and the lines for one row of Sections, Material Types
+  // or CNC Bar Grades. A plain function, not a component (see the traps).
+  function supplierPriceControls(listName, entry, unit) {
+    if (!Array.isArray(master.supplierPrices)) return { picker: null, lines: null };
+    const grade = listName === "sections" ? entry.grade || "" : "";
+    const lines = pricesFor(master.supplierPrices, listName, entry.name, grade);
+    const taken = new Set(lines.map((p) => p.supplierId));
+    const what = [entry.name, grade].filter(Boolean).join(" ");
+    return {
+      picker: (
+        <TypeToFind
+          style={{ width: 150 }}
+          inputStyle={{ ...S.managerFactorInput, width: "100%", padding: "5px 24px 5px 7px", boxSizing: "border-box" }}
+          options={(master.suppliers || []).filter((s) => !taken.has(s.id)).map((s) => ({ value: s.id, label: s.name }))}
+          value=""
+          onChange={(v) => v && givePriceToSupplier(listName, entry, v)}
+          emptyLabel={entry.price ? "Whose price?" : "Add supplier"}
+          title={
+            entry.price
+              ? `Pick the supplier this ${unit} is from: it becomes that supplier's price line.`
+              : `Pick a supplier to add a price line for ${what}.`
+          }
+        />
+      ),
+      lines: (
+        <SupplierPriceLines
+          lines={lines}
+          suppliers={master.suppliers}
+          unit={unit}
+          what={what}
+          S={S}
+          onPrice={(supplierId, v) => setSupplierPrice(listName, entry.name, grade, supplierId, v)}
+          onSupplier={(id, supplierId) => changeSupplierPrices((list) => changePriceSupplierIn(list, id, supplierId))}
+          onRemove={(id) => changeSupplierPrices((list) => removeSupplierPriceIn(list, id))}
+        />
+      ),
+    };
   }
 
   function updateGradeShortName(name, newValue) {
@@ -15031,6 +15149,10 @@ export default function StockControl() {
       return {
         ...prev,
         sections: list.map((x) => (isSectionRow(x, name, oldGrade) ? { ...x, grade: (newGrade || "").trim() } : x)),
+        // Its supplier prices move to the new material with it.
+        supplierPrices: Array.isArray(prev.supplierPrices)
+          ? movePrices(prev.supplierPrices, "sections", { name, grade: oldGrade || "" }, { grade: newGrade || "" })
+          : prev.supplierPrices,
       };
     });
   }
@@ -15130,7 +15252,14 @@ export default function StockControl() {
   }
 
   function removeSupplierRow(id) {
-    setMaster((prev) => ({ ...prev, suppliers: prev.suppliers.filter((s) => s.id !== id) }));
+    // The database removes a removed supplier's price lines with it (on
+    // delete cascade); so does the screen's copy, or a later save would
+    // send a line for a supplier that is gone and be refused.
+    setMaster((prev) => ({
+      ...prev,
+      suppliers: prev.suppliers.filter((s) => s.id !== id),
+      supplierPrices: Array.isArray(prev.supplierPrices) ? prev.supplierPrices.filter((p) => p.supplierId !== id) : prev.supplierPrices,
+    }));
   }
 
   // A supplier can have several contact people — sales rep, accounts,
@@ -22408,8 +22537,9 @@ export default function StockControl() {
                             value={entry.price}
                             onCommit={(v) => updateFactorField(entry.name, "price", v, entry.grade)}
                             style={S.managerFactorInput}
-                            title="R/m"
+                            title="R/m, no supplier. Pick a supplier beside it to make it that supplier's price."
                           />
+                          {supplierPriceControls("sections", entry, "R/m").picker}
                           <TypeToFind
                             style={{ width: 110 }}
                             inputStyle={{ ...S.managerFactorInput, width: "100%", padding: "5px 24px 5px 7px" }}
@@ -22452,6 +22582,7 @@ export default function StockControl() {
                           <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeMasterEntry(entry)}>
                             <Trash2 size={13} />
                           </button>
+                          {supplierPriceControls("sections", entry, "R/m").lines}
                         </div>
                       ))}
                   </div>
@@ -22545,7 +22676,7 @@ export default function StockControl() {
                     ? master[managerTab]
                         .filter((e) => e.name.toLowerCase().includes(managerSearchQuery.toLowerCase()))
                         .map((entry) => (
-                          <div key={entry.name} style={S.managerRow}>
+                          <div key={entry.name} style={{ ...S.managerRow, flexWrap: "wrap" }}>
                             <EditableName value={entry.name} onCommit={(v) => renameMasterEntry(managerTab, entry.name, v)} />
                             <NumberBox
                               value={entry.factor}
@@ -22557,8 +22688,9 @@ export default function StockControl() {
                               value={entry.price}
                               onCommit={(v) => updateFactorField(entry.name, "price", v)}
                               style={S.managerFactorInput}
-                              title="R/kg"
+                              title="R/kg, no supplier. Pick a supplier beside it to make it that supplier's price."
                             />
+                            {supplierPriceControls(managerTab, entry, "R/kg").picker}
                             {managerTab === "grades" && (
                               <input
                                 value={entry.shortName || ""}
@@ -22570,6 +22702,7 @@ export default function StockControl() {
                             <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeMasterEntry(entry)}>
                               <Trash2 size={13} />
                             </button>
+                            {supplierPriceControls(managerTab, entry, "R/kg").lines}
                           </div>
                         ))
                     : master[managerTab]
