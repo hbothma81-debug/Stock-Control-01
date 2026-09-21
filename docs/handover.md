@@ -3397,3 +3397,125 @@ already made" (Emailing a document); the one-off Microsoft setup is
 - **Next, the last of his four:** the invoice request emailed to an
   accounts address kept in a settings box, only when the person pressing
   has a mailbox connected; the request itself made as today either way.
+
+---
+
+## 21 Sep 2026 — Email: state of play at wrap-up
+
+A new conversation, one day old. It owns `src/email` and the Email button on
+each document that has one. The rules are in `CLAUDE.md` under "Decisions
+already made" (Emailing a document); the one-off Microsoft setup is
+`docs/EMAIL-SETUP-MICROSOFT.md`. The three entries above this one record each
+push; this is where it all stands.
+
+### Done and live (three pushes, each alone and ahead of the queue, on his word)
+
+- **Purchase order to the supplier** (`65f2aa7..3accf60`): "Email to
+  supplier" on an opened order; anyone with Can raise PO; never a cancelled
+  order. Also in that push: the way in for a browser that blocks Microsoft's
+  pop-up, "Sign in on this page instead".
+- **The Sage invoice to the customer** (`3accf60..4ecca3e`): beside "Open the
+  invoice" on both Records → Invoicing cards and on the invoice file under
+  the job's Files tab → Invoicing pill; admins, Invoicing managers, sales
+  people.
+- **Delivery note to the customer or the supplier** (`4ecca3e..700aca5`):
+  beside "View document" on Records → Delivery Notes and under the job's
+  Delivery tab; the same people, and for a supplier's note also Can raise PO.
+- **Switched on:** the two Microsoft IDs are in Vercel (Type Config) and in
+  the practice `.env`; the registration's four return addresses end in
+  `/outlook-signin.html` (IT corrected them; he is now an owner of the app
+  registration). Live is `App-BYou4mJf.js`.
+- Every send is a row in `sent_emails` and shows under the document as
+  "Emailed 21 Sep 14:05 to … by …". Off the live address every email goes to
+  the sender's own mailbox only, marked [PRACTICE].
+
+### On hold, by his word
+
+- **The invoice request emailed to accounts** ("wait with the invoice request
+  to accounts", 21 Sep). Nothing planned in detail, nothing built. Do not
+  raise it unless he does. His decisions for it stand: sent only when the
+  person pressing Request invoice has a mailbox connected, the request itself
+  made as today either way, accounts' address in a settings box, no fixed
+  sender and no server key, never to a customer.
+
+### Every setup file this conversation wrote, and where it has run
+
+| File | What it adds | Practice | Live |
+| --- | --- | --- | --- |
+| `setup-sent-emails.sql` | table `sent_emails`, read and add only (no update or delete rule, on purpose) | confirmed 21 Sep, asked through the signed-in page | confirmed 21 Sep, `CHECK-live-table.cjs`: 200 |
+| `setup-sent-emails-party.sql` | column `sent_emails.party_name` and an index | confirmed 21 Sep, the same way | confirmed 21 Sep: 200, beside a made-up column that answered 400 |
+
+Both are tables and columns, so both could be checked; nothing here is only
+rules, functions or triggers beyond the table's two policies, which came in
+with the table (a signed-in insert and read both worked on practice, which is
+the policies answering). His first paste of the first file on live had not
+landed: the second did. Both are registered in `build-test-database.sh` and
+`CHECK-which-setup-files-are-run.sql`, and `setup-ALL.sql` was regenerated
+each time with only the new file in its diff.
+
+### Built but NOT yet tested by Heinrich (nothing has been sent on live by anybody)
+
+He has watched none of this himself: every test below "proven" was mine, on
+practice, with his mailbox connected in the Browser pane.
+
+- **A first send on live, of anything.** Open a purchase order → Email to
+  supplier → put his OWN address in To → Connect Outlook → Send. On live the
+  email really goes to whoever is in To. That one send also tries, for the
+  first time: a sign-in on live, and the **pop-up way in** (his Chrome opens
+  pop-ups; the Browser pane never does, so only "Sign in on this page
+  instead" has ever been used).
+- **Purchase order:** a supplier with saved addresses on a real send (live
+  PO-0039 opened with `leon@superarc.co.za` filled in, then cancelled); the
+  contact buttons; the Emailed line on live.
+- **Sage invoice:** a first real send to a customer, and the second one for
+  that customer opening with To already filled in (proven on practice only);
+  a customer with saved contacts; an uploaded image instead of a PDF; a sales
+  person who is not an admin sending from the job's Files tab (seen on
+  practice with a pretend login, page only).
+- **Delivery note:** any send on live; a supplier's note on a real send (the
+  window was opened on live DN-0005 and cancelled; practice has no supplier
+  note); a note whose PDF was never filed (it should say so and send
+  nothing); a non-admin on these screens.
+- **A phone**, and **two people sharing one computer** (the second app login
+  should be asked to connect their own Outlook, not inherit the first one's).
+- **Staff have the buttons now** and have been told nothing by the app:
+  first use on each device is Connect Outlook with their own work address.
+
+### Proven on practice (real sends, all to his own mailbox)
+
+PO-0002; a test invoice on JOB-0010 (`TEST-sage-invoice-practice.pdf`, still
+on that job); DN-0001. For each: Microsoft answered 202, the email was
+addressed to the sender alone whatever To said, the right file was attached,
+the `sent_emails` row was read back, and the Emailed line showed on every
+screen that carries it. Also: the record saved without `party_name` before
+that SQL and with it after; invoice and delivery-note addresses for the same
+customer remembered apart. Practice holds 4 `sent_emails` rows and his
+mailbox four [PRACTICE] emails, safe to delete.
+
+### Waiting on Heinrich
+
+- The first live send (above). Nothing else: no SQL to run, no ticks to set,
+  no decision owed.
+- Small wrinkles he has been told about, none fixed, none urgent: before
+  Outlook is connected on a device a rep sending his own job's document is
+  offered himself as the Cc button; a delivery note's supplier is matched to
+  the supplier list by exact name (live DN-0005 "QJ Paint" is not on the
+  list, so To was empty); files over 3 MB are refused.
+
+### Held back in the queue, not this conversation's, still not live
+
+`07bc651` (the `CHECK-live-table.cjs` fix), `9c669e6` (Force complete and
+Mark whole job urgent), `8b241be`, `7b725b5`, `d6f5b1d` (Supplier prices,
+steps 1 to 3), `f245239`. This conversation's own queued commits are
+documents only (its handover entries and this wrap-up) plus the three email
+commits under their old numbers, identical to what is live.
+
+### Pick up next
+
+- When he reports his first live send: read `sent_emails` on live through
+  his signed-in tab and confirm the row and the Emailed line; if the pop-up
+  was blocked in his Chrome, find out why before anyone else meets it.
+- A fifth document, if he asks: a rules function in `emailRules.js` with
+  tests, a small `<thing>Email.js` beside `invoiceEmail.js`, and
+  `SendEmailButton` next to that document's View button.
+- The invoice request to accounts only if he raises it.
