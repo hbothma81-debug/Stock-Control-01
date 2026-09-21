@@ -3139,3 +3139,25 @@ types a section is already filed under, and live has no round tube size.
   clean. Round Tube seen in the form on practice, nothing saved.
 - **Still his to do on live:** add the size under Stock Manager → Sections →
   CHS · Round Tube; the form picks sizes, it never adds them.
+
+### State of play at wrap-up (21 Sep 2026)
+
+- **Done and live:** 99f502c, above. Nothing half-done.
+- **SQL:** this conversation wrote no `setup-*.sql` and changed nothing in
+  either database.
+- **Built, not yet tried by Heinrich:** the Section type box on live's Add
+  item → Structural (reload first): Round Tube and the other empty types
+  should be offered, and the "All types" filter above the stock list should
+  still show only the types in use. Seen by me on practice only; on live I
+  read the bundle and loaded the page, and never opened the form.
+- **Waiting on Heinrich:** add the round tube size under Stock Manager →
+  Sections → "CHS · Round Tube" before it can be stocked. Asked whether
+  that pill is there, he answered "no pill". The code lists all 18 pills,
+  empty or not, so either he meant "no sizes in it" or something on live
+  hides it: not looked at. **Stock Manager's next session should open that
+  screen on live with him before anything else.**
+- **For Stock Manager:** the add-stock form's type list now holds every
+  fixed type (`stockSectionTypes`); `stockSectionTypesInUse` is the old
+  list, used by the filter only.
+- CLAUDE.md gained the rule above and one line under "Checking what is
+  live": live's bundle name is never the local build's.
