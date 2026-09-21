@@ -9035,6 +9035,26 @@ export default function StockControl() {
     }
   }
 
+  // The request buttons on a Records -> Invoicing card. One request: the
+  // plain "Open request" it always had. A job billed in parts: a button per
+  // request, oldest first, each with its day and amount. The card used to
+  // say "(2 requests)" and open only the newest, so the other looked lost
+  // (JOB-0036, 21 Sep 2026). A plain function, not a component: see the
+  // gotchas in CLAUDE.md.
+  function renderOpenRequestButtons(job, noneText) {
+    // The list is held newest first.
+    const forJob = jobInvoiceRequests.filter((r) => r.job_id === job.id).reverse();
+    if (forJob.length === 0) return <span style={S.roleHint}>{noneText}</span>;
+    return forJob.map((r, i) => (
+      <button key={r.id} type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => viewJobInvoiceRequest(r)}>
+        <FileText size={13} />{" "}
+        {forJob.length === 1
+          ? "Open request"
+          : `Open request ${i + 1} of ${forJob.length}: ${invoiceDateLabel(r.submitted_at)}${r.total_amount != null ? `, ${rand(r.total_amount)}` : ""}`}
+      </button>
+    ));
+  }
+
   async function loadInvoiceNotes() {
     if (!supabase) return;
     try {
@@ -18281,18 +18301,7 @@ export default function StockControl() {
                       ))}
                   </div>
                   <div style={S.reqActions}>
-                    {jobInvoiceRequests.find((r) => r.job_id === job.id) ? (
-                      <button
-                        type="button"
-                        className="stk-btn"
-                        style={S.reqActionBtnMuted}
-                        onClick={() => viewJobInvoiceRequest(jobInvoiceRequests.find((r) => r.job_id === job.id))}
-                      >
-                        <FileText size={13} /> Open request
-                      </button>
-                    ) : (
-                      <span style={S.roleHint}>No invoice request submitted yet</span>
-                    )}
+                    {renderOpenRequestButtons(job, "No invoice request submitted yet")}
                     {/* The invoice itself, once accounts has raised it in Sage.
                         Separate from Open request above, which is the floor's
                         request to bill -- two different documents that are easy
@@ -18391,18 +18400,7 @@ export default function StockControl() {
                       ))}
                     </div>
                     <div style={S.reqActions}>
-                      {jobInvoiceRequests.find((r) => r.job_id === job.id) ? (
-                        <button
-                          type="button"
-                          className="stk-btn"
-                          style={S.reqActionBtnMuted}
-                          onClick={() => viewJobInvoiceRequest(jobInvoiceRequests.find((r) => r.job_id === job.id))}
-                        >
-                          <FileText size={13} /> Open request
-                        </button>
-                      ) : (
-                        <span style={S.roleHint}>No invoice request on file</span>
-                      )}
+                      {renderOpenRequestButtons(job, "No invoice request on file")}
                       {/* The invoice itself, once accounts has raised it in Sage.
                           Separate from Open request above, which is the floor's
                           request to bill -- two different documents that are easy
