@@ -14,6 +14,7 @@ import {
   outlookErrorText,
 } from "./outlook.js";
 import { MAX_ATTACHMENT_BYTES, goesToSelf, checkAddresses, actualRecipients, graphMessage, sentLine } from "./emailRules.js";
+import { recordSentEmail } from "./sentEmails.js";
 
 // "Email …" on a document, and the window it opens: To, Cc, subject and
 // message filled in and all changeable, the PDF attached, sent from the
@@ -23,31 +24,52 @@ import { MAX_ATTACHMENT_BYTES, goesToSelf, checkAddresses, actualRecipients, gra
 //
 //   appUser        { id, name }: the app login, for the record and so a
 //                  mailbox connected by one login is not used by the next
-//   getDefaults    () => { to, cc, subject, body, suggestions }, asked when
-//                  the window opens (poEmailDefaults in emailRules.js)
-//   buildAttachment  async () => ({ fileName, blob }), asked on Send
-//   record         { documentType, relatedId, jobId } for the sent_emails row
+//   getDefaults    () => { to, cc, subject, body, suggestions, ccSuggestions },
+//                  asked when the button is pressed; may be async (the
+//                  invoice looks up where the customer's last one went)
+//   buildAttachment  async () => ({ fileName, blob, contentType }), asked on Send
+//   attachmentNote what the window says is attached
+//   partyWord      "supplier" or "customer", for the no-address hint
+//   record         { documentType, relatedId, jobId, partyName } for the
+//                  sent_emails row
 //   onSent         called once the email has gone
 //
 // Draws nothing until the Microsoft setup's two IDs are in the build
 // (emailIsSetUp): a button that can only fail is worse than none.
-export default function SendEmailButton({ label, title, style, appUser, getDefaults, buildAttachment, record, onSent }) {
-  const [open, setOpen] = useState(false);
+export default function SendEmailButton({ label, title, style, appUser, getDefaults, buildAttachment, attachmentNote, partyWord, record, onSent }) {
+  // What the window opens with, once it is known; null while shut.
+  const [defaults, setDefaults] = useState(null);
+  const [opening, setOpening] = useState(false);
   if (!emailIsSetUp()) return null;
+  async function open() {
+    if (opening) return;
+    setOpening(true);
+    try {
+      setDefaults((await getDefaults()) || {});
+    } catch (err) {
+      // A look-up that failed must not cost the person the window.
+      console.error("The email window's starting values could not be worked out:", err);
+      setDefaults({});
+    } finally {
+      setOpening(false);
+    }
+  }
   return (
     <>
-      <button type="button" className="stk-btn" style={style || S.reqActionBtn} title={title} onClick={() => setOpen(true)}>
+      <button type="button" className="stk-btn" style={style || S.reqActionBtn} title={title} onClick={open} disabled={opening}>
         <Mail size={13} /> {label}
       </button>
-      {open && (
+      {defaults && (
         <SendEmailModal
           heading={label}
           appUser={appUser}
-          defaults={getDefaults()}
+          defaults={defaults}
           buildAttachment={buildAttachment}
+          attachmentNote={attachmentNote}
+          partyWord={partyWord}
           record={record}
           onSent={onSent}
-          onClose={() => setOpen(false)}
+          onClose={() => setDefaults(null)}
         />
       )}
     </>
@@ -63,7 +85,7 @@ function blobToBase64(blob) {
   });
 }
 
-function SendEmailModal({ heading, appUser, defaults, buildAttachment, record, onSent, onClose }) {
+function SendEmailModal({ heading, appUser, defaults, buildAttachment, attachmentNote, partyWord = "supplier", record, onSent, onClose }) {
   const [to, setTo] = useState(defaults.to || "");
   const [cc, setCc] = useState(defaults.cc || "");
   const [subject, setSubject] = useState(defaults.subject || "");
@@ -104,6 +126,9 @@ function SendEmailModal({ heading, appUser, defaults, buildAttachment, record, o
   const unreadable = [...toCheck.bad, ...ccCheck.bad];
   const canSend = !!mailbox && !busy && !sentNote && toCheck.list.length > 0 && unreadable.length === 0 && subject.trim() !== "";
   const unused = (defaults.suggestions || []).filter((s) => !toCheck.list.some((a) => a.toLowerCase() === s.email.toLowerCase()));
+  const unusedCc = (defaults.ccSuggestions || []).filter(
+    (s) => ![...toCheck.list, ...ccCheck.list].some((a) => a.toLowerCase() === s.email.toLowerCase())
+  );
 
   async function connect() {
     setError("");
@@ -163,24 +188,27 @@ function SendEmailModal({ heading, appUser, defaults, buildAttachment, record, o
           cc: real.cc,
           subject: toSelf ? `[PRACTICE] ${subject.trim()}` : subject.trim(),
           body: toSelf ? `PRACTICE COPY. On the live app this would have gone to: ${toCheck.list.join(", ")}${ccCheck.list.length ? ` (cc ${ccCheck.list.join(", ")})` : ""}\n\n${body}` : body,
-          attachment: { fileName: file.fileName, base64 },
+          attachment: { fileName: file.fileName, base64, contentType: file.contentType || file.blob.type || "application/pdf" },
         })
       );
       gone = true;
       const row = {
         sent_by: appUser?.name || null,
         from_address: mailbox.address || null,
-        to_addresses: real.to,
-        cc_addresses: real.cc,
+        // Who it was addressed to in the window. On practice that is not
+        // where it went (test_mode says so), but it is what "where did this
+        // customer's last invoice go" has to remember.
+        to_addresses: toCheck.list,
+        cc_addresses: ccCheck.list,
         subject: subject.trim(),
         document_type: record.documentType,
         related_id: record.relatedId != null ? String(record.relatedId) : null,
         job_id: record.jobId || null,
+        party_name: record.partyName || null,
         file_name: file.fileName,
         test_mode: toSelf,
       };
-      const { error: recordError } = await supabase.from("sent_emails").insert(row);
-      if (recordError) throw recordError;
+      await recordSentEmail(row);
       setSentNote(`Sent to ${real.to.join(", ")}. It is in your Outlook Sent Items.`);
       onSent?.();
     } catch (err) {
@@ -257,7 +285,7 @@ function SendEmailModal({ heading, appUser, defaults, buildAttachment, record, o
         )}
 
         <label style={{ ...S.label, display: "block" }}>TO</label>
-        <input style={box} value={to} onChange={(e) => setTo(e.target.value)} placeholder="name@supplier.co.za; second@supplier.co.za" disabled={!!sentNote} />
+        <input style={box} value={to} onChange={(e) => setTo(e.target.value)} placeholder={partyWord === "customer" ? "creditors@customer.co.za; second@customer.co.za" : "name@supplier.co.za; second@supplier.co.za"} disabled={!!sentNote} />
         {unused.length > 0 && !sentNote && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
             {unused.map((s) => (
@@ -276,11 +304,32 @@ function SendEmailModal({ heading, appUser, defaults, buildAttachment, record, o
           </div>
         )}
         {(defaults.suggestions || []).length === 0 && !to.trim() && (
-          <div style={S.roleHint}>No email address is saved for this supplier. Type one here; add it under Stock Manager → Suppliers to have it filled in next time.</div>
+          <div style={S.roleHint}>
+            {partyWord === "customer"
+              ? "No email address is saved for this customer. Type one here; the app remembers where this customer's last invoice went. Contacts are added under Stock Manager → Customers."
+              : "No email address is saved for this supplier. Type one here; add it under Stock Manager → Suppliers to have it filled in next time."}
+          </div>
         )}
 
         <label style={{ ...S.label, display: "block" }}>CC</label>
         <input style={box} value={cc} onChange={(e) => setCc(e.target.value)} placeholder="optional" disabled={!!sentNote} />
+        {unusedCc.length > 0 && !sentNote && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+            {unusedCc.map((s) => (
+              <button
+                key={s.email}
+                type="button"
+                className="stk-btn"
+                style={{ ...S.reqActionBtnMuted, fontSize: 12 }}
+                title="Add to Cc"
+                onClick={() => setCc((t) => (t.trim() ? `${t.trim().replace(/[;,]$/, "")}; ${s.email}` : s.email))}
+              >
+                + {s.name ? `${s.name} · ` : ""}
+                {s.email}
+              </button>
+            ))}
+          </div>
+        )}
 
         <label style={{ ...S.label, display: "block" }}>SUBJECT</label>
         <input style={box} value={subject} onChange={(e) => setSubject(e.target.value)} disabled={!!sentNote} />
@@ -288,7 +337,7 @@ function SendEmailModal({ heading, appUser, defaults, buildAttachment, record, o
         <label style={{ ...S.label, display: "block" }}>MESSAGE</label>
         <textarea style={{ ...box, minHeight: 170, resize: "vertical", fontFamily: "inherit", lineHeight: 1.45 }} value={body} onChange={(e) => setBody(e.target.value)} disabled={!!sentNote} />
 
-        <div style={S.roleHint}>Attached: the PDF of this document, made fresh when you press Send.</div>
+        <div style={S.roleHint}>{attachmentNote || "Attached: the PDF of this document, made fresh when you press Send."}</div>
 
         {unreadable.length > 0 && <div style={{ ...S.roleHint, color: C.danger }}>Not an email address: {unreadable.join(", ")}</div>}
         {error && <div style={{ ...S.roleHint, color: C.danger }}>{error}</div>}
@@ -320,9 +369,13 @@ function SendEmailModal({ heading, appUser, defaults, buildAttachment, record, o
 // it asks the database for one document's few rows when somebody opens it
 // and never on a timer. `refresh` changes when a Send has just gone.
 // If the table is not there yet (setup-sent-emails.sql) it shows nothing.
-export function SentEmailLines({ documentType, relatedId, refresh }) {
+//
+// A LIST of cards hands the rows in instead (`rows`; App.jsx reads them all
+// at once with sentEmailsFor): one read for the whole list, not one per card.
+export function SentEmailLines({ documentType, relatedId, refresh, rows: given }) {
   const [rows, setRows] = useState([]);
   useEffect(() => {
+    if (given !== undefined) return undefined;
     if (!emailIsSetUp() || !supabase || relatedId == null || relatedId === "") return undefined;
     let alive = true;
     supabase
@@ -338,11 +391,12 @@ export function SentEmailLines({ documentType, relatedId, refresh }) {
     return () => {
       alive = false;
     };
-  }, [documentType, relatedId, refresh]);
-  if (rows.length === 0) return null;
+  }, [documentType, relatedId, refresh, given]);
+  const shown = given !== undefined ? given || [] : rows;
+  if (shown.length === 0) return null;
   return (
     <div style={{ marginTop: 6 }}>
-      {rows.map((r) => (
+      {shown.map((r) => (
         <div key={r.id} style={{ ...S.itemComment, fontStyle: "normal" }}>
           {sentLine(r)}
         </div>

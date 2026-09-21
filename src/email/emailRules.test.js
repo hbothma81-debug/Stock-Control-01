@@ -10,6 +10,8 @@ import {
   actualRecipients,
   graphMessage,
   sentLine,
+  lastSentTo,
+  invoiceEmailDefaults,
 } from "./emailRules.js";
 
 test("only the live site sends to the real people", () => {
@@ -110,5 +112,75 @@ test("the message as Microsoft wants it", () => {
 test("the line on the card, in South African time", () => {
   const line = sentLine({ sent_at: "2026-09-21T12:05:00Z", to_addresses: ["a@b.com", "c@d.com"], sent_by: "Heinrich" });
   assert.match(line, /^Emailed 21 Sep 14:05 to a@b\.com, c@d\.com by Heinrich$/);
-  assert.match(sentLine({ sent_at: "2026-09-21T12:05:00Z", to_addresses: ["me@x.com"], test_mode: true }), /practice: went to the sender only/);
+  assert.match(sentLine({ sent_at: "2026-09-21T12:05:00Z", to_addresses: ["me@x.com"], test_mode: true }), /practice: it went to the sender only/);
+});
+
+test("where this customer's last invoice went", () => {
+  assert.deepEqual(lastSentTo([]), []);
+  assert.deepEqual(lastSentTo(null), []);
+  assert.deepEqual(
+    lastSentTo([
+      { sent_at: "2026-09-01T08:00:00Z", to_addresses: ["old@cust.co.za"] },
+      { sent_at: "2026-09-20T08:00:00Z", to_addresses: ["creditors@cust.co.za", "second@cust.co.za"] },
+      { sent_at: "2026-09-10T08:00:00Z", to_addresses: ["middle@cust.co.za"] },
+    ]),
+    ["creditors@cust.co.za", "second@cust.co.za"]
+  );
+  assert.deepEqual(lastSentTo([{ sent_at: "2026-09-20T08:00:00Z", to_addresses: ["not an address", "ok@cust.co.za"] }]), ["ok@cust.co.za"]);
+});
+
+test("a Sage invoice's email: the first time To is empty and the contacts are offered", () => {
+  const d = invoiceEmailDefaults({
+    job: { job_number: "JOB-0042", invoice_number: "20616", customer_po: "4500123", customer: "Greenzone" },
+    contacts: [
+      { name: "Buyer", email: "buyer@greenzone.co.za" },
+      { name: "No address", email: "" },
+    ],
+    lastTo: [],
+    salesRep: { name: "Mark", email: "mark@ersupplies.co.za" },
+    ownAddress: "accounts@ersupplies.co.za",
+    company: { name: "East Rand Supplies", phone: "011 000 0000" },
+    senderName: "Chante",
+  });
+  assert.equal(d.to, "");
+  assert.equal(d.cc, "");
+  assert.deepEqual(d.suggestions, [{ name: "Buyer", email: "buyer@greenzone.co.za" }]);
+  assert.deepEqual(d.ccSuggestions, [{ name: "Mark", email: "mark@ersupplies.co.za" }]);
+  assert.equal(d.subject, "Invoice 20616 - your order 4500123 - JOB-0042 - East Rand Supplies");
+  assert.match(d.body, /our invoice 20616\./);
+  assert.match(d.body, /Your order number: 4500123/);
+  assert.match(d.body, /Our reference: JOB-0042/);
+  assert.match(d.body, /Kind regards,\nChante\nEast Rand Supplies\n011 000 0000$/);
+});
+
+test("a Sage invoice's email: next time To is where the last one went", () => {
+  const d = invoiceEmailDefaults({
+    job: { job_number: "JOB-0050", invoice_number: "20700", customer_po: "" },
+    contacts: [{ name: "Buyer", email: "buyer@greenzone.co.za" }],
+    lastTo: ["creditors@greenzone.co.za"],
+    salesRep: null,
+    company: { name: "East Rand Supplies" },
+    senderName: "Chante",
+  });
+  assert.equal(d.to, "creditors@greenzone.co.za");
+  assert.equal(d.subject, "Invoice 20700 - JOB-0050 - East Rand Supplies");
+  assert.ok(!/order number/.test(d.body));
+  assert.deepEqual(d.ccSuggestions, []);
+});
+
+test("a Sage invoice's email: no invoice number yet, and the rep who is sending is not offered to himself", () => {
+  const d = invoiceEmailDefaults({
+    job: { job_number: "JOB-0007", invoice_number: null, customer_po: null },
+    contacts: [],
+    lastTo: [],
+    salesRep: { name: "Mark", email: "Mark@ERSupplies.co.za" },
+    ownAddress: "mark@ersupplies.co.za",
+    company: {},
+    senderName: "Mark",
+  });
+  assert.equal(d.subject, "Invoice for JOB-0007");
+  assert.match(d.body, /Please find our invoice attached\./);
+  assert.ok(!/undefined|null/.test(d.body + d.subject));
+  assert.deepEqual(d.ccSuggestions, []);
+  assert.deepEqual(d.suggestions, []);
 });

@@ -53,6 +53,7 @@ ORDER=(
   setup-jobs-invoiced-amount.sql
   setup-generated-documents.sql
   setup-sent-emails.sql
+  setup-sent-emails-party.sql
   setup-shortages-table.sql
   setup-shortage-priority.sql
   setup-shortage-rework.sql

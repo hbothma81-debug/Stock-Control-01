@@ -97,6 +97,9 @@ import LaserTab from "./laser/LaserTab.jsx";
 import CancelShortage from "./laser/CancelShortage.jsx";
 import SendEmailButton, { SentEmailLines } from "./email/SendEmailButton.jsx";
 import { poEmailDefaults } from "./email/emailRules.js";
+import { emailIsSetUp } from "./email/outlook.js";
+import { sentEmailsFor } from "./email/sentEmails.js";
+import { SAGE_INVOICE, invoiceWindowDefaults, jobFileAttachment } from "./email/invoiceEmail.js";
 import { programTitle } from "./laser/programTitle.js";
 import useLaserPrograms from "./laser/useLaserPrograms.js";
 import InfoRequestModal, { InfoAnswerModal } from "./InfoRequestModal.jsx";
@@ -1654,6 +1657,11 @@ export default function StockControl() {
   // Goes up by one when an email has just been sent, so the opened card
   // re-reads its "Emailed ..." lines.
   const [emailSentTick, setEmailSentTick] = useState(0);
+  // The "Emailed ..." rows of every invoice on file, by the file's id: one
+  // read for the whole Records -> Invoicing screen, not one per card. Asked
+  // while that screen is showing, when its invoices load and after a send;
+  // never on a timer.
+  const [invoiceEmailRows, setInvoiceEmailRows] = useState(() => new Map());
   const [receivingSearchQuery, setReceivingSearchQuery] = useState("");
   // Same compact-line, tap-to-expand pattern as Purchase Orders and
   // Requisitions.
@@ -11600,6 +11608,52 @@ export default function StockControl() {
   const canManageRequisitions = isAdmin || !!profile?.canManageRequisitions;
   const canAccessStockManager = isAdmin || !!profile?.canAccessStockManager;
   const canRaisePO = isAdmin || !!profile?.canRaisePO;
+
+  // Who may email the invoice accounts uploaded to the customer: accounts
+  // and admins (Records -> Invoicing), and sales people (the job's Files
+  // tab, the only place they can reach it). Heinrich, 21 Sep 2026.
+  const mayEmailInvoice = isAdmin || !!profile?.canManageInvoicing || !!profile?.isSalesPerson;
+
+  useEffect(() => {
+    if (tab !== "invoicing" || !mayEmailInvoice || !emailIsSetUp() || invoiceDocs.length === 0) return undefined;
+    let alive = true;
+    sentEmailsFor(SAGE_INVOICE, invoiceDocs.map((d) => d.id))
+      .then((map) => alive && setInvoiceEmailRows(map))
+      .catch((err) => console.error("Failed to load which invoices were emailed:", err));
+    return () => {
+      alive = false;
+    };
+  }, [tab, mayEmailInvoice, invoiceDocs, emailSentTick]);
+
+  // "Email invoice to customer" for one uploaded invoice: a plain function,
+  // not a component (one declared in here would remount on every render).
+  // Used by both Records -> Invoicing cards and the job's Files tab, so the
+  // window, the wording and the record are the same from either.
+  function renderInvoiceEmailButton(job, doc) {
+    if (!job || !doc || !mayEmailInvoice) return null;
+    return (
+      <SendEmailButton
+        label="Email invoice to customer"
+        title="Send the invoice on file to the customer from your Outlook"
+        style={S.reqActionBtnMuted}
+        partyWord="customer"
+        attachmentNote={`Attached: ${doc.file_name}, the invoice on file for ${job.job_number}.`}
+        appUser={{ id: currentUser?.id, name: roleLabel }}
+        getDefaults={() =>
+          invoiceWindowDefaults({
+            job,
+            contacts: master.customerContacts?.[job.customer] || [],
+            company: master.companyDetails || {},
+            senderName: roleLabel,
+            appUserId: currentUser?.id,
+          })
+        }
+        buildAttachment={() => jobFileAttachment(doc)}
+        record={{ documentType: SAGE_INVOICE, relatedId: doc.id, jobId: job.id, partyName: job.customer }}
+        onSent={() => setEmailSentTick((n) => n + 1)}
+      />
+    );
+  }
   const hasAnyAccess = isAdmin || (!!profile && (canAccessStockManager || NAV_TABS.some((t) => canView(t.key))));
 
   const visibleTabs = useMemo(() => {
@@ -18401,6 +18455,7 @@ export default function StockControl() {
                               <FileText size={13} /> Open the invoice
                             </button>
                           )}
+                          {renderInvoiceEmailButton(job, onFile)}
                           {(isAdmin || !!profile?.canManageInvoicing) && (
                             <label
                               style={{ ...S.reqActionBtnMuted, cursor: busy ? "default" : "pointer" }}
@@ -18437,6 +18492,7 @@ export default function StockControl() {
                     )}
                     {renderInvoiceNotes(job)}
                   </div>
+                  <SentEmailLines rows={invoiceEmailRows.get(String(invoiceDocs.find((d) => d.job_id === job.id)?.id)) || []} />
                 </div>
               ))}
             </div>
@@ -18500,6 +18556,7 @@ export default function StockControl() {
                                 <FileText size={13} /> Open the invoice
                               </button>
                             )}
+                            {renderInvoiceEmailButton(job, onFile)}
                             {(isAdmin || !!profile?.canManageInvoicing) && (
                               <label
                                 style={{ ...S.reqActionBtnMuted, cursor: busy ? "default" : "pointer" }}
@@ -18525,6 +18582,7 @@ export default function StockControl() {
                       })()}
                       {renderInvoiceNotes(job)}
                     </div>
+                    <SentEmailLines rows={invoiceEmailRows.get(String(invoiceDocs.find((d) => d.job_id === job.id)?.id)) || []} />
                   </div>
                 ))}
             </div>
@@ -24185,6 +24243,7 @@ export default function StockControl() {
                                     Move to…
                                   </button>
                                 )}
+                                {f.doc && f.stage === "Invoicing" && renderInvoiceEmailButton(jobDetail.job, f.doc)}
                                 <SavedCheck fieldKey={`jobdoc-${f.doc?.id}`} />
                                 {f.remove && (
                                   <button type="button" className="stk-btn" style={S.managerDelete} onClick={f.remove}>
@@ -24196,6 +24255,9 @@ export default function StockControl() {
                                 {f.from}
                                 {f.at ? ` — ${new Date(f.at).toLocaleString()}` : ""}
                               </div>
+                              {f.doc && f.stage === "Invoicing" && mayEmailInvoice && (
+                                <SentEmailLines documentType={SAGE_INVOICE} relatedId={f.doc.id} refresh={emailSentTick} />
+                              )}
                               {moving && (
                                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
                                   {[{ key: "", title: "Whole job" }, ...stageNames.map((n) => ({ key: n, title: n }))]
