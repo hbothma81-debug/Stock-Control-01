@@ -135,6 +135,7 @@ import {
   wholeJobUrgent,
 } from "./jobs/forceComplete.js";
 import { invoicingMatchesSearch, invoicingMatchesPicks, inDayRange } from "./jobs/invoicingSearch.js";
+import { markInvoicedRefusal } from "./jobs/markInvoiced.js";
 import {
   stageReadiness, readinessLabel, readinessGroup, jobGroupAtStage,
   READINESS_STAGE_COLUMNS, READINESS_LINE_COLUMNS, READINESS_COUNT_COLUMNS,
@@ -10652,6 +10653,26 @@ export default function StockControl() {
     const amount = takesAmount ? readInvoiceAmount(markInvoicedAmountText(markInvoicedModal)) : null;
     if (takesAmount && amount == null) {
       alert("Enter the invoice amount from Sage, excluding VAT. Type 0 if the job was invoiced at nothing.");
+      return;
+    }
+    // Refused, for everyone, while a line still has quantity to invoice or
+    // one of the job's own stages is open (src/jobs/markInvoiced.js; JOB-0014,
+    // 22 Sep 2026). Read fresh: the pop-up may have sat open a while.
+    try {
+      const [lineRead, stageRead] = await Promise.all([
+        supabase.from("job_quote_items").select("description, qty, qty_invoiced, parent_quote_item_id").eq("job_id", job.id),
+        supabase.from("job_processes").select("process_name, is_complete, shortage_id").eq("job_id", job.id),
+      ]);
+      if (lineRead.error) throw lineRead.error;
+      if (stageRead.error) throw stageRead.error;
+      const refusal = markInvoicedRefusal(job.job_number, lineRead.data, stageRead.data);
+      if (refusal) {
+        alert(refusal);
+        return;
+      }
+    } catch (err) {
+      console.error("Could not check the job before marking it invoiced:", err);
+      alert("Couldn't check the job's lines and stages — check your connection and try again. Nothing was marked.");
       return;
     }
     try {
