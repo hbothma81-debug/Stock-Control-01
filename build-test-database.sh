@@ -51,6 +51,7 @@ ORDER=(
   setup-job-invoice-requests.sql
   setup-invoice-notes.sql
   setup-jobs-invoiced-amount.sql
+  setup-job-sage-invoices.sql
   setup-generated-documents.sql
   setup-sent-emails.sql
   setup-sent-emails-party.sql
