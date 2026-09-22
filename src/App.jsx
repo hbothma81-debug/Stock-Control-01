@@ -18122,7 +18122,10 @@ export default function StockControl() {
                             <FigureBox
                               label={`Invoiced in ${poMonthLabel(thisMonth)}`}
                               value={invoiced.total}
-                              hint={`${jobsWord(invoiced.count)} · excluding VAT`}
+                              // Invoices, not jobs: since 22 Sep 2026 a job can be
+                              // billed on several Sage invoices, each counted in
+                              // its own month (src/jobs/sageInvoices.js).
+                              hint={`${invoiced.count} ${invoiced.count === 1 ? "invoice" : "invoices"} · excluding VAT`}
                               note={
                                 invoiced.atQuotedValue > 0
                                   ? `${invoiced.atQuotedValue} of ${invoiced.count} at quoted value: no invoice amount was typed`
