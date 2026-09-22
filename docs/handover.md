@@ -3580,3 +3580,58 @@ no sheet sizes or bar grades); receiving onto an existing row at another
 price (the average), the one-tap received flag, a PO with a job; a login
 without Stock Manager on "New size". Practice JOB-0005 is now Complete
 (forced) from this check.
+
+---
+
+## 22 Sep 2026 — Jobs page: several Sage invoices per job, and Mark as Invoiced refused early; pushed on Heinrich's word (`a478399..402c505`)
+
+**For Planning's record of pushes.** Four commits, all this conversation's:
+`1edd7b3` Mark as Invoiced refused while lines are partly invoiced or
+stages open; `c0ac7de` the Sage invoices table; `397d4b9` a Sage invoice
+per request on Records → Invoicing; `402c505` the practice trial, the
+"invoices" wording and the CLAUDE.md rule. Save point tag
+`savepoint-2026-09-22-live-a478399` on GitHub. Clean clone at `402c505`:
+278 tests, names 0 problems, build, the same 4 unchecked writes as before.
+Found live by "Record Sage invoice", "cannot be marked Invoiced yet",
+"Partly invoiced:" (bundle `App-CxvweGXo.js`). Live opened signed in:
+Records → Invoicing draws (Outstanding 16, Invoiced 43, All requests 34),
+JOB-0014's card shows its five requests each with Mark invoiced, two jobs
+with no request keep the whole-job button, the Invoiced box reads "38
+invoices"; no console errors, no failed requests.
+
+**What went wrong and what changed.** JOB-0014 was marked Invoiced as a
+whole on 18 Sep with nine of eleven lines partly invoiced and five stages
+open, so it left the floor. Heinrich's answers: clear the mark; refuse
+Mark as Invoiced for everyone while anything is left; one Sage invoice can
+cover two requests; the job goes Invoiced by itself when the last request
+is marked; a partly invoiced job stays In Progress with a banner; old
+invoiced jobs stay as they are; the month box counts each Sage invoice in
+its own month. Rules: `src/jobs/markInvoiced.js`, `src/jobs/sageInvoices.js`;
+CLAUDE.md under "Decisions already made".
+
+**SQL written by this conversation:**
+- `setup-job-sage-invoices.sql` — table `job_sage_invoices`, column
+  `job_invoice_requests.sage_invoice_id`, and an UPDATE rule on
+  `job_invoice_requests` it never had. **Run on practice and on live by
+  Heinrich, 22 Sep**, both confirmed with the fixed column check beside a
+  made-up column. Proven on pglite (from another conversation's scratch
+  pglite folder; the repo has no pglite of its own). Registered.
+- `FIX-job-0014-marked-invoiced-too-early.sql` — one-off, **run on live**:
+  JOB-0014 back In Progress, mark cleared, nine lines back to requested;
+  seen back on Bending on the Production tab.
+
+**Tried on practice, read from the database:** the refusal (JOB-0008
+refused, JOB-0010 marked and put back); one Sage invoice on one request;
+one on two requests (amount 12 → 37 on the tick); the last request taking
+JOB-0010 to Invoiced by itself; the job page banner with lines still to
+bill; the search by Sage number; the month box (three Sage invoices plus
+one old job). Practice put back.
+
+**Not tried by anyone:** accounts as a non-admin with only Can manage
+invoicing; a job going Invoiced when its last stage is ticked after every
+request was already marked (rule tested, not staged); a real Sage number
+typed by Chanté on live.
+
+**Not built, waiting on Heinrich:** step 3, the uploaded Sage PDF and its
+email per Sage invoice rather than per job (the Email conversation's
+code; announce first). Asked twice, unanswered.
