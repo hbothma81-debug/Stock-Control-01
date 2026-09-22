@@ -25,6 +25,7 @@ const lower = (value) => String(value ?? "").toLowerCase();
 // True when the typed text finds the job or anything filed against it.
 //   extra.deliveryNotes   delivery note numbers on the job
 //   extra.requests        the job's invoice requests (file_name, submitted_by)
+//   extra.sageInvoices    the job's Sage invoices (invoice_number, invoiced_by)
 export function invoicingMatchesSearch(job, query, extra = {}) {
   const q = lower(query).trim();
   if (!q) return true;
@@ -35,6 +36,7 @@ export function invoicingMatchesSearch(job, query, extra = {}) {
     job?.invoiced_by,
     ...(extra.deliveryNotes || []),
     ...(extra.requests || []).flatMap((r) => [r?.file_name, r?.submitted_by]),
+    ...(extra.sageInvoices || []).flatMap((s) => [s?.invoice_number, s?.invoiced_by]),
   ];
   return texts.some((t) => lower(t).includes(q));
 }

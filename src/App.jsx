@@ -136,6 +136,7 @@ import {
 } from "./jobs/forceComplete.js";
 import { invoicingMatchesSearch, invoicingMatchesPicks, inDayRange } from "./jobs/invoicingSearch.js";
 import { markInvoicedRefusal } from "./jobs/markInvoiced.js";
+import { sageInvoicesOf, requestsOnInvoice, suggestedSageAmount, sageNumbersLabel, notYetFullyInvoiced, partlyInvoicedBanner } from "./jobs/sageInvoices.js";
 import {
   stageReadiness, readinessLabel, readinessGroup, jobGroupAtStage,
   READINESS_STAGE_COLUMNS, READINESS_LINE_COLUMNS, READINESS_COUNT_COLUMNS,
@@ -1868,6 +1869,12 @@ export default function StockControl() {
   const productionLoadOrderRef = useRef(null);
   if (!productionLoadOrderRef.current) productionLoadOrderRef.current = makeLoadOrder();
   const [jobInvoiceRequests, setJobInvoiceRequests] = useState([]);
+  // The Sage invoices accounts raised, one row each, a request pointing at
+  // the one that billed it (src/jobs/sageInvoices.js, 22 Sep 2026). Not
+  // ready on a database without the table: nothing offered, nothing sent.
+  const [jobSageInvoices, setJobSageInvoices] = useState([]);
+  const [sageInvoicesReady, setSageInvoicesReady] = useState(false);
+  const [sageInvoiceModal, setSageInvoiceModal] = useState(null); // { job, requestIds, invoiceNumber, amount }
   // One invoice request per job at a time (src/jobs/invoiceRequestOnce.js).
   // The ref is the rule; the state only turns the buttons to "Sending…".
   const invoiceRequestLockRef = useRef(null);
@@ -4014,7 +4021,7 @@ export default function StockControl() {
     // every jobs load, to fill a variable nothing ever read -- the screens
     // that need quote items fetch their own, for the one job they are
     // showing.
-    const [jobsResult, invReqResult, deliveryNotesResult, quoteLinesResult] = await Promise.allSettled([
+    const [jobsResult, invReqResult, deliveryNotesResult, quoteLinesResult, sageResult] = await Promise.allSettled([
       fetchAllRows("jobs", { orderBy: "created_at", ascending: false }),
       fetchAllRows("job_invoice_requests", { orderBy: "submitted_at", ascending: false }),
       fetchAllRows("delivery_notes", { orderBy: "delivery_note_number", ascending: false }),
@@ -4031,7 +4038,17 @@ export default function StockControl() {
         select: "job_id, qty, unit_price, parent_quote_item_id",
         filter: (q) => q.is("parent_quote_item_id", null),
       }),
+      // The Sage invoices. A database without the table answers an error,
+      // which only means "not ready": the screens then work as before.
+      fetchAllRows("job_sage_invoices", { orderBy: "invoiced_at", ascending: false }),
     ]);
+    if (sageResult.status === "fulfilled") {
+      setJobSageInvoices(sageResult.value || []);
+      setSageInvoicesReady(true);
+    } else {
+      setJobSageInvoices([]);
+      setSageInvoicesReady(false);
+    }
 
     if (jobsResult.status === "fulfilled") {
       setJobsList(jobsResult.value || []);
@@ -4147,6 +4164,9 @@ export default function StockControl() {
       if (stagesError) throw stagesError;
       const changed = await settleFinishedJobs({ [jobId]: stages || [] }, job ? [job] : []);
       if (changed) await fetchJobs();
+      // A job billed in part whose last stage just closed may now be
+      // fully invoiced (every request already on a Sage invoice).
+      if (jobSageInvoices.some((s) => s.job_id === jobId)) await settleSageInvoicedJob(jobId);
     } catch (err) {
       console.error("Could not check whether that was the last stage:", err);
     }
@@ -9375,18 +9395,160 @@ export default function StockControl() {
   // say "(2 requests)" and open only the newest, so the other looked lost
   // (JOB-0036, 21 Sep 2026). A plain function, not a component: see the
   // gotchas in CLAUDE.md.
-  function renderOpenRequestButtons(job, noneText) {
+  //
+  // Since 22 Sep 2026 each request also says which Sage invoice billed it,
+  // or offers "Mark invoiced" to accounts (src/jobs/sageInvoices.js). Above
+  // the rows, a job billed in part carries its banner (his answer 3).
+  function renderOpenRequestButtons(job, noneText, { allowMark = false } = {}) {
     // The list is held newest first.
     const forJob = jobInvoiceRequests.filter((r) => r.job_id === job.id).reverse();
     if (forJob.length === 0) return <span style={S.roleHint}>{noneText}</span>;
-    return forJob.map((r, i) => (
-      <button key={r.id} type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => viewJobInvoiceRequest(r)}>
-        <FileText size={13} />{" "}
-        {forJob.length === 1
-          ? "Open request"
-          : `Open request ${i + 1} of ${forJob.length}: ${invoiceDateLabel(r.submitted_at)}${r.total_amount != null ? `, ${rand(r.total_amount)}` : ""}`}
-      </button>
-    ));
+    const banner = partlyInvoicedBanner(job, jobInvoiceRequests, jobSageInvoices);
+    const invoiceOf = (r) => (r.sage_invoice_id ? jobSageInvoices.find((s) => s.id === r.sage_invoice_id) : null);
+    return (
+      <>
+        {banner && (
+          <div style={{ ...S.roleHint, color: C.accentRaw, fontWeight: 600, width: "100%" }}>{banner}</div>
+        )}
+        {forJob.map((r, i) => {
+          const inv = invoiceOf(r);
+          const onSame = inv ? requestsOnInvoice(inv.id, jobInvoiceRequests).length : 0;
+          return (
+            <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", width: "100%" }}>
+              <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => viewJobInvoiceRequest(r)}>
+                <FileText size={13} />{" "}
+                {forJob.length === 1
+                  ? "Open request"
+                  : `Open request ${i + 1} of ${forJob.length}: ${invoiceDateLabel(r.submitted_at)}${r.total_amount != null ? `, ${rand(r.total_amount)}` : ""}`}
+              </button>
+              {inv ? (
+                <span style={{ ...S.roleHint, color: C.accentFinished }}>
+                  Sage {inv.invoice_number}
+                  {inv.amount != null ? ` · ${rand(inv.amount)}` : ""} · {invoiceDateLabel(inv.invoiced_at)}
+                  {inv.invoiced_by ? ` · ${inv.invoiced_by}` : ""}
+                  {onSame > 1 ? ` (${onSame} requests)` : ""}
+                </span>
+              ) : r.sage_invoice_id ? (
+                <span style={S.roleHint}>Sage invoice (loading…)</span>
+              ) : allowMark && sageInvoicesReady && (isAdmin || !!profile?.canManageInvoicing) ? (
+                <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => openSageInvoiceModal(job, r)}>
+                  <Check size={13} /> Mark invoiced
+                </button>
+              ) : null}
+            </div>
+          );
+        })}
+      </>
+    );
+  }
+
+  // Accounts has raised a Sage invoice for this request, and maybe for
+  // others on the job with it ("can be 2 requests and one sage").
+  function openSageInvoiceModal(job, request) {
+    setSageInvoiceModal({ job, requestIds: [request.id], invoiceNumber: "", amount: null });
+  }
+
+  async function submitSageInvoice() {
+    const { job, requestIds, invoiceNumber } = sageInvoiceModal;
+    const number = (invoiceNumber || "").trim();
+    if (!number) {
+      alert("Enter the real invoice number from Sage first.");
+      return;
+    }
+    const amountText = sageInvoiceModal.amount != null ? sageInvoiceModal.amount : suggestedSageAmount(requestIds, jobInvoiceRequests);
+    const amount = readInvoiceAmount(amountText);
+    if (amount == null) {
+      alert("Enter the invoice amount from Sage, excluding VAT. Type 0 if it was invoiced at nothing.");
+      return;
+    }
+    if (requestIds.length === 0) {
+      alert("Tick at least one request this Sage invoice covers.");
+      return;
+    }
+    try {
+      const { data: made, error } = await supabase
+        .from("job_sage_invoices")
+        .insert({ job_id: job.id, invoice_number: number, amount, invoiced_by: roleLabel })
+        .select("id")
+        .single();
+      if (error) throw error;
+      // Only requests still unbilled: two people marking at once cannot
+      // move a request off the invoice the other just put it on.
+      const { data: linked, error: linkError } = await supabase
+        .from("job_invoice_requests")
+        .update({ sage_invoice_id: made.id })
+        .in("id", requestIds)
+        .eq("job_id", job.id)
+        .is("sage_invoice_id", null)
+        .select("id");
+      if (linkError) throw linkError;
+      const n = (linked || []).length;
+      await logJobEvent(job.id, "sage invoice", `${number} — ${rand(amount)} on ${n} request${n === 1 ? "" : "s"}`);
+      if (n < requestIds.length) alert(`${requestIds.length - n} of those requests had just been put on another Sage invoice and were left as they were.`);
+      setSageInvoiceModal(null);
+      await fetchJobs();
+      await settleSageInvoicedJob(job.id);
+    } catch (err) {
+      console.error("Failed to record the Sage invoice:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
+  // The job goes Invoiced by itself once every line is billed, every stage
+  // ticked and every request has its Sage invoice (Heinrich, 22 Sep 2026).
+  // Read fresh. Called after a Sage invoice is recorded and after the last
+  // stage is ticked on a job that already has one. Never fatal.
+  async function settleSageInvoicedJob(jobId) {
+    if (!supabase || !jobId) return;
+    try {
+      const [jobRead, lineRead, stageRead, requestRead, sageRead] = await Promise.all([
+        supabase.from("jobs").select("*").eq("id", jobId).single(),
+        supabase.from("job_quote_items").select("description, qty, qty_invoiced, parent_quote_item_id").eq("job_id", jobId),
+        supabase.from("job_processes").select("process_name, is_complete, shortage_id").eq("job_id", jobId),
+        supabase.from("job_invoice_requests").select("id, job_id, sage_invoice_id").eq("job_id", jobId),
+        supabase.from("job_sage_invoices").select("*").eq("job_id", jobId),
+      ]);
+      for (const r of [jobRead, lineRead, stageRead, requestRead, sageRead]) if (r.error) throw r.error;
+      const job = jobRead.data;
+      if (!job || job.status === "invoiced" || job.status === "cancelled") return;
+      if ((sageRead.data || []).length === 0) return;
+      if (notYetFullyInvoiced(job, requestRead.data, lineRead.data, stageRead.data)) return;
+      const total = (sageRead.data || []).reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
+      const numbers = sageNumbersLabel(jobId, sageRead.data);
+      const { data: changed, error } = await supabase
+        .from("jobs")
+        .update({
+          status: "invoiced",
+          invoice_number: numbers,
+          invoiced_by: roleLabel,
+          invoiced_at: new Date().toISOString(),
+          ...(jobHasInvoicedAmount(job) ? { invoiced_amount: total } : {}),
+        })
+        .eq("id", jobId)
+        .neq("status", "invoiced")
+        .select("id");
+      if (error) throw error;
+      if (!changed || changed.length === 0) return;
+      const { error: itemsError } = await supabase
+        .from("job_quote_items")
+        .update({ item_status: "invoiced" })
+        .eq("job_id", jobId)
+        .eq("item_status", "invoice_requested");
+      if (itemsError) throw itemsError;
+      await logJobEvent(jobId, "invoiced", `every request has its Sage invoice: ${numbers}`);
+      if (job.sales_rep) {
+        await sendNotifications({
+          job_id: jobId,
+          job_number: job.job_number,
+          sales_rep: job.sales_rep,
+          message: `${job.job_number} (${job.customer || "no customer"}) fully invoiced — Sage ${numbers}`,
+        });
+      }
+      await fetchJobs();
+      if (jobDetail?.job.id === jobId) refreshJobDetail();
+    } catch (err) {
+      console.error("Could not check whether the job is fully invoiced:", err);
+    }
   }
 
   async function loadInvoiceNotes() {
@@ -9444,7 +9606,7 @@ export default function StockControl() {
   function invoicingLists() {
     // Asked for a dozen times while the screen is drawn; gathered once for
     // the same lists, boxes and person.
-    const inputs = [jobsList, jobInvoiceRequests, allDeliveryNotes, invoicingSearchQuery, invoicingCustomerFilter, invoicingSalesRepFilter, invoiceRequestsDateFrom, invoiceRequestsDateTo, isAdmin, !!profile?.canManageInvoicing];
+    const inputs = [jobsList, jobInvoiceRequests, jobSageInvoices, allDeliveryNotes, invoicingSearchQuery, invoicingCustomerFilter, invoicingSalesRepFilter, invoiceRequestsDateFrom, invoiceRequestsDateTo, isAdmin, !!profile?.canManageInvoicing];
     const held = invoicingListsRef.current;
     if (held && held.inputs.every((v, i) => v === inputs[i])) return held.lists;
     const lists = gatherInvoicingLists();
@@ -9469,7 +9631,11 @@ export default function StockControl() {
     const to = invoiceRequestsDateTo;
     const found = (job, requests) =>
       invoicingMatchesPicks(job, picks) &&
-      invoicingMatchesSearch(job, invoicingSearchQuery, { deliveryNotes: job ? notesOf.get(job.id) : [], requests });
+      invoicingMatchesSearch(job, invoicingSearchQuery, {
+        deliveryNotes: job ? notesOf.get(job.id) : [],
+        requests,
+        sageInvoices: job ? sageInvoicesOf(job.id, jobSageInvoices) : [],
+      });
     // Newest first as loaded, so a job's last entry is its first request.
     const firstSent = (job) => {
       const own = requestsOf.get(job.id) || [];
@@ -17927,7 +18093,7 @@ export default function StockControl() {
                       const shown = jobsList.filter(matchesFilters);
                       const onOrder = onOrderFigure(shown, jobLineTotals);
                       const thisMonth = monthKeySA(new Date());
-                      const invoiced = isAdmin ? invoicedInMonthFigure(shown, thisMonth, jobLineTotals) : null;
+                      const invoiced = isAdmin ? invoicedInMonthFigure(shown, thisMonth, jobLineTotals, jobSageInvoices) : null;
                       // Every invoice request sent this month, added up
                       // (Heinrich, 17 Sep 2026: on this page, nowhere else).
                       // Only the requests of the jobs the filters are
@@ -19263,7 +19429,7 @@ export default function StockControl() {
                       ))}
                   </div>
                   <div style={S.reqActions}>
-                    {renderOpenRequestButtons(job, "No invoice request submitted yet")}
+                    {renderOpenRequestButtons(job, "No invoice request submitted yet", { allowMark: true })}
                     {/* The invoice itself, once accounts has raised it in Sage.
                         Separate from Open request above, which is the floor's
                         request to bill -- two different documents that are easy
@@ -19313,7 +19479,9 @@ export default function StockControl() {
                         true, and React draws true as nothing -- so the one person
                         who should always have been able to mark a job invoiced was
                         the only one who could not. */}
-                    {(isAdmin || !!profile?.canManageInvoicing) && (
+                    {/* Since 22 Sep 2026 a job with requests is invoiced request by
+                        request, above; the whole-job mark stays for a job that has none. */}
+                    {(isAdmin || !!profile?.canManageInvoicing) && !jobInvoiceRequests.some((r) => r.job_id === job.id) && (
                       <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => openMarkInvoicedModal(job)}>
                         <Check size={13} /> Mark as Invoiced
                       </button>
@@ -24787,19 +24955,28 @@ export default function StockControl() {
                         <Check size={13} /> {invoiceSendingFor.includes(jobDetail.job.id) ? "Sending…" : "Invoice Now (all remaining)"}
                       </button>
                     )}
-                    <button
-                      type="button"
-                      className="stk-btn"
-                      style={S.reqActionBtn}
-                      onClick={() => openMarkInvoicedModal(jobDetail.job)}
-                    >
-                      <Check size={13} /> Mark as Invoiced
-                    </button>
+                    {!jobInvoiceRequests.some((r) => r.job_id === jobDetail.job.id) && (
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={S.reqActionBtn}
+                        onClick={() => openMarkInvoicedModal(jobDetail.job)}
+                      >
+                        <Check size={13} /> Mark as Invoiced
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
             )}
 
+            {/* A job billed in part stays on the floor and says so here
+                (src/jobs/sageInvoices.js); accounts marks each request on
+                Records -> Invoicing. */}
+            {(() => {
+              const banner = partlyInvoicedBanner(jobDetail.job, jobInvoiceRequests, jobSageInvoices, jobDetail.quoteItems);
+              return banner ? <div style={{ ...S.roleHint, marginTop: 8, color: C.accentRaw, fontWeight: 600 }}>{banner}</div> : null;
+            })()}
             {jobDetail.job.status === "invoiced" && (
               <div style={{ ...S.roleHint, marginTop: 8, color: C.accentFinished }}>
                 Invoiced — #{jobDetail.job.invoice_number} — by {jobDetail.job.invoiced_by} on {new Date(jobDetail.job.invoiced_at).toLocaleDateString()}
@@ -26811,6 +26988,75 @@ export default function StockControl() {
             )}
             <button type="button" className="stk-btn" style={S.submitBtn} onClick={submitMarkInvoiced}>
               Mark as Invoiced
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* A Sage invoice for one request, or for several at once: the other
+          requests on the job not yet billed are offered as ticks, and the
+          amount starts as the ticked ones added up (src/jobs/sageInvoices.js). */}
+      {sageInvoiceModal && (
+        <div style={{ ...S.modalOverlay, zIndex: 30 }}>
+          <div style={{ ...S.modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Sage invoice on {sageInvoiceModal.job.job_number}</span>
+              <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setSageInvoiceModal(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={S.roleHint}>Raise the invoice in Sage first, then record its number here.</div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Covers</label>
+              {jobInvoiceRequests
+                .filter((r) => r.job_id === sageInvoiceModal.job.id && !r.sage_invoice_id)
+                .slice()
+                .reverse()
+                .map((r, i, all) => (
+                  <label key={r.id} style={S.checkRow}>
+                    <input
+                      type="checkbox"
+                      checked={sageInvoiceModal.requestIds.includes(r.id)}
+                      onChange={(e) =>
+                        setSageInvoiceModal((m) => ({
+                          ...m,
+                          requestIds: e.target.checked ? [...m.requestIds, r.id] : m.requestIds.filter((id) => id !== r.id),
+                        }))
+                      }
+                    />
+                    {all.length === 1 ? "The request" : `Request ${i + 1} of ${all.length}`}: {invoiceDateLabel(r.submitted_at)}
+                    {r.total_amount != null ? `, ${rand(r.total_amount)}` : ""}
+                  </label>
+                ))}
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Sage invoice number</label>
+              <input
+                style={S.input}
+                value={sageInvoiceModal.invoiceNumber}
+                onChange={(e) => setSageInvoiceModal((m) => ({ ...m, invoiceNumber: e.target.value }))}
+                placeholder="e.g. 20612"
+                autoFocus
+              />
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label style={S.label}>Invoice amount, excluding VAT (R)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
+                style={S.input}
+                value={sageInvoiceModal.amount != null ? sageInvoiceModal.amount : suggestedSageAmount(sageInvoiceModal.requestIds, jobInvoiceRequests)}
+                onChange={(e) => setSageInvoiceModal((m) => ({ ...m, amount: e.target.value }))}
+                placeholder="From the Sage invoice, before VAT"
+              />
+              {sageInvoiceModal.amount == null && (
+                <div style={S.roleHint}>The ticked requests added up. Change it if Sage says otherwise.</div>
+              )}
+            </div>
+            <button type="button" className="stk-btn" style={S.submitBtn} onClick={submitSageInvoice}>
+              Record Sage invoice
             </button>
           </div>
         </div>

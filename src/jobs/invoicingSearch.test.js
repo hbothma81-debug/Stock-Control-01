@@ -70,3 +70,9 @@ test("From and To include both days, and a row with no date fails a picked range
   assert.equal(inDayRange(null, "", ""), true);
   assert.equal(inDayRange(null, "2026-09-01", ""), false);
 });
+
+test("finds by any Sage invoice on the job", () => {
+  const sageInvoices = [{ invoice_number: "20612", invoiced_by: "Chanté" }];
+  assert.equal(invoicingMatchesSearch({ job_number: "JOB-0014" }, "20612", { sageInvoices }), true);
+  assert.equal(invoicingMatchesSearch({ job_number: "JOB-0014" }, "20613", { sageInvoices }), false);
+});

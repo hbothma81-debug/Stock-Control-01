@@ -100,13 +100,29 @@ export function requestedInMonthFigure(requests, monthKey) {
   };
 }
 
-// { total, count, atQuotedValue } over the jobs marked invoiced in that
-// South African month ("2026-09").
-export function invoicedInMonthFigure(jobs, monthKey, lineTotals) {
-  const inMonth = (jobs || []).filter(
-    (j) => j.status === "invoiced" && monthKey && monthKeySA(j.invoiced_at) === monthKey
-  );
+// { total, count, atQuotedValue } over what was invoiced in that South
+// African month ("2026-09").
+//
+// Since 22 Sep 2026 a job can carry several Sage invoices
+// (job_sage_invoices, src/jobs/sageInvoices.js). Each of those counts in
+// the month it was raised, at its own amount (his answer 5: a job invoiced
+// across two months shows in both). A job with any Sage invoice is left
+// out of the job-level count below, so it is never counted twice. Jobs
+// invoiced before this, with their one number on the job, count as they
+// always did.
+export function invoicedInMonthFigure(jobs, monthKey, lineTotals, sageInvoices) {
+  const shownJobs = new Set((jobs || []).map((j) => j.id));
+  const withSage = new Set((sageInvoices || []).map((s) => s.job_id));
   let total = 0;
+  let count = 0;
+  for (const s of sageInvoices || []) {
+    if (!shownJobs.has(s.job_id) || !monthKey || monthKeySA(s.invoiced_at) !== monthKey) continue;
+    total += Number(s.amount) || 0;
+    count += 1;
+  }
+  const inMonth = (jobs || []).filter(
+    (j) => j.status === "invoiced" && !withSage.has(j.id) && monthKey && monthKeySA(j.invoiced_at) === monthKey
+  );
   let atQuotedValue = 0;
   for (const j of inMonth) {
     if (j.invoiced_amount != null && j.invoiced_amount !== "") {
@@ -116,5 +132,5 @@ export function invoicedInMonthFigure(jobs, monthKey, lineTotals) {
       atQuotedValue += 1;
     }
   }
-  return { total, count: inMonth.length, atQuotedValue };
+  return { total, count: count + inMonth.length, atQuotedValue };
 }

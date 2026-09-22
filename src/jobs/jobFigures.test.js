@@ -128,3 +128,25 @@ test("no month asked for counts nothing", () => {
   const jobs = [{ id: "h", status: "invoiced", invoiced_at: null, invoiced_amount: 50 }];
   assert.deepEqual(invoicedInMonthFigure(jobs, "", {}), { total: 0, count: 0, atQuotedValue: 0 });
 });
+
+test("invoiced in a month: each Sage invoice in its own month, its job never counted twice", () => {
+  const jobs = [
+    // Billed on two Sage invoices, one in August, one in September; the
+    // job's own mark (October) must not be counted as well.
+    { id: "a", status: "invoiced", invoiced_at: "2026-10-01T08:00:00Z", invoiced_amount: 999 },
+    // Still on the floor, but partly invoiced this month.
+    { id: "b", status: "in_progress" },
+    // An old job with its one number on the job.
+    { id: "c", status: "invoiced", invoiced_at: "2026-09-10T08:00:00Z", invoiced_amount: 300 },
+  ];
+  const sage = [
+    { job_id: "a", amount: 100, invoiced_at: "2026-08-20T08:00:00Z" },
+    { job_id: "a", amount: 40, invoiced_at: "2026-09-02T08:00:00Z" },
+    { job_id: "b", amount: "10.50", invoiced_at: "2026-09-15T08:00:00Z" },
+    // A job not on the list (filtered out on screen): not counted.
+    { job_id: "z", amount: 5000, invoiced_at: "2026-09-15T08:00:00Z" },
+  ];
+  assert.deepEqual(invoicedInMonthFigure(jobs, "2026-09", {}, sage), { total: 40 + 10.5 + 300, count: 3, atQuotedValue: 0 });
+  assert.deepEqual(invoicedInMonthFigure(jobs, "2026-08", {}, sage), { total: 100, count: 1, atQuotedValue: 0 });
+  assert.deepEqual(invoicedInMonthFigure(jobs, "2026-10", {}, sage), { total: 0, count: 0, atQuotedValue: 0 });
+});
