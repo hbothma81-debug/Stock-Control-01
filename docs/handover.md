@@ -3635,3 +3635,65 @@ typed by Chanté on live.
 **Not built, waiting on Heinrich:** step 3, the uploaded Sage PDF and its
 email per Sage invoice rather than per job (the Email conversation's
 code; announce first). Asked twice, unanswered.
+
+---
+
+## 25 Sep 2026 — Jobs page: state of play at wrap-up (18–25 Sep)
+
+Everything this conversation built is live and pushed; the queue is empty.
+The detail is in its entries above (18, 19, 21, 22 Sep).
+
+### Done and live
+
+- Items tab A to Z; Records → Invoicing search and filter bar.
+- Closing Invoicing always sends the invoice request; Mark as Invoiced
+  refused while lines are partly invoiced or stages open.
+- Several Sage invoices per job, one covering one or more requests, marked
+  request by request on Records → Invoicing; the job goes Invoiced by
+  itself; partly invoiced jobs stay on the floor with a banner; the month
+  box counts invoices in their own month.
+- Live data repairs by his pastes: JOB-0088, JOB-0014. The column check
+  script fixed (a column check was always 400 before 21 Sep).
+- Pushed on his word: the whole 21 Sep queue (other conversations' work,
+  tried on practice first, save point tag), and every push above.
+
+### SQL written by this conversation, and where it has run
+
+- `setup-job-sage-invoices.sql` — practice and live, both confirmed 22 Sep
+  beside a made-up column.
+- `FIX-job-0088-half-made-invoice-request.sql`, `FIX-job-0014-marked-invoiced-too-early.sql`
+  — one-off, live only, both run by him and read back.
+- Still outstanding from 17 Sep: `setup-jobs-invoiced-amount.sql` is on live
+  (21 Sep) and **not on practice**.
+
+### Built but not yet tested by Heinrich
+
+- Sage invoices as a non-admin accounts person (Can manage invoicing only);
+  a job going Invoiced when its last stage is ticked after every request
+  was already marked; a real Sage number typed by Chanté on live.
+- A real keyboard Tab along an Items tab row after renaming a line.
+- The search bar's Sales rep box, the To date alone, a phone-width look.
+- Request invoice pressed on a real Production card after the 19 Sep change.
+- Delete for customer on Records → Drawings, never run anywhere.
+
+### Waiting on Heinrich
+
+- **Step 3, planned 22 Sep, not built:** the uploaded Sage PDF and its
+  email filed per Sage invoice, not per job. The plan: one column
+  `job_documents.sage_invoice_id`; a file box in the "Record Sage invoice"
+  pop-up and Open / Email / Upload on each Sage line of the Records card;
+  the email names the Sage number (the Email conversation's `emailRules.js`
+  and `invoiceEmail.js`: announce before touching); the Files tab's
+  Invoicing pill labelled by Sage number; old uploads stay on the job. Four
+  questions unanswered: upload in the pop-up and on the line both; one PDF
+  and one email per Sage invoice covering two requests; old jobs untouched;
+  "No PDF on file" on a Sage line without one.
+- `setup-jobs-invoiced-amount.sql` on practice.
+- On order box admins only? Asked three times, unanswered.
+- His usage was at 98% on 25 Sep: this chat is cleared for that reason.
+
+### Pick up next
+
+1. His four answers on step 3, then build it (SQL first, practice, then
+   the code, then announce to Email).
+2. Whatever accounts reports from the Sage invoice flow on live.
