@@ -124,7 +124,7 @@ import {
 import { JOBS_ORDER_KEY, JOB_ORDERS, isJobOrder, sortJobs } from "./jobs/jobOrder.js";
 import { jobMatchesSearch, poMatchesSearch, poLabel } from "./jobs/jobSearch.js";
 import { closingSendsInvoiceRequest, showsRequestInvoiceButton } from "./jobs/invoiceOnClose.js";
-import { makeOneAtATime, stillToSend, invoiceRequestRefusal } from "./jobs/invoiceRequestOnce.js";
+import { makeOneAtATime, stillToSend, invoiceRequestRefusal, linesChangedFromError, sendFunctionMissing } from "./jobs/invoiceRequestOnce.js";
 import {
   mayForceComplete,
   forcedBy,
@@ -7752,12 +7752,16 @@ export default function StockControl() {
   }
 
   async function storeAndMarkInvoiceRequest(job, itemsWithQty) {
-    // The document and the request row are saved first, the lines marked
-    // after (19 Sep 2026). The other way round, a PDF that failed to save
-    // left every line reading "requested" with no request behind it, and a
-    // second try found nothing left to send. This way a failure part way
-    // leaves a request accounts can see and lines still to mark, never
-    // marked lines with nothing sent.
+    // The document is stored first; then the request row, the lines marked
+    // and the log are one all-or-nothing save in the database
+    // (send_invoice_request, setup-invoice-request-function.sql; 25 Sep
+    // 2026). Sixty separate saves from here could stop part way, a page
+    // closed or a connection dropped, and leave a request whose later lines
+    // still read "to send", sent again by the next Invoice Now. The function
+    // holds the job's lines while it checks them and refuses the whole
+    // request if any changed since the PDF was drawn; what it refuses is
+    // thrown as linesChanged and said by the button that was pressed. A PDF
+    // stored for a refused request points at nothing and harms nothing.
     const lines = itemsWithQty.map(({ item: it, qty }) => {
       // A quoted line has no part number of its own -- it comes from the
       // stock item the line was linked to. A line typed straight in with no
@@ -7790,6 +7794,43 @@ export default function StockControl() {
     // Not stored means no request: said out loud, so nothing that follows a
     // request (ticking Invoicing, Mark as Invoiced) goes ahead without one.
     if (!stored) throw new Error("The invoice request document could not be stored.");
+    const { error: sendError } = await supabase.rpc("send_invoice_request", {
+      p_job_id: job.id,
+      p_storage_path: path,
+      p_file_name: fileName,
+      p_submitted_by: roleLabel,
+      p_lines: itemsWithQty.map(({ item: it, qty }) => ({ id: it.id, qty, unit_price: Number(it.unit_price) || 0 })),
+    });
+    if (sendError) {
+      const changed = linesChangedFromError(sendError);
+      if (changed) {
+        if (jobDetail?.job?.id === job.id) refreshJobDetail();
+        const err = new Error(sendError.message);
+        err.linesChanged = changed;
+        throw err;
+      }
+      if (!sendFunctionMissing(sendError)) throw sendError;
+      console.warn(
+        "send_invoice_request is not on this database (run setup-invoice-request-function.sql): the request was saved the old way, one line at a time."
+      );
+      await markInvoiceRequestLineByLine(job, itemsWithQty, path, fileName, totalAmount);
+    }
+    if (job.sales_rep) {
+      await sendNotifications({
+        job_id: job.id,
+        job_number: job.job_number,
+        sales_rep: job.sales_rep,
+        message: `${lines.length} item(s) submitted to invoice on ${job.job_number} (${job.customer || "no customer"}) by ${roleLabel}`,
+      });
+    }
+  }
+
+  // The save as it was until 25 Sep 2026, kept only for a database without
+  // send_invoice_request. It mirrors setup-invoice-request-function.sql:
+  // change both together. The request row first, the lines after (19 Sep
+  // 2026): the other way round left lines reading "requested" with no
+  // request behind them, and a retry found nothing to send.
+  async function markInvoiceRequestLineByLine(job, itemsWithQty, path, fileName, totalAmount) {
     const { error: reqError } = await supabase.from("job_invoice_requests").insert({
       job_id: job.id,
       storage_path: path,
@@ -7816,14 +7857,6 @@ export default function StockControl() {
         invoiced_by: roleLabel,
       });
       if (logError) throw logError;
-    }
-    if (job.sales_rep) {
-      await sendNotifications({
-        job_id: job.id,
-        job_number: job.job_number,
-        sales_rep: job.sales_rep,
-        message: `${lines.length} item(s) submitted to invoice on ${job.job_number} (${job.customer || "no customer"}) by ${roleLabel}`,
-      });
     }
   }
 

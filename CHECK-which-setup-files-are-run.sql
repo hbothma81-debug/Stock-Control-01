@@ -147,7 +147,11 @@ with checks (setup_file, looks_for, found) as (
     ('setup-supplier-prices.sql',       'table master_supplier_prices',
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'master_supplier_prices')),
     ('setup-stock-paid-price.sql',      'column stock_items.paid_price',
-      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'stock_items' and column_name = 'paid_price'))
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'stock_items' and column_name = 'paid_price')),
+    ('setup-invoice-request-function.sql', 'column job_quote_item_invoices.request_id',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'job_quote_item_invoices' and column_name = 'request_id')),
+    ('setup-invoice-request-function.sql', 'function send_invoice_request',
+      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'send_invoice_request'))
 )
 select
   setup_file,

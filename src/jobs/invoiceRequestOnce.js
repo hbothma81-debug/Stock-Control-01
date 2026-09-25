@@ -71,3 +71,29 @@ export function invoiceRequestRefusal(err, jobNumber) {
   }
   return null;
 }
+
+// 3. (25 Sep 2026) The save itself is one call to the database function
+//    send_invoice_request (setup-invoice-request-function.sql): the request
+//    row, the lines marked and the log, all or nothing, with the job's
+//    lines held for that moment. Sixty separate saves from the browser
+//    could stop part way (a page closed, a connection dropped) and leave a
+//    request whose later lines still read "to send". These two read what
+//    the function answers.
+
+// The lines the function refused, as it lists them (hint 'lines_changed',
+// the list as JSON in the error's detail), or null for any other error.
+export function linesChangedFromError(error) {
+  if (!error || error.hint !== "lines_changed") return null;
+  try {
+    const list = JSON.parse(error.details);
+    return Array.isArray(list) ? list : null;
+  } catch {
+    return null;
+  }
+}
+
+// True when the database has no send_invoice_request yet (the setup file
+// not run there): the app then saves the old way and says so in the console.
+export function sendFunctionMissing(error) {
+  return !!error && (error.code === "PGRST202" || /could not find the function/i.test(String(error.message || "")));
+}

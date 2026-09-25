@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { makeOneAtATime, stillToSend, invoiceRequestRefusal } from "./invoiceRequestOnce.js";
+import { makeOneAtATime, stillToSend, invoiceRequestRefusal, linesChangedFromError, sendFunctionMissing } from "./invoiceRequestOnce.js";
 
 test("a second request for the same job is refused while the first is under way", async () => {
   const lock = makeOneAtATime();
@@ -62,4 +62,23 @@ test("the person is told which it was; any other failure keeps the button's own 
   assert.match(text, /Nothing was sent for JOB-0036/);
   assert.match(text, /P-026 \(0 left\)/);
   assert.equal(invoiceRequestRefusal(new Error("network"), "JOB-0036"), null);
+});
+
+test("the database function's refusal is read back as the lines it named", () => {
+  // As PostgREST hands a RAISE EXCEPTION ... USING DETAIL, HINT to supabase-js.
+  const err = { code: "P0001", message: "The lines changed before the invoice request was sent.", details: '[{"description": "P-026", "asked": 2, "left": 0}]', hint: "lines_changed" };
+  assert.deepEqual(linesChangedFromError(err), [{ description: "P-026", asked: 2, left: 0 }]);
+  assert.match(invoiceRequestRefusal({ linesChanged: linesChangedFromError(err) }, "JOB-0036"), /P-026 \(0 left\)/);
+  // Any other error, or a detail that is not a list, is not that refusal.
+  assert.equal(linesChangedFromError({ code: "P0001", message: "An invoice request needs at least one line.", details: null, hint: null }), null);
+  assert.equal(linesChangedFromError({ hint: "lines_changed", details: "not json" }), null);
+  assert.equal(linesChangedFromError({ hint: "lines_changed", details: '{"a":1}' }), null);
+  assert.equal(linesChangedFromError(null), null);
+});
+
+test("a database without the function is told apart from any other failure", () => {
+  assert.equal(sendFunctionMissing({ code: "PGRST202", message: "Could not find the function public.send_invoice_request(p_file_name, p_job_id, p_lines, p_storage_path, p_submitted_by) in the schema cache" }), true);
+  assert.equal(sendFunctionMissing({ code: "P0001", message: "The lines changed before the invoice request was sent." }), false);
+  assert.equal(sendFunctionMissing(new Error("Failed to fetch")), false);
+  assert.equal(sendFunctionMissing(null), false);
 });
