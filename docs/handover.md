@@ -3775,3 +3775,55 @@ page conversation's check, not this one's.
 Heinrich reports on; then, if he asks, stores/fasteners/buy-outs supplier
 prices, designed the same way (a `list_name` per division on the same
 table would do, with the stock row's `value` as the no-supplier price).
+
+---
+
+## 25 Sep 2026 — Invoice requests: the gap closed, one save in the database (156e698, NOT pushed, SQL not run anywhere)
+
+Heinrich: "FIX THE GAP. YES (request_id). BUILD HERE." Built in the
+JOB-0036 conversation, not Jobs page, by his answer.
+
+- **The gap:** sending a request was some sixty saves from the browser
+  (the document, the request row, then every line marked and logged one
+  after another; four seconds on JOB-0036). A page closed or a connection
+  dropped in those seconds left a request whose later lines still read
+  "to send", and the next Invoice Now sent them again in a second
+  document.
+- **`setup-invoice-request-function.sql`** (registered in
+  `build-test-database.sh` and `CHECK-which-setup-files-are-run.sql`;
+  `setup-ALL.sql` regenerated): `job_quote_item_invoices.request_id`, and
+  `send_invoice_request(p_job_id, p_storage_path, p_file_name,
+  p_submitted_by, p_lines jsonb)`. It holds the job's lines, checks every
+  one is on the job, not a part, not out with a supplier, has that much
+  left and still has the price the PDF printed (to 4 decimals); anything
+  off refuses the whole request (hint `lines_changed`, the lines as JSON
+  in the error's detail) and saves nothing; then the request row, the
+  lines and the log go in one save, the total the exact sum rounded to
+  cents, the request row handed back as JSON. Proven on pglite, 21 cases
+  (a scratch database needs `create role authenticated` for the grant).
+  **Not yet pasted on practice or live.** Order agreed: practice first,
+  then it is tried there signed in, then live, then the push.
+- **App** (`storeAndMarkInvoiceRequest`): stores the PDF, then the one
+  `supabase.rpc("send_invoice_request", …)`. A `lines_changed` refusal is
+  thrown as `linesChanged`, said by whichever button was pressed, and the
+  job page reloads. Where the function is missing (PGRST202) the old
+  line-by-line save runs (`markInvoiceRequestLineByLine`, kept as the
+  mirror of the SQL file) with a console warning, so the app works before
+  the paste. `linesChangedFromError`, `sendFunctionMissing` in
+  `src/jobs/invoiceRequestOnce.js`, tested.
+- **`CHECK-invoice-requests-add-up.sql`**: read only, the by-hand scan of
+  21 Sep as a paste: jobs whose requests do not add up to their lines and
+  lines whose log disagrees. JOB-0002, 0003, 0005 (invoiced before
+  requests existed) are always listed; the note in the file says so.
+- Checked: names, 280 tests, build, staged App.jsx parses. **Tried on no
+  screen**: practice was not signed in in this conversation's pane and has
+  no function yet. To try on practice after his paste: Invoice Now on a
+  Complete job with lines left, read `request_id` back from
+  `job_quote_item_invoices`; then, with a line already requested from
+  another tab, the refusal names the line and saves nothing.
+- Seen in passing, not mine, not touched: esbuild warns of a duplicate key
+  `jobNumber` in an object literal at about line 14020 of App.jsx
+  (`receivingPo.jobNumber`, Supplier prices' receiving); the second key
+  wins, so it does what it means, but somebody should drop the first.
+- Still with him from 21 Sep: the held commits went live on 22 Sep; the
+  JOB-0014 trace was repaired on 22 Sep by his paste (Jobs page's FIX).
