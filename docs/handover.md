@@ -3697,3 +3697,81 @@ The detail is in its entries above (18, 19, 21, 22 Sep).
 1. His four answers on step 3, then build it (SQL first, practice, then
    the code, then announce to Email).
 2. Whatever accounts reports from the Sage invoice flow on live.
+
+---
+
+## 25 Sep 2026 — Supplier prices (Stock Manager): state of play at wrap-up (21 Sep work)
+
+**What was built, all of it live since 21 Sep** (pushed by the Jobs page
+conversation with the whole queue, `700aca5..5dc2c50`, save point tag
+`savepoint-2026-09-21-live-700aca5`; the rules are written up under
+"Supplier prices" and "Stock on hand is worth what was paid" in CLAUDE.md):
+
+| Commit | What |
+|---|---|
+| `8b241be` | `setup-supplier-prices.sql`: table `master_supplier_prices` |
+| `7b725b5` | Stock Manager: a supplier box beside every price on Sections, Material Types, CNC Bar Grades; flat lines per supplier, red after 3 months; `src/manager/supplierPrices.js` (tested), `SupplierPriceLines.jsx`. Also fixed a section rename never reaching the master list. |
+| `d6f5b1d` | `listPrice` (cheapest of suppliers and no-supplier) behind `findPrice` / `findSectionPrice`; add-stock form: Supplier above the price boxes, cheapest filled in, chips, typed price saves to that supplier |
+| `ed8f426` | `setup-stock-paid-price.sql`: `stock_items.paid_price` and the one-off stamp; shelf value, export and usage cost by the paid price; same-item check includes the supplier; opened row shows "R92.00/m" |
+| `2165605` | "Save price only" under Add to stock; "New size" boxes under the Section box (Stock Manager people) |
+| `5dc2c50` | Requisition form fills the cheapest supplier with chips; requisition priced at its own supplier; receiving lands on the delivering supplier's row, averages the paid price, restamps the supplier's list price from the PO price; `src/manager/receiving.js` (tested) |
+
+**SQL this conversation wrote**
+
+- `setup-supplier-prices.sql` — practice: pasted by Heinrich 21 Sep ("ready, 4 of 4"). Live: `master_supplier_prices` answers 200 on 25 Sep (`CHECK-live-table.cjs`, beside a made-up column that answers 400). Its four policies and the `updated_at` trigger are rules, not checkable from outside; the Jobs page conversation's pre-push check of 21 Sep found the table on both, and the app writes to it on live without a refused request being reported.
+- `setup-stock-paid-price.sql` — practice: pasted 21 Sep (3 of 6 structural rows stamped; the 30x30x2 rows have no list price and read the list). Live: `stock_items.paid_price` answers 200 on 25 Sep. Heinrich never sent the live result table, so how many live rows were stamped is unknown; `CHECK-which-setup-files-are-run.sql` has a row for each file.
+
+Both are in `build-test-database.sh` and `CHECK-which-setup-files-are-run.sql`; `setup-ALL.sql` regenerated.
+
+**Tried on practice by Claude with Heinrich signed in, every save read
+back from the database:** Stock Manager (price → supplier line, restamp,
+second supplier and "cheapest", reload, a section's change of material
+and pencil rename carrying the line, remove); the add-stock sections form
+(autofill, chip pick, material cleared and put back, typed price, a
+supplier typed new); the paid price (shelf value holds when a cheaper
+list price appears; same section from another supplier adds as its own
+row, and without a supplier is still "already in the library"; new row
+stamped; edit changes only the row); Save price only (FB 40x5 made on
+the form, priced for a supplier, no stock row, both "missing" messages);
+requisition → PO (R1530 = R255/m × 6 m) → received at R1590 (new row for
+that supplier at 265, list price 255 dated May → 265 dated today,
+requisition and PO closed). The Jobs page conversation also tried the
+paid price with its column on practice before the push (Add 1 / Use 1
+left it untouched).
+
+**Built but never tried by anyone on a screen** (Heinrich to try, or the
+next session; the rules behind the first three are in the tests):
+
+- Receiving onto a row that already holds stock from that supplier at
+  another price: the average (`averagePaid`).
+- The one-tap "received" flag on a stock row (lands and averages at the
+  requisition's price, list untouched).
+- A PO with a job: the allocation should point at the row the stock
+  landed on (`landedLines`).
+- The plate and CNC bar add-stock and requisition forms (practice has no
+  sheet sizes or bar grades; same functions as sections).
+- A login without Rand values on Edit item (empty price boxes, nothing
+  saved) and one without Stock Manager on the form (no "New size" link).
+- Removing a supplier through the Suppliers tab (its lines should go).
+- A real price older than 3 months showing red on Stock Manager (drawn
+  with made-up data only; the requisition chip did show red on practice).
+- CNC Bar Grades in Stock Manager (same code as Material Types).
+
+**Waiting on Heinrich:** nothing that blocks. The live stamp result was
+never reported (see above).
+
+**Agreed for later, not built:** supplier prices for stores, fasteners
+and buy-outs (their price still sits on the stock row, so they cannot
+have Save price only); a price box on the receiving screen if the PO
+price stops being good enough ("PO price is fine for now"); a short-name
+change still does not rewrite stored rows (older decision, 16 Sep).
+
+**Left on practice by the tests:** one `generated_documents` row for
+PO-0003.pdf under Records (no delete rule on that table); the PO counter
+was set back to 3. Practice JOB-0005 is Complete (forced) from the Jobs
+page conversation's check, not this one's.
+
+**Next session should pick up:** whichever of the untried list above
+Heinrich reports on; then, if he asks, stores/fasteners/buy-outs supplier
+prices, designed the same way (a `list_name` per division on the same
+table would do, with the stock row's `value` as the no-supplier price).
