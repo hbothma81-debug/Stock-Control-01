@@ -3843,3 +3843,16 @@ JOB-0036 conversation, not Jobs page, by his answer.
   request of R 3.98 with its line reading 0 of 2 (somebody's test reset
   the line; not this conversation's), which the CHECK file will list.
   **Next: the same two pastes on live, then "push from here".**
+- **Pushed on his word 27 Sep ("done on live, push from here"),
+  11af6a7..65f25e0, the queue exactly this conversation's three commits.**
+  Before: the column checked on live beside a known and a made-up column
+  (200, 200, 400); the function called on live with the public key alone
+  answered `P0001 An invoice request needs at least one line` where a
+  made-up name answered PGRST202, so it is there and ran its first check
+  (Supabase grants execute on public functions to anon as well; the row
+  rules still show anon nothing and let it write nothing, so that call
+  can do no work); clean clone: names 0, 280 tests, build. Live went
+  `App-CxvweGXo.js` to `App-CW8PhqNU.js` with "send_invoice_request" in
+  it. Nobody has sent a real request on live through the function yet:
+  the next one is its first. `CHECK-invoice-requests-add-up.sql` on live
+  afterwards would show it adding up.
