@@ -4077,3 +4077,45 @@ Both are committed and waiting for his word to push.
 - "Push from here" for `8df253c`.
 - One question: should a crash also tell the admins by itself, and
   where (asked with a recommendation this time).
+
+### 27 Sep 2026, later still — the app_errors SQL pasted by the session, on his word
+
+Heinrich, out of the office: "Can you paste". Done through his own
+Chrome, which was signed in to Supabase; the Browser pane was not, and
+no password was typed.
+
+- **Practice (stock-control-TEST): both pastes ran.** The check row reads
+  "ready". Confirmed from the database: `app_errors` answers 200 beside a
+  made-up table answering 404.
+- **The round trip, tried on practice as Test:** a crash set off on
+  purpose on JOB-0002 welding was written (POST 201), the same crash a
+  moment later was not written again, and the line was read back on
+  Stock Manager → App errors and from the database: heading, the
+  error's words, Test, 27 Sept 13:17, Chrome on Windows, the address.
+  The search found it by "welding test" and dropped it for "bending".
+  That test line stays on practice until it is 90 days old. Fault code
+  taken out afterwards; the working tree matches `8df253c`.
+- **Live: paste 1 ran** (the table and its two rules; `app_errors`
+  answers 200 on live). **Paste 2 did NOT run on live.** Supabase put up
+  "Potential issue detected" for it, as it did on practice, and the
+  session's safety check refused the confirming press on the live
+  database. Not retried, not worked around; the warning was cancelled.
+  Paste 2 is the function and trigger that clear lines older than 90
+  days, and the check row.
+- **What live is missing until he runs paste 2:** only the 90-day
+  clearing. Writing and reading work without it, and the list asks for
+  the last 90 days only.
+- **Supabase usage, read the same way, looking only:** cycle 25 Sep to
+  25 Oct, egress 0.092 of 5 GB (2%) after three days, one of them a
+  working day. Grace period ends 14 Oct 2026. Database 43 MB live, 31 MB
+  practice; storage 0.18 of 1 GB.
+
+### Waiting on Heinrich
+
+- Paste 2 on live, by his own hand: the second block of
+  `setup-app-errors.sql`, from "create or replace function" down. It is
+  sitting in the SQL editor of the live project in his Chrome on the
+  office PC (Run, then Run query), or he can paste it from anywhere.
+- "Push from here" for `8df253c` (step 3's code).
+- Whether a crash should tell the admins by itself; recommended: a red
+  count on the Stock Manager button, admins only.
