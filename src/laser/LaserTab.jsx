@@ -4,6 +4,12 @@ import CutList from "./CutList.jsx";
 import ShiftReport from "./ShiftReport.jsx";
 import ShortageCentre from "./ShortageCentre.jsx";
 import LaserStatus from "./LaserStatus.jsx";
+import ErrorBoundary from "../ErrorBoundary.jsx";
+
+// What the crash box calls each screen ("Tube Laser Nesting could not be
+// shown"); anything not listed is the Shortages screen, as in the switch
+// below.
+const SCREEN_WORDS = { nesting: "Nesting", cutting: "Cutting", shifts: "Shifts", packing: "Packing" };
 
 // A laser tab: the switch between Nesting, Cutting, Shortages, Shifts
 // (and Packing, on a laser that packs on its own tab) and the screen
@@ -162,6 +168,12 @@ export default function LaserTab({
                     ))}
                   </div>
                 )}
+                {/* One screen crashing leaves the switch above it working,
+                    so the operator can still reach Cutting when Nesting
+                    holds a bad row (src/ErrorBoundary.jsx). The key makes
+                    a fresh net for each screen: without it the red box
+                    would stay up after switching away. */}
+                <ErrorBoundary key={view} box what={`${machine.label} ${SCREEN_WORDS[view] || "Shortages"}`}>
                 {view === "nesting" ? (
                   <NestingView
                     machine={machine}
@@ -272,6 +284,7 @@ export default function LaserTab({
                     onGoToNesting={canNest ? () => setLaserView("nesting") : null}
                   />
                 )}
+                </ErrorBoundary>
               </>
             );
           })()

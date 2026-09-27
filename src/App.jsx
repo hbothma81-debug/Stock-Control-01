@@ -5901,7 +5901,7 @@ export default function StockControl() {
       onFinishPacking: (row) => finishPacking(row, tubeLaser),
       onFlagShortage: (row) => openShortageFlagModal(row.job, row.process),
       onLogItem: (row, item, qty, progress) => logPackingItem(row, item, qty, progress, tubeLaser),
-      ItemProgress: QtyProgressControl,
+      ItemProgress: SafeQtyProgressControl,
       isAdmin,
     };
   }
@@ -18275,57 +18275,64 @@ export default function StockControl() {
             })()}
         </div>
       ) : tab === "laser4kw" ? (
-        <LaserTab
-          laser={laser}
-          machine={PLATE_LASER}
-          isAdmin={isAdmin}
-          profile={profile}
-          jobsList={jobsList}
-          master={master}
-          shortageSummary={shortageSummary}
-          shortageReasonText={shortageReasonText}
-          cancelShortage={cancelShortage}
-          SavedCheck={SavedCheck}
-          ExpandableProcessNotes={ExpandableProcessNotes}
-          saveJobSigmaNestNumber={saveJobSigmaNestNumber}
-          toggleProcessUrgent={toggleProcessUrgent}
-          setLaserPriority={setLaserPriority}
-          saveProcessNote={saveProcessNote}
-          uploadJobDocument={uploadJobDocument}
-          openShortageFlagModal={openShortageFlagModal}
-          setPullStockModal={setPullStockModal}
-          viewJobDocument={viewJobDocument}
-          openDrawingPreview={openDrawingPreview}
-        />
+        // The net here catches what the tab itself works out before it
+        // draws a screen; each screen inside has its own net (LaserTab.jsx),
+        // so one bad screen leaves the switch between them working.
+        <ErrorBoundary box what={PLATE_LASER.label}>
+          <LaserTab
+            laser={laser}
+            machine={PLATE_LASER}
+            isAdmin={isAdmin}
+            profile={profile}
+            jobsList={jobsList}
+            master={master}
+            shortageSummary={shortageSummary}
+            shortageReasonText={shortageReasonText}
+            cancelShortage={cancelShortage}
+            SavedCheck={SavedCheck}
+            ExpandableProcessNotes={ExpandableProcessNotes}
+            saveJobSigmaNestNumber={saveJobSigmaNestNumber}
+            toggleProcessUrgent={toggleProcessUrgent}
+            setLaserPriority={setLaserPriority}
+            saveProcessNote={saveProcessNote}
+            uploadJobDocument={uploadJobDocument}
+            openShortageFlagModal={openShortageFlagModal}
+            setPullStockModal={setPullStockModal}
+            viewJobDocument={viewJobDocument}
+            openDrawingPreview={openDrawingPreview}
+          />
+        </ErrorBoundary>
       ) : tab === "tubeLaser" ? (
-        <LaserTab
-          laser={tubeLaser}
-          machine={TUBE_LASER}
-          isAdmin={isAdmin}
-          profile={profile}
-          jobsList={jobsList}
-          master={master}
-          shortageSummary={shortageSummary}
-          shortageReasonText={shortageReasonText}
-          cancelShortage={cancelShortage}
-          SavedCheck={SavedCheck}
-          ExpandableProcessNotes={ExpandableProcessNotes}
-          saveJobSigmaNestNumber={saveJobSigmaNestNumber}
-          toggleProcessUrgent={toggleProcessUrgent}
-          setLaserPriority={setLaserPriority}
-          saveProcessNote={saveProcessNote}
-          uploadJobDocument={uploadJobDocument}
-          openShortageFlagModal={openShortageFlagModal}
-          setPullStockModal={setPullStockModal}
-          viewJobDocument={viewJobDocument}
-          openDrawingPreview={openDrawingPreview}
-          items={items}
-          canRequisition={canRequisition}
-          openRequisition={openRequisition}
-          packing={tubePackingProps({ canTake: false })}
-          ItemProgress={QtyProgressControl}
-          onLogNestedItem={(row, item, qty, progress) => logNestedItem(row, item, qty, progress, tubeLaser)}
-        />
+        <ErrorBoundary box what={TUBE_LASER.label}>
+          <LaserTab
+            laser={tubeLaser}
+            machine={TUBE_LASER}
+            isAdmin={isAdmin}
+            profile={profile}
+            jobsList={jobsList}
+            master={master}
+            shortageSummary={shortageSummary}
+            shortageReasonText={shortageReasonText}
+            cancelShortage={cancelShortage}
+            SavedCheck={SavedCheck}
+            ExpandableProcessNotes={ExpandableProcessNotes}
+            saveJobSigmaNestNumber={saveJobSigmaNestNumber}
+            toggleProcessUrgent={toggleProcessUrgent}
+            setLaserPriority={setLaserPriority}
+            saveProcessNote={saveProcessNote}
+            uploadJobDocument={uploadJobDocument}
+            openShortageFlagModal={openShortageFlagModal}
+            setPullStockModal={setPullStockModal}
+            viewJobDocument={viewJobDocument}
+            openDrawingPreview={openDrawingPreview}
+            items={items}
+            canRequisition={canRequisition}
+            openRequisition={openRequisition}
+            packing={tubePackingProps({ canTake: false })}
+            ItemProgress={SafeQtyProgressControl}
+            onLogNestedItem={(row, item, qty, progress) => logNestedItem(row, item, qty, progress, tubeLaser)}
+          />
+        </ErrorBoundary>
       ) : tab === "production" ? (
         productionSelectedDept === null ? (
           <div style={S.list}>
@@ -18590,10 +18597,7 @@ export default function StockControl() {
                       onFinishPacking={p.onFinishPacking}
                       onFlagShortage={p.onFlagShortage}
                       onLogItem={p.onLogItem}
-                      // The same count box as p.ItemProgress, in its own
-                      // safety net. The Tube Laser tab's Packing screen
-                      // still gets the bare one until its own nets are built.
-                      ItemProgress={SafeQtyProgressControl}
+                      ItemProgress={p.ItemProgress}
                       isAdmin={p.isAdmin}
                       busyId={tubeLaser.programBusyId}
                     />
@@ -22697,11 +22701,13 @@ export default function StockControl() {
                 })()
               )
             ) : managerTab === "companyDetails" ? (
-              <CompanyDetails
-                companyDetails={master.companyDetails}
-                updateCompanyDetail={updateCompanyDetail}
-                handleCompanyLogoSelect={handleCompanyLogoSelect}
-              />
+              <ErrorBoundary box what="Company Details">
+                <CompanyDetails
+                  companyDetails={master.companyDetails}
+                  updateCompanyDetail={updateCompanyDetail}
+                  handleCompanyLogoSelect={handleCompanyLogoSelect}
+                />
+              </ErrorBoundary>
             ) : managerTab === "shifts" ? (
               // The shop's shifts, set once. Nothing enforces them yet --
               // this is the settings, and they do nothing until the rule
@@ -23125,17 +23131,19 @@ export default function StockControl() {
                 <div style={S.empty}>Time Manager is for admins and whoever they put on it.</div>
               )
             ) : managerTab === "departments" && isAdmin ? (
-              <UserManagement
-                people={people}
-                master={master}
-                shifts={shiftsList}
-                updatePersonField={updatePersonField}
-                updatePersonPermission={updatePersonPermission}
-                toggleProcessTypeAccess={toggleProcessTypeAccess}
-                resetPersonAccess={resetPersonAccess}
-                deletePersonPermanently={deletePersonPermanently}
-                SavedCheck={SavedCheck}
-              />
+              <ErrorBoundary box what="User Management">
+                <UserManagement
+                  people={people}
+                  master={master}
+                  shifts={shiftsList}
+                  updatePersonField={updatePersonField}
+                  updatePersonPermission={updatePersonPermission}
+                  toggleProcessTypeAccess={toggleProcessTypeAccess}
+                  resetPersonAccess={resetPersonAccess}
+                  deletePersonPermanently={deletePersonPermanently}
+                  SavedCheck={SavedCheck}
+                />
+              </ErrorBoundary>
             ) : managerTab === "departments" ? (
               <div style={S.empty}>User Management is Admin-only.</div>
             ) : managerTab === "sections" ? (

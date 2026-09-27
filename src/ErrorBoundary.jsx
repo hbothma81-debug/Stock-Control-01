@@ -13,6 +13,12 @@
 // A net catches only what is drawn by a piece inside it, so a screen drawn
 // by App.jsx itself falls to the net around the whole app.
 //
+// A pop-up draws its own dark layer over the page, and that goes with it
+// when it crashes: the box would land at the foot of the page, unseen.
+// So around a pop-up add `popup`, and the box comes up over the page as
+// the pop-up did; `onClose` is what the pop-up's own x does, behind a
+// Close button.
+//
 // A class, because React offers no other way to catch a drawing crash.
 // Its colours are its own: the app's theme may be the thing that broke.
 // The box follows the theme where the theme is there, and falls back to
@@ -114,6 +120,25 @@ const B = {
     cursor: "pointer",
   },
   details: { ...S.details, background: T.surface, border: `1px solid ${T.border}`, color: T.muted, padding: 8, fontSize: 11 },
+  // Above every pop-up the app draws (src/theme.js goes up to 30).
+  backdrop: {
+    position: "fixed",
+    inset: 0,
+    background: "#00000099",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+    zIndex: 60,
+  },
+  popupCard: {
+    width: "100%",
+    maxWidth: 460,
+    maxHeight: "90vh",
+    overflowY: "auto",
+    background: T.surface,
+    borderRadius: 8,
+  },
 };
 
 export default class ErrorBoundary extends Component {
@@ -138,8 +163,9 @@ export default class ErrorBoundary extends Component {
     const newVersion = isNewVersionError(error);
     const tryAgain = () => this.setState({ error: null, componentStack: "", at: null });
 
-    if (this.props.box) {
-      return (
+    if (this.props.box || this.props.popup) {
+      const { popup, onClose } = this.props;
+      const box = (
         <div style={B.box} role="alert">
           <div style={B.title}>{newVersion ? "The app has been updated" : crashTitle(this.props.what, this.props.where)}</div>
           <div style={B.text}>
@@ -157,6 +183,11 @@ export default class ErrorBoundary extends Component {
                 Try again
               </button>
             )}
+            {popup && onClose && (
+              <button type="button" style={B.btn} onClick={onClose}>
+                Close
+              </button>
+            )}
           </div>
           {!newVersion && (
             <pre style={B.details}>
@@ -165,6 +196,12 @@ export default class ErrorBoundary extends Component {
               {at ? at.toLocaleString("en-ZA") : ""}
             </pre>
           )}
+        </div>
+      );
+      if (!popup) return box;
+      return (
+        <div style={B.backdrop}>
+          <div style={B.popupCard}>{box}</div>
         </div>
       );
     }
