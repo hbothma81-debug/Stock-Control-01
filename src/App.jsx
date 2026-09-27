@@ -2947,7 +2947,7 @@ export default function StockControl() {
         // ORDERED_STRING_LISTS are read back in stored order.
         ops.push(
           supabase.from("master_string_lists").upsert(
-            added.map((v) => ({ id: idFor(`s ${listName} ${v}`), list_name: listName, value: v, sort_order: nextList.indexOf(v) }))
+            added.map((v) => ({ id: idFor(`s\0${listName}\0${v}`), list_name: listName, value: v, sort_order: nextList.indexOf(v) }))
           )
         );
       }
@@ -2999,7 +2999,7 @@ export default function StockControl() {
         ops.push(
           supabase.from("master_factor_items").upsert(
             added.map((e) => ({
-              id: idFor(`f ${listName} ${rowKey(listName, e)}`),
+              id: idFor(`f\0${listName}\0${rowKey(listName, e)}`),
               list_name: listName,
               name: e.name,
               factor: e.factor || 0,
