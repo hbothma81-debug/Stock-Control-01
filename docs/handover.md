@@ -4176,3 +4176,23 @@ no password was typed.
 - **His answer on clearing:** leave the number as it is (it goes down
   only as crashes age past 7 days) and decide after the first real crash.
 - **Nothing of App health's is waiting to be pushed** except this entry.
+
+### 27 Sep 2026 — App health: the NUL characters in App.jsx, fixed, NOT pushed
+
+- **`f636650`:** the four literal NUL characters in App.jsx (the
+  separators in the two `idFor` keys of `saveMasterToTables`, Stock
+  Manager's save) are written as `\0`. Two lines changed, on the file's
+  bytes, nothing else.
+- **Every conversation can use the Grep tool on App.jsx again.** Until
+  now it silently reported nothing after about line 2950.
+- **Proof it changes nothing:** built before and after, all 13 built
+  files identical byte for byte. Nothing to try on a screen.
+- **New guard:** `src/lib/sourceText.test.js` fails `npm test` if any
+  source file holds a hidden control character, naming the file and line.
+- Names 0 problems, 308 tests pass, build clean. CLAUDE.md's gotcha is
+  rewritten.
+
+### Waiting on Heinrich
+
+- "Push from here" for `f636650` (with handover notes `15863f4` and this
+  one).
