@@ -3941,3 +3941,31 @@ tried, and what nobody has:
   line SQL if the data security work wants it.
 - Seen in passing, Supplier prices' code: a duplicate `jobNumber` key in
   an object literal at about line 14020 of App.jsx (the second wins).
+
+---
+
+## 27 Sep 2026 — App health: the crash screen, step 1 pushed on Heinrich's word
+
+- **Pushed `658372f..14b7cc7`** ("push from here", 27 Sep). The queue held
+  that one commit only. Clean clone first: names 0 problems, 284 tests
+  pass, build clean. Live before: App-CW8PhqNU.js; after: App-DRynyHx0.js,
+  entry file index-CGyxpDtd.js.
+- **What it is:** `src/ErrorBoundary.jsx` around the whole app in
+  `LoginGate.jsx`; App.jsx untouched. A crash while drawing shows a
+  message ("Please tell Heinrich, with a photo of this screen"), Try
+  again, Reload the app and the error's own words. A build gone from the
+  site after a push reads "The app has been updated", Reload only. Rules
+  in `src/lib/crashText.js`, tested.
+- **Checking it is live:** the wording sits in the entry file
+  (`assets/index-….js`), not the App bundle, so `CHECK-what-is-live.cjs`
+  answers NO for it. Fetch the entry file and search that.
+- **Seen on live:** the wording is in the entry file; the live page opens
+  signed in with no console errors. **Never seen:** the crash screen
+  itself inside the signed-in app, practice or live; only on
+  `ui-preview.html` ("Crash screen" pill).
+- **Health check the same day** (read only): figures in the memory note
+  `app-health-backlog`. `npm audit` now names Vite and esbuild (dev
+  server only); the fix is Vite 5 to 8, not planned yet.
+- **Next, not built:** step 2, nets around the screens that are their own
+  files; step 3, each crash saved to a new `app_errors` table (his
+  answer B), which needs SQL on both databases.
