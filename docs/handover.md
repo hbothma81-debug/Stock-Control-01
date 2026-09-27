@@ -4031,3 +4031,20 @@ Both are committed and waiting for his word to push.
 - `npm audit`: Vite and esbuild, dev server only; the fix is Vite 5 to 8
   and needs its own plan.
 - The Supabase usage chart for the cycle that began 25 Sep: not read.
+
+### 27 Sep 2026, later — crash screen groups B and C pushed
+
+- **Pushed `71ac8b8..56e6d99`** on Heinrich's "Push B and C from here".
+  The queue held this conversation's four commits only (`9211b61`,
+  `8f45854`, `3197728`, `56e6d99`), checked in a clean clone at
+  `56e6d99`: names 0 problems, 288 tests pass, build clean. Live before:
+  App-BUaEXZjg.js; after: App-Bt10jBNT.js (entry index-BbPTMoxR.js),
+  found by "the Buy-outs tab" and "the Info Request window".
+- **Seen on live, signed in, looking only:** the page opens with no
+  console errors; all four Laser 4kw screens and all five Tube Laser
+  screens draw with the real data, no red box anywhere. Nothing pressed
+  but the tabs and the switch.
+- **Step 3 answered** (27 Sep): the list of crashes goes on a new "App
+  errors" button in Stock Manager, admins only; rows kept 90 days. Whether
+  a crash also rings the admins' notifications had no recommendation
+  behind it, so it is not built and is asked again.
