@@ -4160,3 +4160,19 @@ no password was typed.
 - Egress: 2% of the month after three days (read 27 Sep). Read it again
   after a full working week before deciding the 1-minute refresh.
 - The whole-table loads: `loadLaserRaw`, `fetchJobs`, `fetchShortages`.
+
+### 27 Sep 2026, last push of the day — the red number is live
+
+- **Pushed `7aa5725..9076b66`** on Heinrich's "Push the red count". The
+  queue held this conversation's two commits only. Three separate steps
+  this time: the tip and the queue read, then the clean clone at
+  `9076b66` (names 0 problems, 306 tests pass, build clean), then the
+  push. Live before: App-BKqV9hjf.js; after: App-TU5K5JzE.js (entry
+  index-CqbF9X-Z.js), found by "Screens that crashed in the last 7 days".
+- **Seen on live, signed in as Heinrich, looking only:** no console
+  errors; the app asked the table for the number once; the Stock Manager
+  button and the App errors row carry no number, which is right for an
+  empty table.
+- **His answer on clearing:** leave the number as it is (it goes down
+  only as crashes age past 7 days) and decide after the first real crash.
+- **Nothing of App health's is waiting to be pushed** except this entry.
