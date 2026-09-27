@@ -3987,3 +3987,47 @@ tried, and what nobody has:
   welding, Laser Status, Tube Laser Status. **Never tried:** the cut
   list's net (no practice job at Cut To Size), a count box inside Laser
   Status (no taken per-item job), anything on live (nothing is crashing).
+
+### 27 Sep 2026, afternoon — crash screen, groups B and C built, NOT pushed
+
+Heinrich was out of the office and asked for B and C without stopping.
+Both are committed and waiting for his word to push.
+
+- **`8f45854`, group B:** nets around each laser tab and each screen
+  inside it (`LaserTab.jsx`, Laser production's file, three small hunks),
+  User Management and Company Details. The tube laser's Nesting and
+  Packing screens now get `SafeQtyProgressControl`.
+- **`3197728`, group C:** nets around the job page's Cut to size,
+  Buy-outs and Materials tabs, the PDF viewer, the Info Request windows
+  (`popup`) and the three email buttons.
+- **CLAUDE.md** has the rule (under Decisions), one App.jsx gotcha, the
+  entry-file note under Checking what is live, and the dev server's
+  half-edited file under Checking a screen.
+- **Tried on practice, signed in as Test,** with a fault set off on
+  purpose and removed before each commit: every piece above except the
+  ones below. Nothing was saved to the practice database.
+- **Never tried:** the Info Request answer window's net (no open request
+  on practice), the Production card's cut list net (no job at Cut To
+  Size), a count box inside plate Laser Status (no taken per-item job), a
+  crash while the email window is open, a non-admin's screens, anything
+  on live.
+- **Seen by accident:** the whole-page crash screen of step 1, in the
+  signed-in app on practice, from a half-edited file the dev server kept
+  serving. Reload the app brought the app back.
+
+### Waiting on Heinrich
+
+- "Push from here" for `8f45854` and `3197728`.
+- Step 3, each crash saved to a new `app_errors` table and listed for
+  admins (his answer B): three questions asked 27 Sep, not answered yet:
+  which screen the list goes on, whether a crash also rings the admins'
+  notifications, how long rows are kept.
+
+### Pick up next (App health)
+
+- Step 3 once he answers. SQL on both databases before the push, or code
+  that works without the table.
+- The four NUL characters in App.jsx (Stock Manager's code): still there.
+- `npm audit`: Vite and esbuild, dev server only; the fix is Vite 5 to 8
+  and needs its own plan.
+- The Supabase usage chart for the cycle that began 25 Sep: not read.
