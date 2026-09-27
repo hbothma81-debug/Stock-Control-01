@@ -60,6 +60,7 @@ async function getPdf() {
 import { TABS, NAV_TABS, TAB_GROUPS, LASER_MACHINES } from "./constants.js";
 import UserManagement from "./UserManagement.jsx";
 import CompanyDetails from "./manager/CompanyDetails.jsx";
+import AppErrors from "./manager/AppErrors.jsx";
 import {
   SECTION_SHAPES, shapeForType, shapeTitle, buildSection, missingBoxes,
   PIPE_STANDARDS, SCHEDULES, SANS62_CLASSES, pipeSizes, sectionKgPerMetre,
@@ -178,7 +179,10 @@ const MANAGER_TABS = [
   { key: "companyDetails", label: "Company Details" },
   { key: "shifts", label: "Time Manager" },
   { key: "departments", label: "User Management" },
+  { key: "appErrors", label: "App errors" },
 ];
+// The Stock Manager buttons only an admin is shown.
+const ADMIN_ONLY_MANAGER_TABS = ["departments", "appErrors"];
 
 const FACTOR_TABLES = ["grades", "sections", "cncGrades"];
 
@@ -21993,7 +21997,7 @@ export default function StockControl() {
 
             {!managerTab ? (
               <div style={S.managerListFullPage}>
-                {MANAGER_TABS.filter((t) => t.key !== "departments" || isAdmin).map((t) => (
+                {MANAGER_TABS.filter((t) => !ADMIN_ONLY_MANAGER_TABS.includes(t.key) || isAdmin).map((t) => (
                   <button
                     key={t.key}
                     type="button"
@@ -23152,6 +23156,15 @@ export default function StockControl() {
               </ErrorBoundary>
             ) : managerTab === "departments" ? (
               <div style={S.empty}>User Management is Admin-only.</div>
+            ) : managerTab === "appErrors" && isAdmin ? (
+              // Every crash the crash screen has caught, for admins
+              // (src/manager/AppErrors.jsx). In its own net like every
+              // page that is its own file.
+              <ErrorBoundary box what="App errors">
+                <AppErrors people={people} />
+              </ErrorBoundary>
+            ) : managerTab === "appErrors" ? (
+              <div style={S.empty}>App errors is Admin-only.</div>
             ) : managerTab === "sections" ? (
               // Sections collapse into their type groups (e.g. "Equal
               // Angle") — selecting one opens a dedicated view for just

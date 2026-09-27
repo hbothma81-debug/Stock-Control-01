@@ -23,8 +23,15 @@
 // Its colours are its own: the app's theme may be the thing that broke.
 // The box follows the theme where the theme is there, and falls back to
 // the dark colours where it is not.
+//
+// Every crash caught is written down for the admins (src/lib/appErrors.js,
+// Stock Manager -> App errors), except a build that is gone after a push,
+// which is no fault. The writing never holds the message up and never
+// fails out loud.
 import { Component } from "react";
 import { isNewVersionError, crashDetails, crashTitle } from "./lib/crashText.js";
+import { recordCrash } from "./lib/appErrors.js";
+import { supabase } from "./lib/supabaseClient.js";
 
 const C = {
   bg: "#1B1D1F",
@@ -155,6 +162,13 @@ export default class ErrorBoundary extends Component {
   componentDidCatch(error, info) {
     this.setState({ componentStack: info?.componentStack || "" });
     console.error(`${crashTitle(this.props.what, this.props.where)}:`, error, info?.componentStack);
+    if (!isNewVersionError(error)) {
+      recordCrash(supabase, {
+        heading: crashTitle(this.props.what, this.props.where),
+        error,
+        componentStack: info?.componentStack,
+      });
+    }
   }
 
   render() {

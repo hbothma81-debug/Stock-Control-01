@@ -151,7 +151,11 @@ with checks (setup_file, looks_for, found) as (
     ('setup-invoice-request-function.sql', 'column job_quote_item_invoices.request_id',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'job_quote_item_invoices' and column_name = 'request_id')),
     ('setup-invoice-request-function.sql', 'function send_invoice_request',
-      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'send_invoice_request'))
+      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'send_invoice_request')),
+    ('setup-app-errors.sql',            'table app_errors',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'app_errors')),
+    ('setup-app-errors.sql',            'app_errors clears lines older than 90 days',
+      exists (select 1 from pg_trigger where tgname = 'app_errors_keep_90_days'))
 )
 select
   setup_file,

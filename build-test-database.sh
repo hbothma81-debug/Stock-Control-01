@@ -92,6 +92,9 @@ ORDER=(
   add-usage-log-permission.sql
   setup-pdf-print-permission.sql
   setup-theme-preference.sql
+
+  # --- the app's own record of crashes (reads profiles to know an admin)
+  setup-app-errors.sql
 )
 
 OUT=setup-ALL.sql
