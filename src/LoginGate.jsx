@@ -1,5 +1,6 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { supabase } from "./lib/supabaseClient.js";
+import ErrorBoundary from "./ErrorBoundary.jsx";
 
 // Loaded only once a real session is confirmed — this is the ~470kb+ main
 // app bundle. Kept out of the initial page load entirely, so someone on a
@@ -217,14 +218,16 @@ export default function LoginGate() {
   }
 
   return (
-    <Suspense
-      fallback={
-        <div style={S.page}>
-          <div style={S.promptText}>Loading the app…</div>
-        </div>
-      }
-    >
-      <MainApp />
-    </Suspense>
+    <ErrorBoundary>
+      <Suspense
+        fallback={
+          <div style={S.page}>
+            <div style={S.promptText}>Loading the app…</div>
+          </div>
+        }
+      >
+        <MainApp />
+      </Suspense>
+    </ErrorBoundary>
   );
 }

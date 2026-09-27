@@ -11,6 +11,7 @@ import Section from "./Section.jsx";
 import RecordRow from "./RecordRow.jsx";
 import TypeToFind from "./TypeToFind.jsx";
 import PdfViewer from "./PdfViewer.jsx";
+import ErrorBoundary from "./ErrorBoundary.jsx";
 import InfoRequestModal, { InfoAnswerModal } from "./InfoRequestModal.jsx";
 import ExtraStagesBox from "./jobs/ExtraStagesBox.jsx";
 import TwoPriceBoxes from "./manager/TwoPriceBoxes.jsx";
@@ -299,6 +300,30 @@ function InfoAnswerDemo() {
   );
 }
 
+// The crash screen, set off on purpose. `kind` picks an ordinary crash or
+// the one a tablet gets when the build it holds is gone from the site.
+function CrashOnPurpose({ kind }) {
+  if (kind === "crash") return [null][0].name;
+  if (kind === "version") throw new TypeError("Failed to fetch dynamically imported module: /assets/App-old.js");
+  return <div style={S.roleHint}>Drawn without trouble.</div>;
+}
+
+function CrashScreenDemo() {
+  const [kind, setKind] = React.useState("");
+  return (
+    <Section title="Crash screen" count={2} defaultOpen={false}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <button className="stk-btn" style={S.reqActionBtn} onClick={() => setKind("crash")}>Crash it</button>
+        <button className="stk-btn" style={S.reqActionBtn} onClick={() => setKind("version")}>Pretend a new version</button>
+        <button className="stk-btn" style={S.reqActionBtn} onClick={() => setKind("")}>Put it right</button>
+      </div>
+      <ErrorBoundary key={kind === "" ? "ok" : "held"}>
+        <CrashOnPurpose kind={kind} />
+      </ErrorBoundary>
+    </Section>
+  );
+}
+
 function Preview() {
   // The colours live on a data-stk-theme attribute, same as the app.
   React.useEffect(() => {
@@ -327,6 +352,8 @@ function Preview() {
         <SendEmailDemo />
 
         <PdfViewerDemo />
+
+        <CrashScreenDemo />
 
         <Section title="Open by default" count={3}>
           <RecordRow title="DN-0042" summary="JOB-0014 — Greenzone" right={<span style={S.roleHint}>To customer</span>}>
