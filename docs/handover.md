@@ -3969,3 +3969,21 @@ tried, and what nobody has:
 - **Next, not built:** step 2, nets around the screens that are their own
   files; step 3, each crash saved to a new `app_errors` table (his
   answer B), which needs SQL on both databases.
+
+### Later on 27 Sep 2026 — crash screen, step 2 group A pushed
+
+- **Pushed `14b7cc7..71ac8b8`** on Heinrich's "Push" (he is out of the
+  office and asked for groups B and C to follow without stopping). The
+  queue held this conversation's two commits only. Clean clone first:
+  names 0 problems, 288 tests pass, build clean. Live before:
+  App-DRynyHx0.js; after: App-BUaEXZjg.js, found by "the count box" and
+  "the cut list", neither of which the old bundle held.
+- **What it is:** a small red box (`box` on `ErrorBoundary`) around the
+  Production card's count box (`SafeQtyProgressControl` in App.jsx), both
+  Laser Status screens under Production, and the Cut To Size card's cut
+  list. The box names the job and stage.
+- **Tried on practice, signed in as Test,** with a fault set off on
+  purpose and removed before the commit: the count box on JOB-0002
+  welding, Laser Status, Tube Laser Status. **Never tried:** the cut
+  list's net (no practice job at Cut To Size), a count box inside Laser
+  Status (no taken per-item job), anything on live (nothing is crashing).
