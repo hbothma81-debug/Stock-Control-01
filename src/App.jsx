@@ -90,6 +90,8 @@ import { materialText } from "./laser/stockOptions.js";
 import { planBars, barsOnShelf, barsSetAside, barsOnOrder, matchingStock, materialName, offcutIsKeepable, KERF_MM, TRIM_MM, MIN_OFFCUT_MM } from "./jobs/cutToSize.js";
 import EditableName from "./EditableName.jsx";
 import TypeToFind from "./TypeToFind.jsx";
+import ErrorBoundary from "./ErrorBoundary.jsx";
+import { crashPlace } from "./lib/crashText.js";
 import TwoPriceBoxes from "./manager/TwoPriceBoxes.jsx";
 import NumberBox from "./manager/NumberBox.jsx";
 import SupplierPriceLines from "./manager/SupplierPriceLines.jsx";
@@ -1277,6 +1279,19 @@ function QtyProgressControl({ process, job, quoteItems, jobItems, itemProgress, 
         </div>
       ))}
     </div>
+  );
+}
+
+// The count box inside its own safety net (src/ErrorBoundary.jsx): one
+// job's bad data shows a red box in that job's place, naming the job and
+// the stage, and every other card carries on. Declared out here, not
+// inside the app, so it is the same component on every render and the
+// boxes keep what is typed in them.
+function SafeQtyProgressControl(props) {
+  return (
+    <ErrorBoundary box what="the count box" where={crashPlace(props.job, props.process)}>
+      <QtyProgressControl {...props} />
+    </ErrorBoundary>
   );
 }
 
@@ -18528,18 +18543,20 @@ export default function StockControl() {
             {laserData === null || jobsList === null ? (
               <div style={S.empty}>Loading…</div>
             ) : (
-              <LaserStatus
-                rows={laserStatusRows().filter((r) => !productionFiltering || productionJobMatches(r.job))}
-                canPack={isAdmin || !!profile?.allowedProcessTypes?.some(workedInLaserStatus)}
-                isAdmin={isAdmin}
-                meName={roleLabel}
-                onTakeJob={takePackingJob}
-                onFinishPacking={finishPacking}
-                onFlagShortage={(row) => openShortageFlagModal(row.job, row.process)}
-                onLogItem={logPackingItem}
-                ItemProgress={QtyProgressControl}
-                busyId={programBusyId}
-              />
+              <ErrorBoundary box what="Laser Status">
+                <LaserStatus
+                  rows={laserStatusRows().filter((r) => !productionFiltering || productionJobMatches(r.job))}
+                  canPack={isAdmin || !!profile?.allowedProcessTypes?.some(workedInLaserStatus)}
+                  isAdmin={isAdmin}
+                  meName={roleLabel}
+                  onTakeJob={takePackingJob}
+                  onFinishPacking={finishPacking}
+                  onFlagShortage={(row) => openShortageFlagModal(row.job, row.process)}
+                  onLogItem={logPackingItem}
+                  ItemProgress={SafeQtyProgressControl}
+                  busyId={programBusyId}
+                />
+              </ErrorBoundary>
             )}
           </div>
         ) : productionSelectedDept === TUBE_LASER_STATUS_DEPT ? (
@@ -18562,20 +18579,25 @@ export default function StockControl() {
                 // the tube operators.
                 const p = tubePackingProps({ canTake: true });
                 return (
-                  <LaserStatus
-                    rows={p.rows.filter((r) => !productionFiltering || productionJobMatches(r.job))}
-                    canPack={p.canPack}
-                    canTake={p.canTake}
-                    words={TUBE_LASER}
-                    meName={p.meName}
-                    onTakeJob={p.onTakeJob}
-                    onFinishPacking={p.onFinishPacking}
-                    onFlagShortage={p.onFlagShortage}
-                    onLogItem={p.onLogItem}
-                    ItemProgress={p.ItemProgress}
-                    isAdmin={p.isAdmin}
-                    busyId={tubeLaser.programBusyId}
-                  />
+                  <ErrorBoundary box what="Tube Laser Status">
+                    <LaserStatus
+                      rows={p.rows.filter((r) => !productionFiltering || productionJobMatches(r.job))}
+                      canPack={p.canPack}
+                      canTake={p.canTake}
+                      words={TUBE_LASER}
+                      meName={p.meName}
+                      onTakeJob={p.onTakeJob}
+                      onFinishPacking={p.onFinishPacking}
+                      onFlagShortage={p.onFlagShortage}
+                      onLogItem={p.onLogItem}
+                      // The same count box as p.ItemProgress, in its own
+                      // safety net. The Tube Laser tab's Packing screen
+                      // still gets the bare one until its own nets are built.
+                      ItemProgress={SafeQtyProgressControl}
+                      isAdmin={p.isAdmin}
+                      busyId={tubeLaser.programBusyId}
+                    />
+                  </ErrorBoundary>
                 );
               })()
             )}
@@ -19022,22 +19044,24 @@ export default function StockControl() {
                                     </button>
                                   </div>
                                 </div>
-                                <CutToSize
-                                  lines={selected.cutItems || []}
-                                  canEdit={false}
-                                  canSeeValue={false}
-                                  sections={master.sections || []}
-                                  customerItems={[]}
-                                  items={items || []}
-                                  findSectionFactor={findSectionFactor}
-                                  findSectionPrice={findSectionPrice}
-                                  findSectionType={findSectionType}
-                                  allocations={(allocationsList || []).filter((a) => a.job_id === job.id)}
-                                  requisitions={requisitions || []}
-                                  onCount={(item, value) => countCutItem(job, item, value)}
-                                  onBookOut={(group, bar, barNumber) => bookOutBarFromCutList(job, group, bar, barNumber)}
-                                  SavedCheck={SavedCheck}
-                                />
+                                <ErrorBoundary box what="the cut list" where={crashPlace(job, process)}>
+                                  <CutToSize
+                                    lines={selected.cutItems || []}
+                                    canEdit={false}
+                                    canSeeValue={false}
+                                    sections={master.sections || []}
+                                    customerItems={[]}
+                                    items={items || []}
+                                    findSectionFactor={findSectionFactor}
+                                    findSectionPrice={findSectionPrice}
+                                    findSectionType={findSectionType}
+                                    allocations={(allocationsList || []).filter((a) => a.job_id === job.id)}
+                                    requisitions={requisitions || []}
+                                    onCount={(item, value) => countCutItem(job, item, value)}
+                                    onBookOut={(group, bar, barNumber) => bookOutBarFromCutList(job, group, bar, barNumber)}
+                                    SavedCheck={SavedCheck}
+                                  />
+                                </ErrorBoundary>
                               </div>
                             )}
                             <button
@@ -19060,7 +19084,7 @@ export default function StockControl() {
                             <div style={{ marginTop: 6 }}>
                               {process.tracking_mode === "each" && !showsRequestInvoiceButton(process) && !stageHasNothingToCut(process.process_name, quoteItems) ? (
                                 <>
-                                  <QtyProgressControl
+                                  <SafeQtyProgressControl
                                     process={process}
                                     job={job}
                                     quoteItems={itemsForStage(process.process_name, quoteItems)}

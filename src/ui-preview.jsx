@@ -310,6 +310,9 @@ function CrashOnPurpose({ kind }) {
 
 function CrashScreenDemo() {
   const [kind, setKind] = React.useState("");
+  // One card of three crashes, the way one job's bad data would: the
+  // other two must carry on.
+  const [cardKind, setCardKind] = React.useState("");
   return (
     <Section title="Crash screen" count={2} defaultOpen={false}>
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
@@ -320,6 +323,20 @@ function CrashScreenDemo() {
       <ErrorBoundary key={kind === "" ? "ok" : "held"}>
         <CrashOnPurpose kind={kind} />
       </ErrorBoundary>
+
+      <div style={{ ...S.label, marginTop: 16 }}>The small box, around one piece of a card</div>
+      <div style={{ display: "flex", gap: 8, margin: "6px 0 10px" }}>
+        <button className="stk-btn" style={S.reqActionBtn} onClick={() => setCardKind("crash")}>Crash the middle card</button>
+        <button className="stk-btn" style={S.reqActionBtn} onClick={() => setCardKind("")}>Put it right</button>
+      </div>
+      {["JOB-0067", "JOB-0068", "JOB-0069"].map((jobNumber) => (
+        <div key={jobNumber} style={{ border: `1px solid ${C.border}`, borderRadius: 6, padding: 10, marginBottom: 8 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>{jobNumber} — Bending</div>
+          <ErrorBoundary box what="the count box" where={`${jobNumber}, Bending`}>
+            <CrashOnPurpose kind={jobNumber === "JOB-0068" ? cardKind : ""} />
+          </ErrorBoundary>
+        </div>
+      ))}
     </Section>
   );
 }

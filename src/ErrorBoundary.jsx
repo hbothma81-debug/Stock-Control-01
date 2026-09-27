@@ -6,10 +6,19 @@
 // It catches crashes in drawing only. A save or a load that fails is not
 // one, and has its own message on its own screen.
 //
+// Two sizes. Around the whole app it takes the page. With `box`, around
+// one piece of a screen (a Production card's count box, Laser Status), it
+// takes only that piece's place and the rest of the screen carries on:
+// `what` names the piece, `where` the job and stage it was drawing.
+// A net catches only what is drawn by a piece inside it, so a screen drawn
+// by App.jsx itself falls to the net around the whole app.
+//
 // A class, because React offers no other way to catch a drawing crash.
 // Its colours are its own: the app's theme may be the thing that broke.
+// The box follows the theme where the theme is there, and falls back to
+// the dark colours where it is not.
 import { Component } from "react";
-import { isNewVersionError, crashDetails } from "./lib/crashText.js";
+import { isNewVersionError, crashDetails, crashTitle } from "./lib/crashText.js";
 
 const C = {
   bg: "#1B1D1F",
@@ -69,6 +78,44 @@ const S = {
   },
 };
 
+// The box's colours: the theme's own (src/theme.js sets these names on
+// the page), with the dark theme's as the fallback.
+const T = {
+  surface: `var(--stk-surface, ${C.surface})`,
+  border: `var(--stk-border, ${C.border})`,
+  text: `var(--stk-text, ${C.text})`,
+  muted: `var(--stk-muted, ${C.muted})`,
+  danger: "var(--stk-danger, #D6543B)",
+  dangerTint: "var(--stk-dangerTint, #3A1E17)",
+};
+
+const B = {
+  box: {
+    background: T.dangerTint,
+    border: `1px solid ${T.danger}`,
+    borderRadius: 6,
+    padding: "10px 12px",
+    color: T.text,
+    fontFamily: "system-ui, -apple-system, sans-serif",
+    textAlign: "left",
+    boxSizing: "border-box",
+  },
+  title: { fontSize: 14, fontWeight: 700, color: T.danger, marginBottom: 4 },
+  text: { fontSize: 13, lineHeight: 1.45, color: T.text },
+  buttons: { display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0" },
+  btn: {
+    background: "transparent",
+    border: `1px solid ${T.danger}`,
+    borderRadius: 6,
+    padding: "7px 12px",
+    color: T.text,
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  details: { ...S.details, background: T.surface, border: `1px solid ${T.border}`, color: T.muted, padding: 8, fontSize: 11 },
+};
+
 export default class ErrorBoundary extends Component {
   constructor(props) {
     super(props);
@@ -81,7 +128,7 @@ export default class ErrorBoundary extends Component {
 
   componentDidCatch(error, info) {
     this.setState({ componentStack: info?.componentStack || "" });
-    console.error("The app crashed while drawing a screen:", error, info?.componentStack);
+    console.error(`${crashTitle(this.props.what, this.props.where)}:`, error, info?.componentStack);
   }
 
   render() {
@@ -89,6 +136,39 @@ export default class ErrorBoundary extends Component {
     if (!error) return this.props.children;
 
     const newVersion = isNewVersionError(error);
+    const tryAgain = () => this.setState({ error: null, componentStack: "", at: null });
+
+    if (this.props.box) {
+      return (
+        <div style={B.box} role="alert">
+          <div style={B.title}>{newVersion ? "The app has been updated" : crashTitle(this.props.what, this.props.where)}</div>
+          <div style={B.text}>
+            {newVersion
+              ? "Reload to get the new version."
+              : "The rest of the screen still works. Please tell Heinrich, with a photo of this screen."}
+          </div>
+          <div style={B.buttons}>
+            {newVersion ? (
+              <button type="button" style={B.btn} onClick={() => window.location.reload()}>
+                Reload the app
+              </button>
+            ) : (
+              <button type="button" style={B.btn} onClick={tryAgain}>
+                Try again
+              </button>
+            )}
+          </div>
+          {!newVersion && (
+            <pre style={B.details}>
+              {crashDetails(error, componentStack, 4)}
+              {"\n"}
+              {at ? at.toLocaleString("en-ZA") : ""}
+            </pre>
+          )}
+        </div>
+      );
+    }
+
     return (
       <div style={S.page}>
         <div style={S.card}>
@@ -103,7 +183,7 @@ export default class ErrorBoundary extends Component {
           )}
           <div style={S.buttons}>
             {!newVersion && (
-              <button type="button" style={S.mainBtn} onClick={() => this.setState({ error: null, componentStack: "", at: null })}>
+              <button type="button" style={S.mainBtn} onClick={tryAgain}>
                 Try again
               </button>
             )}
