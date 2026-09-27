@@ -4048,3 +4048,32 @@ Both are committed and waiting for his word to push.
   errors" button in Stock Manager, admins only; rows kept 90 days. Whether
   a crash also rings the admins' notifications had no recommendation
   behind it, so it is not built and is asked again.
+
+### 27 Sep 2026, evening — crash screen step 3 built, NOT pushed, SQL waiting
+
+- **`8df253c`:** every crash the crash screen catches is written to a new
+  table, `app_errors`, and admins read them on Stock Manager → App
+  errors. Rules in `src/lib/appErrors.js` (tested), screen in
+  `src/manager/AppErrors.jsx`, SQL in `setup-app-errors.sql` (registered,
+  `setup-ALL.sql` regenerated). CLAUDE.md has the rule.
+- **Database change:** one new table with its own function and trigger
+  (`app_errors_keep_90_days`). Nothing existing is touched.
+- **The SQL is on neither database** (27 Sep: practice and live both
+  answer 404 for `app_errors`). The code works without it: crash screen
+  unchanged, nothing written, the list says "Not set up on this database
+  yet".
+- **Proven:** the SQL on pglite, 15 checks (who may add, read, change,
+  delete; the 90-day clearing; safe to run twice). The code without the
+  table, on practice signed in as Test. Clean clone at `8df253c`: names
+  0, 304 tests, build clean.
+- **Never tried:** a crash written and read back, because that needs the
+  table. After his paste on practice: set a crash off, open App errors,
+  read the row back from the database as well as the screen.
+
+### Waiting on Heinrich
+
+- Paste `setup-app-errors.sql` on practice, then on live (given to him
+  as two pastes, each under 40 lines).
+- "Push from here" for `8df253c`.
+- One question: should a crash also tell the admins by itself, and
+  where (asked with a recommendation this time).
