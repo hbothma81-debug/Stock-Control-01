@@ -1,15 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  crashRow, seenLately, isNoTable, recordCrash, loadCrashes, crashWho, splitByAge, crashMatchesSearch, deviceInWords,
-  KEEP_DAYS, LIST_LIMIT,
+  crashRow, seenLately, isNoTable, recordCrash, loadCrashes, countRecentCrashes, crashWho, splitByAge, crashMatchesSearch, deviceInWords,
+  KEEP_DAYS, RECENT_DAYS, LIST_LIMIT,
 } from "./appErrors.js";
 
 const DAY = 86400000;
 
 // A stand-in for the database client: answers what it is told to, and
 // keeps what it was asked.
-function fakeClient({ user = { id: "u1", email: "floor@x" }, insertError = null, rows = [], selectError = null } = {}) {
+function fakeClient({ user = { id: "u1", email: "floor@x" }, insertError = null, rows = [], selectError = null, count = null } = {}) {
   const asked = { inserts: [], selects: [] };
   const client = {
     asked,
@@ -20,13 +20,15 @@ function fakeClient({ user = { id: "u1", email: "floor@x" }, insertError = null,
           asked.inserts.push({ table, row });
           return { error: insertError };
         },
-        select(columns) {
-          const q = { table, columns };
+        select(columns, options) {
+          const q = { table, columns, options };
           asked.selects.push(q);
           const chain = {
             gte(col, value) { q.gte = [col, value]; return chain; },
             order(col, how) { q.order = [col, how]; return chain; },
             limit(n) { q.limit = n; return Promise.resolve({ data: selectError ? null : rows, error: selectError }); },
+            // A count is awaited straight after its filter, with no limit.
+            then(done) { return done({ data: null, count: selectError ? null : count, error: selectError }); },
           };
           return chain;
         },
@@ -147,6 +149,26 @@ test("list: a database without the table reads as not set up, any other failure 
   assert.deepEqual(await loadCrashes(fakeClient({ selectError: { code: "PGRST205", message: "Could not find the table" } })), { rows: [], notSetUp: true });
   assert.deepEqual(await loadCrashes(fakeClient({ selectError: { code: "500", message: "down" } })), { rows: [], failed: "down" });
   assert.deepEqual(await loadCrashes(null), { rows: [], notSetUp: true });
+});
+
+test("the red number: the last seven days, a number and no rows", async () => {
+  const now = Date.parse("2026-09-27T10:00:00Z");
+  const client = fakeClient({ count: 3 });
+  assert.equal(await countRecentCrashes(client, { now }), 3);
+  const q = client.asked.selects[0];
+  assert.equal(q.table, "app_errors");
+  assert.deepEqual(q.options, { count: "exact", head: true });
+  assert.deepEqual(q.gte, ["happened_at", new Date(now - RECENT_DAYS * DAY).toISOString()]);
+  assert.equal(q.limit, undefined);
+});
+
+test("the red number: none is 0; no table, a failure or no database is no number", async () => {
+  assert.equal(await countRecentCrashes(fakeClient({ count: 0 })), 0);
+  assert.equal(await countRecentCrashes(fakeClient({ count: null })), 0);
+  assert.equal(await countRecentCrashes(fakeClient({ selectError: { code: "PGRST205", message: "Could not find the table" } })), null);
+  assert.equal(await countRecentCrashes(fakeClient({ selectError: { code: "500", message: "down" } })), null);
+  assert.equal(await countRecentCrashes(null), null);
+  assert.equal(await countRecentCrashes({ from() { throw new Error("no network"); } }), null);
 });
 
 test("who: the name from the people list, else the address, else Unknown", () => {

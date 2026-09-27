@@ -58,7 +58,10 @@ function CrashLine({ row, who }) {
   );
 }
 
-export default function AppErrors({ people }) {
+// onRead(n), optional: how many of the lines just read are from the last
+// 7 days, so the red number on the Stock Manager button agrees with the
+// pill here without asking the database again.
+export default function AppErrors({ people, onRead }) {
   // null while the first read is out.
   const [answer, setAnswer] = useState(null);
   const [typed, setTyped] = useState("");
@@ -67,7 +70,9 @@ export default function AppErrors({ people }) {
   async function read() {
     setReading(true);
     try {
-      setAnswer(await loadCrashes(supabase));
+      const got = await loadCrashes(supabase);
+      setAnswer(got);
+      if (onRead && !got.failed && !got.notSetUp) onRead(splitByAge(got.rows, Date.now()).recent.length);
     } catch (err) {
       setAnswer({ rows: [], failed: err?.message || String(err) });
     } finally {

@@ -61,6 +61,7 @@ import { TABS, NAV_TABS, TAB_GROUPS, LASER_MACHINES } from "./constants.js";
 import UserManagement from "./UserManagement.jsx";
 import CompanyDetails from "./manager/CompanyDetails.jsx";
 import AppErrors from "./manager/AppErrors.jsx";
+import { countRecentCrashes } from "./lib/appErrors.js";
 import {
   SECTION_SHAPES, shapeForType, shapeTitle, buildSection, missingBoxes,
   PIPE_STANDARDS, SCHEDULES, SANS62_CLASSES, pipeSizes, sectionKgPerMetre,
@@ -2194,6 +2195,9 @@ export default function StockControl() {
   const [form, setForm] = useState(emptyForm);
   const [showManager, setShowManager] = useState(false);
   const [managerTab, setManagerTab] = useState(null);
+  // Crashes in the last 7 days: the red number on the Stock Manager button
+  // and on its App errors row, for admins. 0 shows nothing.
+  const [recentCrashCount, setRecentCrashCount] = useState(0);
   const [managerInput, setManagerInput] = useState("");
   const [managerFactor, setManagerFactor] = useState("");
   const [managerShortName, setManagerShortName] = useState("");
@@ -2611,8 +2615,21 @@ export default function StockControl() {
       // and the Ready / Waiting split reloads behind them (the effect on
       // jobStagesByJob). Only then, and only on a person's own press.
       ...(tab === "jobs" && jobsStageFilter && jobsList !== null ? [refreshJobStages()] : []),
+      // An admin's red number of crashes: a number, no rows.
+      readCrashCount(),
     ]);
     setIsRefreshing(false);
+  }
+
+  // The red number on the Stock Manager button (src/lib/appErrors.js).
+  // Admins only: nobody else may read the table, so nobody else asks.
+  // When the app starts, on Refresh, and whenever the App errors screen
+  // has read its list; never on a timer. A function, not a const, because
+  // isAdmin is declared further down.
+  async function readCrashCount() {
+    if (!isAdmin) return;
+    const n = await countRecentCrashes(supabase);
+    if (n != null) setRecentCrashCount(n);
   }
 
   // Quiet: the first load says so when it fails; on a Refresh the settings
@@ -11991,6 +12008,11 @@ export default function StockControl() {
 
   const isAdmin = !!profile?.isAdmin;
 
+  // Once it is known that this is an admin. Below isAdmin on purpose.
+  useEffect(() => {
+    if (isAdmin) readCrashCount();
+  }, [isAdmin]);
+
   useEffect(() => {
     // Needed by more than just admin/User Management now — the Sales
     // Person picker on the item form needs real account names too, so this
@@ -16707,6 +16729,12 @@ export default function StockControl() {
             <button className="stk-btn" style={S.roleChip} onClick={() => setShowManager(true)}>
               <Database size={13} strokeWidth={2.5} />
               Stock Manager
+              {/* Crashes in the last 7 days, admins only (App errors). */}
+              {isAdmin && recentCrashCount > 0 && (
+                <span style={S.notifBadgeCount} title="Screens that crashed in the last 7 days: Stock Manager, App errors">
+                  {recentCrashCount}
+                </span>
+              )}
             </button>
           )}
           {session && (
@@ -22014,6 +22042,9 @@ export default function StockControl() {
                     }}
                   >
                     <span>{t.label}</span>
+                    {t.key === "appErrors" && recentCrashCount > 0 && (
+                      <span style={{ ...S.notifBadgeCount, marginLeft: "auto", marginRight: 8 }}>{recentCrashCount}</span>
+                    )}
                     <ChevronDown size={14} style={{ transform: "rotate(-90deg)" }} />
                   </button>
                 ))}
@@ -23161,7 +23192,7 @@ export default function StockControl() {
               // (src/manager/AppErrors.jsx). In its own net like every
               // page that is its own file.
               <ErrorBoundary box what="App errors">
-                <AppErrors people={people} />
+                <AppErrors people={people} onRead={setRecentCrashCount} />
               </ErrorBoundary>
             ) : managerTab === "appErrors" ? (
               <div style={S.empty}>App errors is Admin-only.</div>

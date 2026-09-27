@@ -126,6 +126,24 @@ export async function loadCrashes(client, { now = Date.now() } = {}) {
   return { rows: data || [], full: (data || []).length >= LIST_LIMIT };
 }
 
+// How many crashes the last week holds: the red number on the Stock
+// Manager button, for admins (Heinrich, 27 Sep 2026). The same week as the
+// list's open pill, so the two numbers agree. One request that brings a
+// number and no rows; asked when an admin's app starts and on Refresh,
+// never on a timer. Nothing to say, or no table yet, is no number at all.
+export async function countRecentCrashes(client, { now = Date.now() } = {}) {
+  try {
+    if (!client) return null;
+    const { count, error } = await client
+      .from(TABLE)
+      .select("id", { count: "exact", head: true })
+      .gte("happened_at", new Date(now - RECENT_DAYS * DAY_MS).toISOString());
+    return error ? null : count ?? 0;
+  } catch {
+    return null;
+  }
+}
+
 // Who it happened to, in the words the list shows: the person's name where
 // the people list has them, else the address they sign in with.
 export function crashWho(row, people) {
