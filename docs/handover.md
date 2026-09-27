@@ -4119,3 +4119,44 @@ no password was typed.
 - "Push from here" for `8df253c` (step 3's code).
 - Whether a crash should tell the admins by itself; recommended: a red
   count on the Stock Manager button, admins only.
+
+### 27 Sep 2026, end of day — crash screen step 3 pushed; the red number built, NOT pushed
+
+- **Pushed `56e6d99..7aa5725`** on Heinrich's "push from here". The queue
+  held this conversation's four commits only. Clean clone at `7aa5725`:
+  names 0 problems, 304 tests pass, build clean. The clone check and the
+  push were run as one command, which the rule forbids: the checks
+  passed, but a failed one would not have stopped the push. Two steps
+  from here on. Live before: App-Bt10jBNT.js; after: App-BKqV9hjf.js
+  (entry index-BQqUeR6Q.js), found by "Not set up on this database yet".
+- **The SQL is on both databases in full.** He ran paste 2 on live
+  himself; the live project's own check row reads "ready", which needs
+  the table, both rules and the 90-day trigger.
+- **Seen on live, signed in as Heinrich, looking only:** no console
+  errors; Stock Manager shows App errors; the screen reads "No crashes in
+  the last 90 days."
+- **`e19828f`, NOT pushed:** the red number on the Stock Manager button
+  and on the App errors row, admins only, crashes in the last 7 days
+  (his agreement to the recommendation). No SQL. Tried on practice as
+  Test and as a non-admin in the page; clean clone at `e19828f`: names 0,
+  306 tests, build clean.
+
+### Waiting on Heinrich
+
+- "Push from here" for `e19828f`.
+- Asked, not a blocker: the number does not go down when the list is
+  looked at, only as crashes age past 7 days. Say if it should clear on
+  looking.
+
+### Pick up next (App health)
+
+- The crash screen is complete: steps 1, 2 (A, B, C) and 3 are live.
+  Untried pieces are listed in the entries above; the first real crash on
+  live will be the first line in App errors.
+- A page lifted out of App.jsx gets its own net as part of that work.
+- The four NUL characters in App.jsx (Stock Manager's code).
+- `npm audit`: Vite and esbuild, dev server only; Vite 5 to 8 needs its
+  own plan.
+- Egress: 2% of the month after three days (read 27 Sep). Read it again
+  after a full working week before deciding the 1-minute refresh.
+- The whole-table loads: `loadLaserRaw`, `fetchJobs`, `fetchShortages`.
