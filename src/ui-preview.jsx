@@ -313,6 +313,9 @@ function CrashScreenDemo() {
   // One card of three crashes, the way one job's bad data would: the
   // other two must carry on.
   const [cardKind, setCardKind] = React.useState("");
+  // A pop-up that crashes: the box must come up over the page, and Close
+  // must do what the pop-up's own x would.
+  const [popupOpen, setPopupOpen] = React.useState(false);
   return (
     <Section title="Crash screen" count={2} defaultOpen={false}>
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
@@ -337,6 +340,14 @@ function CrashScreenDemo() {
           </ErrorBoundary>
         </div>
       ))}
+
+      <div style={{ ...S.label, marginTop: 16 }}>Around a pop-up</div>
+      <button className="stk-btn" style={{ ...S.reqActionBtn, marginTop: 6 }} onClick={() => setPopupOpen(true)}>Open a pop-up that crashes</button>
+      {popupOpen && (
+        <ErrorBoundary popup what="the Info Request window" where="JOB-0068, Bending" onClose={() => setPopupOpen(false)}>
+          <CrashOnPurpose kind="crash" />
+        </ErrorBoundary>
+      )}
     </Section>
   );
 }

@@ -12142,28 +12142,30 @@ export default function StockControl() {
     if (!first?.job_id || !(mayEmailInvoice || (toSupplier && canRaisePO))) return null;
     return (
       <>
-        <SendEmailButton
-          label={toSupplier ? "Email to supplier" : "Email to customer"}
-          title={`Send ${first.delivery_note_number} from your Outlook`}
-          style={{ ...S.reqActionBtnMuted, marginTop: 8, marginLeft: 8 }}
-          partyWord={toSupplier ? "supplier" : "customer"}
-          attachmentNote={`Attached: ${first.delivery_note_number}.pdf, the delivery note as it was filed.`}
-          appUser={{ id: currentUser?.id, name: roleLabel }}
-          getDefaults={() =>
-            deliveryNoteWindowDefaults({
-              note: first,
-              job,
-              supplier: toSupplier ? master.suppliers.find((sup) => sup.name === first.recipient_name) : undefined,
-              contacts: toSupplier ? [] : master.customerContacts?.[first.recipient_name] || master.customerContacts?.[job?.customer] || [],
-              company: master.companyDetails || {},
-              senderName: roleLabel,
-              appUserId: currentUser?.id,
-            })
-          }
-          buildAttachment={() => deliveryNoteAttachment(first)}
-          record={{ documentType: DELIVERY_NOTE, relatedId: first.delivery_note_number, jobId: first.job_id, partyName: first.recipient_name }}
-          onSent={() => setEmailSentTick((n) => n + 1)}
-        />
+        <ErrorBoundary box what="the email button" where={first.delivery_note_number}>
+          <SendEmailButton
+            label={toSupplier ? "Email to supplier" : "Email to customer"}
+            title={`Send ${first.delivery_note_number} from your Outlook`}
+            style={{ ...S.reqActionBtnMuted, marginTop: 8, marginLeft: 8 }}
+            partyWord={toSupplier ? "supplier" : "customer"}
+            attachmentNote={`Attached: ${first.delivery_note_number}.pdf, the delivery note as it was filed.`}
+            appUser={{ id: currentUser?.id, name: roleLabel }}
+            getDefaults={() =>
+              deliveryNoteWindowDefaults({
+                note: first,
+                job,
+                supplier: toSupplier ? master.suppliers.find((sup) => sup.name === first.recipient_name) : undefined,
+                contacts: toSupplier ? [] : master.customerContacts?.[first.recipient_name] || master.customerContacts?.[job?.customer] || [],
+                company: master.companyDetails || {},
+                senderName: roleLabel,
+                appUserId: currentUser?.id,
+              })
+            }
+            buildAttachment={() => deliveryNoteAttachment(first)}
+            record={{ documentType: DELIVERY_NOTE, relatedId: first.delivery_note_number, jobId: first.job_id, partyName: first.recipient_name }}
+            onSent={() => setEmailSentTick((n) => n + 1)}
+          />
+        </ErrorBoundary>
         <SentEmailLines documentType={DELIVERY_NOTE} relatedId={first.delivery_note_number} refresh={emailSentTick} />
       </>
     );
@@ -12176,26 +12178,28 @@ export default function StockControl() {
   function renderInvoiceEmailButton(job, doc) {
     if (!job || !doc || !mayEmailInvoice) return null;
     return (
-      <SendEmailButton
-        label="Email invoice to customer"
-        title="Send the invoice on file to the customer from your Outlook"
-        style={S.reqActionBtnMuted}
-        partyWord="customer"
-        attachmentNote={`Attached: ${doc.file_name}, the invoice on file for ${job.job_number}.`}
-        appUser={{ id: currentUser?.id, name: roleLabel }}
-        getDefaults={() =>
-          invoiceWindowDefaults({
-            job,
-            contacts: master.customerContacts?.[job.customer] || [],
-            company: master.companyDetails || {},
-            senderName: roleLabel,
-            appUserId: currentUser?.id,
-          })
-        }
-        buildAttachment={() => jobFileAttachment(doc)}
-        record={{ documentType: SAGE_INVOICE, relatedId: doc.id, jobId: job.id, partyName: job.customer }}
-        onSent={() => setEmailSentTick((n) => n + 1)}
-      />
+      <ErrorBoundary box what="the email button" where={crashPlace(job)}>
+        <SendEmailButton
+          label="Email invoice to customer"
+          title="Send the invoice on file to the customer from your Outlook"
+          style={S.reqActionBtnMuted}
+          partyWord="customer"
+          attachmentNote={`Attached: ${doc.file_name}, the invoice on file for ${job.job_number}.`}
+          appUser={{ id: currentUser?.id, name: roleLabel }}
+          getDefaults={() =>
+            invoiceWindowDefaults({
+              job,
+              contacts: master.customerContacts?.[job.customer] || [],
+              company: master.companyDetails || {},
+              senderName: roleLabel,
+              appUserId: currentUser?.id,
+            })
+          }
+          buildAttachment={() => jobFileAttachment(doc)}
+          record={{ documentType: SAGE_INVOICE, relatedId: doc.id, jobId: job.id, partyName: job.customer }}
+          onSent={() => setEmailSentTick((n) => n + 1)}
+        />
+      </ErrorBoundary>
     );
   }
   const hasAnyAccess = isAdmin || (!!profile && (canAccessStockManager || NAV_TABS.some((t) => canView(t.key))));
@@ -17483,22 +17487,24 @@ export default function StockControl() {
                             sent. Draws nothing until the Microsoft setup's
                             IDs are in the build. */}
                         {canRaisePO && po.status !== "cancelled" && (
-                          <SendEmailButton
-                            label="Email to supplier"
-                            title="Send this order to the supplier from your Outlook"
-                            appUser={{ id: currentUser?.id, name: roleLabel }}
-                            getDefaults={() =>
-                              poEmailDefaults({
-                                po,
-                                supplier: master.suppliers.find((s) => s.id === po.supplierId),
-                                company: master.companyDetails || {},
-                                senderName: roleLabel,
-                              })
-                            }
-                            buildAttachment={async () => ({ fileName: `${po.poNumber}.pdf`, blob: (await buildPoDoc(po)).output("blob") })}
-                            record={{ documentType: "purchase_order", relatedId: po.poNumber, jobId: po.jobId }}
-                            onSent={() => setEmailSentTick((n) => n + 1)}
-                          />
+                          <ErrorBoundary box what="the email button" where={po.poNumber}>
+                            <SendEmailButton
+                              label="Email to supplier"
+                              title="Send this order to the supplier from your Outlook"
+                              appUser={{ id: currentUser?.id, name: roleLabel }}
+                              getDefaults={() =>
+                                poEmailDefaults({
+                                  po,
+                                  supplier: master.suppliers.find((s) => s.id === po.supplierId),
+                                  company: master.companyDetails || {},
+                                  senderName: roleLabel,
+                                })
+                              }
+                              buildAttachment={async () => ({ fileName: `${po.poNumber}.pdf`, blob: (await buildPoDoc(po)).output("blob") })}
+                              record={{ documentType: "purchase_order", relatedId: po.poNumber, jobId: po.jobId }}
+                              onSent={() => setEmailSentTick((n) => n + 1)}
+                            />
+                          </ErrorBoundary>
                         )}
                         {canRaisePO && (
                           <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => copyPurchaseOrder(po)}>
@@ -23675,7 +23681,9 @@ export default function StockControl() {
                     own viewer in a frame: phones and tablets showed a blank
                     box, the first page only, or saved the file to Downloads.
                     See PdfViewer.jsx. */}
-                <PdfViewer url={previewData} title={previewItem.attachmentName || "Attachment"} />
+                <ErrorBoundary box what="the PDF" where={previewItem.attachmentName || ""}>
+                  <PdfViewer url={previewData} title={previewItem.attachmentName || "Attachment"} />
+                </ErrorBoundary>
                 {/* A document that was made but not filed is lost unless it
                     is printed now, so the buttons show for it whatever the
                     tick says. */}
@@ -26391,78 +26399,88 @@ export default function StockControl() {
             </>
           )}
 
+          {/* Each of these three tabs in its own safety net
+              (src/ErrorBoundary.jsx): a crash in one leaves the job page
+              and its other tabs open. Inside the condition, so leaving
+              the tab takes the red box away with it. */}
           {jobDetailTab === "cut" && (
-            <CutToSize
-              lines={jobDetail.cutItems || []}
-              canEdit={canEditThisJob}
-              canSeeValue={canSeeValue}
-              sections={master.sections || []}
-              customerItems={(items || []).filter((i) => i.mainCat === "custom" && i.customer === jobDetail.job.customer)}
-              items={items || []}
-              findSectionFactor={findSectionFactor}
-              findSectionPrice={findSectionPrice}
-              onAdd={(line) => addJobCutItem(jobDetail.job, line)}
-              onUpdate={(item, field, value) => updateJobCutItem(jobDetail.job, item, field, value)}
-              onRemove={(item) => removeJobCutItem(jobDetail.job, item)}
-              onPrint={() => printCuttingList(jobDetail.job, jobDetail.cutItems || [], jobDetail.allocations || [])}
-              allocations={jobDetail.allocations || []}
-              requisitions={requisitions || []}
-              findSectionType={findSectionType}
-              onSetAside={(group, count) => setAsideBarsForCutList(jobDetail.job, group, count)}
-              onRequisition={canRequisition ? (group, count) => requisitionBarsForCutList(jobDetail.job, group, count) : null}
-              SavedCheck={SavedCheck}
-            />
+            <ErrorBoundary box what="the Cut to size tab" where={crashPlace(jobDetail.job)}>
+              <CutToSize
+                lines={jobDetail.cutItems || []}
+                canEdit={canEditThisJob}
+                canSeeValue={canSeeValue}
+                sections={master.sections || []}
+                customerItems={(items || []).filter((i) => i.mainCat === "custom" && i.customer === jobDetail.job.customer)}
+                items={items || []}
+                findSectionFactor={findSectionFactor}
+                findSectionPrice={findSectionPrice}
+                onAdd={(line) => addJobCutItem(jobDetail.job, line)}
+                onUpdate={(item, field, value) => updateJobCutItem(jobDetail.job, item, field, value)}
+                onRemove={(item) => removeJobCutItem(jobDetail.job, item)}
+                onPrint={() => printCuttingList(jobDetail.job, jobDetail.cutItems || [], jobDetail.allocations || [])}
+                allocations={jobDetail.allocations || []}
+                requisitions={requisitions || []}
+                findSectionType={findSectionType}
+                onSetAside={(group, count) => setAsideBarsForCutList(jobDetail.job, group, count)}
+                onRequisition={canRequisition ? (group, count) => requisitionBarsForCutList(jobDetail.job, group, count) : null}
+                SavedCheck={SavedCheck}
+              />
+            </ErrorBoundary>
           )}
 
           {jobDetailTab === "buyouts" && (
-            <BuyOuts
-              lines={jobDetail.buyoutItems || []}
-              canEdit={canEditThisJob}
-              canSeeValue={canSeeValue}
-              codes={(items || []).filter((i) => i.mainCat === "buyouts")}
-              suppliers={master.suppliers || []}
-              purchaseOrders={(purchaseOrders || []).filter((po) => po.jobId === jobDetail.job.id)}
-              allocations={jobDetail.allocations || []}
-              items={items || []}
-              onViewPo={viewPoPdf}
-              legacyNote={jobDetail.job.buy_out_notes || ""}
-              onAdd={(line) => addJobBuyoutItem(jobDetail.job, line)}
-              onUpdate={(item, field, value) => updateJobBuyoutItem(jobDetail.job, item, field, value)}
-              onRemove={(item) => removeJobBuyoutItem(jobDetail.job, item)}
-              // Sales people raise their own job's orders; so does anyone
-              // with the purchase order permission.
-              onRaisePo={
-                canEditThisJob && (isAdmin || profile?.isSalesPerson || canRaisePO)
-                  ? (supplierName, lines) => raisePoForBuyouts(jobDetail.job, supplierName, lines)
-                  : null
-              }
-              onAddSupplier={canEditThisJob ? (name) => addSupplierFromJob(name) : null}
-              SavedCheck={SavedCheck}
-            />
+            <ErrorBoundary box what="the Buy-outs tab" where={crashPlace(jobDetail.job)}>
+              <BuyOuts
+                lines={jobDetail.buyoutItems || []}
+                canEdit={canEditThisJob}
+                canSeeValue={canSeeValue}
+                codes={(items || []).filter((i) => i.mainCat === "buyouts")}
+                suppliers={master.suppliers || []}
+                purchaseOrders={(purchaseOrders || []).filter((po) => po.jobId === jobDetail.job.id)}
+                allocations={jobDetail.allocations || []}
+                items={items || []}
+                onViewPo={viewPoPdf}
+                legacyNote={jobDetail.job.buy_out_notes || ""}
+                onAdd={(line) => addJobBuyoutItem(jobDetail.job, line)}
+                onUpdate={(item, field, value) => updateJobBuyoutItem(jobDetail.job, item, field, value)}
+                onRemove={(item) => removeJobBuyoutItem(jobDetail.job, item)}
+                // Sales people raise their own job's orders; so does anyone
+                // with the purchase order permission.
+                onRaisePo={
+                  canEditThisJob && (isAdmin || profile?.isSalesPerson || canRaisePO)
+                    ? (supplierName, lines) => raisePoForBuyouts(jobDetail.job, supplierName, lines)
+                    : null
+                }
+                onAddSupplier={canEditThisJob ? (name) => addSupplierFromJob(name) : null}
+                SavedCheck={SavedCheck}
+              />
+            </ErrorBoundary>
           )}
 
           {jobDetailTab === "materials" && (
-            <Materials
-              allocations={jobDetail.allocations || []}
-              stages={inFlowOrder((jobDetail.processes || []).filter((p) => !p.shortage_id), jobDetail.job)}
-              items={items || []}
-              canEdit={canEditThisJob}
-              onReserve={() => {
-                setAllocateModal({ job: jobDetail.job, process: null, item: null, stagePickable: true });
-                setAllocateQty("");
-              }}
-              onTakeNow={() => setPullStockModal({ job: jobDetail.job, process: null, dept: null, search: "" })}
-              onUse={(a) =>
-                setUseAllocationModal({
-                  allocation: a,
-                  item: (items || []).find((i) => i.id === a.item_id),
-                  qty: String(Math.max(0, Number(a.qty_allocated) - Number(a.qty_used))),
-                  offcuts: [],
-                })
-              }
-              onRelease={releaseAllocation}
-              onAssignStage={assignAllocationToProcess}
-            />
+            <ErrorBoundary box what="the Materials tab" where={crashPlace(jobDetail.job)}>
+              <Materials
+                allocations={jobDetail.allocations || []}
+                stages={inFlowOrder((jobDetail.processes || []).filter((p) => !p.shortage_id), jobDetail.job)}
+                items={items || []}
+                canEdit={canEditThisJob}
+                onReserve={() => {
+                  setAllocateModal({ job: jobDetail.job, process: null, item: null, stagePickable: true });
+                  setAllocateQty("");
+                }}
+                onTakeNow={() => setPullStockModal({ job: jobDetail.job, process: null, dept: null, search: "" })}
+                onUse={(a) =>
+                  setUseAllocationModal({
+                    allocation: a,
+                    item: (items || []).find((i) => i.id === a.item_id),
+                    qty: String(Math.max(0, Number(a.qty_allocated) - Number(a.qty_used))),
+                    offcuts: [],
+                  })
+                }
+                onRelease={releaseAllocation}
+                onAssignStage={assignAllocationToProcess}
+              />
+            </ErrorBoundary>
           )}
 
           {jobDetailTab === "invoice" && (
@@ -26846,25 +26864,37 @@ export default function StockControl() {
         </div>
       )}
 
+      {/* A pop-up that crashes takes its own dark layer with it, so its
+          net draws the red box over the page, with a Close that does what
+          the pop-up's own x does (`popup` in src/ErrorBoundary.jsx). The
+          key sits on the net so a second request starts with a fresh one. */}
       {infoRequestModal && (
-        <InfoRequestModal
+        <ErrorBoundary
           key={infoRequestModal.process.id}
-          job={infoRequestModal.job}
-          process={infoRequestModal.process}
-          onUploadPhoto={(file) => uploadInfoRequestPhotoFor(infoRequestModal.job.id, file)}
-          onSubmit={submitInfoRequest}
+          popup
+          what="the Info Request window"
+          where={crashPlace(infoRequestModal.job, infoRequestModal.process)}
           onClose={() => setInfoRequestModal(null)}
-        />
+        >
+          <InfoRequestModal
+            job={infoRequestModal.job}
+            process={infoRequestModal.process}
+            onUploadPhoto={(file) => uploadInfoRequestPhotoFor(infoRequestModal.job.id, file)}
+            onSubmit={submitInfoRequest}
+            onClose={() => setInfoRequestModal(null)}
+          />
+        </ErrorBoundary>
       )}
 
       {infoAnswerModal && (
-        <InfoAnswerModal
-          key={infoAnswerModal.id}
-          req={infoAnswerModal}
-          onViewPhoto={viewShortagePhoto}
-          onSubmit={submitInfoAnswer}
-          onClose={() => setInfoAnswerModal(null)}
-        />
+        <ErrorBoundary key={infoAnswerModal.id} popup what="the Info Request answer window" onClose={() => setInfoAnswerModal(null)}>
+          <InfoAnswerModal
+            req={infoAnswerModal}
+            onViewPhoto={viewShortagePhoto}
+            onSubmit={submitInfoAnswer}
+            onClose={() => setInfoAnswerModal(null)}
+          />
+        </ErrorBoundary>
       )}
 
       {copyJobModal && (

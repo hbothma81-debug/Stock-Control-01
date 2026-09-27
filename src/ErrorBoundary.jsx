@@ -136,6 +136,7 @@ const B = {
     maxWidth: 460,
     maxHeight: "90vh",
     overflowY: "auto",
+    overflowX: "hidden",
     background: T.surface,
     borderRadius: 8,
   },
