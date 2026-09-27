@@ -3827,3 +3827,19 @@ JOB-0036 conversation, not Jobs page, by his answer.
   wins, so it does what it means, but somebody should drop the first.
 - Still with him from 21 Sep: the held commits went live on 22 Sep; the
   JOB-0014 trace was repaired on 22 Sep by his paste (Jobs page's FIX).
+- **Tried on practice 27 Sep, Heinrich signed in, after his paste there**
+  (the function answered `lines_changed` to a made-up job first; the
+  column answered). JOB-0003, Items tab, 1 typed in the Qty box, Invoice:
+  the browser sent the PDF and one `rpc/send_invoice_request` (200) and
+  nothing else; request R 1.99, the line 1 of 2, the log row naming the
+  request. Then the same press with the call altered to ask for 999: the
+  function answered 400 `P0001` with the line in its detail, the screen
+  said "Nothing was sent for JOB-0003 … 55556 (1 left) … The job has been
+  reloaded", the database unchanged, one PDF left in storage pointing at
+  nothing (by design). Not tried: two devices at once (one account on
+  practice), the Production card's Request invoice and Invoice Now (no
+  practice job reads Complete); those go through the same
+  `submitItemsToInvoice`. Practice JOB-0003 already carried a 21 Sep
+  request of R 3.98 with its line reading 0 of 2 (somebody's test reset
+  the line; not this conversation's), which the CHECK file will list.
+  **Next: the same two pastes on live, then "push from here".**
