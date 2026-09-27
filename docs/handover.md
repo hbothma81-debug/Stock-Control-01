@@ -3856,3 +3856,88 @@ JOB-0036 conversation, not Jobs page, by his answer.
   it. Nobody has sent a real request on live through the function yet:
   the next one is its first. `CHECK-invoice-requests-add-up.sql` on live
   afterwards would show it adding up.
+
+---
+
+## 27 Sep 2026 — Jobs page area (the JOB-0036 / invoice requests conversation): state of play at wrap-up
+
+A separate conversation Heinrich opened on 21 Sep with "job 36 shows 2
+requests, I think one document is not there", and kept for the fix that
+followed ("build here"). Cleared after this entry: the area goes back to
+the Jobs page conversation.
+
+### Done and live
+
+- **JOB-0036 repaired on live** (21 Sep): his paste of
+  `FIX-job-0036-missing-and-doubled-invoice-request.sql`, Invoice Now
+  pressed once on his word, read back: R 9,852.88 + R 6,582.98 =
+  R 16,435.86, the job's worth.
+- **The card offers every request** (`9192c1e`, live 21 Sep):
+  `renderOpenRequestButtons`, since extended by Jobs page with the Sage
+  invoice on the same row.
+- **Send once** (`65f2aa7`, live 21 Sep): one request per job at a time
+  on the device, the lines read fresh before anything is sent, the three
+  buttons read "Sending…".
+- **One save in the database** (`156e698`, live 27 Sep, pushed
+  `11af6a7..65f25e0`): `send_invoice_request` and
+  `job_quote_item_invoices.request_id`; the app's old line-by-line save
+  kept only for a database without the function.
+- `CHECK-invoice-requests-add-up.sql`, read only, in the repo.
+- CLAUDE.md: the "sent once" rule and the card rule under Decisions, the
+  database-function rule under Database changes, two gotchas
+  (`window.confirm` freezes a running save; a Bash heredoc cut short),
+  two notes under Checking a screen.
+
+### Every SQL file this conversation wrote
+
+| File | Practice | Live |
+|---|---|---|
+| `setup-invoice-request-function.sql` (a column, an index, a function) | Run, his paste 27 Sep. Checked: the column answers through the app's client; the function answered `lines_changed` to a made-up job, and saved a real request | Run, his paste 27 Sep. Checked: the column answers 200 beside a made-up column's 400; the function answers its own first refusal to the public key where a made-up name answers PGRST202 |
+| `FIX-job-0036-missing-and-doubled-invoice-request.sql` (one-off, live only) | Not for practice | Run, his paste 21 Sep; his pasted result and the database read back agree |
+| `CHECK-invoice-requests-add-up.sql` (reads only) | Never pasted; proven on pglite | Never pasted; proven on pglite |
+
+### Built but not yet tried by Heinrich
+
+Nothing here has been tried by Heinrich himself. What this conversation
+tried, and what nobody has:
+
+- **The card's buttons per request:** seen by this conversation on live,
+  signed in as him, on JOB-0036 (each button asked storage for its own
+  file). To try: Records → Invoicing, a job billed in parts.
+- **"Sending…" and the refusal of a second press:** tried on no screen,
+  by nobody. To try on practice: press Invoice twice fast on a job with
+  many lines; one request, and the second press is told one is under way.
+- **The fresh read before sending (`stillToSend`):** tried on no screen.
+  It needs the same job open in two tabs: request a line in one, then
+  press Invoice for the same line in the other without reloading.
+- **The database save:** tried on practice by this conversation through
+  the typed Qty box and Invoice on JOB-0003's Items tab, a real send and
+  a forced refusal, both read back. **No real request has gone through it
+  on live yet.** Invoice Now, the Production card's Request invoice and
+  ticking Invoicing were not pressed since (no practice job reads
+  Complete); they call the same `submitItemsToInvoice`.
+- **Two devices at the same moment:** never tried; practice has one
+  account. The database holds the job's lines for the length of the save,
+  proven on pglite only as far as one connection can.
+- **The old save as fallback:** both databases have the function, so it
+  no longer runs anywhere; never seen on a screen since it was split out.
+
+### Waiting on Heinrich
+
+- Nothing has to be run or ticked.
+- Offered, no answer needed unless he wants it: `CHECK-invoice-requests-
+  add-up.sql` pasted on live after the first real request, to see the
+  jobs add up.
+
+### Pick up next (Jobs page)
+
+- After the first real invoice request on live: read its
+  `job_quote_item_invoices.request_id` back, or paste the CHECK file.
+- Once that has held for a while, ask him whether the fallback
+  (`markInvoiceRequestLineByLine`) may go: it is the one remaining copy
+  of the rule outside the database.
+- The function can be called with the signed-out key (Supabase's default
+  grant); the row rules make such a call useless. Revoking it is a one
+  line SQL if the data security work wants it.
+- Seen in passing, Supplier prices' code: a duplicate `jobNumber` key in
+  an object literal at about line 14020 of App.jsx (the second wins).
