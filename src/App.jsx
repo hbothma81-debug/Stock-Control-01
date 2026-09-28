@@ -7834,9 +7834,15 @@ export default function StockControl() {
     // request goes without one, and the note is made from the request's
     // row afterwards. A number taken for a request the database then
     // refuses is skipped in the book.
+    //
+    // On a database that has not had setup-delivery-notes-per-request.sql
+    // there is no note and no word about one: the request goes exactly as
+    // it did before. So this can be live before the SQL is.
     let noteNumberTaken = null;
+    let notesSetUp = true;
     try {
-      noteNumberTaken = await takeDeliveryNoteNumber();
+      noteNumberTaken = await takeDeliveryNoteNumber({ databaseOnly: true });
+      if (!noteNumberTaken) notesSetUp = false;
     } catch (err) {
       console.error("No delivery note number could be taken; the request goes without one:", err);
     }
@@ -7900,7 +7906,8 @@ export default function StockControl() {
     } catch (err) {
       console.error("The invoice request went; what follows it did not all go:", err);
     }
-    await makeNoteWithRequest(job, itemsWithQty, requestId, noteNumberTaken);
+    if (notesSetUp) await makeNoteWithRequest(job, itemsWithQty, requestId, noteNumberTaken);
+    else console.warn("No delivery note was made with this request: setup-delivery-notes-per-request.sql has not been run on this database.");
   }
 
   // The save as it was until 25 Sep 2026, kept only for a database without
@@ -10043,10 +10050,13 @@ export default function StockControl() {
   // DN-0005 existed and every note was refused. On a database without the
   // function the number is worked out here from the notes and the counter
   // as the database holds them now (nextNoteNumber mirrors the function).
-  async function takeDeliveryNoteNumber() {
+  // databaseOnly: nothing (null) where the database has no such function,
+  // which is how a request tells that the setup file has not been run.
+  async function takeDeliveryNoteNumber({ databaseOnly = false } = {}) {
     const { data, error } = await supabase.rpc("take_delivery_note_number");
     if (!error && Number.isInteger(Number(data)) && Number(data) > 0) return { number: Number(data), fromDatabase: true };
     if (error && !allocatorMissing(error)) throw error;
+    if (databaseOnly) return null;
     const [used, counter] = await Promise.all([
       supabase.from("delivery_notes").select("delivery_note_number").order("created_at", { ascending: false }).limit(200),
       supabase.from("master_counters").select("value").eq("counter_name", "nextDeliveryNoteNumber"),
