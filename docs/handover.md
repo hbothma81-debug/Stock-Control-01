@@ -4306,3 +4306,67 @@ no password was typed.
   Sep,** about ten minutes each time, shell and browser alike. Read-only
   tools still work while it is down. Nothing was pushed or changed
   during either gap.
+
+## 28 Sep 2026 — Delivery notes: one with every invoice request (built in App health, the area is Jobs page's)
+
+Heinrich, 28 Sep: "I still dont have a delivery note per invoice
+request". His note of 21 Sep (block 2 of NOTES-AND-IDEAS.md) had never
+been sent to a building conversation. He asked for it to be built here.
+
+### Found broken on live (read through his signed-in tab, nothing changed)
+
+- **No delivery note can be made on live, and none has been since 31
+  Aug.** The table refuses two rows under one number and the app saves a
+  row per line. DN-0005 (two lines, JOB-0009) saved one row and failed;
+  the counter still reads 5, so every note since is refused.
+- All five notes on live are his own trials, 29 to 31 Aug.
+- **Check back in writes nothing on the note:** no rule lets a delivery
+  note row be changed. The line goes back on the floor regardless.
+- 48 invoice requests on 41 jobs; 47 on jobs with no delivery note.
+- The "Delivery Note" STAGE is on live's Job Process Types list: 46
+  jobs, 20 ticked (Andries, Heinrich, Gawie), 26 open. A tick, no paper.
+
+### Committed, NOT pushed
+
+- **`717273b`**: a customer delivery note with every invoice request,
+  by every route; "Make delivery note" on a request's row; one saver
+  for every note, rows as one insert; numbers from the database; check
+  back in asks the row back. Rules in `src/jobs/deliveryNotes.js`
+  (tested). CLAUDE.md has the rule.
+- **`f6420bb`**: silent on a database without the SQL, so both commits
+  can be live before the SQL is and hold nothing behind them.
+
+### SQL: `setup-delivery-notes-per-request.sql`, on NEITHER database yet
+
+- Proven on pglite, 20 checks. Registered; `setup-ALL.sql` regenerated.
+- Supabase will flag it ("Potential issue detected": it drops the
+  constraint). On live that confirmation is Heinrich's own press.
+
+### Tried on practice, signed in as Test, without the SQL (JOB-0008)
+
+- Before `f6420bb`: a one-line request made DN-0002 and opened it to
+  print, both PDFs read back; a two-line request went and its note was
+  refused whole with the right words.
+- After `f6420bb`: a two-line request went exactly as before, no note,
+  no message.
+
+### Not tried, all needing the SQL on practice
+
+- A note with several lines; "Make delivery note" on the second request
+  above (its PDF names DN-0003, which is still the next number); the
+  floor's Request invoice; Invoice Now with Mark as Invoiced behind the
+  note; the by-hand button with several lines; Check back in; two
+  devices asking for a number at once.
+
+### Left on practice by testing
+
+- JOB-0008: three invoice requests (lines 100, 101, 102, 103, 104 part
+  requested) and delivery note DN-0002. The job is still In progress.
+
+### Waiting on Heinrich
+
+- The SQL on practice, then on live. Asked whether the session may paste
+  it on practice.
+- Whether "Delivery Note" comes off the Job Process Types list for new
+  jobs (asked 28 Sep, not answered; untouched).
+- "Push from here" once the SQL is on both and practice has been tried.
