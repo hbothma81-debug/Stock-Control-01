@@ -4586,3 +4586,33 @@ been sent to a building conversation. He asked for it to be built here.
   delivery note" on JOB-0132's request (Invoiced pill), which he has
   already asked for, and a look for any note of ten lines or more made
   on live before the push, to rebuild.
+
+### 28 Sep 2026, 19:00 — the long note fix and Rebuild PDF are LIVE (`bcc5e48..089af4e`)
+
+- **Pushed on Heinrich's "push from here".** The queue held this
+  conversation's four commits only: `0ade39b` (the code) and three
+  handover notes (`e415f9c`, `1c4abc7`, `089af4e`). No SQL.
+- **Each step on its own:** the live tip and queue read, the clean clone
+  at `089af4e` with no settings file, as Vercel builds (names 0
+  problems, 359 tests pass, build clean, the same 5 unchecked writes as
+  live), the queue read again, the push.
+- **Live before:** App-BLO4OUd7.js, no "Rebuild PDF" in it. **After:**
+  App-CHTBJ_LA.js, entry index-Q12jBU7U.js, up within a minute; found
+  in it by "Rebuild PDF", "delivery note PDF rebuilt", "The stored PDF
+  is replaced" and the refusal's own words, beside a made-up phrase
+  that is not there.
+- **Seen on live, signed OUT only:** the sign-in page draws, no crash
+  screen, no request fails. The two "401" lines in the console are my
+  own reads, sent before I saw the pane was signed out.
+- **The Browser pane is signed out of live** (it was signed in as
+  Heinrich until the evening of 28 Sep). Signing in is his.
+- **NOT done, waiting on his sign-in, both already asked for by him:**
+  1. "Make delivery note" on JOB-0132's request (Tilvis Engineering, R
+     2,372.09, 25 lines; Records → Invoicing, Invoiced pill). The next
+     number is DN-0009 unless a request was sent in between.
+  2. A look for any note of ten lines or more made on live between
+     the first push (28 Sep, about 14:00) and this one: its stored PDF
+     is garbled, and "Rebuild PDF" puts it right. None existed at
+     17:50; requests sent after that are not known.
+- **Nothing of the new code has been pressed on live:** not a long
+  note, not Rebuild PDF.
