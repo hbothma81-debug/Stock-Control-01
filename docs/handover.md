@@ -4370,3 +4370,46 @@ been sent to a building conversation. He asked for it to be built here.
 - Whether "Delivery Note" comes off the Job Process Types list for new
   jobs (asked 28 Sep, not answered; untouched).
 - "Push from here" once the SQL is on both and practice has been tried.
+
+### 28 Sep 2026, afternoon — delivery notes tried on practice with the SQL; the stage switch built
+
+- **The SQL is on PRACTICE**, pasted by the session on Heinrich's word
+  ("paste on practice"), through his Chrome: the check row reads "ready",
+  the columns answer beside a made-up one. **It is NOT on live**; that
+  paste is his, by his own answer.
+- **`f8c108c`**: four things put right after trying it on practice (the
+  request named a note once per line; no button for requests older than
+  27 Sep; an opened document above the pop-ups; the Delivery tab names
+  each line).
+- **`8ab1160`**: a stage can be "Not offered on new jobs"
+  (`process_type_settings.retired`, in the same SQL file;
+  `src/jobs/retiredStages.js`). His answer on the Delivery Note stage:
+  off the list for new jobs only, open jobs left as they are.
+- **Tried on practice, signed in as Test, each read back from the
+  database** (JOB-0008): "Make delivery note" on a sent request
+  (DN-0003, DN-0004); a note made by itself with a three-line request
+  (DN-0005); by hand to a supplier with two lines (DN-0006); Check back
+  in; numbers 3 to 6 from the database; the stage switch on Drilling,
+  put back afterwards.
+- **Clean clone at `8ab1160`:** names 0 problems, 340 tests pass, build
+  clean.
+- **Not tried:** Invoice Now and the floor's Request invoice themselves
+  (no practice job has an open Invoicing stage and lines left); Copy job
+  and the Then box with a stage not offered; two devices at once;
+  anything on live.
+
+### Left on practice by testing (JOB-0008)
+
+- Five invoice requests; delivery notes DN-0002 to DN-0006; lines 100
+  to 107 part requested; line 109 out with Test Steel Supplies on
+  DN-0006. DN-0003 went to the request of R 429.48 by the test script's
+  mistake: the request of R 131.25 prints DN-0003 and carries DN-0004.
+
+### Waiting on Heinrich
+
+- `setup-delivery-notes-per-request.sql` on LIVE, his paste.
+- "Push from here" for `717273b`, `f6420bb`, `f8c108c`, `8ab1160` (and
+  the handover notes). The code is silent without the SQL, so either
+  order is safe.
+- Then, on live: mark Delivery Note "Not offered on new jobs" under
+  Stock Manager → Job Process Types (offered to do it for him).
