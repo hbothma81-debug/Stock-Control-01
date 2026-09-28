@@ -4242,3 +4242,38 @@ no password was typed.
 - The "not set aside" warning after a cut names the section but not the
   length, so a 6m line and an offcut read the same. The wording is in
   `consumeProgramStock` in App.jsx (Jobs page's code).
+
+## 28 Sep 2026 — App health: the NUL characters fix pushed alone, ahead of the queue
+
+- **What had changed since App health's last push (9076b66):** the Laser
+  production conversation pushed twice this morning, `9076b66..205d5b1`
+  (a tube program cut off several lengths and offcuts; the waiting list
+  shows a program's lengths), and left one commit of its own in the
+  queue, `6daaa99`.
+- **Health of what was live (205d5b1), clean clone:** names 0 problems,
+  316 tests pass, build clean; `laser_programs.stock_lines` answers on
+  live beside a made-up column that does not.
+- **Pushed `205d5b1..e7bb9dd`** on Heinrich's "push from here": one
+  commit, App health's own (`e7bb9dd` on live, the same change as
+  `f636650` on the shared branch), cherry-picked onto the live tip in a
+  scratch clone and merged back afterwards (`fab736f`, no content
+  change). Each step on its own: the queue read, the checks, what the
+  push would carry, the push. On the live tip with the fix: names 0
+  problems, 318 tests pass, build clean, all 13 built files identical to
+  the build of live's own code.
+- **Live after:** GitHub's main is `e7bb9dd`. The live bundle keeps its
+  name, App-CH6QuCc1.js, because the built app did not change: this push
+  cannot be found by a bundle name or by wording. The live page opens
+  signed in with no console errors, and the Stock Manager button carries
+  no red number (no crash written on live yet).
+- **Held back, not App health's:** `6daaa99`, Laser production's, from
+  09:41 on 28 Sep. Wording only, in `consumeProgramStock` in App.jsx:
+  the two stock warnings after a tube cut name the length ("30x30x2
+  6m"), so a 6m line and an offcut no longer read the same. Its own note
+  says it was seen on practice on program 00007. Heinrich was told; a
+  push of it needs his word.
+- **Also still in the queue, notes only:** handover commits `15863f4`,
+  `e0cf278`, `25e97c7` and this one.
+- **The auto-approval check for commands gave no answer for about ten
+  minutes** during this push (shell and browser alike). Read-only tools
+  still worked. It came back by itself; nothing was run meanwhile.
