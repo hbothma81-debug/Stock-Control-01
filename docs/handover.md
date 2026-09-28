@@ -4535,3 +4535,54 @@ been sent to a building conversation. He asked for it to be built here.
   does not fit prints each copy on its own page or pages; short notes
   stay as they are. Then "Make delivery note" for JOB-0132, and a look
   for any long note made in between.
+
+### 28 Sep 2026, 18:30 — the long note fixed and Rebuild PDF built (`0ade39b`), NOT pushed
+
+- **His answers: "your recommendation, build here"** to both questions.
+  So: each copy on its own page where the note does not fit, short notes
+  unchanged; and a "Rebuild PDF" button on a note, admins only.
+- **Built, one commit, `0ade39b`. No SQL.** The paper is lifted out of
+  App.jsx into `src/jobs/deliveryNotePdf.js`; the rebuild rules are
+  `noteToRebuild` and `canRebuildNote` in `src/jobs/deliveryNotes.js`;
+  CLAUDE.md carries the rule. Names 0 problems, 359 tests pass (340
+  before), build clean, the same 5 unchecked writes as live.
+- **Measured, not counted.** The customer's copy is drawn first; if its
+  signature line is no lower than 147 mm and it is still on page 1, ours
+  goes on the bottom half as always. Otherwise ours starts on a fresh
+  page. Nine plain lines fit, ten do not; seven lines whose descriptions
+  wrap do not either.
+- **Tried on practice, signed in as Test, read back from the database
+  and the stored PDFs:**
+  - JOB-0008, an invoice request of 13 lines from the Items tab: the
+    request went, DN-0007 (practice's numbering) was made by itself, 13
+    rows, and its PDF is two pages: the customer's copy on page 1, ours
+    on page 2, every line on both, "page 1 of 1" under each.
+  - Rebuild PDF on DN-0005 (3 lines, customer): Cancel sent nothing;
+    Yes replaced the stored file (its time moved from 11:12 to 16:09
+    GMT), same words in the same places, rows unchanged, a second line
+    in `generated_documents`, "delivery note PDF rebuilt" in the job's
+    History.
+  - Rebuild PDF on DN-0006 (2 lines, supplier, checked back in): the
+    same, and no line's state was touched.
+  - DN-0002 (no quantities): refused with its reason when the button
+    was still shown on it; the button is now not shown on such a note.
+  - A person who is not an admin (the permissions answer rewritten on
+    its way in, nothing saved): no Rebuild PDF on the job's Delivery tab.
+  - No console errors on a clean load through Jobs, the job's tabs and
+    Records.
+- **Live can replace a stored file:** read only, 29 process sheets in
+  `job-documents` have been filed more than once at the same path, the
+  newest today, and the stored file carries that time. So Rebuild PDF
+  needs no storage SQL on live.
+- **Not tried:** a note long enough to run over a page (tests only, 40
+  and 90 lines); a supplier's address of several lines (tests only;
+  practice's supplier has none); Rebuild PDF from Records → Delivery
+  Notes pressed (seen there, pressed on the job's tab); anything on
+  live.
+- **Left on practice:** JOB-0008 has one more invoice request (R
+  2,560.32, 13 lines) and DN-0007; two rebuild lines in its History.
+- **Waiting on him:** "push from here" for `0ade39b` (and the handover
+  notes `e415f9c`, `1c4abc7` and this one). **Then, on live:** "Make
+  delivery note" on JOB-0132's request (Invoiced pill), which he has
+  already asked for, and a look for any note of ten lines or more made
+  on live before the push, to rebuild.
