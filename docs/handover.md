@@ -4473,3 +4473,22 @@ been sent to a building conversation. He asked for it to be built here.
   (the copy should leave the stage behind and say so in the job's log),
   and the Then box. Both tried on no screen anywhere yet.
 - **To undo:** the same select, back to "Offered on jobs".
+
+### 28 Sep 2026, 17:35 — handover notes pushed (`030b9ba..bcc5e48`)
+
+- **On Heinrich's "push from here".** The queue held this
+  conversation's two commits only, `d56e885` and `bcc5e48`, both
+  `docs/handover.md` and nothing else. No app code, no SQL.
+- **Each step on its own:** the live tip and queue read, the clean clone
+  at `bcc5e48` (names 0 problems, 340 tests pass, build clean), the
+  queue read again, the push.
+- **Live after:** App-BLO4OUd7.js, entry index-RZCf4-ng.js, the same
+  files as before the push, as they should be with notes only. Opened
+  signed in as Heinrich: no console errors, the Jobs list draws,
+  Delivery Note is still the only stage marked "Not offered on new
+  jobs".
+- **A clean clone's file sizes depend on its settings file.** This
+  clone had no `.env`, so its build left the Microsoft sign-in library
+  out (App 794 kB); the clone before it had the practice `.env` copied
+  in and built it in (App 888 kB). Same code. Compare builds only
+  between clones set up the same way.
