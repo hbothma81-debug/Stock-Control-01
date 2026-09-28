@@ -5435,6 +5435,10 @@ export default function StockControl() {
       alert(`${label} was cut, but the stock line it was set aside from no longer exists, so nothing came off the shelf.`);
       return;
     }
+    // The section with its length, for the warnings: a program can be
+    // cut off a 6m line and an offcut of the same section, and the name
+    // alone reads the same for both.
+    const itemWords = item.length ? `${item.name} ${item.length}m` : item.name;
     try {
       const { data: links, error: linkError } = await supabase
         .from("laser_program_jobs")
@@ -5515,13 +5519,13 @@ export default function StockControl() {
       // disagreeing with the shelf.
       if (left > 0 && change > 0) {
         alert(
-          `${label}: ${amount} × ${item.name} came off the shelf, but only ${amount - left} of it was set aside for the job. ` +
+          `${label}: ${amount} × ${itemWords} came off the shelf, but only ${amount - left} of it was set aside for the job. ` +
             `The other ${left} was not reserved by anyone.`
         );
       }
       if (shortOnShelf > 0) {
         alert(
-          `${label}: the shelf only had ${amount - shortOnShelf} × ${item.name} on it, so it now reads nothing rather than ` +
+          `${label}: the shelf only had ${amount - shortOnShelf} × ${itemWords} on it, so it now reads nothing rather than ` +
             `going below. Count the rack and correct it on the stock screen.`
         );
       }
