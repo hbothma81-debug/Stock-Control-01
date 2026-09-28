@@ -4413,3 +4413,37 @@ been sent to a building conversation. He asked for it to be built here.
   order is safe.
 - Then, on live: mark Delivery Note "Not offered on new jobs" under
   Stock Manager → Job Process Types (offered to do it for him).
+
+### 28 Sep 2026, later — delivery notes with every request are LIVE
+
+- **The SQL is on live**, Heinrich's paste. Checked from outside: the
+  three columns answer beside a made-up one; the function is there
+  (asked with the signed-out key, which the counters' rule refuses at
+  the function's first line, so no number was taken; a made-up function
+  is "not found"). Tried on practice first. The live counter still reads
+  5 and the newest note is DN-0005.
+- **Pushed `0e3331b..030b9ba`** on his "push from here". The queue held
+  this conversation's seven commits only (`717273b`, `f6420bb`,
+  `f8c108c`, `8ab1160` and three handover notes). Each step on its own:
+  the queue read, the clean clone at `030b9ba` (names 0 problems, 340
+  tests pass, build clean), the queue read again, the push.
+- **Live before:** App-DjBoag3p.js. **After:** App-BLO4OUd7.js (entry
+  index-RZCf4-ng.js), found by "Make delivery note", "Not offered on new
+  jobs" and "made with this request".
+- **Seen on live, signed in as Heinrich, looking only:** no console
+  errors; Records → Invoicing draws (Outstanding 10, Invoiced 66, All
+  requests 49) with "Make delivery note" on the requests sent since 27
+  Sep and no button on the older ones; Job Process Types shows the new
+  select on all 22 stages, none marked.
+- **Four requests sent on 28 Sep before the push have no note:**
+  JOB-0014 (two), JOB-0149, JOB-0132. "Make delivery note" on each makes
+  it. Nothing was pressed on live.
+- **No note has been made on live yet.** The first request sent from now
+  on makes DN-0006.
+- **Not done: Delivery Note is NOT marked "Not offered on new jobs" on
+  live.** He asked what it means; explained; waiting for his yes.
+- **A check that proved nothing, for the record:** calling a function
+  with an argument it does not take answers the same "could not find"
+  whether or not the function exists (it said so of
+  `send_invoice_request`, which is on live). The signed-out call is the
+  one that tells.
