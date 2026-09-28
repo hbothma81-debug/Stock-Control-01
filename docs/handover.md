@@ -4196,3 +4196,49 @@ no password was typed.
 
 - "Push from here" for `f636650` (with handover notes `15863f4` and this
   one).
+
+---
+
+## 28 Sep 2026 — Tube laser: a program cut off several lengths and offcuts
+
+### Done and live
+
+- **"Add another length or offcut"** under the section box on both typed
+  tube nesting forms and under each section in Import nesting report
+  (Heinrich, 28 Sep). Same section and grade only. One Cut box; the
+  lengths come off the shelf in the order listed, an undo puts back what
+  that cut took. The Cutting card, the job's open row and the Programs
+  waiting to be cut list show "2 × 6m + 2 × 2.2m". Write-up in
+  `docs/TUBE-LASER-HOW-IT-WORKS.md`; rules in `src/laser/stockLines.js`
+  (tested). The plate laser is untouched.
+- **Database change, announce it:** `laser_programs.stock_lines` (a
+  list), `setup-laser-program-stock-lines.sql`, on practice and live by
+  Heinrich's paste on 28 Sep, checked beside a made-up column.
+- **Pushed from this conversation on Heinrich's word ("push from
+  here"), alone, ahead of the queue:** 9076b66..205d5b1, two commits
+  (d29ccce and 205d5b1 on live; the same changes as f194d1b and a982957
+  on the shared branch, merged back afterwards). Clean clone on the live
+  tip: 316 tests pass, names check 0 problems, build passes. Live bundle
+  went from App-TU5K5JzE.js to App-CH6QuCc1.js; the new wording is in
+  it; the live page loads with no console errors.
+- **Tried on practice, read back from the database:** New program with
+  2 × 6m + 2 × 2.2m (program 00007, OFFCUT-TEST, JOB-0012, left there
+  uncut); Cut 3 took 2 off the 6m line and 1 off the offcut; Undo 2 and
+  Undo one put them back.
+
+### Still queued, not pushed (other conversations' work)
+
+- 15863f4 and e0cf278 (handover notes) and f636650 (the four NUL
+  characters in App.jsx written as `\0`). Untouched by this push.
+
+### Not tried
+
+- The import's extra rows (a file cannot be picked from the Browser
+  pane), the form on a job's row, a program whose job has the stock
+  reserved, and anything on live signed in.
+
+### Offered, not built
+
+- The "not set aside" warning after a cut names the section but not the
+  length, so a 6m line and an offcut read the same. The wording is in
+  `consumeProgramStock` in App.jsx (Jobs page's code).
