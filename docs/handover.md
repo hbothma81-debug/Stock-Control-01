@@ -4277,3 +4277,32 @@ no password was typed.
 - **The auto-approval check for commands gave no answer for about ten
   minutes** during this push (shell and browser alike). Read-only tools
   still worked. It came back by itself; nothing was run meanwhile.
+
+### 28 Sep 2026, later — the whole queue pushed from App health, on Heinrich's second word
+
+- **Pushed `e7bb9dd..0e3331b`** on Heinrich's second "push from here",
+  given after he was told what was held and what it does. The queue held
+  one app change, Laser production's `6daaa99` (the two stock warnings
+  after a tube cut name the item with its length, "30x30x2 6m"; wording
+  only, in `consumeProgramStock`), and handover notes and merges. Against
+  live the queue changed two files: `docs/handover.md` and 8 lines of
+  `src/App.jsx`.
+- **Each step on its own:** the tip and the queue read; the change read
+  line by line; the clean clone at `0e3331b` (names 0 problems, 318 tests
+  pass, build clean); the queue read again; the push.
+- **Live before:** App-CH6QuCc1.js, the warnings naming the item without
+  its length. **After:** App-DjBoag3p.js (entry index-DYNvCyxd.js), the
+  warnings naming it with its length. Found by a pattern that survives
+  the build, since the change adds no words of its own: a name and a
+  length joined in one template ending in "m".
+- **Seen on live, signed in as Heinrich, looking only:** no console
+  errors; all five Tube Laser screens draw, no red box; no red number on
+  the Stock Manager button.
+- **`6daaa99` on practice:** tried by its own conversation on program
+  00007 (its commit says so). App health did not cut anything on
+  practice to see the warning itself.
+- **The queue is empty** but for this note.
+- **The auto-approval check for commands gave no answer twice on 28
+  Sep,** about ten minutes each time, shell and browser alike. Read-only
+  tools still work while it is down. Nothing was pushed or changed
+  during either gap.
