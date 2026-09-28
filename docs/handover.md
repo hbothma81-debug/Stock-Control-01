@@ -4447,3 +4447,29 @@ been sent to a building conversation. He asked for it to be built here.
   whether or not the function exists (it said so of
   `send_invoice_request`, which is on live). The signed-out call is the
   one that tells.
+
+### 28 Sep 2026, 15:56 — Delivery Note marked "Not offered on new jobs" on LIVE
+
+- **On Heinrich's word ("yes set in on live").** Set with the app's own
+  control in his signed-in tab: Stock Manager → Job Process Types, the
+  one row named Delivery Note, third select. One save went out
+  (`process_type_settings`, `retired: true`), accepted.
+- **Read back from the live database:** the Delivery Note row is new
+  (there was none) and reads `retired` true, every other switch on it
+  off; it is the only stage marked; the other 11 settings rows are
+  unchanged to the letter; the stage is still on the Job Process Types
+  list, in its place between Assembly and Invoicing.
+- **Jobs untouched:** Delivery Note sits on 46 job stages, 26 open,
+  before and after, row for row.
+- **Seen on live, looking only, nothing saved:** Edit processes on
+  JOB-0178 (no Delivery Note) offers 21 stages and not Delivery Note; on
+  JOB-0120 (has it) it offers all 22 with Delivery Note ticked and no
+  red outline. Production still shows the Delivery Note pill, 14 ready
+  and 6 waiting: the 20 jobs in progress. The other 6 open stages are on
+  5 cancelled jobs and 1 invoiced job, which Production never shows.
+- **Other devices** read the setting when the app loads, so a screen
+  that was already open offers Delivery Note until Refresh or a reload.
+- **Not tried on live:** Copy job of a job that carries Delivery Note
+  (the copy should leave the stage behind and say so in the job's log),
+  and the Then box. Both tried on no screen anywhere yet.
+- **To undo:** the same select, back to "Offered on jobs".
