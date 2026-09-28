@@ -1610,6 +1610,11 @@ function ProgramList({
                 >
                   <span style={{ fontWeight: 700, fontSize: 15 }}>{programTitle(p)}</span>
                   <span style={{ color: C.muted, fontSize: 14 }}>{p.material}</span>
+                  {stockLinesOf(p).length > 1 && (
+                    <span style={{ color: C.muted, fontSize: 14 }} title="The stock comes off the shelf in this order">
+                      {stockLinesText(stockLinesOf(p))}
+                    </span>
+                  )}
                   {p.sheet_name && <span style={{ color: C.muted, fontSize: 14 }}>{p.sheet_name}</span>}
                   {Number(p.part_count) > 0 && (
                     <span style={{ color: C.muted, fontSize: 14 }}>{p.part_count} parts</span>
