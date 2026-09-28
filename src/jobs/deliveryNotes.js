@@ -106,6 +106,28 @@ export function notesByRequest(noteRowsHeld) {
   return found;
 }
 
+// The numbers of the notes on one job, each once, in number order. A note
+// is a row per line, so its number is held once per line.
+export function notesOnJob(noteRowsHeld, jobId) {
+  const numbers = (noteRowsHeld || [])
+    .filter((d) => d?.job_id === jobId)
+    .map((d) => d.delivery_note_number)
+    .filter(Boolean);
+  return [...new Set(numbers)].sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+}
+
+// Requests have kept a list of their own lines since this day
+// (job_quote_item_invoices.request_id, setup-invoice-request-function.sql,
+// live 27 Sep 2026). One sent before it cannot have its note made by the
+// app, so it is not offered the button: a button that can only say "cannot
+// tell" is worse than none.
+export const REQUESTS_KEEP_LINES_SINCE = "2026-09-27T00:00:00+02:00";
+
+export function canMakeNoteFor(request) {
+  const sent = Date.parse(request?.submitted_at || "");
+  return Number.isFinite(sent) && sent >= Date.parse(REQUESTS_KEEP_LINES_SINCE);
+}
+
 // Whether the rows held say the database has the link at all. No rows to
 // look at is "cannot tell".
 export function linkReady(noteRowsHeld) {

@@ -131,7 +131,7 @@ import { closingSendsInvoiceRequest, showsRequestInvoiceButton } from "./jobs/in
 import { makeOneAtATime, stillToSend, invoiceRequestRefusal, linesChangedFromError, sendFunctionMissing } from "./jobs/invoiceRequestOnce.js";
 import {
   nextNoteNumber, noteRows, withoutNewColumns, isMissingNewColumn, isNumberRefused, allocatorMissing,
-  notePdfLines, notesByRequest, linkReady, linesOfRequest, noteNotMadeWords,
+  notePdfLines, notesByRequest, notesOnJob, canMakeNoteFor, linkReady, linesOfRequest, noteNotMadeWords,
 } from "./jobs/deliveryNotes.js";
 import {
   mayForceComplete,
@@ -9790,11 +9790,9 @@ export default function StockControl() {
   // even when blank -- "not on the job" is information; a missing line
   // is a guess. A job can be invoiced without one, so it never blocks.
   function invoiceHeaderLines(job) {
-    const dns = (allDeliveryNotes || [])
-      .filter((d) => d.job_id === job.id)
-      .map((d) => d.delivery_note_number)
-      .filter(Boolean)
-      .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+    // A note is a row per line, so its number is there once per line:
+    // each is named once.
+    const dns = notesOnJob(allDeliveryNotes, job.id);
     return [
       ["Customer PO", job.customer_po || "— not on the job"],
       ["Sales rep", job.sales_rep || "—"],
@@ -10258,7 +10256,7 @@ export default function StockControl() {
         </button>
       );
     }
-    if (!requestNotesReady) return null;
+    if (!requestNotesReady || !canMakeNoteFor(request)) return null;
     const busy = makingNoteFor.includes(request.id);
     return (
       <button
@@ -23933,7 +23931,12 @@ export default function StockControl() {
         // Higher z-index than the standard modal overlay — this can open
         // while Job Detail (or another modal) is already open behind it,
         // same fix as the New Stock Item modal needed for the same reason.
-        <div style={{ ...S.modalOverlay, zIndex: 30 }}>
+        // And above the pop-ups that sit at 30 (Mark as Invoiced, the Sage
+        // invoice, Copy job): Invoice Now makes the request, opens its
+        // delivery note to print, and opens Mark as Invoiced in the same
+        // breath, and at 30 the pop-up, drawn later, covered the note
+        // (28 Sep 2026). A document that has been opened is on top.
+        <div style={{ ...S.modalOverlay, zIndex: 35 }}>
           <div style={{ ...S.modal, maxWidth: previewItem.attachmentType === "pdf" ? 900 : 520 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalHead}>
               <span style={S.modalTitle}>{previewItem.attachmentName || "Attachment"}</span>
@@ -26663,15 +26666,24 @@ export default function StockControl() {
                             {group.length} line{group.length === 1 ? "" : "s"}
                           </span>
                         </div>
-                        {group.map((dn) => (
-                          <div key={dn.id} style={{ ...S.roleHint, marginTop: 4 }}>
-                            {dn.checked_back_in_at
-                              ? `✓ Received by ${dn.checked_back_in_by} on ${new Date(dn.checked_back_in_at).toLocaleString()}`
-                              : dn.direction === "to_supplier"
-                              ? "Not yet checked back in"
-                              : null}
-                          </div>
-                        ))}
+                        {group.map((dn) => {
+                          // Which line, and how many: a note carries several
+                          // now, and "Not yet checked back in" twice over
+                          // did not say which was which.
+                          const line = jobDetail.quoteItems.find((q) => q.id === dn.quote_item_id);
+                          const what = [dn.qty != null ? `${Number(dn.qty)} ×` : "", line?.description || ""].filter(Boolean).join(" ");
+                          const state = dn.checked_back_in_at
+                            ? `✓ Received by ${dn.checked_back_in_by} on ${new Date(dn.checked_back_in_at).toLocaleString()}`
+                            : dn.direction === "to_supplier"
+                            ? "Not yet checked back in"
+                            : "";
+                          if (!what && !state) return null;
+                          return (
+                            <div key={dn.id} style={{ ...S.roleHint, marginTop: 4 }}>
+                              {[what, state].filter(Boolean).join(": ")}
+                            </div>
+                          );
+                        })}
                         <button
                           type="button"
                           className="stk-btn"

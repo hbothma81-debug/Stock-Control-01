@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   numberOfNote, nextNoteNumber, noteRows, withoutNewColumns, isMissingNewColumn, isNumberRefused, allocatorMissing,
-  notePdfLines, notesByRequest, linkReady, linesOfRequest, noteNotMadeWords,
+  notePdfLines, notesByRequest, notesOnJob, canMakeNoteFor, linkReady, linesOfRequest, noteNotMadeWords,
 } from "./deliveryNotes.js";
 
 test("a note's number: DN-0005 is 5, anything else is none", () => {
@@ -114,6 +114,29 @@ test("two notes naming one request: the earlier is the one shown", () => {
   ]);
   assert.equal(map.get("req-1").number, "DN-0006");
   assert.equal(map.get("req-1").rows.length, 1);
+});
+
+test("the notes on a job: each number once, in number order, this job's only", () => {
+  const held = [
+    { job_id: "j1", delivery_note_number: "DN-0010" },
+    { job_id: "j1", delivery_note_number: "DN-0003" },
+    { job_id: "j1", delivery_note_number: "DN-0003" },
+    { job_id: "j2", delivery_note_number: "DN-0004" },
+    { job_id: "j1", delivery_note_number: "" },
+    { job_id: "j1", delivery_note_number: "DN-0002" },
+  ];
+  assert.deepEqual(notesOnJob(held, "j1"), ["DN-0002", "DN-0003", "DN-0010"]);
+  assert.deepEqual(notesOnJob(held, "j3"), []);
+  assert.deepEqual(notesOnJob(null, "j1"), []);
+});
+
+test("Make delivery note is offered only to a request that kept its lines", () => {
+  assert.equal(canMakeNoteFor({ submitted_at: "2026-09-26T21:59:59Z" }), false, "26 Sep 23:59 in South Africa");
+  assert.equal(canMakeNoteFor({ submitted_at: "2026-09-26T22:00:00Z" }), true, "27 Sep 00:00 in South Africa");
+  assert.equal(canMakeNoteFor({ submitted_at: "2026-09-28T08:47:00+00:00" }), true);
+  assert.equal(canMakeNoteFor({ submitted_at: "2026-09-19T04:50:00+00:00" }), false);
+  assert.equal(canMakeNoteFor({ submitted_at: null }), false);
+  assert.equal(canMakeNoteFor(null), false);
 });
 
 test("whether the database has the link: read off a row, or cannot tell", () => {
