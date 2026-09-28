@@ -4492,3 +4492,46 @@ been sent to a building conversation. He asked for it to be built here.
   out (App 794 kB); the clone before it had the practice `.env` copied
   in and built it in (App 888 kB). Same code. Compare builds only
   between clones set up the same way.
+
+### 28 Sep 2026, 17:50 — the first delivery notes made on LIVE, and a fault found: a long note prints garbled
+
+- **On Heinrich's word ("make them on live").** Three of the four
+  requests of 28 Sep got their note, with the app's own "Make delivery
+  note" button in his signed-in tab (Records → Invoicing), oldest
+  request first:
+  - **DN-0006**, JOB-0014 Greenzone, the R 49,968.33 request, 6 lines.
+  - **DN-0007**, JOB-0149 FSS, the R 4,235.20 request, 4 lines.
+  - **DN-0008**, JOB-0014 Greenzone, the R 7,743.36 request, 2 lines.
+- **Each press was guarded:** the app's own question had to name the
+  job and list exactly the request's lines, or the answer was No.
+- **Read back from the live database after each:** the rows under one
+  number, the right job, the request's own id on every row, quantities
+  and lines as the request's log holds them, made by Heinrich; one
+  `generated_documents` row each; DN-0001 to DN-0005 and the four
+  requests themselves unchanged to the letter; the counter reads 9. The
+  numbers came from `take_delivery_note_number` every time.
+- **Each stored PDF read back** (the app's own PDF.js): one page, two
+  copies, the number, the customer, every line in both copies. Each
+  card now shows its DN button in place of "Make delivery note".
+- **Two "400" lines in the console are mine,** not the app's: two of my
+  own read-back queries asked for columns that do not exist
+  (`delivery_notes.status`, `generated_documents.created_at`; the
+  second is `generated_at`).
+- **HELD, not made: JOB-0132 Tilvis Engineering, the R 2,372.09
+  request, 25 lines.** Its button is still there (Invoiced pill).
+- **THE FAULT, live now: a delivery note of 10 lines or more prints
+  garbled.** `buildDeliveryNoteDoc` prints two copies on one page, the
+  customer's from the top and ours from 166 mm, whatever the number of
+  lines. Measured with the same jsPDF calls (`note-layout.mjs` in the
+  scratchpad clone, which agrees with the three real notes to the
+  millimetre): up to 9 lines fit; at 10 the signature line meets the
+  dashed line; from 11 our copy's heading prints on top of the
+  customer's table. It is older than notes-with-requests (the by-hand
+  note always did it) but nobody made long notes. **Every request of 10
+  lines or more sent on live from now on makes such a PDF by itself.**
+  The rows in the database are right; only the paper is wrong, and a
+  stored PDF is never rebuilt.
+- **Proposed to him, not built, waiting on his answers:** a note that
+  does not fit prints each copy on its own page or pages; short notes
+  stay as they are. Then "Make delivery note" for JOB-0132, and a look
+  for any long note made in between.
