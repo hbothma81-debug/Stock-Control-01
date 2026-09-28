@@ -110,6 +110,8 @@ with checks (setup_file, looks_for, found) as (
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'job_buyout_items')),
     ('setup-laser-program-stock-link.sql', 'column laser_programs.stock_item_id',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'laser_programs' and column_name = 'stock_item_id')),
+    ('setup-laser-program-stock-lines.sql', 'column laser_programs.stock_lines',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'laser_programs' and column_name = 'stock_lines')),
     ('setup-job-line-stock-code.sql',   'column job_quote_items.stock_code',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'job_quote_items' and column_name = 'stock_code')),
     ('setup-job-line-material-type.sql', 'column job_quote_items.material_type',

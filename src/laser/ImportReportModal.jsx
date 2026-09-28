@@ -3,6 +3,8 @@ import { X, Upload, Check } from "lucide-react";
 import { C, S } from "../theme.js";
 import StockSectionPicker from "./StockSectionPicker.jsx";
 import { stockOptions, optionForMaterial } from "./stockOptions.js";
+import MoreStockLines from "./MoreStockLines.jsx";
+import { buildStockLines, totalLengths } from "./stockLines.js";
 import TypeToFind from "../TypeToFind.jsx";
 import {
   parseNestingList,
@@ -65,6 +67,15 @@ export default function ImportReportModal({
   const [reference, setReference] = useState("");
   // Each section's chosen stock line (its id), by the software's wording.
   const [chosen, setChosen] = useState({});
+  // More lengths and offcuts of each section, by the software's wording:
+  // [{ value, qty }]. The file says how many lengths the section takes,
+  // so the first stock line gets what these rows leave.
+  const [more, setMore] = useState({});
+  const moreOf = (reportSection) => more[reportSection] || [];
+  const moreTotal = (reportSection) => moreOf(reportSection).reduce((n, m) => n + Math.max(0, Math.round(Number(m.qty) || 0)), 0);
+  const firstQty = (s) => s.tubes - moreTotal(s.reportSection);
+  const moreSettled = (s) =>
+    moreOf(s.reportSection).every((m) => !!m.value && Math.round(Number(m.qty)) >= 1) && firstQty(s) >= 1;
   const [picked, setPicked] = useState([]);
   const [jobQuery, setJobQuery] = useState("");
   const [saving, setSaving] = useState(false);
@@ -156,6 +167,7 @@ export default function ImportReportModal({
       const first = {};
       for (const s of result.sections) first[s.reportSection] = remembered(s.reportSection)?.value || "";
       setChosen(first);
+      setMore({});
     } catch (err) {
       console.error("Could not read the nesting report:", err);
       setError(err?.message || "Could not read that file.");
@@ -197,11 +209,13 @@ export default function ImportReportModal({
   };
 
   const allChosen = parsed ? parsed.sections.every((s) => !!optionOf(s.reportSection)) : false;
+  const allMoreSettled = parsed ? parsed.sections.every(moreSettled) : false;
   const hasParts = parsed ? parsed.sections.some((s) => (s.parts || []).length > 0) : false;
   // What actually happens: the file has parts AND they are wanted.
   const partsOn = hasParts && useParts;
   const parentSettled = !partsOn || !!parent;
-  const canCreate = !!parsed && allChosen && picked.length > 0 && !!reference.trim() && parentSettled && !saving;
+  const canCreate =
+    !!parsed && allChosen && allMoreSettled && picked.length > 0 && !!reference.trim() && parentSettled && !saving;
 
   async function create() {
     if (!canCreate) return;
@@ -211,11 +225,19 @@ export default function ImportReportModal({
         nesting_name: reference.trim(),
         sections: parsed.sections.map((s) => {
           const o = optionOf(s.reportSection);
+          const extra = moreOf(s.reportSection);
+          const stockLines = extra.length
+            ? buildStockLines([
+                { option: o, qty: firstQty(s) },
+                ...extra.map((m) => ({ option: options.find((x) => x.value === m.value), qty: m.qty })),
+              ])
+            : [];
           return {
             reportSection: s.reportSection,
             material: o.material,
             item: o.item,
             lengths: s.tubes,
+            stock_lines: stockLines.length > 1 && totalLengths(stockLines) === s.tubes ? stockLines : null,
             parts: partsOn ? s.parts || [] : [],
             // Every nest in full, for the floor printout. Kept whether or
             // not the parts go on the job: the printout is the program's.
@@ -409,7 +431,17 @@ export default function ImportReportModal({
                             <StockSectionPicker
                               options={options}
                               value={chosen[s.reportSection] || ""}
-                              onChange={(o) => setChosen((prev) => ({ ...prev, [s.reportSection]: o ? o.value : "" }))}
+                              onChange={(o) => {
+                                const was = optionOf(s.reportSection);
+                                setMore((prev) => ({
+                                  ...prev,
+                                  [s.reportSection]:
+                                    !o || o.material !== was?.material
+                                      ? []
+                                      : (prev[s.reportSection] || []).filter((m) => m.value !== o.value),
+                                }));
+                                setChosen((prev) => ({ ...prev, [s.reportSection]: o ? o.value : "" }));
+                              }}
                               canRequisition={canRequisition}
                               onRequisition={onRequisition}
                             />
@@ -418,6 +450,21 @@ export default function ImportReportModal({
                             <div style={S.roleHint}>Lengths</div>
                             <div style={{ fontSize: 18, fontWeight: 700 }}>{s.tubes}</div>
                           </div>
+                        </div>
+                        <div style={{ marginTop: 6 }}>
+                          <MoreStockLines
+                            options={options}
+                            first={optionOf(s.reportSection)}
+                            rows={moreOf(s.reportSection)}
+                            onChange={(rows) => setMore((prev) => ({ ...prev, [s.reportSection]: rows }))}
+                          />
+                          {moreOf(s.reportSection).length > 0 && (
+                            <div style={{ ...S.roleHint, ...(firstQty(s) >= 1 ? {} : { color: C.danger }) }}>
+                              {firstQty(s) >= 1
+                                ? `The file has ${s.tubes} lengths: ${firstQty(s)} off the stock line picked first, ${moreTotal(s.reportSection)} off the rest.`
+                                : `The file has ${s.tubes} lengths and the rows above add up to ${moreTotal(s.reportSection)}. Leave at least 1 for the stock line picked first, or pick the offcut there.`}
+                            </div>
+                          )}
                         </div>
                         <div style={{ ...S.roleHint, marginTop: 4 }}>
                           {nestsNote(s)}
@@ -465,6 +512,9 @@ export default function ImportReportModal({
                     : `Create ${parsed.sections.length === 1 ? "program" : `${parsed.sections.length} programs`}`}
                 </button>
                 {parsed && !allChosen && <div style={S.roleHint}>Pick a stock line for every section first.</div>}
+                {parsed && allChosen && !allMoreSettled && (
+                  <div style={S.roleHint}>Finish the extra lengths and offcuts first: a stock line and how many on each row.</div>
+                )}
                 {parsed && allChosen && picked.length === 0 && <div style={S.roleHint}>Pick the job first.</div>}
                 {parsed && allChosen && picked.length > 0 && !parentSettled && (
                   <div style={S.roleHint}>Say which of the job's lines the parts go under.</div>

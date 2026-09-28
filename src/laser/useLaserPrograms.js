@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "../lib/supabaseClient.js";
+import { stockLinesOf, stockMoves } from "./stockLines.js";
 
 // Everything a laser tab knows and does: the programs, the job stages
 // behind them, and every change the nesting and cutting screens can
@@ -644,6 +645,9 @@ export default function useLaserPrograms(deps) {
     cut_minutes,
     jobs,
     reserve,
+    // More than one stock line (stockLines.js): a list, in the order the
+    // lengths come off the shelf. Null for a program off one line.
+    stock_lines,
     // The parts cut on this program ({ name, qty, length }), and which
     // job line they sit under. Only a laser whose programs know their
     // parts sends these; a plate program sends nothing and the columns
@@ -692,6 +696,10 @@ export default function useLaserPrograms(deps) {
           // that picks no stock -- and a database where the column has
           // not been added yet -- carries on as before.
           ...(reserve?.item?.id ? { stock_item_id: reserve.item.id } : {}),
+          // Written only for a program off several stock lines, so every
+          // other program saves on a database where
+          // setup-laser-program-stock-lines.sql has not been run.
+          ...(Array.isArray(stock_lines) && stock_lines.length > 1 ? { stock_lines } : {}),
           created_by: roleLabel,
           // The nests, for the floor printout (setup-tube-laser-nests.sql).
           ...(Array.isArray(nests) && nests.length ? { nests } : {}),
@@ -704,6 +712,18 @@ export default function useLaserPrograms(deps) {
         console.error("Program saved without its nests (run setup-tube-laser-nests.sql):", error);
         delete row.nests;
         ({ data, error } = await insertRow(row));
+      }
+      // A database without the stock_lines column refuses the program.
+      // Nothing is made: a program that took every length off its first
+      // stock line would put the shelf wrong without anybody knowing.
+      if (error && row.stock_lines && /stock_lines/i.test(error.message || "")) {
+        console.error("Program not saved (run setup-laser-program-stock-lines.sql):", error);
+        alert(
+          "This database cannot keep more than one stock line on a program yet, so nothing was saved. " +
+            "Please tell Heinrich: setup-laser-program-stock-lines.sql has to be run. " +
+            "Until then, make the program with one stock line."
+        );
+        return false;
       }
       if (error) throw error;
       if (jobs.length) {
@@ -763,6 +783,7 @@ export default function useLaserPrograms(deps) {
         sheets_required: s.lengths,
         jobs,
         reserve: s.item ? { item: s.item, qty: s.lengths } : null,
+        stock_lines: s.stock_lines || null,
         parts: s.parts || [],
         nests: s.nests || [],
         parent_line_id,
@@ -1035,8 +1056,19 @@ export default function useLaserPrograms(deps) {
       // could undo it. The cut is the fact; the stock following it is a
       // consequence, and a rack that cannot be moved must never tell
       // the operator his cut failed.
+      //
+      // A program off several stock lines takes them in the order
+      // listed (stockMoves): each line that moves is handed over as if
+      // it were the program's own.
       if (machine.materialFrom === "sections" && typeof consumeStock === "function") {
-        await consumeStock({ ...program, sheets_cut: cut }, cut - before);
+        const lines = stockLinesOf(program);
+        if (lines.length > 1) {
+          for (const m of stockMoves(lines, before, cut)) {
+            await consumeStock({ ...program, sheets_cut: cut, stock_item_id: m.stock_item_id }, m.delta);
+          }
+        } else {
+          await consumeStock({ ...program, sheets_cut: cut }, cut - before);
+        }
       }
 
       // Re-read before deciding anything: someone else may have cut the

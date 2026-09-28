@@ -5,6 +5,7 @@ import Section from "../Section.jsx";
 import { pickShift, currentAndPreviousWindow, lastEndedShift, fmtTime } from "../lib/shiftWindow.js";
 import { plannedMinutes, outstandingMinutes, fmtMinutes, laserShifts, outstandingUnits } from "../lib/cuttingTime.js";
 import { programTitle } from "./programTitle.js";
+import { stockLinesOf, stockLinesText } from "./stockLines.js";
 import PrintNestsButton from "./PrintNestsButton.jsx";
 
 // The laser operator's screen. A to-do list of programs to cut.
@@ -531,6 +532,13 @@ function ProgramRow({ program, notes, canCut, machine = {}, onToggleCut, onSetCu
             </span>
           )}
           <span style={S.partTag}>{p.material}</span>
+          {/* A program off several stock lines: which lengths, in the
+              order they come off the shelf as the count goes up. */}
+          {stockLinesOf(p).length > 1 && (
+            <span style={S.partTag} title="Cut in this order: the stock comes off the shelf in it">
+              {stockLinesText(stockLinesOf(p))}
+            </span>
+          )}
           {p.sheet_name && <span style={S.partTag}>{p.sheet_name}</span>}
           {p.machine && <span style={S.partTag}>{p.machine}</span>}
           {Number(p.part_count) > 0 && (
