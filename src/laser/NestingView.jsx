@@ -8,6 +8,8 @@ import { programTitle } from "./programTitle.js";
 import ImportReportModal from "./ImportReportModal.jsx";
 import StockSectionPicker from "./StockSectionPicker.jsx";
 import { stockOptions } from "./stockOptions.js";
+import MoreStockLines from "./MoreStockLines.jsx";
+import { buildStockLines, totalLengths, stockLinesOf, stockLinesText } from "./stockLines.js";
 import { parseTypedParts } from "./nestingReport.js";
 import { parentChoices, NEW_PARENT } from "./ImportReportModal.jsx";
 import PrintNestsButton from "./PrintNestsButton.jsx";
@@ -172,6 +174,8 @@ export default function NestingView({
   const [newGrade, setNewGrade] = useState("");
   // The stock line, on a laser whose section is picked off real stock.
   const [newStock, setNewStock] = useState(null);
+  // More lengths and offcuts of that section: [{ value, qty }].
+  const [newMore, setNewMore] = useState([]);
   // The parts, typed, and which of the first job's lines they go under.
   const [newParts, setNewParts] = useState("");
   const [newParent, setNewParent] = useState("");
@@ -202,6 +206,7 @@ export default function NestingView({
     setNewThickness("");
     setNewGrade("");
     setNewStock(null);
+    setNewMore([]);
     setNewParts("");
     setNewParent("");
     setNewMinutes("");
@@ -210,7 +215,8 @@ export default function NestingView({
   }
 
   const identified = w.generated ? !!newName.trim() : !!newNumber.trim();
-  const materialPicked = w.bySections ? !!newStock : !!newThickness && !!newGrade;
+  const newMoreSettled = newMore.every((m) => !!m.value && Math.round(Number(m.qty)) >= 1);
+  const materialPicked = w.bySections ? !!newStock && newMoreSettled : !!newThickness && !!newGrade;
   const partsSettled = !newParts.trim() || !!newParent;
   const canSubmit = identified && materialPicked && picked.length > 0 && partsSettled && !saving;
 
@@ -223,6 +229,15 @@ export default function NestingView({
       alert(err.message);
       return;
     }
+    // Several stock lines: the program is cut off all of them, in the
+    // order listed.
+    const stockLines =
+      w.bySections && newMore.length
+        ? buildStockLines([
+            { option: newStock, qty: Math.max(1, Math.round(Number(newRepeats) || 1)) },
+            ...newMore.map((m) => ({ option: stockChoices.find((o) => o.value === m.value), qty: m.qty })),
+          ])
+        : [];
     setSaving(true);
     try {
       const ok = await onCreateProgram({
@@ -230,7 +245,8 @@ export default function NestingView({
         nesting_name: newName.trim(),
         material: w.bySections ? newStock.material : `${newThickness} ${newGrade}`,
         sheet_name: w.hasSheet ? newSheet.trim() : "",
-        sheets_required: newRepeats,
+        sheets_required: stockLines.length > 1 ? totalLengths(stockLines) : newRepeats,
+        stock_lines: stockLines.length > 1 ? stockLines : null,
         cut_minutes: w.hasTime ? newMinutes : "",
         // Picking the stock line is picking the stock: that many lengths
         // are set aside for the first job on the program.
@@ -398,7 +414,11 @@ export default function NestingView({
                   <StockSectionPicker
                     options={stockChoices}
                     value={newStock?.value || ""}
-                    onChange={setNewStock}
+                    onChange={(o) => {
+                      if (!o || o.material !== newStock?.material) setNewMore([]);
+                      else setNewMore((prev) => prev.filter((m) => m.value !== o.value));
+                      setNewStock(o);
+                    }}
                     canRequisition={canRequisition}
                     onRequisition={onRequisition}
                   />
@@ -457,6 +477,10 @@ export default function NestingView({
                 </div>
               )}
             </div>
+
+            {w.bySections && (
+              <MoreStockLines options={stockChoices} first={newStock} rows={newMore} onChange={setNewMore} units={w.units} />
+            )}
 
             {w.generated && (
               <div style={S.roleHint}>
@@ -729,6 +753,8 @@ function NestRow({
   const [grade, setGrade] = useState("");
   // The stock line picked, on the tube laser.
   const [stockPick, setStockPick] = useState(null);
+  // More lengths and offcuts of that section: [{ value, qty }].
+  const [moreStock, setMoreStock] = useState([]);
   // The parts typed, and which of this job's lines they go under.
   const [typedParts, setTypedParts] = useState("");
   const [partsParent, setPartsParent] = useState(null);
@@ -800,7 +826,8 @@ function NestRow({
   })();
 
   const identified = w.generated ? !!nestingName.trim() : !!programNumber.trim();
-  const materialPicked = w.bySections ? !!stockPick : !!thickness && !!grade;
+  const moreSettled = moreStock.every((m) => !!m.value && Math.round(Number(m.qty)) >= 1);
+  const materialPicked = w.bySections ? !!stockPick && moreSettled : !!thickness && !!grade;
   const partsSettled = !typedParts.trim() || !!parentValue;
   const canCreate = identified && materialPicked && !!r.candidate && partsSettled && !saving;
 
@@ -813,6 +840,15 @@ function NestRow({
       alert(err.message);
       return;
     }
+    // Several stock lines: the program is cut off all of them, in the
+    // order listed.
+    const stockLines =
+      w.bySections && moreStock.length
+        ? buildStockLines([
+            { option: stockPick, qty: Math.max(1, Math.round(Number(repeats) || 1)) },
+            ...moreStock.map((m) => ({ option: stockChoices.find((o) => o.value === m.value), qty: m.qty })),
+          ])
+        : [];
     setSaving(true);
     try {
       const chosen = [r.candidate, ...alsoOn];
@@ -820,7 +856,8 @@ function NestRow({
         program_number: programNumber.trim(),
         nesting_name: nestingName.trim(),
         sheet_name: w.hasSheet ? sheet.trim() : "",
-        sheets_required: repeats,
+        sheets_required: stockLines.length > 1 ? totalLengths(stockLines) : repeats,
+        stock_lines: stockLines.length > 1 ? stockLines : null,
         cut_minutes: w.hasTime ? minutes : "",
         // Stored as one line the way the machine reads it, built from the
         // two lists so nobody types "1.2mm MS" three different ways. On
@@ -843,6 +880,7 @@ function NestRow({
         setThickness("");
         setGrade("");
         setStockPick(null);
+        setMoreStock([]);
         setTypedParts("");
         setPartsParent(null);
         setSheet("");
@@ -1001,6 +1039,11 @@ function NestRow({
                       {programTitle(pg)}
                     </span>
                     {pg.material && <span style={S.partTag}>{pg.material}</span>}
+                    {stockLinesOf(pg).length > 1 && (
+                      <span style={S.partTag} title="The stock comes off the shelf in this order">
+                        {stockLinesText(stockLinesOf(pg))}
+                      </span>
+                    )}
                     {pg.sheet_name && <span style={S.partTag}>{pg.sheet_name}</span>}
                     {plannedMinutes(pg) != null && (
                       <span style={S.partTag} title="Planned cutting time, all sheets">
@@ -1136,7 +1179,11 @@ function NestRow({
                     <StockSectionPicker
                       options={stockChoices}
                       value={stockPick?.value || ""}
-                      onChange={setStockPick}
+                      onChange={(o) => {
+                        if (!o || o.material !== stockPick?.material) setMoreStock([]);
+                        else setMoreStock((prev) => prev.filter((m) => m.value !== o.value));
+                        setStockPick(o);
+                      }}
                       canRequisition={canRequisition}
                       onRequisition={onRequisition}
                     />
@@ -1195,6 +1242,10 @@ function NestRow({
                   </div>
                 )}
               </div>
+
+              {w.bySections && (
+                <MoreStockLines options={stockChoices} first={stockPick} rows={moreStock} onChange={setMoreStock} units={w.units} />
+              )}
 
               {w.generated && (
                 <div style={S.roleHint}>

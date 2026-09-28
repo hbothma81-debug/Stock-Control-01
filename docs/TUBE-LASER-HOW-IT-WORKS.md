@@ -197,6 +197,35 @@ Both are switches in the tube profile (`cutListBy: "job"`,
 `cutAmount: true`). The plate laser has neither and is unchanged: its
 thickness groups and its running-total box.
 
+## A program cut off several lengths and offcuts
+
+Asked for by Heinrich on 28 Sep 2026: a nest is often cut off a few full
+lengths and whatever offcuts of that section are on the rack, and each
+offcut is its own stock line. Under the section box on both typed forms
+(Nest it on a job's row, New program) and under each section in Import
+nesting report, **Add another length or offcut** adds a row: a stock
+line and how many. The rows offer only the first line's section and
+grade in its other lengths, because a program is one section. On the
+typed forms the program's lengths are the rows added up; on the import
+the file says how many lengths, so the first stock line gets what the
+rows leave, and must be left at least one.
+
+His answers: one Cut box for the whole program, not one per length; the
+lengths come off the shelf in the order listed, top row first. So the
+card shows "3 × 6m + 2 × 2.4m" beside the section, which is the order to
+cut in. A cut taken back puts back what that cut took. If the nester
+raises the program's lengths afterwards, the extra cuts come off the
+last line listed.
+
+The list is `laser_programs.stock_lines`; the rules are in
+`src/laser/stockLines.js` (tested) and the rows are
+`src/laser/MoreStockLines.jsx`. A program off one stock line keeps no
+list and uses `stock_item_id` as before. Each line that moves goes
+through `consumeProgramStock` in App.jsx as if it were the program's
+own, so reservations, the shelf and the usage log follow the same rule
+as ever. Picking still sets nothing aside. Tube only: the rows are drawn
+where the profile says `materialFrom: "sections"`.
+
 ## The floor printout
 
 Built 14 Sep 2026 from `docs/FLOOR-NESTING-PRINTOUT-PLAN.md`. A Print
@@ -302,6 +331,12 @@ with whoever else touches `next_laser_program_number`.
 list, empty by default, holding each nest off the report for the floor
 printout. The import still saves a program on a database without it,
 leaving the nests off.
+
+`setup-laser-program-stock-lines.sql` (28 Sep 2026):
+`laser_programs.stock_lines`, a list, blank on every program off one
+stock line. On a database without it a program with extra rows is
+refused and says so, and nothing is saved; every other program saves as
+before.
 
 ## Switching it on
 
