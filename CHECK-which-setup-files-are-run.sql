@@ -165,7 +165,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-delivery-notes-per-request.sql', 'a delivery note row can be changed (check back in)',
       exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'delivery_notes' and cmd = 'UPDATE')),
     ('setup-delivery-notes-per-request.sql', 'function take_delivery_note_number',
-      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'take_delivery_note_number'))
+      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'take_delivery_note_number')),
+    ('setup-delivery-notes-per-request.sql', 'column process_type_settings.retired',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'process_type_settings' and column_name = 'retired'))
 )
 select
   setup_file,

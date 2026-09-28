@@ -17,7 +17,12 @@
 --   3. adds to each row what quantity went out, and which invoice request
 --      the note was made for;
 --   4. gives out delivery note numbers from the database, one caller at a
---      time, never a number already used.
+--      time, never a number already used;
+--   5. lets a stage be marked "not offered on new jobs" under Job Process
+--      Types. For the Delivery Note stage, which is a tick that makes no
+--      paper: it cannot be removed while jobs carry it, so it stays for
+--      them and is only not offered to others. Nothing is marked by this
+--      file; that is a choice made on the screen.
 --
 -- Nothing existing is deleted or renumbered. DN-0001 to DN-0005 stay as
 -- they are; the next note is DN-0006.
@@ -72,6 +77,8 @@ $fn$;
 
 grant execute on function public.take_delivery_note_number() to authenticated;
 
+alter table public.process_type_settings add column if not exists retired boolean not null default false;
+
 
 -- ============ Check ============
 
@@ -84,5 +91,7 @@ select 'delivery notes' as step,
              and exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'delivery_notes' and cmd = 'UPDATE')
              and exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
                           where n.nspname = 'public' and p.proname = 'take_delivery_note_number')
+             and exists (select 1 from information_schema.columns where table_schema = 'public'
+                          and table_name = 'process_type_settings' and column_name = 'retired')
             then 'ready — a note can carry several lines, and numbers come from the database'
             else 'SOMETHING IS MISSING - tell Claude' end as result;

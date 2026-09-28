@@ -133,6 +133,7 @@ import {
   nextNoteNumber, noteRows, withoutNewColumns, isMissingNewColumn, isNumberRefused, allocatorMissing,
   notePdfLines, notesByRequest, notesOnJob, canMakeNoteFor, linkReady, linesOfRequest, noteNotMadeWords,
 } from "./jobs/deliveryNotes.js";
+import { isRetired, retiredReady, stagesOffered, stagesToCopy } from "./jobs/retiredStages.js";
 import {
   mayForceComplete,
   forcedBy,
@@ -8057,7 +8058,9 @@ export default function StockControl() {
       ]);
       // A read that failed would otherwise copy as "nothing there".
       for (const read of [procRead, lineRead, cutRead]) if (read.error) throw read.error;
-      const sourceProcesses = procRead.data || [];
+      // A stage no longer offered on new jobs is left behind, and said so
+      // below (src/jobs/retiredStages.js).
+      const { kept: sourceProcesses, left: stagesLeftBehind } = stagesToCopy(procRead.data || [], processTypeSettings);
       const sourceQuoteItems = lineRead.data || [];
       const sourceCutItems = cutRead.data || [];
 
@@ -8157,7 +8160,11 @@ export default function StockControl() {
 
       // The old job's history stays with the old job. What carries over is
       // one line saying where this one came from -- provenance, not baggage.
-      await logJobEvent(newJob.id, "copied", `from ${source.job_number}`);
+      await logJobEvent(
+        newJob.id,
+        "copied",
+        `from ${source.job_number}` + (stagesLeftBehind.length ? ` — without ${stagesLeftBehind.join(", ")}, no longer offered on new jobs` : "")
+      );
 
       setCopyJobModal(null);
       fetchJobs();
@@ -8351,6 +8358,9 @@ export default function StockControl() {
     const flow = master?.jobProcessTypes || [];
     const welding = flow.findIndex((n) => /weld/i.test(n));
     return flow.filter((n, i) => {
+      // A stage no longer offered is not offered here either
+      // (src/jobs/retiredStages.js).
+      if (isRetired(processTypeSettings, n)) return false;
       if (onlyMarked(n)) return true;
       if (welding === -1 || i >= welding || /buy/i.test(n)) return false;
       return !isLaserProcess(n) && !isTubeLaserProcess(n) && !isPlateNestingProcess(n) && !workedInLaserStatus(n) && !isInvoicingStage(n);
@@ -23885,6 +23895,27 @@ export default function StockControl() {
                               <SavedCheck fieldKey={`pts-${entry}-only_marked`} />
                                 </>
                               )}
+                              {/* A stage nobody should add to a job any more.
+                                  It stays on this list and on every job that
+                                  has it; removing it is refused while a job
+                                  carries it, because those jobs would leave
+                                  the Production tab. Shown only where the
+                                  database has the setting
+                                  (src/jobs/retiredStages.js). */}
+                              {retiredReady(processTypeSettings) && (
+                                <>
+                                  <select
+                                    value={isRetired(processTypeSettings, entry) ? "retired" : ""}
+                                    onChange={(e) => saveProcessTypeSetting(entry, "retired", e.target.value === "retired")}
+                                    style={{ ...S.input, width: "auto", fontSize: 13, padding: "4px 6px" }}
+                                    title="Not offered: no job can have this stage added, and Copy job leaves it behind. Jobs that already have it keep it, and it still shows on the Production tab for them."
+                                  >
+                                    <option value="">Offered on jobs</option>
+                                    <option value="retired">Not offered on new jobs</option>
+                                  </select>
+                                  <SavedCheck fieldKey={`pts-${entry}-retired`} />
+                                </>
+                              )}
                             </div>
                           )}
                           <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
@@ -27253,14 +27284,14 @@ export default function StockControl() {
                   drawn — so it could not be unticked, could not be removed,
                   and could not appear in Production either. The job was
                   stuck with a stage nothing could reach. */}
-              {[
-                ...master.jobProcessTypes,
-                ...(jobDetail?.processes || [])
-                  .filter((p) => !p.shortage_id && !master.jobProcessTypes.includes(p.process_name))
-                  .map((p) => p.process_name),
-              ]
-                .filter((name, i, all) => all.indexOf(name) === i)
-                .map((name) => {
+              {/* A stage no longer offered on new jobs (Delivery Note) is
+                  left out unless this job already has it
+                  (src/jobs/retiredStages.js). */}
+              {stagesOffered(
+                master.jobProcessTypes,
+                processTypeSettings,
+                (jobDetail?.processes || []).filter((p) => !p.shortage_id).map((p) => p.process_name)
+              ).map((name) => {
                 const jobStages = (jobDetail?.processes || []).filter((p) => !p.shortage_id && p.process_name === name);
                 const existingProcess = jobStages[0];
                 const orphaned = !master.jobProcessTypes.includes(name);
