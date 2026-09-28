@@ -130,6 +130,10 @@ import { jobMatchesSearch, poMatchesSearch, poLabel } from "./jobs/jobSearch.js"
 import { closingSendsInvoiceRequest, showsRequestInvoiceButton } from "./jobs/invoiceOnClose.js";
 import { makeOneAtATime, stillToSend, invoiceRequestRefusal, linesChangedFromError, sendFunctionMissing } from "./jobs/invoiceRequestOnce.js";
 import {
+  nextNoteNumber, noteRows, withoutNewColumns, isMissingNewColumn, isNumberRefused, allocatorMissing,
+  notePdfLines, notesByRequest, linkReady, linesOfRequest, noteNotMadeWords,
+} from "./jobs/deliveryNotes.js";
+import {
   mayForceComplete,
   forcedBy,
   openStages,
@@ -1990,6 +1994,14 @@ export default function StockControl() {
   const [newPartForm, setNewPartForm] = useState({ description: "", qty: "", lengthMm: "", madeOn: "", linkedItemId: null });
   const [jobHistoryOpen, setJobHistoryOpen] = useState(false); // { [quoteItemId]: "3" }
   const [deliveryNoteBatchModal, setDeliveryNoteBatchModal] = useState(null);
+  // The requests a delivery note is being made for right now, so a second
+  // press of "Make delivery note" cannot make a second note.
+  const [makingNoteFor, setMakingNoteFor] = useState([]);
+  // Which delivery note goes with which invoice request, from the notes
+  // already loaded with the jobs (src/jobs/deliveryNotes.js). Ready only
+  // once a note row shows the database has the link.
+  const requestNotes = useMemo(() => notesByRequest(allDeliveryNotes), [allDeliveryNotes]);
+  const requestNotesReady = linkReady(allDeliveryNotes) === true;
   const [copyJobModal, setCopyJobModal] = useState(null);
   const [editProcessesModal, setEditProcessesModal] = useState(null); // { job, selected: Set<string> }
   const [showAddStockItemModal, setShowAddStockItemModal] = useState(false);
@@ -7815,10 +7827,23 @@ export default function StockControl() {
         unitPrice: Number(it.unit_price),
       };
     });
+    // Every request goes with a delivery note of its own (Heinrich, 28 Sep
+    // 2026; src/jobs/deliveryNotes.js). Its number is taken first, so the
+    // request can print it; the note itself is made only once the request
+    // has gone. Never in the request's way: with no number to be had the
+    // request goes without one, and the note is made from the request's
+    // row afterwards. A number taken for a request the database then
+    // refuses is skipped in the book.
+    let noteNumberTaken = null;
+    try {
+      noteNumberTaken = await takeDeliveryNoteNumber();
+    } catch (err) {
+      console.error("No delivery note number could be taken; the request goes without one:", err);
+    }
     // Stored as a real document accounts can open when ready — never
     // downloaded automatically. Visible from both the job itself and
     // the Invoicing tab, since accounts works from there.
-    const doc = await buildDraftInvoiceDoc(job, lines);
+    const doc = await buildDraftInvoiceDoc(job, lines, noteNumberTaken ? formatDeliveryNoteNumber(noteNumberTaken.number) : null);
     const totalAmount = lines.reduce((sum, li) => sum + li.qty * li.unitPrice, 0);
     const fileName = `Invoice-Request-${job.job_number}-${Date.now()}.pdf`;
     const path = `${job.id}/${fileName}`;
@@ -7834,13 +7859,14 @@ export default function StockControl() {
     // Not stored means no request: said out loud, so nothing that follows a
     // request (ticking Invoicing, Mark as Invoiced) goes ahead without one.
     if (!stored) throw new Error("The invoice request document could not be stored.");
-    const { error: sendError } = await supabase.rpc("send_invoice_request", {
+    const { data: sent, error: sendError } = await supabase.rpc("send_invoice_request", {
       p_job_id: job.id,
       p_storage_path: path,
       p_file_name: fileName,
       p_submitted_by: roleLabel,
       p_lines: itemsWithQty.map(({ item: it, qty }) => ({ id: it.id, qty, unit_price: Number(it.unit_price) || 0 })),
     });
+    let requestId = sent?.id || null;
     if (sendError) {
       const changed = linesChangedFromError(sendError);
       if (changed) {
@@ -7855,14 +7881,26 @@ export default function StockControl() {
       );
       await markInvoiceRequestLineByLine(job, itemsWithQty, path, fileName, totalAmount);
     }
-    if (job.sales_rep) {
-      await sendNotifications({
-        job_id: job.id,
-        job_number: job.job_number,
-        sales_rep: job.sales_rep,
-        message: `${lines.length} item(s) submitted to invoice on ${job.job_number} (${job.customer || "no customer"}) by ${roleLabel}`,
-      });
+    // From here on the request has gone. Nothing below may throw: a throw
+    // would tell the person their request failed when it did not.
+    try {
+      if (!requestId) {
+        // The old line-by-line save gives no row back: found by its file.
+        const { data: found } = await supabase.from("job_invoice_requests").select("id").eq("storage_path", path).limit(1);
+        requestId = found?.[0]?.id || null;
+      }
+      if (job.sales_rep) {
+        await sendNotifications({
+          job_id: job.id,
+          job_number: job.job_number,
+          sales_rep: job.sales_rep,
+          message: `${lines.length} item(s) submitted to invoice on ${job.job_number} (${job.customer || "no customer"}) by ${roleLabel}`,
+        });
+      }
+    } catch (err) {
+      console.error("The invoice request went; what follows it did not all go:", err);
     }
+    await makeNoteWithRequest(job, itemsWithQty, requestId, noteNumberTaken);
   }
 
   // The save as it was until 25 Sep 2026, kept only for a database without
@@ -9494,6 +9532,7 @@ export default function StockControl() {
                   ? "Open request"
                   : `Open request ${i + 1} of ${forJob.length}: ${invoiceDateLabel(r.submitted_at)}${r.total_amount != null ? `, ${rand(r.total_amount)}` : ""}`}
               </button>
+              {renderRequestNote(job, r)}
               {inv ? (
                 <span style={{ ...S.roleHint, color: C.accentFinished }}>
                   Sage {inv.invoice_number}
@@ -9997,6 +10036,80 @@ export default function StockControl() {
     setDeliveryNoteBatchModal({ job, itemsWithQty, direction: "to_supplier", recipientName: "", notes: "" });
   }
 
+  // The next delivery note number, from the database
+  // (take_delivery_note_number, setup-delivery-notes-per-request.sql): one
+  // caller at a time, never a number a note already carries. Until 28 Sep
+  // 2026 the app counted them in memory; live's counter said 5 while
+  // DN-0005 existed and every note was refused. On a database without the
+  // function the number is worked out here from the notes and the counter
+  // as the database holds them now (nextNoteNumber mirrors the function).
+  async function takeDeliveryNoteNumber() {
+    const { data, error } = await supabase.rpc("take_delivery_note_number");
+    if (!error && Number.isInteger(Number(data)) && Number(data) > 0) return { number: Number(data), fromDatabase: true };
+    if (error && !allocatorMissing(error)) throw error;
+    const [used, counter] = await Promise.all([
+      supabase.from("delivery_notes").select("delivery_note_number").order("created_at", { ascending: false }).limit(200),
+      supabase.from("master_counters").select("value").eq("counter_name", "nextDeliveryNoteNumber"),
+    ]);
+    if (used.error) throw used.error;
+    if (counter.error) throw counter.error;
+    return {
+      number: nextNoteNumber((used.data || []).map((r) => r.delivery_note_number), counter.data?.[0]?.value),
+      fromDatabase: false,
+    };
+  }
+
+  // Saves one delivery note, whoever asked for it: by hand from the Items
+  // tab, or by itself with an invoice request (src/jobs/deliveryNotes.js).
+  // The rows go in as one save, all of them or none: saved one at a time, a
+  // note refused on its second line was left half made. Then a supplier's
+  // lines are marked out, and the PDF is stored. Gives back the note's
+  // number; throws what went wrong, `needsSetup` when the database still
+  // refuses rows that share a number.
+  async function saveDeliveryNote({ job, itemsWithQty, direction, recipientName, recipientAddress = "", notes = "", requestId = null, taken = null, showPreview = true }) {
+    let number = taken || (await takeDeliveryNoteNumber());
+    let noteNumber = null;
+    for (let attempt = 0; ; attempt++) {
+      noteNumber = formatDeliveryNoteNumber(number.number);
+      const rows = noteRows({ noteNumber, job, itemsWithQty, direction, recipientName, recipientAddress, notes, createdBy: roleLabel, requestId });
+      let { error } = await supabase.from("delivery_notes").insert(rows);
+      if (error && isMissingNewColumn(error)) ({ error } = await supabase.from("delivery_notes").insert(withoutNewColumns(rows)));
+      if (!error) break;
+      if (!isNumberRefused(error) || attempt >= 2) throw error;
+      // Refused over the number. Either a note already carries it (take
+      // the next), or the database still refuses two rows under one number.
+      const { data: held, error: readError } = await supabase.from("delivery_notes").select("id").eq("delivery_note_number", noteNumber).limit(1);
+      if (readError) throw readError;
+      if (!held || held.length === 0) {
+        const err = new Error("The database refuses two lines under one delivery note number.");
+        err.needsSetup = true;
+        throw err;
+      }
+      number = await takeDeliveryNoteNumber();
+    }
+    if (direction === "to_supplier") {
+      const { error: statusError } = await supabase
+        .from("job_quote_items")
+        .update({ item_status: "out_external" })
+        .in("id", itemsWithQty.map(({ item }) => item.id));
+      if (statusError) throw statusError;
+    }
+    // Only where the database does not count for itself: the counter is
+    // moved on through the master save, as it always was.
+    if (!number.fromDatabase) setMaster((prev) => ({ ...prev, nextDeliveryNoteNumber: number.number + 1 }));
+    await buildDeliveryNoteDoc(
+      { delivery_note_number: noteNumber, direction, recipient_name: String(recipientName || "").trim(), recipient_address: recipientAddress, created_at: new Date().toISOString() },
+      notePdfLines(
+        itemsWithQty,
+        (item) => jobLineCode(item, item.linked_item_id ? (items || []).find((i) => i.id === item.linked_item_id) : null),
+        (item) => jobLineDescription(item, item.linked_item_id ? (items || []).find((i) => i.id === item.linked_item_id) : null)
+      ),
+      job,
+      { showPreview }
+    );
+    return noteNumber;
+  }
+
   async function submitBatchDeliveryNote() {
     const m = deliveryNoteBatchModal;
     if (!m.recipientName.trim()) {
@@ -10004,34 +10117,19 @@ export default function StockControl() {
       return;
     }
     try {
-      const noteNumber = formatDeliveryNoteNumber(master.nextDeliveryNoteNumber);
       let recipientAddress = "";
       if (m.direction === "to_supplier") {
         const sup = master.suppliers.find((s) => s.name === m.recipientName);
         recipientAddress = sup?.address || "";
       }
-      // One delivery_notes row per item (sharing the same note number) so
-      // "check back in" still knows exactly which item each row is for —
-      // the printed document below combines them into one delivery anyway.
-      for (const { item: it, qty } of m.itemsWithQty) {
-        const { error } = await supabase.from("delivery_notes").insert({
-          delivery_note_number: noteNumber,
-          job_id: m.job.id,
-          quote_item_id: it.id,
-          recipient_type: m.direction === "to_supplier" ? "supplier" : "customer",
-          recipient_name: m.recipientName.trim(),
-          recipient_address: recipientAddress,
-          direction: m.direction,
-          notes: m.notes.trim(),
-          created_by: roleLabel,
-        });
-        if (error) throw error;
-        if (m.direction === "to_supplier") {
-          const { error: statusError } = await supabase.from("job_quote_items").update({ item_status: "out_external" }).eq("id", it.id);
-          if (statusError) throw statusError;
-        }
-      }
-      setMaster((prev) => ({ ...prev, nextDeliveryNoteNumber: (prev.nextDeliveryNoteNumber || 1) + 1 }));
+      const noteNumber = await saveDeliveryNote({
+        job: m.job,
+        itemsWithQty: m.itemsWithQty,
+        direction: m.direction,
+        recipientName: m.recipientName,
+        recipientAddress,
+        notes: m.notes,
+      });
       if (m.job.sales_rep) {
         await sendNotifications({
           job_id: m.job.id,
@@ -10040,21 +10138,129 @@ export default function StockControl() {
           message: `${m.itemsWithQty.length} item(s) sent out on ${noteNumber} to ${m.recipientName.trim()} on ${m.job.job_number} (${m.job.customer || "no customer"})`,
         });
       }
-      await buildDeliveryNoteDoc(
-        { delivery_note_number: noteNumber, direction: m.direction, recipient_name: m.recipientName.trim(), recipient_address: recipientAddress, created_at: new Date().toISOString() },
-        m.itemsWithQty.map(({ item, qty }) => {
-          const linked = item.linked_item_id ? (items || []).find((i) => i.id === item.linked_item_id) : null;
-          return { code: jobLineCode(item, linked), description: jobLineDescription(item, linked), qty };
-        }),
-        m.job
-      );
       setInvoiceQtyInputs({});
       setDeliveryNoteBatchModal(null);
       refreshJobDetail();
+      fetchJobs();
     } catch (err) {
       console.error("Failed to create delivery note:", err);
-      alert("Couldn't create that delivery note — check your connection and try again.");
+      alert(
+        err?.needsSetup
+          ? "That delivery note has more than one line, and the database has not been updated for that yet (setup-delivery-notes-per-request.sql). Nothing was saved."
+          : "Couldn't create that delivery note — check your connection and try again. Nothing was saved."
+      );
     }
+  }
+
+  // The customer's delivery note that goes with an invoice request: the
+  // lines and quantities of that request and nothing else, made by itself
+  // by every route a request is sent (Heinrich, 28 Sep 2026). Never fatal
+  // and never thrown: the request has gone by now, and a note that cannot
+  // be made is said out loud and made later from the request's own row.
+  async function makeNoteWithRequest(job, itemsWithQty, requestId, taken) {
+    try {
+      await saveDeliveryNote({
+        job,
+        itemsWithQty,
+        direction: "to_customer",
+        recipientName: job.customer || "Customer not on the job",
+        requestId,
+        taken,
+      });
+      return true;
+    } catch (err) {
+      console.error("The invoice request went, but its delivery note could not be made:", err);
+      alert(noteNotMadeWords(job.job_number, err));
+      return false;
+    }
+  }
+
+  // "Make delivery note" on a request that has none: one whose note failed
+  // when it was sent, or one sent before notes were made with requests.
+  // Its lines are read from the request's own log.
+  async function makeNoteForSentRequest(job, request) {
+    if (makingNoteFor.includes(request.id)) return;
+    setMakingNoteFor((ids) => [...ids, request.id]);
+    try {
+      const { data: log, error: logError } = await supabase
+        .from("job_quote_item_invoices")
+        .select("quote_item_id, qty_added")
+        .eq("request_id", request.id);
+      if (logError) throw logError;
+      if (!log || log.length === 0) {
+        alert(
+          `This request was sent before requests kept a list of their own lines (27 Sep 2026), so the app cannot tell which lines it covered. ` +
+            `Open the request to see them; a note for it has to be written by hand.`
+        );
+        return;
+      }
+      const { data: lines, error: lineError } = await supabase.from("job_quote_items").select("*").eq("job_id", job.id);
+      if (lineError) throw lineError;
+      const { itemsWithQty, gone } = linesOfRequest(log, lines || []);
+      if (itemsWithQty.length === 0) {
+        alert("None of the lines on that request are on the job any more, so there is nothing to put on a delivery note.");
+        return;
+      }
+      const ok = window.confirm(
+        `Make the delivery note for this request on ${job.job_number}?\n\n` +
+          itemsWithQty.slice(0, 8).map(({ item, qty }) => `${qty} × ${item.description}`).join("\n") +
+          (itemsWithQty.length > 8 ? `\nand ${itemsWithQty.length - 8} more` : "") +
+          (gone ? `\n\n${gone} line${gone === 1 ? " is" : "s are"} no longer on the job and left off.` : "")
+      );
+      if (!ok) return;
+      await saveDeliveryNote({
+        job,
+        itemsWithQty,
+        direction: "to_customer",
+        recipientName: job.customer || "Customer not on the job",
+        requestId: request.id,
+      });
+      fetchJobs();
+      if (jobDetail?.job?.id === job.id) refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to make the delivery note for a request:", err);
+      alert(
+        err?.needsSetup
+          ? "That delivery note has more than one line, and the database has not been updated for that yet (setup-delivery-notes-per-request.sql). Nothing was saved."
+          : "Couldn't make that delivery note — check your connection and try again. Nothing was saved."
+      );
+    } finally {
+      setMakingNoteFor((ids) => ids.filter((id) => id !== request.id));
+    }
+  }
+
+  // The delivery note beside a request, wherever requests are listed: its
+  // number, which opens it; or "Make delivery note" where the request has
+  // none. Nothing at all on a database that cannot link the two yet. A
+  // plain function, not a component: see the gotchas in CLAUDE.md.
+  function renderRequestNote(job, request) {
+    const note = requestNotes.get(request.id);
+    if (note) {
+      return (
+        <button
+          type="button"
+          className="stk-btn"
+          style={S.reqActionBtnMuted}
+          title="The delivery note made with this request"
+          onClick={() => viewDeliveryNoteDocument(job, { delivery_note_number: note.number })}
+        >
+          <Truck size={13} /> {note.number}
+        </button>
+      );
+    }
+    if (!requestNotesReady) return null;
+    const busy = makingNoteFor.includes(request.id);
+    return (
+      <button
+        type="button"
+        className="stk-btn"
+        style={{ ...S.reqActionBtnMuted, ...(busy ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}
+        disabled={busy}
+        onClick={() => makeNoteForSentRequest(job, request)}
+      >
+        <Truck size={13} /> {busy ? "Making…" : "Make delivery note"}
+      </button>
+    );
   }
 
   // Shared by every PDF generator in the app — the same proportional-sizing
@@ -10152,7 +10358,7 @@ export default function StockControl() {
   // as the process sheet needed, for the same reason: the document needs
   // to still be there to open later, both from the job page generally and
   // specifically when checking external items back in.
-  async function buildDeliveryNoteDoc(note, lineItems, job) {
+  async function buildDeliveryNoteDoc(note, lineItems, job, { showPreview = true } = {}) {
     const { jsPDF, autoTable } = await getPdf();
     const doc = new jsPDF();
     const company = master.companyDetails || {};
@@ -10225,6 +10431,7 @@ export default function StockControl() {
       fileName: `${note.delivery_note_number}.pdf`,
       jobId: job.id,
       relatedId: note.delivery_note_number,
+      showPreview,
     });
   }
 
@@ -10262,11 +10469,21 @@ export default function StockControl() {
 
   async function checkInDeliveryNote(job, note, quoteItem) {
     try {
-      const { error } = await supabase
+      // The row is asked back: a database with no rule for changing a
+      // delivery note refuses without an error, and until 28 Sep 2026 the
+      // line went back on the floor with nothing written on the note.
+      const { data: changed, error } = await supabase
         .from("delivery_notes")
         .update({ checked_back_in_at: new Date().toISOString(), checked_back_in_by: roleLabel })
-        .eq("id", note.id);
+        .eq("id", note.id)
+        .select("id");
       if (error) throw error;
+      if (!changed || changed.length === 0) {
+        alert(
+          "The database refused to write the check-in on that delivery note. Run setup-delivery-notes-per-request.sql on the database, then try again. Nothing was changed."
+        );
+        return;
+      }
       if (note.quote_item_id) {
         const { error: statusError } = await supabase
           .from("job_quote_items")
@@ -10292,7 +10509,9 @@ export default function StockControl() {
   // A clearly-labeled draft, not a real tax invoice — the real one is
   // still made in Sage, but this gives accounts something concrete to
   // work from rather than nothing at all.
-  async function buildDraftInvoiceDoc(job, lines) {
+  // deliveryNoteNumber: the note made with this request, printed under the
+  // job's other notes so accounts can match the two papers.
+  async function buildDraftInvoiceDoc(job, lines, deliveryNoteNumber = null) {
     const { jsPDF, autoTable } = await getPdf();
     const doc = new jsPDF();
     const company = master.companyDetails || {};
@@ -10326,7 +10545,17 @@ export default function StockControl() {
     doc.text(job.customer || "—", leftX + 30, y);
     y += 6;
     doc.setFontSize(10);
-    for (const [label, value] of invoiceHeaderLines(job)) {
+    // With a note of its own, the request names it first and any earlier
+    // notes after: "none issued" above "DN-0006" read as a contradiction.
+    const headerLines = invoiceHeaderLines(job).flatMap(([label, value]) =>
+      label !== "Delivery notes" || !deliveryNoteNumber
+        ? [[label, value]]
+        : [
+            ["Delivery note", `${deliveryNoteNumber}, made with this request`],
+            ...(value === "none issued" ? [] : [["Earlier notes", value]]),
+          ]
+    );
+    for (const [label, value] of headerLines) {
       doc.setFont(undefined, "bold");
       doc.text(`${label}:`, leftX, y);
       doc.setFont(undefined, "normal");
@@ -26419,6 +26648,10 @@ export default function StockControl() {
                         <div className="stk-meta-row" style={S.rowMeta}>
                           <span>Sent by {first.created_by}</span>
                           <span>{new Date(first.created_at).toLocaleDateString()}</span>
+                          {first.invoice_request_id && <span>Made with an invoice request</span>}
+                          <span>
+                            {group.length} line{group.length === 1 ? "" : "s"}
+                          </span>
                         </div>
                         {group.map((dn) => (
                           <div key={dn.id} style={{ ...S.roleHint, marginTop: 4 }}>
@@ -26550,14 +26783,17 @@ export default function StockControl() {
                           <span>Submitted by {req.submitted_by}</span>
                           <span>{new Date(req.submitted_at).toLocaleDateString()}</span>
                         </div>
-                        <button
-                          type="button"
-                          className="stk-btn"
-                          style={{ ...S.reqActionBtnMuted, marginTop: 8 }}
-                          onClick={() => viewJobInvoiceRequest(req)}
-                        >
-                          <FileText size={13} /> View document
-                        </button>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                          <button
+                            type="button"
+                            className="stk-btn"
+                            style={S.reqActionBtnMuted}
+                            onClick={() => viewJobInvoiceRequest(req)}
+                          >
+                            <FileText size={13} /> View document
+                          </button>
+                          {renderRequestNote(jobDetail.job, req)}
+                        </div>
                       </div>
                     ))}
                   </div>

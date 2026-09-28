@@ -157,7 +157,15 @@ with checks (setup_file, looks_for, found) as (
     ('setup-app-errors.sql',            'table app_errors',
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'app_errors')),
     ('setup-app-errors.sql',            'app_errors clears lines older than 90 days',
-      exists (select 1 from pg_trigger where tgname = 'app_errors_keep_90_days'))
+      exists (select 1 from pg_trigger where tgname = 'app_errors_keep_90_days')),
+    ('setup-delivery-notes-per-request.sql', 'a delivery note can carry several lines',
+      not exists (select 1 from pg_constraint where conname = 'delivery_notes_delivery_note_number_key')),
+    ('setup-delivery-notes-per-request.sql', 'column delivery_notes.invoice_request_id',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'delivery_notes' and column_name = 'invoice_request_id')),
+    ('setup-delivery-notes-per-request.sql', 'a delivery note row can be changed (check back in)',
+      exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'delivery_notes' and cmd = 'UPDATE')),
+    ('setup-delivery-notes-per-request.sql', 'function take_delivery_note_number',
+      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'take_delivery_note_number'))
 )
 select
   setup_file,
