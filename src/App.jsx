@@ -131,8 +131,9 @@ import { closingSendsInvoiceRequest, showsRequestInvoiceButton } from "./jobs/in
 import { makeOneAtATime, stillToSend, invoiceRequestRefusal, linesChangedFromError, sendFunctionMissing } from "./jobs/invoiceRequestOnce.js";
 import {
   nextNoteNumber, noteRows, withoutNewColumns, isMissingNewColumn, isNumberRefused, allocatorMissing,
-  notePdfLines, notesByRequest, notesOnJob, canMakeNoteFor, linkReady, linesOfRequest, noteNotMadeWords,
+  notePdfLines, notesByRequest, notesOnJob, canMakeNoteFor, linkReady, linesOfRequest, noteNotMadeWords, noteToRebuild, canRebuildNote,
 } from "./jobs/deliveryNotes.js";
+import { drawDeliveryNote } from "./jobs/deliveryNotePdf.js";
 import { isRetired, retiredReady, stagesOffered, stagesToCopy } from "./jobs/retiredStages.js";
 import {
   mayForceComplete,
@@ -1998,6 +1999,8 @@ export default function StockControl() {
   // The requests a delivery note is being made for right now, so a second
   // press of "Make delivery note" cannot make a second note.
   const [makingNoteFor, setMakingNoteFor] = useState([]);
+  // The delivery note whose PDF is being rebuilt right now, by its number.
+  const [rebuildingNote, setRebuildingNote] = useState(null);
   // Which delivery note goes with which invoice request, from the notes
   // already loaded with the jobs (src/jobs/deliveryNotes.js). Ready only
   // once a note row shows the database has the link.
@@ -10376,72 +10379,22 @@ export default function StockControl() {
   // as the process sheet needed, for the same reason: the document needs
   // to still be there to open later, both from the job page generally and
   // specifically when checking external items back in.
+  //
+  // What is drawn where is src/jobs/deliveryNotePdf.js: two copies on one
+  // sheet where the note fits, a page or more a copy where it does not.
+  // Until 28 Sep 2026 it was drawn here, two copies on one sheet whatever
+  // the number of lines, and from eleven lines our copy printed on top of
+  // the customer's. Gives back what generateAndStoreDocument gives:
+  // nothing where the PDF could not be filed.
   async function buildDeliveryNoteDoc(note, lineItems, job, { showPreview = true } = {}) {
     const { jsPDF, autoTable } = await getPdf();
     const doc = new jsPDF();
-    const company = master.companyDetails || {};
-    const leftX = 14;
-    const rightX = 196;
-
-    const renderCopy = (topY, copyLabel) => {
-      let y = topY;
-      // Logo, sized to its real proportions — never forced into a square,
-      // same fix applied to every other document that has one.
-      const { width: logoW } = addCompanyLogo(doc, company, leftX, y - 8, 26, 14);
-      const textX = leftX + (logoW ? logoW + 6 : 0);
-      doc.setFontSize(9);
-      doc.setFont(undefined, "bold");
-      doc.text(copyLabel, rightX, y - 6, { align: "right" });
-      doc.setFontSize(16);
-      doc.text("DELIVERY NOTE", rightX, y, { align: "right" });
-      // Company name wraps within the space before the title, so a long
-      // registered name can never collide with it.
-      doc.setFontSize(12);
-      const nameLines = doc.splitTextToSize(company.name || "Delivery Note", 105 - (textX - leftX));
-      doc.text(nameLines, textX, y);
-      y += Math.max(nameLines.length * 5, 5) + 4;
-      doc.setFontSize(9);
-      doc.setFont(undefined, "normal");
-      doc.text(`Number: ${note.delivery_note_number}`, rightX, y, { align: "right" });
-      y += 5;
-      doc.text(`Date: ${new Date(note.created_at || Date.now()).toLocaleDateString()}`, rightX, y, { align: "right" });
-      y += 8;
-      doc.setFont(undefined, "bold");
-      doc.text(note.direction === "to_supplier" ? "To (Supplier):" : "To (Customer):", leftX, y);
-      doc.setFont(undefined, "normal");
-      doc.text(note.recipient_name, leftX + 45, y);
-      y += 5;
-      if (note.recipient_address) {
-        doc.text(note.recipient_address, leftX + 45, y);
-        y += 5;
-      }
-      y += 5;
-      autoTable(doc, {
-        startY: y,
-        head: [["Code", "Description", "Qty"]],
-        body: lineItems.map((li) => [li.code || "—", li.description, String(li.qty)]),
-        theme: "grid",
-        headStyles: { fillColor: [27, 29, 31] },
-        margin: { left: leftX, right: leftX },
-      });
-      const afterY = (doc.lastAutoTable?.finalY || y + 20) + 12;
-      doc.setFontSize(9);
-      doc.text("Sent by: _______________________", leftX, afterY);
-      doc.text("Received by: _______________________", rightX - 70, afterY);
-      return afterY + 10;
-    };
-
-    renderCopy(26, "Recipient Copy");
-    doc.setDrawColor(180, 180, 180);
-    doc.setLineDashPattern([2, 2], 0);
-    doc.line(leftX, 155, rightX, 155);
-    doc.setLineDashPattern([], 0);
-    renderCopy(166, "Our Copy");
+    drawDeliveryNote({ doc, autoTable, note, lineItems, company: master.companyDetails || {}, drawLogo: addCompanyLogo });
 
     // Deterministic path from job id + note number — every delivery_notes
     // row for this note (one per item) shares one PDF, and it can always
     // be found again later without needing to store the path anywhere.
-    await generateAndStoreDocument({
+    return generateAndStoreDocument({
       doc,
       documentType: "delivery_note",
       bucket: "job-documents",
@@ -10451,6 +10404,76 @@ export default function StockControl() {
       relatedId: note.delivery_note_number,
       showPreview,
     });
+  }
+
+  // "Rebuild PDF" on a delivery note, admins only (Heinrich, 28 Sep 2026):
+  // the note's paper made afresh from its rows in the database and filed
+  // over the stored one. For a PDF that was stored wrong, as a note of ten
+  // lines or more was until the paper learnt to take a page a copy. The
+  // note, its number and its date do not change, and nothing is rebuilt
+  // that the rows cannot vouch for (noteToRebuild says why not). Read
+  // fresh from the database, never from what the screen holds.
+  async function rebuildDeliveryNotePdf(job, note) {
+    if (!isAdmin || !job || rebuildingNote) return;
+    const number = note.delivery_note_number;
+    setRebuildingNote(number);
+    try {
+      const [held, lines] = await Promise.all([
+        supabase.from("delivery_notes").select("*").eq("delivery_note_number", number).eq("job_id", job.id),
+        supabase.from("job_quote_items").select("*").eq("job_id", job.id),
+      ]);
+      if (held.error) throw held.error;
+      if (lines.error) throw lines.error;
+      const plan = noteToRebuild(held.data, lines.data);
+      if (!plan.ok) {
+        alert(plan.why);
+        return;
+      }
+      const n = plan.itemsWithQty.length;
+      const ok = window.confirm(
+        `Rebuild the PDF of ${number} on ${job.job_number} from the database?\n\n` +
+          `${n} line${n === 1 ? "" : "s"}, to ${plan.note.recipient_name || "nobody named"}.\n\n` +
+          `The stored PDF is replaced. The note, its number and its date stay as they are.`
+      );
+      if (!ok) return;
+      const linkedOf = (item) => (item.linked_item_id ? (items || []).find((i) => i.id === item.linked_item_id) : null);
+      const filed = await buildDeliveryNoteDoc(
+        plan.note,
+        notePdfLines(plan.itemsWithQty, (item) => jobLineCode(item, linkedOf(item)), (item) => jobLineDescription(item, linkedOf(item))),
+        job
+      );
+      if (filed) {
+        await logJobEvent(job.id, "delivery note PDF rebuilt", `${number} — ${n} line${n === 1 ? "" : "s"}, from the database`);
+        if (jobDetail?.job?.id === job.id) refreshJobDetail();
+      }
+    } catch (err) {
+      console.error("Failed to rebuild a delivery note's PDF:", err);
+      alert("Couldn't rebuild that PDF — check your connection and try again. The stored PDF is as it was.");
+    } finally {
+      setRebuildingNote(null);
+    }
+  }
+
+  // The button, beside "View document" wherever a note is listed; `rows`
+  // are the note's rows as the screen holds them. Not shown on a note that
+  // kept no quantities, which could only be refused. A plain function, not
+  // a component: see the gotchas in CLAUDE.md.
+  function renderDeliveryNoteRebuild(job, rows) {
+    if (!isAdmin || !job || !canRebuildNote(rows)) return null;
+    const note = rows[0];
+    const busy = rebuildingNote === note.delivery_note_number;
+    return (
+      <button
+        type="button"
+        className="stk-btn"
+        style={{ ...S.reqActionBtnMuted, marginTop: 8, marginLeft: 8, ...(rebuildingNote ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}
+        disabled={!!rebuildingNote}
+        title="Makes this note's PDF afresh from the database and files it over the stored one. Admins only."
+        onClick={() => rebuildDeliveryNotePdf(job, note)}
+      >
+        <RefreshCw size={13} /> {busy ? "Rebuilding…" : "Rebuild PDF"}
+      </button>
+    );
   }
 
   // Reopens a delivery note's PDF later — same deterministic path used
@@ -20052,6 +20075,7 @@ export default function StockControl() {
                     >
                       <FileText size={13} /> View document
                     </button>
+                    {renderDeliveryNoteRebuild(job, group)}
                     {renderDeliveryNoteEmail(job, first)}
                   </RecordRow>
                 ))}
@@ -26723,6 +26747,7 @@ export default function StockControl() {
                         >
                           <FileText size={13} /> View document
                         </button>
+                        {renderDeliveryNoteRebuild(jobDetail.job, group)}
                         {renderDeliveryNoteEmail(jobDetail.job, first)}
                       </div>
                     );

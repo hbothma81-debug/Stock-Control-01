@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   numberOfNote, nextNoteNumber, noteRows, withoutNewColumns, isMissingNewColumn, isNumberRefused, allocatorMissing,
-  notePdfLines, notesByRequest, notesOnJob, canMakeNoteFor, linkReady, linesOfRequest, noteNotMadeWords,
+  notePdfLines, notesByRequest, notesOnJob, canMakeNoteFor, linkReady, linesOfRequest, noteNotMadeWords, noteToRebuild, canRebuildNote,
 } from "./deliveryNotes.js";
 
 test("a note's number: DN-0005 is 5, anything else is none", () => {
@@ -172,4 +172,77 @@ test("the words when the request went and its note did not", () => {
   const setup = noteNotMadeWords("JOB-0068", Object.assign(new Error("x"), { needsSetup: true }));
   assert.match(setup, /setup-delivery-notes-per-request\.sql/);
   assert.match(setup, /WAS sent/);
+});
+
+const noteRow = (over) => ({
+  id: "r", delivery_note_number: "DN-0009", job_id: "job-1", quote_item_id: "a", qty: 1, direction: "to_customer",
+  recipient_name: "Tilvis Engineering", recipient_address: "", created_at: "2026-09-28T08:32:31Z", ...over,
+});
+
+test("rebuilding a note's PDF: its lines and quantities from its own rows, in quote order", () => {
+  const quoteItems = [
+    { id: "b", description: "Gusset", sort_order: 2 },
+    { id: "a", description: "Bracket", sort_order: 1 },
+    { id: "c", description: "Not on the note", sort_order: 3 },
+  ];
+  const rows = [
+    noteRow({ id: "2", quote_item_id: "b", qty: "2.5", created_at: "2026-09-28T08:32:32Z" }),
+    noteRow({ id: "1", quote_item_id: "a", qty: 4 }),
+  ];
+  const got = noteToRebuild(rows, quoteItems);
+  assert.equal(got.ok, true);
+  assert.deepEqual(got.itemsWithQty.map((l) => [l.item.description, l.qty]), [["Bracket", 4], ["Gusset", 2.5]]);
+  // The number, the date and who it went to are the note's own.
+  assert.deepEqual(got.note, {
+    delivery_note_number: "DN-0009",
+    direction: "to_customer",
+    recipient_name: "Tilvis Engineering",
+    recipient_address: "",
+    created_at: "2026-09-28T08:32:31Z",
+  });
+});
+
+test("rebuilding: a supplier's note keeps its supplier and address", () => {
+  const got = noteToRebuild(
+    [noteRow({ direction: "to_supplier", recipient_name: "Test Steel Supplies", recipient_address: "12 Industry Road\nWadeville" })],
+    [{ id: "a", description: "Bracket", sort_order: 1 }]
+  );
+  assert.equal(got.note.direction, "to_supplier");
+  assert.equal(got.note.recipient_address, "12 Industry Road\nWadeville");
+});
+
+test("rebuilding is refused for a note from before quantities were kept: DN-0001 to DN-0005 on live", () => {
+  const got = noteToRebuild([noteRow({ delivery_note_number: "DN-0005", qty: null })], [{ id: "a", description: "Bracket" }]);
+  assert.equal(got.ok, false);
+  assert.match(got.why, /DN-0005 was made before delivery notes kept their quantities/);
+  assert.match(got.why, /left as it is/);
+  // One row without a quantity is enough: the paper would be half a guess.
+  assert.equal(noteToRebuild([noteRow({ qty: 3 }), noteRow({ id: "2", quote_item_id: "b", qty: 0 })], [{ id: "a" }, { id: "b" }]).ok, false);
+});
+
+test("rebuilding is refused where a line has left the job: the paper would come out short", () => {
+  const rows = [noteRow({}), noteRow({ id: "2", quote_item_id: "gone" }), noteRow({ id: "3", quote_item_id: "gone too" })];
+  const got = noteToRebuild(rows, [{ id: "a", description: "Bracket" }]);
+  assert.equal(got.ok, false);
+  assert.match(got.why, /2 of the 3 lines on DN-0009 are no longer on the job/);
+  assert.match(noteToRebuild(rows.slice(0, 2), [{ id: "a" }]).why, /1 of the 2 lines on DN-0009 is no longer on the job/);
+});
+
+test("rebuilding is refused for no rows, and for rows of two notes or two jobs", () => {
+  assert.equal(noteToRebuild([], []).ok, false);
+  assert.equal(noteToRebuild(null, null).ok, false);
+  assert.match(noteToRebuild([], []).why, /no lines in the database/);
+  const items = [{ id: "a" }];
+  assert.equal(noteToRebuild([noteRow({}), noteRow({ id: "2", delivery_note_number: "DN-0010" })], items).ok, false);
+  assert.equal(noteToRebuild([noteRow({}), noteRow({ id: "2", job_id: "job-2" })], items).ok, false);
+});
+
+test("the Rebuild PDF button: only on a note whose every line kept its quantity", () => {
+  assert.equal(canRebuildNote([noteRow({ qty: 4 }), noteRow({ id: "2", qty: "2.5" })]), true);
+  // DN-0001 to DN-0005 on live: made before quantities were kept.
+  assert.equal(canRebuildNote([noteRow({ qty: null })]), false);
+  assert.equal(canRebuildNote([noteRow({ qty: 4 }), noteRow({ id: "2", qty: undefined })]), false);
+  assert.equal(canRebuildNote([noteRow({ qty: 0 })]), false);
+  assert.equal(canRebuildNote([]), false);
+  assert.equal(canRebuildNote(null), false);
 });

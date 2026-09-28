@@ -153,6 +153,70 @@ export function linesOfRequest(logRows, quoteItems) {
   return { itemsWithQty, gone };
 }
 
+// "Rebuild PDF" on a note, for admins (Heinrich, 28 Sep 2026): the note's
+// paper made afresh from its rows, for a PDF that was stored wrong. A note
+// of ten lines or more was, until the paper learnt to take a page a copy
+// (src/jobs/deliveryNotePdf.js), and a stored PDF is never looked at again
+// by the app. The number, the date and who it went to come from the rows
+// and do not change.
+//
+// Refused, with the reason, where the rows cannot say what the paper said:
+//   - a note from before notes kept their quantities (28 Sep 2026): the
+//     stored PDF is the only record of how many, so it is left alone;
+//   - a line since removed from the job: the paper would come out short.
+//
+// Gives { ok: true, note, itemsWithQty } or { ok: false, why }.
+//
+// canRebuildNote is for the screen, from the rows it already holds: the
+// button is not shown on a note that kept no quantities. A button that can
+// only say "cannot" is worse than none.
+export function canRebuildNote(noteRowsHeld) {
+  const rows = noteRowsHeld || [];
+  return rows.length > 0 && rows.every((r) => Number(r?.qty) > 0);
+}
+
+export function noteToRebuild(noteRowsHeld, quoteItems) {
+  const rows = [...(noteRowsHeld || [])].sort((a, b) => Date.parse(a.created_at || 0) - Date.parse(b.created_at || 0));
+  if (rows.length === 0) return { ok: false, why: "That delivery note has no lines in the database, so there is nothing to build it from." };
+  const number = rows[0].delivery_note_number;
+  if (rows.some((r) => r.delivery_note_number !== number || r.job_id !== rows[0].job_id)) {
+    return { ok: false, why: "Those lines belong to more than one delivery note or job. Nothing was changed." };
+  }
+  if (rows.some((r) => !(Number(r.qty) > 0))) {
+    return {
+      ok: false,
+      why:
+        `${number} was made before delivery notes kept their quantities (28 Sep 2026), so the app cannot tell how many of each line it carried. ` +
+        `Its stored PDF is the only record of that, and is left as it is.`,
+    };
+  }
+  const byId = new Map((quoteItems || []).map((q) => [q.id, q]));
+  const gone = rows.filter((r) => !byId.has(r.quote_item_id)).length;
+  if (gone > 0) {
+    return {
+      ok: false,
+      why:
+        `${gone} of the ${rows.length} line${rows.length === 1 ? "" : "s"} on ${number} ${gone === 1 ? "is" : "are"} no longer on the job, so a rebuilt note would come out short. ` +
+        `Its stored PDF is left as it is.`,
+    };
+  }
+  const itemsWithQty = rows
+    .map((r) => ({ item: byId.get(r.quote_item_id), qty: Number(r.qty) }))
+    .sort((a, b) => (Number(a.item.sort_order) || 0) - (Number(b.item.sort_order) || 0));
+  const first = rows[0];
+  return {
+    ok: true,
+    note: {
+      delivery_note_number: number,
+      direction: first.direction,
+      recipient_name: first.recipient_name || "",
+      recipient_address: first.recipient_address || "",
+      created_at: first.created_at,
+    },
+    itemsWithQty,
+  };
+}
+
 // What the person is told when the request went and its note did not.
 export function noteNotMadeWords(jobNumber, err) {
   const why = err?.needsSetup
