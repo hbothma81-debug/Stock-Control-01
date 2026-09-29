@@ -5069,3 +5069,32 @@ did: the two type-to-find boxes ran over the box beside them).
   it is handed. pglite: 39 checks, each paste run by itself in order
   on an empty database included. The app's build is the same file,
   byte for byte: no app code changed.
+- **29 Sep 2026, SQL on PRACTICE, his word ("1. yes"):** the five
+  pastes went in through his Chrome, and all four functions answer
+  there (each called from the practice app, beside a made-up name).
+  On LIVE it is not there yet: his paste.
+- **A rename tried on practice through the box, signed in as Test:**
+  "MS" given the short name "MST": "Changed: 6 stock lines, 4
+  sections, 3 requisitions, 3 cut list lines, 2 laser programs, 1
+  tube import name", the app reloaded itself. Then the short name
+  taken away again, and practice compared equal, row for row, to the
+  copy read before the trial. Still tried by nobody: a purchase order
+  raised after a rename, a login that is not an admin.
+- **Live read the same day, he signed in, read only:** "Mild Steel"
+  is written on 77 stock lines, 19 sections, 11 requisitions, 10 cut
+  list lines, 277 laser programs and 5 tube job lines; 3 stock lines
+  read "MS" already and will join them. The rename itself waits for
+  the time he picks.
+- **JOB-0132's delivery note made on live, his word of 28 Sep:**
+  DN-0018, 25 lines, the request's own lines and quantities, read
+  back; its paper is two pages, a copy a page, signatures at 267 mm.
+  DN-0011 (78 lines, made by the floor that morning) reads right: six
+  pages, three a copy. No note of ten lines or more was made before
+  the fix, so there is nothing to rebuild.
+- **Three requests of 29 Sep have no note: JOB-0168, JOB-0152,
+  JOB-0154** (Gawie, 08:25 to 08:27). Not a fault in the new code:
+  their paper prints "Delivery notes:", the old build's word, so that
+  screen had not been reloaded since the push; from 08:31 the same
+  person's requests carry notes. No number was skipped. "Make
+  delivery note" is on each request's row; making them needs his
+  word.
