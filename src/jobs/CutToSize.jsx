@@ -63,6 +63,11 @@ import {
 const sameText = (a, b) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
 
 const cell = (width) => ({ ...S.input, width, fontSize: 14, padding: "4px 6px" });
+// A box as wide as what it holds, between a least and a most: a drawing
+// number or a pipe's name is read whole, not through a slot. The least is
+// wide on purpose (Heinrich, 29 Sep 2026: longer boxes, the drawing number
+// most of all; the note can be the short one).
+const wideEnough = (text, least, most = 380) => Math.min(most, Math.max(least, String(text || "").length * 8.5 + 36));
 // A type-to-find box in a row of small boxes, with room for its cross.
 // The box is as wide as its wrapper, padding and edge included: left to
 // itself it is that much wider and runs over the box beside it.
@@ -214,7 +219,8 @@ export default function CutToSize({
           list="cut-drawing-options"
           placeholder="Drawing no"
           onChange={(e) => setD((p) => ({ ...p, drawingNo: e.target.value }))}
-          style={cell(110)}
+          title={d.drawingNo || "The customer's drawing or part number"}
+          style={{ ...cell(wideEnough(d.drawingNo, 230)), maxWidth: "100%", boxSizing: "border-box" }}
         />
         {/* Three boxes, in the order of the New stock item form. The type
             and the size are never one box. */}
@@ -230,7 +236,7 @@ export default function CutToSize({
           title="Square Tube, Pipe, Flat Bar: the type first, then a size of it"
           // Every type, not the first twelve: the list is short.
           maxShown={types.length}
-          style={{ width: 170 }}
+          style={{ width: wideEnough(d.sectionType, 210), maxWidth: "100%" }}
           inputStyle={findCell}
         />
         <TypeToFind
@@ -240,7 +246,7 @@ export default function CutToSize({
           emptyLabel="Material"
           title="The material. With one picked, the Size box lists the sizes held in it."
           maxShown={Math.max(12, materialOptions.length)}
-          style={{ width: 120 }}
+          style={{ width: wideEnough(d.grade, 180), maxWidth: "100%" }}
           inputStyle={findCell}
         />
         <TypeToFind
@@ -250,7 +256,7 @@ export default function CutToSize({
           emptyLabel={d.sectionType ? "Size" : "Size: type first"}
           title={d.section || (d.sectionType ? `The sizes of ${d.sectionType} on Stock Manager's Sections list` : "Pick the section type first")}
           // As wide as its name needs: a pipe's is forty letters long.
-          style={{ width: Math.min(360, Math.max(150, String(d.section || "").length * 8.5 + 36)), maxWidth: "100%" }}
+          style={{ width: wideEnough(d.section, 230), maxWidth: "100%" }}
           inputStyle={findCell}
         />
         <UnitInput
@@ -295,7 +301,9 @@ export default function CutToSize({
           value={d.note}
           placeholder={was ? "Note" : "Note (optional)"}
           onChange={(e) => setD((p) => ({ ...p, note: e.target.value }))}
-          style={{ ...cell(120), flex: 1, minWidth: 80 }}
+          title={d.note || "A note for the saw operator"}
+          // The short one: it no longer takes whatever room is left.
+          style={{ ...cell(150), maxWidth: "100%", boxSizing: "border-box" }}
           onKeyDown={(e) => e.key === "Enter" && onEnter()}
         />
       </>
