@@ -26775,6 +26775,7 @@ export default function StockControl() {
                 canEdit={canEditThisJob}
                 canSeeValue={canSeeValue}
                 sections={master.sections || []}
+                materials={master.grades || []}
                 customerItems={(items || []).filter((i) => i.mainCat === "custom" && i.customer === jobDetail.job.customer)}
                 items={items || []}
                 findSectionFactor={findSectionFactor}

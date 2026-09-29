@@ -389,6 +389,7 @@ function CutToSizeDemo() {
         canEdit={canEdit}
         canSeeValue
         sections={sections}
+        materials={[{ name: "Mild Steel 300WA", shortName: "300WA" }, { name: "Stainless 304", shortName: "304" }, { name: "S355", shortName: "" }]}
         customerItems={[{ id: "i1", partNumber: "P-001", name: "Bracket" }]}
         items={[{ id: "s1", mainCat: "structural", name: "SHS 50x50x3", grade: "300WA", length: 6, qty: 1, stockType: "full" }]}
         findSectionFactor={(name, grade) => row(name, grade)?.factor || 0}

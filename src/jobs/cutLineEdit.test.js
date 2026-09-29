@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   cutHasStarted, blankDraft, draftOfLine, sectionOnList, sectionChoices, gradesOfSection, draftWithSection,
-  checkCutDraft, cutLineChanges, changesMaterial, pileStillUsed,
+  checkCutDraft, cutLineChanges, changesMaterial, pileStillUsed, materialAsListed,
 } from "./cutLineEdit.js";
 
 // Stock Manager's Sections list: a row per size and material.
@@ -163,4 +163,26 @@ test("whether another line still draws on the pile a line was on", () => {
   assert.equal(pileStillUsed([LINE, { ...other, grade: "304" }], LINE), false);
   assert.equal(pileStillUsed([LINE, { ...other, stock_length_m: 13 }], LINE), false);
   assert.equal(pileStillUsed([LINE, { ...other, section: "shs 50x50x3" }], LINE), true);
+});
+
+test("a material under its long name is the one the list holds by its short name", () => {
+  const materials = [{ name: "Mild Steel", shortName: "MS" }, { name: "Stainless 304", shortName: "304" }, { name: "3CR12", shortName: "" }];
+  const sections = [
+    { name: "SHS 50x50x2", grade: "MS", type: "Square Tube" },
+    { name: "SHS 50x50x2", grade: "304", type: "Square Tube" },
+    { name: "FB 40x5", grade: "Mild Steel", type: "Flat Bar" },
+  ];
+  // Practice, 29 Sep 2026: the line read "Mild Steel", the list "MS".
+  assert.equal(materialAsListed(materials, sections, "SHS 50x50x2", "Mild Steel"), "MS");
+  assert.equal(materialAsListed(materials, sections, "shs 50x50x2", "mild steel"), "MS");
+  assert.equal(materialAsListed(materials, sections, "SHS 50x50x2", "ms"), "MS");
+  assert.equal(materialAsListed(materials, sections, "SHS 50x50x2", "Stainless 304"), "304");
+  // The other way round: the list holds the long name.
+  assert.equal(materialAsListed(materials, sections, "FB 40x5", "MS"), "Mild Steel");
+  // A material the size is not held in, or one nobody knows: left as it is.
+  assert.equal(materialAsListed(materials, sections, "FB 40x5", "304"), "304");
+  assert.equal(materialAsListed(materials, sections, "SHS 50x50x2", "mild"), "mild");
+  assert.equal(materialAsListed(materials, sections, "SHS 50x50x2", "3CR12"), "3CR12");
+  assert.equal(materialAsListed(null, sections, "SHS 50x50x2", "Mild Steel"), "Mild Steel");
+  assert.equal(materialAsListed(materials, sections, "SHS 50x50x2", ""), "");
 });

@@ -29,6 +29,7 @@ import {
   draftWithSection,
   checkCutDraft,
   cutLineChanges,
+  materialAsListed,
 } from "./cutLineEdit.js";
 
 // The Cut to size tab on a job: the parts to be cut from structural
@@ -77,6 +78,7 @@ export default function CutToSize({
   canEdit,
   canSeeValue,
   sections,
+  materials,
   customerItems,
   items,
   findSectionFactor,
@@ -140,11 +142,13 @@ export default function CutToSize({
 
   function startEdit(line) {
     const d = draftOfLine(line);
-    // As the list spells them, so the boxes show what is chosen.
+    // As the list spells them, so the boxes show what is chosen: the
+    // section by its listed name, the material by the name the list holds
+    // it under ("Mild Steel" on an old line is the list's "MS").
     const listed = sectionOnList(sections, d.section);
     if (listed) {
       d.section = listed;
-      d.grade = gradesOfSection(sections, listed).find((g) => sameText(g, d.grade)) || d.grade;
+      d.grade = materialAsListed(materials, sections, listed, d.grade);
     }
     setEdit({ id: line.id, draft: d });
     setSizing(null);
@@ -299,6 +303,8 @@ export default function CutToSize({
             value={sizing.type}
             onChange={(v) => setSizing((s) => ({ ...s, type: v, boxes: {} }))}
             emptyLabel="Section type"
+            // Every type, not the first twelve: the list is fixed and short.
+            maxShown={SECTION_SHAPES.length}
             style={{ flex: 1, minWidth: 170 }}
           />
           <TypeToFind

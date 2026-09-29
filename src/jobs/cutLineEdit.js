@@ -78,6 +78,22 @@ export function gradesOfSection(sections, name) {
   return out;
 }
 
+// A material under the name the Sections list holds it by. The list keeps
+// a material by its short name where it has one ("MS"); a line saved
+// before that may carry the long one ("Mild Steel"), which is the same
+// steel and must not read as a stranger. `materials` is Stock Manager's
+// Material Types: [{ name, shortName }]. Anything else comes back as it is.
+export function materialAsListed(materials, sections, sectionName, grade) {
+  const typed = String(grade || "").trim();
+  if (!typed) return "";
+  const held = gradesOfSection(sections, sectionName);
+  const direct = held.find((g) => sameText(g, typed));
+  if (direct) return direct;
+  const material = (materials || []).find((m) => sameText(m?.name, typed) || sameText(m?.shortName, typed));
+  if (!material) return typed;
+  return held.find((g) => sameText(g, material.shortName) || sameText(g, material.name)) || typed;
+}
+
 // Picking a section fills its material in where there is only one, and
 // clears a material the new section is not held in.
 export function draftWithSection(draft, sections, name) {
