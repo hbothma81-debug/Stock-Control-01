@@ -14,6 +14,7 @@ import PdfViewer from "./PdfViewer.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import InfoRequestModal, { InfoAnswerModal } from "./InfoRequestModal.jsx";
 import ExtraStagesBox from "./jobs/ExtraStagesBox.jsx";
+import CutToSize from "./jobs/CutToSize.jsx";
 import TwoPriceBoxes from "./manager/TwoPriceBoxes.jsx";
 import NumberBox from "./manager/NumberBox.jsx";
 import FigureBox, { FigureRow } from "./FigureBox.jsx";
@@ -352,6 +353,99 @@ function CrashScreenDemo() {
   );
 }
 
+// A job's cut list with nothing behind it: what is saved is kept on this
+// page only. Line 2 has pieces cut, so it is locked; line 3 carries a
+// section typed before sections were picked from the list.
+const PREVIEW_SECTIONS = [
+  { name: "SHS 50x50x3", grade: "300WA", type: "Square Tube", factor: 4.25, price: 58 },
+  { name: "SHS 50x50x3", grade: "304", type: "Square Tube", factor: 4.3, price: 310 },
+  { name: "EA 50x50x5", grade: "300WA", type: "Equal Angle", factor: 3.77, price: 49 },
+  { name: "SHS 100x100x4", grade: "300WA", type: "Square Tube", factor: 11.7, price: 160 },
+  { name: "FB 40x5", grade: "", type: "Flat Bar", factor: 1.57, price: 20 },
+];
+const PREVIEW_CUT_LINES = [
+  { id: "c1", drawing_no: "P-001", section: "SHS 50x50x3", grade: "300WA", cut_length_mm: 1200, qty: 8, qty_cut: 0, stock_length_m: 6, trim_front: true, note: "" },
+  { id: "c2", drawing_no: "", section: "EA 50x50x5", grade: "300WA", cut_length_mm: 2450, qty: 4, qty_cut: 2, stock_length_m: 6, trim_front: true, note: "two are cut" },
+  { id: "c3", drawing_no: "", section: "50x50 sq tube", grade: "mild", cut_length_mm: 600, qty: 3, qty_cut: 0, stock_length_m: 6, trim_front: false, note: "typed before the rule" },
+];
+// The app hands in Stock Manager's own boxes (pipe's included); these
+// stand in for the plain ones.
+const previewSizeBoxes = (shape, d, setD) =>
+  (shape.boxes || []).map(([k, label]) => (
+    <label key={k} style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 90 }}>
+      <span style={{ fontSize: 12, color: C.muted }}>{label}</span>
+      <input style={S.input} inputMode="decimal" value={d[k] ?? ""} onChange={(e) => setD((p) => ({ ...p, [k]: e.target.value }))} />
+    </label>
+  ));
+
+function CutToSizeDemo() {
+  const [sections, setSections] = React.useState(PREVIEW_SECTIONS);
+  const [lines, setLines] = React.useState(PREVIEW_CUT_LINES);
+  const [canEdit, setCanEdit] = React.useState(true);
+  const [said, setSaid] = React.useState([]);
+  const say = (text) => setSaid((p) => [text, ...p].slice(0, 8));
+  const same = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+  const row = (name, grade) => sections.find((s) => same(s.name, name) && same(s.grade, grade));
+  return (
+    <Section title="Cut to size" count={lines.length} defaultOpen={false}>
+      <div style={S.roleHint}>
+        A job's cut list. Line 2 has pieces cut, so it is locked. Line 3 was typed before sections were picked from the list.
+      </div>
+      <label style={{ ...S.roleHint, display: "inline-flex", gap: 6, alignItems: "center", marginTop: 6 }}>
+        <input type="checkbox" checked={canEdit} onChange={(e) => setCanEdit(e.target.checked)} /> this person may change the job
+      </label>
+      <CutToSize
+        lines={lines}
+        canEdit={canEdit}
+        canSeeValue
+        sections={sections}
+        customerItems={[{ id: "i1", partNumber: "P-001", name: "Bracket" }]}
+        items={[{ id: "s1", mainCat: "structural", name: "SHS 50x50x3", grade: "300WA", length: 6, qty: 1, stockType: "full" }]}
+        findSectionFactor={(name, grade) => row(name, grade)?.factor || 0}
+        findSectionPrice={(name, grade) => row(name, grade)?.price || 0}
+        findSectionType={(name) => sections.find((s) => same(s.name, name))?.type || ""}
+        allocations={[]}
+        requisitions={[]}
+        onAdd={async (line) => {
+          setLines((p) => [...p, { ...line, id: `c${p.length + 1}-${Date.now()}`, qty_cut: 0 }]);
+          say(`added: ${JSON.stringify(line)}`);
+          return true;
+        }}
+        onSave={async (item, patch, words) => {
+          setLines((p) => p.map((l) => (l.id === item.id ? { ...l, ...patch } : l)));
+          say(`saved ${item.id}: ${words.join("; ")} | ${JSON.stringify(patch)}`);
+          return true;
+        }}
+        onRemove={(item) => {
+          setLines((p) => p.filter((l) => l.id !== item.id));
+          say(`removed ${item.id}`);
+        }}
+        onSetAside={(g, n) => say(`set aside ${n} of ${g.section}`)}
+        onRequisition={(g, n) => say(`requisition ${n} of ${g.section}`)}
+        onAddStock={canEdit ? (g) => say(`Add stock opened: ${g.section} ${g.grade}, ${g.stockLengthM} m`) : null}
+        newSize={{
+          grades: ["300WA", "304", "S355"],
+          renderBoxes: previewSizeBoxes,
+          onTake: ({ shape, built, grade }) => {
+            setSections((p) => (p.some((s) => same(s.name, built.name) && same(s.grade, grade)) ? p : [...p, { name: built.name, grade, type: shape.label, factor: 0, price: 0 }]));
+            say(`new size: ${built.name} ${grade} (${shape.label})`);
+          },
+        }}
+        SavedCheck={() => null}
+      />
+      <div style={{ ...S.label, marginTop: 12 }}>What the screen asked for, newest first</div>
+      <div data-testid="cut-said">
+        {said.length === 0 && <div style={S.roleHint}>Nothing yet.</div>}
+        {said.map((text, i) => (
+          <div key={i} style={S.roleHint}>
+            {text}
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
 function Preview() {
   // The colours live on a data-stk-theme attribute, same as the app.
   React.useEffect(() => {
@@ -382,6 +476,8 @@ function Preview() {
         <PdfViewerDemo />
 
         <CrashScreenDemo />
+
+        <CutToSizeDemo />
 
         <Section title="Open by default" count={3}>
           <RecordRow title="DN-0042" summary="JOB-0014 — Greenzone" right={<span style={S.roleHint}>To customer</span>}>

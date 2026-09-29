@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Plus, Trash2, AlertTriangle, FileText } from "lucide-react";
+import { Plus, Trash2, AlertTriangle, FileText, Pencil, Check, X, PackagePlus, Lock } from "lucide-react";
 import { C, S } from "../theme.js";
+import TypeToFind from "../TypeToFind.jsx";
+import { SECTION_SHAPES, shapeForType, buildSection, missingBoxes } from "../manager/sectionShapes.js";
 import {
-  DEFAULT_STOCK_M,
   KERF_MM,
   TRIM_MM,
   MIN_OFFCUT_MM,
@@ -17,6 +18,17 @@ import {
   fmtM,
   fmtKg,
 } from "./cutToSize.js";
+import {
+  cutHasStarted,
+  blankDraft,
+  draftOfLine,
+  sectionOnList,
+  sectionChoices,
+  gradesOfSection,
+  draftWithSection,
+  checkCutDraft,
+  cutLineChanges,
+} from "./cutLineEdit.js";
 
 // The Cut to size tab on a job: the parts to be cut from structural
 // stock, what that comes to in bars, and what is left over.
@@ -26,22 +38,26 @@ import {
 // shopping list: this many bars, this many on the shelf.
 //
 // Lives in its own file so the quoting module can show the same screen
-// on a quote. It owns nothing but the "new line" being typed; everything
-// saved comes in as `lines` and goes out through onAdd / onUpdate /
-// onRemove, the same way the quoted items work.
+// on a quote. It owns nothing but what is being typed; everything saved
+// comes in as `lines` and goes out through onAdd / onSave / onRemove.
+//
+// Changing a line (Heinrich, 29 Sep 2026; rules in cutLineEdit.js): a
+// line reads as words with a pencil; the pencil opens it in the boxes a
+// new line is typed in, with Save and Cancel. A line with a piece cut is
+// locked. The section and its material are picked from Stock Manager's
+// Sections list; a size that is not there is made from its type's boxes
+// (`newSize`, for the people who can open Stock Manager), and bars are
+// booked into stock from the Bars needed row (`onAddStock`, for the
+// people who can add stock).
 
-const blankLine = () => ({
-  drawingNo: "",
-  section: "",
-  grade: "",
-  cutLengthMm: "",
-  qty: "",
-  stockLengthM: String(DEFAULT_STOCK_M),
-  trimFront: true,
-  note: "",
-});
+const sameText = (a, b) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
 
 const cell = (width) => ({ ...S.input, width, fontSize: 14, padding: "4px 6px" });
+// A type-to-find box in a row of small boxes, with room for its cross.
+// The box is as wide as its wrapper, padding and edge included: left to
+// itself it is that much wider and runs over the box beside it.
+const findCell = { fontSize: 14, padding: "4px 26px 4px 6px", boxSizing: "border-box" };
+const linkBtn = { marginTop: 6, padding: 0, border: "none", background: "transparent", color: C.muted, fontSize: 13, textDecoration: "underline", cursor: "pointer" };
 
 // A number box with its unit written after it, so nobody has to guess
 // whether a length is millimetres or metres.
@@ -64,7 +80,7 @@ export default function CutToSize({
   findSectionFactor,
   findSectionPrice,
   onAdd,
-  onUpdate,
+  onSave,
   onRemove,
   onPrint,
   allocations,
@@ -72,17 +88,24 @@ export default function CutToSize({
   findSectionType,
   onSetAside,
   onRequisition,
+  onAddStock,
+  newSize,
   onCount,
   onBookOut,
   SavedCheck,
 }) {
-  const [draft, setDraft] = useState(blankLine);
+  const [draft, setDraft] = useState(blankDraft);
   const [adding, setAdding] = useState(false);
+  // The line open in the boxes: { id, draft }. One at a time.
+  const [edit, setEdit] = useState(null);
+  const [saving, setSaving] = useState(false);
+  // The New size boxes, under whichever form asked for them:
+  // { where: "add" or a line's id, type, boxes, grade }.
+  const [sizing, setSizing] = useState(null);
 
-  const sectionNames = [...new Set((sections || []).map((s) => s.name).filter(Boolean))].sort();
-  const gradesFor = (name) =>
-    [...new Set((sections || []).filter((s) => s.name.toLowerCase() === (name || "").toLowerCase()).map((s) => s.grade).filter(Boolean))];
   const partNumbers = [...new Set((customerItems || []).map((i) => i.partNumber || i.name).filter(Boolean))].sort();
+  const linkedItemFor = (drawingNo) =>
+    (customerItems || []).find((i) => sameText(i.partNumber || i.name, drawingNo) && String(drawingNo || "").trim())?.id || null;
 
   const groups = planBars(lines);
   const totalPieces = (lines || []).reduce((sum, l) => sum + (Number(l.qty) || 0), 0);
@@ -99,36 +122,223 @@ export default function CutToSize({
   const totalCost = (lines || []).reduce((sum, l) => sum + (costOf(l) || 0), 0);
   const anyWeight = (lines || []).some((l) => weightOf(l) != null);
 
-  function setSection(name) {
-    // Filling the grade in from the section saves a keystroke on the
-    // common case and leaves it changeable for the rest.
-    const grades = gradesFor(name);
-    setDraft((d) => ({ ...d, section: name, grade: d.grade || (grades.length === 1 ? grades[0] : "") }));
-  }
-
   async function submitDraft() {
-    if (!draft.section.trim()) return alert("Pick a section first.");
-    if (!(Number(draft.cutLengthMm) > 0)) return alert("Give the cut length, in millimetres.");
-    if (!(Number(draft.qty) > 0)) return alert("How many?");
-    if (!(Number(draft.stockLengthM) > 0)) return alert("Give the stock length, in metres.");
+    const read = checkCutDraft(draft, sections);
+    if (!read.ok) return alert(read.why);
     setAdding(true);
-    const ok = await onAdd({
-      drawing_no: draft.drawingNo.trim(),
-      section: draft.section.trim(),
-      grade: draft.grade.trim(),
-      cut_length_mm: Number(draft.cutLengthMm),
-      qty: Number(draft.qty),
-      stock_length_m: Number(draft.stockLengthM),
-      trim_front: !!draft.trimFront,
-      note: draft.note.trim(),
-      linked_item_id:
-        (customerItems || []).find((i) => (i.partNumber || i.name || "").trim().toLowerCase() === draft.drawingNo.trim().toLowerCase())?.id ||
-        null,
-    });
+    const ok = await onAdd({ ...read.values, linked_item_id: linkedItemFor(read.values.drawing_no) });
     setAdding(false);
     // Keep the section and stock length: the next line is usually more of
     // the same bar.
-    if (ok) setDraft((d) => ({ ...blankLine(), section: d.section, grade: d.grade, stockLengthM: d.stockLengthM, trimFront: d.trimFront }));
+    if (ok) {
+      setDraft((d) => ({ ...blankDraft(), section: d.section, grade: d.grade, stockLengthM: d.stockLengthM, trimFront: d.trimFront }));
+      setSizing(null);
+    }
+  }
+
+  function startEdit(line) {
+    const d = draftOfLine(line);
+    // As the list spells them, so the boxes show what is chosen.
+    const listed = sectionOnList(sections, d.section);
+    if (listed) {
+      d.section = listed;
+      d.grade = gradesOfSection(sections, listed).find((g) => sameText(g, d.grade)) || d.grade;
+    }
+    setEdit({ id: line.id, draft: d });
+    setSizing(null);
+  }
+
+  function stopEdit() {
+    setEdit(null);
+    setSizing(null);
+  }
+
+  async function saveEdit(line) {
+    const read = checkCutDraft(edit.draft, sections, line);
+    if (!read.ok) return alert(read.why);
+    const { patch, words } = cutLineChanges(line, read.values);
+    if (words.length === 0) return stopEdit();
+    if ("drawing_no" in patch) patch.linked_item_id = linkedItemFor(patch.drawing_no);
+    setSaving(true);
+    const ok = await onSave(line, patch, words);
+    setSaving(false);
+    if (ok) stopEdit();
+  }
+
+  const setEditDraft = (fn) => setEdit((e) => (e ? { ...e, draft: typeof fn === "function" ? fn(e.draft) : fn } : e));
+
+  // The boxes of one line, a new one or one being changed (`was`). A plain
+  // function, not a component: declared in here a component would be made
+  // afresh on every keystroke and throw the cursor out of the box.
+  function lineBoxes(d, setD, was, onEnter) {
+    const choices = sectionChoices(sections);
+    const offList = d.section && !sectionOnList(sections, d.section);
+    const sectionOptions = offList ? [...choices, { value: d.section, label: d.section, hint: "not on the Sections list" }] : choices;
+    const grades = gradesOfSection(sections, d.section);
+    const oddGrade = d.grade && !grades.some((g) => sameText(g, d.grade));
+    const gradeOptions = oddGrade ? [...grades, { value: d.grade, label: d.grade, hint: offList ? "as the line was saved" : "not a material of this size" }] : grades;
+    return (
+      <>
+        <input
+          value={d.drawingNo}
+          list="cut-drawing-options"
+          placeholder="Drawing no"
+          onChange={(e) => setD((p) => ({ ...p, drawingNo: e.target.value }))}
+          style={cell(110)}
+        />
+        <TypeToFind
+          options={sectionOptions}
+          value={d.section}
+          onChange={(v) => setD((p) => draftWithSection(p, sections, v))}
+          emptyLabel="Section"
+          title="The size, from Stock Manager's Sections list"
+          style={{ width: 170 }}
+          inputStyle={findCell}
+        />
+        {gradeOptions.length > 0 ? (
+          <TypeToFind
+            options={gradeOptions}
+            value={d.grade}
+            onChange={(v) => setD((p) => ({ ...p, grade: v }))}
+            emptyLabel="Material"
+            title="The materials this size is held in"
+            style={{ width: 120 }}
+            inputStyle={findCell}
+          />
+        ) : (
+          d.section && <span style={{ fontSize: 12, color: C.muted }}>no material</span>
+        )}
+        <UnitInput
+          unit="mm"
+          min="1"
+          step="1"
+          value={d.cutLengthMm}
+          placeholder="Length"
+          onChange={(e) => setD((p) => ({ ...p, cutLengthMm: e.target.value }))}
+          style={cell(80)}
+          title="Cut length"
+        />
+        <span style={{ color: C.muted }}>×</span>
+        <UnitInput
+          unit="off"
+          min="1"
+          step="1"
+          value={d.qty}
+          placeholder="Qty"
+          onChange={(e) => setD((p) => ({ ...p, qty: e.target.value }))}
+          style={cell(58)}
+          title="Quantity"
+        />
+        <span style={{ color: C.muted }}>from</span>
+        <UnitInput
+          unit="m"
+          min="0.1"
+          step="0.1"
+          value={d.stockLengthM}
+          onChange={(e) => setD((p) => ({ ...p, stockLengthM: e.target.value }))}
+          style={cell(58)}
+          title="Stock length"
+        />
+        <label
+          style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: C.muted }}
+          title={`Take ${TRIM_MM} mm off the front of each bar to square it up`}
+        >
+          <input type="checkbox" checked={!!d.trimFront} onChange={(e) => setD((p) => ({ ...p, trimFront: e.target.checked }))} />
+          trim
+        </label>
+        <input
+          value={d.note}
+          placeholder={was ? "Note" : "Note (optional)"}
+          onChange={(e) => setD((p) => ({ ...p, note: e.target.value }))}
+          style={{ ...cell(120), flex: 1, minWidth: 80 }}
+          onKeyDown={(e) => e.key === "Enter" && onEnter()}
+        />
+      </>
+    );
+  }
+
+  // A size that is not on the list, made from its type's fixed boxes as
+  // Stock Manager makes it, then picked for the line being typed.
+  function sizeBlock(where, d, setD) {
+    if (!newSize) return null;
+    if (!sizing || sizing.where !== where) {
+      return (
+        <button
+          type="button"
+          className="stk-btn"
+          style={linkBtn}
+          onClick={() =>
+            setSizing({ where, type: shapeForType(findSectionType ? findSectionType(d.section) : "")?.label || "", boxes: {}, grade: d.grade || "" })
+          }
+        >
+          Size not on the list? New size
+        </button>
+      );
+    }
+    const shape = shapeForType(sizing.type);
+    const grade = String(sizing.grade || "").trim();
+    const built = shape && grade ? buildSection(shape, sizing.boxes) : null;
+    const missing = shape ? missingBoxes(shape, sizing.boxes) : [];
+    const onList = built && gradesOfSection(sections, built.name).some((g) => sameText(g, grade));
+    const take = async () => {
+      if (!built) return;
+      const ok = await newSize.onTake({ shape, built, grade });
+      if (ok === false) return;
+      setD((p) => ({ ...p, section: built.name, grade }));
+      setSizing(null);
+    };
+    return (
+      <div style={{ marginTop: 8, padding: 8, border: `1px dashed ${C.border}`, borderRadius: 6 }}>
+        <label style={S.label}>New size</label>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+          <TypeToFind
+            options={SECTION_SHAPES.map((s) => ({ value: s.label, label: s.label, hint: s.key }))}
+            value={sizing.type}
+            onChange={(v) => setSizing((s) => ({ ...s, type: v, boxes: {} }))}
+            emptyLabel="Section type"
+            style={{ flex: 1, minWidth: 170 }}
+          />
+          <TypeToFind
+            options={newSize.grades || []}
+            value={sizing.grade}
+            onChange={(v) => setSizing((s) => ({ ...s, grade: v }))}
+            emptyLabel="Material"
+            style={{ flex: 1, minWidth: 140 }}
+          />
+        </div>
+        {shape && (
+          <div style={{ ...S.managerAddRow, flexWrap: "wrap", alignItems: "flex-end", marginTop: 6 }}>
+            {newSize.renderBoxes(shape, sizing.boxes || {}, (fn) => setSizing((s) => ({ ...s, boxes: fn(s.boxes || {}) })))}
+          </div>
+        )}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", fontSize: 13, color: C.muted, marginTop: 6 }}>
+          <span style={{ flex: 1, minWidth: 160 }}>
+            {built ? (
+              <>
+                {onList ? "Already on the list: " : "Adds "}
+                <b>
+                  {built.name} {grade}
+                </b>
+                {onList ? "" : " to Stock Manager → Sections"}.
+              </>
+            ) : !shape ? (
+              "Pick the section type first."
+            ) : !grade ? (
+              "Pick the material, from the list."
+            ) : (
+              `Still needed: ${missing.join(", ")}.`
+            )}
+          </span>
+          <button type="button" className="stk-btn" style={{ ...S.addBtn, opacity: built ? 1 : 0.5 }} disabled={!built} onClick={take}>
+            <Check size={15} strokeWidth={2.5} />
+            Use this size
+          </button>
+          <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setSizing(null)} title="Cancel the new size">
+            <X size={15} />
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -203,6 +413,19 @@ export default function CutToSize({
                       title="Raise a requisition for the bars not on the floor or on order"
                     >
                       Requisition {short}
+                    </button>
+                  )}
+                  {/* Bars that are on the floor and not in the app yet:
+                      booked in from here, the form ready filled. */}
+                  {onAddStock && (
+                    <button
+                      type="button"
+                      className="stk-btn"
+                      style={S.reqActionBtnMuted}
+                      onClick={() => onAddStock(g)}
+                      title={`Book ${fmtM(g.stockLengthM)} bars of ${materialName(g, findSectionType)} into stock, without leaving the job`}
+                    >
+                      <PackagePlus size={13} /> Add stock
                     </button>
                   )}
                   {g.bars.length > 0 && (
@@ -307,95 +530,54 @@ export default function CutToSize({
           const kg = weightOf(it);
           const cost = costOf(it);
           const cut = Number(it.qty_cut || 0);
+          const locked = cutHasStarted(it);
+          const editing = canEdit && edit && edit.id === it.id && !locked;
+          const offList = !!String(it.section || "").trim() && !sectionOnList(sections, it.section);
+
+          if (editing) {
+            return (
+              <div key={it.id} style={{ ...S.managerRow, display: "block", border: `1px solid ${C.accentRaw}` }}>
+                <label style={S.label}>
+                  Change {it.qty} × {fmtMm(Number(it.cut_length_mm))} {it.section}
+                </label>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                  {lineBoxes(edit.draft, setEditDraft, it, () => saveEdit(it))}
+                  <button type="button" className="stk-btn" style={{ ...S.addBtn, opacity: saving ? 0.5 : 1 }} onClick={() => saveEdit(it)} disabled={saving}>
+                    <Check size={15} strokeWidth={2.5} />
+                    {saving ? "Saving…" : "Save"}
+                  </button>
+                  <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={stopEdit} disabled={saving}>
+                    Cancel
+                  </button>
+                </div>
+                {sizeBlock(it.id, edit.draft, setEditDraft)}
+              </div>
+            );
+          }
+
           return (
             <div key={it.id} style={S.managerRow}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 14, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                  {canEdit ? (
-                    <>
-                      <input
-                        defaultValue={it.drawing_no}
-                        list="cut-drawing-options"
-                        placeholder="Drawing no"
-                        onBlur={(e) => onUpdate(it, "drawing_no", e.target.value)}
-                        style={cell(110)}
-                      />
-                      <input
-                        defaultValue={it.section}
-                        list="cut-section-options"
-                        placeholder="Section"
-                        onBlur={(e) => onUpdate(it, "section", e.target.value)}
-                        style={cell(120)}
-                      />
-                      <input
-                        defaultValue={it.grade}
-                        list="cut-grade-options"
-                        placeholder="Grade"
-                        onBlur={(e) => onUpdate(it, "grade", e.target.value)}
-                        style={cell(90)}
-                      />
-                      <UnitInput
-                        unit="mm"
-                        min="1"
-                        step="1"
-                        defaultValue={it.cut_length_mm}
-                        onBlur={(e) => onUpdate(it, "cut_length_mm", e.target.value)}
-                        style={cell(80)}
-                        title="Cut length"
-                      />
-                      <span style={{ color: C.muted }}>×</span>
-                      <UnitInput
-                        unit="off"
-                        min={cut || 0}
-                        step="1"
-                        defaultValue={it.qty}
-                        onBlur={(e) => onUpdate(it, "qty", e.target.value)}
-                        style={cell(58)}
-                        title={cut > 0 ? `${cut} already cut — cannot go below that` : "Quantity"}
-                      />
-                      <span style={{ color: C.muted }}>from</span>
-                      <UnitInput
-                        unit="m"
-                        min="0.1"
-                        step="0.1"
-                        defaultValue={it.stock_length_m}
-                        onBlur={(e) => onUpdate(it, "stock_length_m", e.target.value)}
-                        style={cell(58)}
-                        title="Stock length"
-                      />
-                      <label
-                        style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: C.muted }}
-                        title={`Take ${TRIM_MM} mm off the front of each bar to square it up`}
-                      >
-                        <input type="checkbox" checked={it.trim_front !== false} onChange={(e) => onUpdate(it, "trim_front", e.target.checked)} />
-                        trim
-                      </label>
-                      <input
-                        defaultValue={it.note}
-                        placeholder="Note"
-                        onBlur={(e) => onUpdate(it, "note", e.target.value)}
-                        style={{ ...cell(120), flex: 1, minWidth: 80 }}
-                      />
-                      <SavedCheck fieldKey={`cutitem-${it.id}`} />
-                      <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => onRemove(it)} title="Remove this line">
-                        <Trash2 size={14} />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <span style={{ fontWeight: 600 }}>{it.qty} ×</span>
-                      <span>{fmtMm(Number(it.cut_length_mm))}</span>
-                      <span>
-                        {it.section}
-                        {it.grade ? ` ${it.grade}` : ""}
-                      </span>
-                      {it.drawing_no && <span style={S.roleHint}>{it.drawing_no}</span>}
-                      <span style={S.roleHint}>
-                        from {fmtM(Number(it.stock_length_m))}
-                        {it.trim_front === false ? ", no trim" : ""}
-                      </span>
-                      {it.note && <span style={S.roleHint}>— {it.note}</span>}
-                    </>
+                  <span style={{ fontWeight: 600 }}>{it.qty} ×</span>
+                  <span>{fmtMm(Number(it.cut_length_mm))}</span>
+                  <span>
+                    {it.section}
+                    {it.grade ? ` ${it.grade}` : ""}
+                  </span>
+                  {it.drawing_no && <span style={S.roleHint}>{it.drawing_no}</span>}
+                  <span style={S.roleHint}>
+                    from {fmtM(Number(it.stock_length_m))}
+                    {it.trim_front === false ? ", no trim" : ""}
+                  </span>
+                  {it.note && <span style={S.roleHint}>— {it.note}</span>}
+                  {canEdit && offList && (
+                    <span
+                      style={{ ...S.chip, color: C.danger, borderColor: C.danger }}
+                      title="This section is not on Stock Manager's Sections list, so it has no weight, no price and matches no stock. Change the line and pick it from the list."
+                    >
+                      <AlertTriangle size={12} /> not on the Sections list
+                    </span>
                   )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, flexWrap: "wrap" }}>
@@ -430,6 +612,36 @@ export default function CutToSize({
                   )}
                 </div>
               </div>
+              {canEdit &&
+                (locked ? (
+                  <span
+                    style={{ ...S.roleHint, display: "inline-flex", alignItems: "center", gap: 4 }}
+                    title="Cutting has started on this line, so it cannot be changed or removed. To cut more of the same, add a new line."
+                  >
+                    <Lock size={12} /> Cutting started
+                  </span>
+                ) : (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    {SavedCheck && <SavedCheck fieldKey={`cutitem-${it.id}`} />}
+                    {onSave && (
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={{ ...S.reqActionBtnMuted, ...(edit ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}
+                        onClick={() => startEdit(it)}
+                        disabled={!!edit}
+                        title={edit ? "Save or cancel the line that is open first" : "Change this line"}
+                      >
+                        <Pencil size={12} /> Edit
+                      </button>
+                    )}
+                    {onRemove && (
+                      <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => onRemove(it)} disabled={!!edit} title="Remove this line">
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </span>
+                ))}
             </div>
           );
         })}
@@ -448,83 +660,17 @@ export default function CutToSize({
         <div style={{ marginTop: 10, padding: 10, background: C.bg, borderRadius: 6, border: `1px solid ${C.border}` }}>
           <label style={S.label}>Add a part</label>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-            <input
-              value={draft.drawingNo}
-              list="cut-drawing-options"
-              placeholder="Drawing no"
-              onChange={(e) => setDraft((d) => ({ ...d, drawingNo: e.target.value }))}
-              style={cell(110)}
-            />
-            <input value={draft.section} list="cut-section-options" placeholder="Section" onChange={(e) => setSection(e.target.value)} style={cell(120)} />
-            <input
-              value={draft.grade}
-              list="cut-grade-options"
-              placeholder="Grade"
-              onChange={(e) => setDraft((d) => ({ ...d, grade: e.target.value }))}
-              style={cell(90)}
-            />
-            <UnitInput
-              unit="mm"
-              min="1"
-              step="1"
-              value={draft.cutLengthMm}
-              placeholder="Length"
-              onChange={(e) => setDraft((d) => ({ ...d, cutLengthMm: e.target.value }))}
-              style={cell(80)}
-            />
-            <span style={{ color: C.muted }}>×</span>
-            <UnitInput
-              unit="off"
-              min="1"
-              step="1"
-              value={draft.qty}
-              placeholder="Qty"
-              onChange={(e) => setDraft((d) => ({ ...d, qty: e.target.value }))}
-              style={cell(58)}
-            />
-            <span style={{ color: C.muted }}>from</span>
-            <UnitInput
-              unit="m"
-              min="0.1"
-              step="0.1"
-              value={draft.stockLengthM}
-              onChange={(e) => setDraft((d) => ({ ...d, stockLengthM: e.target.value }))}
-              style={cell(58)}
-              title="Stock length"
-            />
-            <label
-              style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: C.muted }}
-              title={`Take ${TRIM_MM} mm off the front of each bar to square it up`}
-            >
-              <input type="checkbox" checked={draft.trimFront} onChange={(e) => setDraft((d) => ({ ...d, trimFront: e.target.checked }))} />
-              trim
-            </label>
-            <input
-              value={draft.note}
-              placeholder="Note (optional)"
-              onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))}
-              style={{ ...cell(120), flex: 1, minWidth: 80 }}
-              onKeyDown={(e) => e.key === "Enter" && submitDraft()}
-            />
+            {lineBoxes(draft, setDraft, null, submitDraft)}
             <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={submitDraft} disabled={adding}>
               <Plus size={12} /> Add
             </button>
           </div>
+          {sizeBlock("add", draft, setDraft)}
         </div>
       )}
 
-      {/* The suggestion lists behind the type-to-find boxes. One copy each,
-          shared by every row. */}
-      <datalist id="cut-section-options">
-        {sectionNames.map((n) => (
-          <option key={n} value={n} />
-        ))}
-      </datalist>
-      <datalist id="cut-grade-options">
-        {[...new Set((sections || []).map((s) => s.grade).filter(Boolean))].sort().map((g) => (
-          <option key={g} value={g} />
-        ))}
-      </datalist>
+      {/* The suggestions behind the drawing number box: the customer's own
+          parts. Typed freely, because a drawing need not be a stock part. */}
       <datalist id="cut-drawing-options">
         {partNumbers.map((p) => (
           <option key={p} value={p} />

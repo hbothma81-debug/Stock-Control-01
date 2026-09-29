@@ -90,6 +90,7 @@ import { groupJobLines, compareLines, heldLineOrder } from "./jobs/lineOrder.js"
 // words, or the import's match finds nothing.
 import { materialText } from "./laser/stockOptions.js";
 import { planBars, barsOnShelf, barsSetAside, barsOnOrder, matchingStock, materialName, offcutIsKeepable, KERF_MM, TRIM_MM, MIN_OFFCUT_MM } from "./jobs/cutToSize.js";
+import { changesMaterial, pileStillUsed } from "./jobs/cutLineEdit.js";
 import EditableName from "./EditableName.jsx";
 import TypeToFind from "./TypeToFind.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
@@ -8989,33 +8990,72 @@ export default function StockControl() {
     }
   }
 
-  async function updateJobCutItem(job, item, field, rawValue) {
-    if (!supabase) return;
-    const textFields = ["drawing_no", "section", "grade", "note"];
-    let value;
-    if (field === "trim_front") value = !!rawValue;
-    else if (textFields.includes(field)) value = String(rawValue).trim();
-    else value = Number(rawValue);
-    if (field === "section" && !value) return;
-    if (!textFields.includes(field) && field !== "trim_front" && !(value >= 0)) return;
-    if (String(item[field] ?? "") === String(value)) return;
-    // The operator's count is real work done; the quantity cannot drop
-    // below it, the same rule invoicing puts on quoted items.
-    if (field === "qty" && value < Number(item.qty_cut || 0)) {
-      alert(`${item.qty_cut} of these have already been cut, so the quantity cannot go below ${item.qty_cut}.`);
-      await openJobDetail(job);
-      return;
-    }
+  // A cut line changed with its pencil (Heinrich, 29 Sep 2026; rules in
+  // src/jobs/cutLineEdit.js). `patch` holds only the columns that change
+  // and `words` the same for the job's History; all of it is one save.
+  // Until then each box saved by itself on the way out of it.
+  //
+  // Nothing on a line may change once a piece of it has been cut (his
+  // answer: none). The screen offers no pencil there, and the save asks
+  // the database the same in one breath (`qty_cut` still 0), because the
+  // saw may have started since this screen read the list. The row is
+  // asked back: a database that refuses the change answers no row and no
+  // error (CLAUDE.md, "Database changes").
+  async function saveJobCutItem(job, item, patch, words) {
+    if (!supabase) return false;
+    if (!patch || Object.keys(patch).length === 0) return true;
     try {
-      const { error } = await supabase.from("job_cut_items").update({ [field]: value }).eq("id", item.id);
+      const { data, error } = await supabase.from("job_cut_items").update(patch).eq("id", item.id).eq("qty_cut", 0).select("id");
       if (error) throw error;
+      if (!data || data.length === 0) {
+        alert(
+          "That line was not changed. Cutting has started on it, or it has been removed, or the database refused the change. The list has been read again."
+        );
+        await openJobDetail(job);
+        return false;
+      }
       flashSaved(`cutitem-${item.id}`);
-      await logJobEvent(job.id, "cut list changed", `${item.section} ${item.cut_length_mm}mm — ${field.replace(/_/g, " ")} ${item[field]} to ${value}`);
+      await logJobEvent(job.id, "cut list changed", `${item.qty} × ${item.cut_length_mm}mm ${item.section}: ${(words || []).join("; ")}`);
+      // Bars set aside for the pile the line was on stay set aside: the
+      // change moves the line, not the bars. Said, when no other line
+      // still draws on that pile.
+      const wasOn = { section: item.section, grade: item.grade, stockLengthM: Number(item.stock_length_m) };
+      const held = changesMaterial(patch) && !pileStillUsed(jobDetail?.cutItems || [], item) ? barsSetAside(wasOn, jobDetail?.allocations || [], items || []) : 0;
       await openJobDetail(job);
+      if (held > 0) {
+        alert(
+          `Saved. ${held} bar${held === 1 ? "" : "s"} of ${materialName(wasOn, findSectionType)} ${held === 1 ? "is" : "are"} still set aside for this job, ` +
+            `and no line on the cut list uses ${held === 1 ? "it" : "them"} now. Release ${held === 1 ? "it" : "them"} on the job's Materials tab if ${held === 1 ? "it is" : "they are"} not needed.`
+        );
+      }
+      return true;
     } catch (err) {
       console.error("Failed to change the cut line:", err);
       alert("That change didn't save — check your signal and try again.");
+      return false;
     }
+  }
+
+  // "Add stock" on a Bars needed row: the New stock item form, opened on
+  // the job with the row's section, material and bar length filled in, so
+  // bars that are on the floor and not in the app are booked in without
+  // leaving the job. The form, its rules and who may use it are the Stock
+  // tab's own; closing it leaves the job as it was.
+  function openAddStockForCutList(group) {
+    const gradeOptions = (master?.grades || []).map((g) => g.shortName || g.name);
+    setForm({
+      ...emptyForm,
+      id: uid(),
+      mainCat: "structural",
+      trackLength: true,
+      sectionType: findSectionType(group.section),
+      section: group.section,
+      grade: gradeOptions.find((g) => sameText(g, group.grade)) || "",
+      length: String(group.stockLengthM),
+    });
+    setEditingId(null);
+    setAllowDuplicate(false);
+    setShowAdd(true);
   }
 
   async function removeJobCutItem(job, item) {
@@ -13066,10 +13106,11 @@ export default function StockControl() {
   // Stock Manager (his answers: both buttons, same people). null is shut.
   const [formNewSize, setFormNewSize] = useState(null);
   const formNewSizeShape = shapeForType(effectiveSectionType) || null;
-  function takeFormNewSize() {
-    const built = formNewSizeShape && formNewSize && buildSection(formNewSizeShape, formNewSize);
-    if (!built) return;
-    const grade = form.grade === CUSTOM ? "" : effectiveGrade;
+  // A size made outside Stock Manager joins Sections here: from the New
+  // stock item form, and from a job's cut list (29 Sep 2026). One copy, so
+  // the two cannot drift. Already on the list in that material: nothing
+  // is added.
+  function addSectionSize(shape, built, grade) {
     setMaster((prev) => {
       const list = prev.sections || [];
       if (list.some((x) => isSectionRow(x, built.name, grade))) return prev;
@@ -13079,12 +13120,18 @@ export default function StockControl() {
         sections: [
           ...list,
           {
-            name: built.name, grade, price: 0, type: formNewSizeShape.label, dimensions: built.dimensions,
+            name: built.name, grade, price: 0, type: shape.label, dimensions: built.dimensions,
             factor: lend ? lend.factor : sectionCalcKgPerM(built.dimensions, grade) || 0,
           },
         ],
       };
     });
+  }
+  function takeFormNewSize() {
+    const built = formNewSizeShape && formNewSize && buildSection(formNewSizeShape, formNewSize);
+    if (!built) return;
+    const grade = form.grade === CUSTOM ? "" : effectiveGrade;
+    addSectionSize(formNewSizeShape, built, grade);
     // Filed under the type's own words, so the Section box offers it.
     setForm((f) => ({ ...f, sectionType: formNewSizeShape.label, customSectionType: "", section: built.name, customSection: "" }));
     setFormNewSize(null);
@@ -26774,7 +26821,17 @@ export default function StockControl() {
                 findSectionFactor={findSectionFactor}
                 findSectionPrice={findSectionPrice}
                 onAdd={(line) => addJobCutItem(jobDetail.job, line)}
-                onUpdate={(item, field, value) => updateJobCutItem(jobDetail.job, item, field, value)}
+                onSave={(item, patch, words) => saveJobCutItem(jobDetail.job, item, patch, words)}
+                onAddStock={canAdd ? (group) => openAddStockForCutList(group) : null}
+                newSize={
+                  canAccessStockManager
+                    ? {
+                        grades: (master.grades || []).map((g) => g.shortName || g.name),
+                        renderBoxes: sectionBoxInputs,
+                        onTake: ({ shape, built, grade }) => addSectionSize(shape, built, grade),
+                      }
+                    : null
+                }
                 onRemove={(item) => removeJobCutItem(jobDetail.job, item)}
                 onPrint={() => printCuttingList(jobDetail.job, jobDetail.cutItems || [], jobDetail.allocations || [])}
                 allocations={jobDetail.allocations || []}
