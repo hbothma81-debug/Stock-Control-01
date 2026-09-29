@@ -4711,3 +4711,87 @@ practice as Test, read back from the database.
   (`prove-app-errors.mjs`, `prove-delivery-notes.mjs`), the layout
   measure and the check scripts. What they proved is in the tests and
   in these notes.
+
+---
+
+## 29 Sep 2026 — Cut list on a job: change a line, add stock, new size (built in App health, the area is Jobs page's)
+
+**Built and committed, NOT pushed. No SQL. The save to the database has
+been tried by nobody: the Browser pane is signed out of practice too.**
+
+### What he asked, and answered
+
+"Cut list page in the job manager: need to be able to edit an item that
+is already created; also need to be able to add stock and new
+structural items from this page." He had made a cutting list on a new
+job and could not change a line. His answers to seven questions: a
+pencil with Save and Cancel; once pieces are cut **nothing** may change;
+a new structural item is a new section size on the list; Add stock for
+the people who can add stock, New size for the people who can open
+Stock Manager; the Production card stays read-only; build here.
+
+### What was there
+
+Every saved line on the job's Cut to size tab was already a row of open
+boxes that saved on the way out of each box (`updateJobCutItem`, now
+gone). Nothing said so, and he took the list for uneditable. Whether
+those boxes also failed on live was not found out: nobody was signed in.
+
+### What is built
+
+- **`src/jobs/cutLineEdit.js`** (new, 16 tests): the rules. Locked once
+  `qty_cut` is over 0; section and material from the Sections list; a
+  whole number of pieces; what a save changes, in columns and in words.
+- **`src/jobs/CutToSize.jsx`** (rewritten around the same Bars needed
+  and Cutting order): a line reads as words with Edit and a bin; Edit
+  opens it in the boxes of "Add a part", one line at a time; Section and
+  Material are type-to-find boxes; "Size not on the list? New size"
+  under both forms; "Add stock" on each Bars needed row.
+- **`src/App.jsx`:** `saveJobCutItem` (one save, `qty_cut` still 0 asked
+  in the same breath, the row asked back), `openAddStockForCutList`,
+  `addSectionSize`. **`takeFormNewSize`, the Stock Manager
+  conversation's, now calls `addSectionSize`** and is otherwise as it
+  was: one copy of how a size joins Sections.
+- **`src/ui-preview.jsx`:** a "Cut to size" pill with a made-up job.
+- CLAUDE.md carries the rule, under the job page decisions.
+
+### Tried, on the no-login demo page only
+
+Edit, two boxes changed, Save: one save of the two columns. Cancel and
+a Save with nothing changed: no save. The other lines' Edit and bin are
+off while a line is open. A line with pieces cut: "Cutting started", no
+Edit, no bin. A line typed before the rule: its quantity changed, its
+section kept; moved on to the list, the save is refused until a
+material of that size is picked. A section typed that is not on the
+list settles on nothing. New size: type, material, boxes, "Adds SHS
+60x60x3 S355 to Stock Manager → Sections", picked for the line, and
+"Already on the list" the second time. Add stock asks for the row's
+material and bar. A person who may not change the job sees words only.
+Nothing overlaps at desktop or phone width, measured (the first build
+did: the two type-to-find boxes ran over the box beside them).
+
+### Tried by nobody
+
+- **`saveJobCutItem` against a database**, on practice or live: the
+  save, the refusal when cutting has started, the History line, the
+  note about bars still set aside.
+- **Add stock opening the real form** with its boxes filled, and the
+  "on the floor" count moving after a save.
+- **New size adding to the real Sections list**, and the pipe boxes.
+- Anything as a person who is not an admin.
+
+### Waiting on Heinrich
+
+1. Sign in on practice in the Browser pane, so the saves can be tried
+   and read back from the database; or try it himself on practice.
+2. Then "push from here".
+
+### For the other conversations
+
+- **Jobs page:** the cut list screen and its save changed as above;
+  `updateJobCutItem` is gone, `onUpdate` is no longer a prop of
+  `CutToSize`.
+- **Stock Manager:** `takeFormNewSize` calls the new `addSectionSize`;
+  nothing else of the New stock item form changed.
+- **Quoting:** `CutToSize` takes `onSave`, `onAddStock` and `newSize`;
+  without them it shows no Edit, no Add stock and no New size.
