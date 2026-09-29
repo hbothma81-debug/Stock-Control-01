@@ -5098,3 +5098,15 @@ did: the two type-to-find boxes ran over the box beside them).
   person's requests carry notes. No number was skipped. "Make
   delivery note" is on each request's row; making them needs his
   word.
+- **29 Sep 2026, SQL on LIVE and PUSHED, his word ("3. Yes"):** he
+  pasted the five himself, his check read "ready"; checked signed
+  out beside a made-up name: all four functions answer on live, the
+  made-up one does not. Live tip was ce748a5, the queue seven
+  commits, all App health's; clean clone: names 0, 393 tests, build
+  clean. Pushed `ce748a5..8e1121f`. Live's bundle went from
+  App-CPde8EJq.js to App-BRo_lN_V.js and holds the short name box's
+  own words. The signed-in look at live afterwards was not made (the
+  session refused the pane's reload of live): nobody has opened
+  Stock Manager -> Material Types on live yet. **Nothing is renamed
+  on live: Mild Steel becomes "MS" at the time he picks, the floor
+  stopped, every screen reloaded afterwards.**
