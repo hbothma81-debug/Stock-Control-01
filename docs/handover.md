@@ -4917,3 +4917,29 @@ did: the two type-to-find boxes ran over the box beside them).
 - **Left on practice now:** JOB-0008's cut list has three lines (the
   third is 3 × 800 of PIPE NB50 SCH40 in MS); Sections has two pipe
   rows; line 1 is as it was, with two more lines in the History.
+
+### 29 Sep 2026, later that evening — longer boxes; and "Mild Steel" on live, asked
+
+- **His word:** "I need longer pill boxes, the notes one can be shorter
+  but drawing one needs to increase, the live app also still gives
+  Mild Steel full name".
+- **The boxes, built, NOT pushed:** each is as wide as what it holds
+  (`wideEnough` in CutToSize.jsx), from a long least: Drawing no 230
+  (was 110), Section type 210 (170), Material 180 (120), Size 230
+  (150), each growing to 380 and never wider than the screen. The Note
+  is 150 and no longer takes whatever room is left. Number boxes as
+  they were.
+- **Tried on practice, signed in:** a drawing number of 27 letters and
+  a pipe's name of 37 both read whole; nothing overlaps or runs past
+  the edge at 904 wide and at 375.
+- **"Mild Steel" on live: NOT changed, asked.** By the rule in
+  CLAUDE.md (16 Sep 2026) a material is held by its short name where it
+  has one and Mild Steel has none, on purpose; so live reads "Mild
+  Steel" on the list, the stock and the job lines alike, and nothing
+  mismatches there. Practice reads "MS" only because its one test
+  material is named "MS". Giving Mild Steel a short name on live means
+  rewriting every row that holds the long one (stock, sections, job
+  lines, cut lines, prices): decided on 16 Sep that a rename must do
+  that, not built, Stock Manager's area. He was asked whether he wants
+  that, as work of its own. **The live app was not looked at:** the
+  Browser pane is signed out of live.
