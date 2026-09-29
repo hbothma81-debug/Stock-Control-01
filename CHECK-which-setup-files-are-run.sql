@@ -167,7 +167,11 @@ with checks (setup_file, looks_for, found) as (
     ('setup-delivery-notes-per-request.sql', 'function take_delivery_note_number',
       exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'take_delivery_note_number')),
     ('setup-delivery-notes-per-request.sql', 'column process_type_settings.retired',
-      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'process_type_settings' and column_name = 'retired'))
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'process_type_settings' and column_name = 'retired')),
+    ('setup-material-short-name.sql',   'function material_places',
+      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'material_places')),
+    ('setup-material-short-name.sql',   'function set_material_short_name',
+      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'set_material_short_name'))
 )
 select
   setup_file,

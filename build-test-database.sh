@@ -96,6 +96,10 @@ ORDER=(
 
   # --- the app's own record of crashes (reads profiles to know an admin)
   setup-app-errors.sql
+
+  # --- a material's short name goes everywhere it is written (functions
+  #     only; reads the tables above when it is called, not when it is made)
+  setup-material-short-name.sql
 )
 
 OUT=setup-ALL.sql

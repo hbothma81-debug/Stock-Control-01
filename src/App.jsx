@@ -64,6 +64,8 @@ import AppErrors from "./manager/AppErrors.jsx";
 import { countRecentCrashes } from "./lib/appErrors.js";
 import { SECTION_SHAPES, shapeForType, shapeTitle, buildSection, missingBoxes, sectionKgPerMetre } from "./manager/sectionShapes.js";
 import { sectionBoxInputs } from "./manager/SectionBoxes.jsx";
+import ShortNameBox from "./manager/ShortNameBox.jsx";
+import { withFullMaterial, shortNameRefusal, shortNameChanged, renameQuestion, renameSummary, renameRefusalWords } from "./manager/materialNames.js";
 import CutToSize from "./jobs/CutToSize.jsx";
 import BuyOuts from "./jobs/BuyOuts.jsx";
 import Materials from "./jobs/Materials.jsx";
@@ -2216,6 +2218,9 @@ export default function StockControl() {
   const [managerInput, setManagerInput] = useState("");
   const [managerFactor, setManagerFactor] = useState("");
   const [managerShortName, setManagerShortName] = useState("");
+  // The material whose short name is being changed in the database right
+  // now, by its name: the boxes wait while it is.
+  const [renamingMaterial, setRenamingMaterial] = useState(null);
   const [managerPrice, setManagerPrice] = useState("");
   const [stockCodeQuery, setStockCodeQuery] = useState("");
   const [stockCodeCustomerFilter, setStockCodeCustomerFilter] = useState("");
@@ -3041,6 +3046,11 @@ export default function StockControl() {
       }
       for (const e of modified) {
         const changes = { factor: e.factor || 0, price: e.price || 0, type: e.type ?? null, short_name: e.shortName || null };
+        // A material's short name is changed by the database alone, with
+        // every row that holds it (changeMaterialShortName). A price saved
+        // from a tablet that has not reloaded since must not put the old
+        // short name back on the list with it.
+        if (listName === "grades") delete changes.short_name;
         if (listName === "sections") changes.dimensions = e.dimensions || null;
         let q = supabase.from("master_factor_items").update(changes).eq("list_name", listName).eq("name", e.name);
         if (listName === "sections") q = q.eq("grade", (e.grade || "").trim());
@@ -14813,10 +14823,15 @@ export default function StockControl() {
   // What a supplier should see on the order. Deliberately not the label
   // used inside the app: for a Stores item that label starts with where
   // we keep it on the shelf, which is our business and not theirs.
+  //
+  // The material is printed in full, whatever the screens call it (his
+  // answer, 29 Sep 2026): a label "MS — SHS 50x50x3" goes to the supplier
+  // as "Mild Steel — SHS 50x50x3". Plate and sections only: CNC bar has
+  // materials of its own, and a Stores label starts with no material.
   function poLineDescription(req) {
     const it = (items || []).find((x) => x.id === req.itemId);
-    const base =
-      it && it.mainCat === "stores" ? it.name || req.itemRawName || req.itemLabel : req.itemLabel;
+    const label = ["plate", "structural"].includes(req.mainCat) ? withFullMaterial(master?.grades, req.itemLabel) : req.itemLabel;
+    const base = it && it.mainCat === "stores" ? it.name || req.itemRawName || label : label;
     const metres = Number(it?.length) || 0;
     if (!metres || !it?.trackLength) return base;
     return `${base} — ${metres}m lengths`;
@@ -16040,11 +16055,56 @@ export default function StockControl() {
     };
   }
 
-  function updateGradeShortName(name, newValue) {
-    setMaster((prev) => ({
-      ...prev,
-      grades: (prev.grades || []).map((x) => (x.name === name ? { ...x, shortName: newValue } : x)),
-    }));
+  // A material's short name changed on Stock Manager -> Material Types
+  // (decided 16 Sep 2026, built 29 Sep 2026 for Mild Steel -> "MS"; rules
+  // in src/manager/materialNames.js, the work in the database:
+  // set_material_short_name, setup-material-short-name.sql).
+  //
+  // A material is stored by its short name, so changing it changes every
+  // stock line, section, requisition, cut list, laser program and job line
+  // that holds it: all of it or none of it, which only the database can
+  // promise. Until now the box changed the list's own row and nothing
+  // else, at every letter typed, and everything still saying the old name
+  // stopped matching.
+  //
+  // Nothing on the screen is changed by hand afterwards. The app is read
+  // again from the start: every list in memory holds the old name, and
+  // one saved from memory would write it back. For the same reason this
+  // waits for the lists' own saves to finish first.
+  //
+  // Answers whether the change was made, for the box to keep or put back
+  // what was typed.
+  async function changeMaterialShortName(entry, short) {
+    if (!supabase || renamingMaterial) return false;
+    if (!shortNameChanged(entry, short)) return false;
+    const why = shortNameRefusal(master?.grades, entry.name, short);
+    if (why) {
+      alert(`${why} Nothing was changed.`);
+      return false;
+    }
+    if (masterSaveQueueRef.current?.busy()) {
+      alert("A change to the lists is still being saved. Wait a moment and try again. Nothing was changed.");
+      return false;
+    }
+    if (!window.confirm(renameQuestion(entry, short))) return false;
+    setRenamingMaterial(entry.name);
+    try {
+      const { data, error } = await supabase.rpc("set_material_short_name", { p_name: entry.name, p_short: short });
+      if (error) {
+        console.error("The short name could not be changed:", error);
+        alert(renameRefusalWords(error));
+        return false;
+      }
+      alert(`${renameSummary(data)}\n\nThe app reloads now. Every other tablet and computer must reload too.`);
+      window.location.reload();
+      return true;
+    } catch (err) {
+      console.error("The short name could not be changed:", err);
+      alert(renameRefusalWords(err));
+      return false;
+    } finally {
+      setRenamingMaterial(null);
+    }
   }
 
   function updateSectionType(name, newType, grade) {
@@ -23857,12 +23917,14 @@ export default function StockControl() {
                               title="R/kg, no supplier. Pick a supplier beside it to make it that supplier's price."
                             />
                             {supplierPriceControls(managerTab, entry, "R/kg").picker}
+                            {/* Taken on leaving the box, asked first, and
+                                done in the database for every row the
+                                material is written on (materialNames.js). */}
                             {managerTab === "grades" && (
-                              <input
+                              <ShortNameBox
                                 value={entry.shortName || ""}
-                                placeholder="Short name"
-                                onChange={(e) => updateGradeShortName(entry.name, e.target.value)}
-                                style={{ ...S.managerFactorInput, width: 130 }}
+                                busy={!!renamingMaterial}
+                                onCommit={(short) => changeMaterialShortName(entry, short)}
                               />
                             )}
                             <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeMasterEntry(entry)}>
