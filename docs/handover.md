@@ -4825,3 +4825,53 @@ did: the two type-to-find boxes ran over the box beside them).
   their boxes from the new file. The function is the same text, names
   check 0, 375 tests, build clean; no screen of theirs was opened
   (signed out).
+
+### 29 Sep 2026, later still — the cut list TRIED ON PRACTICE, signed in; two small additions
+
+- **He had seen the pipe fault in the practice app, not on the demo
+  page,** and signed in on practice in the Browser pane (port 5173,
+  another conversation's server, which serves this folder) for me to
+  look. **What he saw was not found:** New size → Pipe in the practice
+  app reads Standard (Schedule seamless, SANS 62, SABS 719 welded),
+  then Schedule, then NB, the same as Stock Manager → Sections → PIPE's
+  Add row, which was opened beside it. Practice's Sections list holds
+  no pipe at all, so the Section box finds nothing for "pipe" or "nb":
+  that may be what he met. **Asked him to point at it**, with a picture.
+- **Tried on practice as Test, every save read back from the
+  database** (JOB-0008):
+  - Edit, material and quantity changed, Save: one PATCH of those two
+    columns with `qty_cut=eq.0` on its address; the row reads MS and 6;
+    History reads "cut list changed: 5 × 500mm SHS 50x50x2: material
+    Mild Steel to MS; quantity 5 to 6". With the material now the
+    list's, Bars needed went from "1 to order" to "11 on the floor".
+  - New size, Pipe SCH40 NB25 in MS, Use this size: one row added to
+    `master_factor_items` (sections; type Pipe, 2.5 kg/m, its numbers
+    in `dimensions`), picked for the line; a line of 2 × 1500 added.
+  - The lock: a line open in its boxes, `qty_cut` set to 1 behind the
+    screen (test set-up, through the app's own client), Save: refused
+    in words, the quantity unchanged in the database, the list read
+    again, the line "Cutting started" with no Edit and no bin. The
+    count was put back to 0.
+  - Add stock on the pipe's row: the New stock item form opens on the
+    job reading Section type Pipe, Material grade MS, Section the
+    pipe's name, Length per piece 6, with its own New size link; shut
+    with its ×, nothing sent, the job and cut list as they were.
+  - Stock Manager → Sections → PIPE draws its boxes from the new file.
+  - No console errors through all of it.
+- **Two additions, from what practice showed:**
+  - The Section type box in New size listed the first 12 of the 18
+    types until something was typed (the type-to-find box's own
+    limit). It lists all 18 now.
+  - `materialAsListed` (cutLineEdit.js, tested): an old line's material
+    opens under the name the Sections list holds it by, long name or
+    short. Practice's own case could not use it: its one material is
+    named "MS" with no long name, and the line's "Mild Steel" was plain
+    typing. Stock Manager's Material Types are handed to the screen as
+    `materials`.
+- **Still tried by nobody:** Add stock SAVED from the job and the "on
+  the floor" count moving; New stock item form's own New size after
+  the move; changing a Sections row's boxes; a person who is not an
+  admin; anything on live.
+- **Left on practice:** JOB-0008's cut list reads 6 × 500 SHS 50x50x2
+  MS (was 5, "Mild Steel") and 2 × 1500 of the new pipe; Sections has
+  the PIPE NB25 SCH40 row in MS; three lines in the job's History.
