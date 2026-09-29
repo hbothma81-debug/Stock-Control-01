@@ -4795,3 +4795,33 @@ did: the two type-to-find boxes ran over the box beside them).
   nothing else of the New stock item form changed.
 - **Quoting:** `CutToSize` takes `onSave`, `onAddStock` and `newSize`;
   without them it shows no Edit, no Add stock and no New size.
+
+### 29 Sep 2026, later — the pipe boxes: one copy, the demo's stand-in gone
+
+- **Heinrich, the same day:** "pipe does not have the same settings as
+  the stock manager with SCH and NB". On the demo page New size drew a
+  stand-in I had written for the type's boxes, and a pipe got no boxes
+  at all. The app itself was handed Stock Manager's own
+  (`sectionBoxInputs`), so there a pipe was right; where he looked was
+  not asked, the stand-in was wrong either way.
+- **Put right, NOT pushed:** `sectionBoxInputs` is lifted out of App.jsx
+  into `src/manager/SectionBoxes.jsx`, word for word. One copy for
+  Stock Manager → Sections (the Add row, changing a row), the New stock
+  item form, the cut list and the demo page. `newSize` no longer
+  carries `renderBoxes`. App.jsx no longer imports `PIPE_STANDARDS`,
+  `SCHEDULES`, `SANS62_CLASSES` or `pipeSizes`: nothing else in it used
+  them.
+- **The Section box is as wide as its name needs**, up to 360: a pipe's
+  name is forty letters ("PIPE NB25 SCH40 33.4OD 26.64ID 3.38WT").
+- **Tried on the demo page:** Pipe → Standard offers Schedule
+  (seamless), SANS 62, SABS 719 welded. Schedule: SCH5 to XS, then NB
+  from the table, "Adds PIPE NB25 SCH40 33.4OD 26.64ID 3.38WT 300WA".
+  SANS 62: Light, Medium, Heavy, then NB. SABS 719: NB, outside
+  diameter and wall typed. The size was used, a line of it added, and
+  it heads its own Bars needed row. Nothing overlaps or runs past the
+  edge at desktop width or at 375.
+- **For Stock Manager, tried by nobody:** Sections' Add row and
+  changing a row, and the New stock item form's New size, now draw
+  their boxes from the new file. The function is the same text, names
+  check 0, 375 tests, build clean; no screen of theirs was opened
+  (signed out).
