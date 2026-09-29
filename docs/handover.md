@@ -4943,3 +4943,35 @@ did: the two type-to-find boxes ran over the box beside them).
   that, not built, Stock Manager's area. He was asked whether he wants
   that, as work of its own. **The live app was not looked at:** the
   Browser pane is signed out of live.
+
+### 29 Sep 2026, 12:00 — the cut list is LIVE (`1967ea1..ce748a5`)
+
+- **Pushed on Heinrich's "push from here".** The queue held this
+  conversation's ten commits only: five of code (`ff21281`, `eb02426`,
+  `64f4bec`, `4a7df1c`, `dc29a21`) and five handover notes. No SQL.
+- **Each step on its own:** the live tip and queue read, the clean clone
+  at `ce748a5` with no settings file (names 0 problems, 383 tests
+  pass, build clean, the same 5 unchecked writes as live), the queue
+  read again, the push.
+- **Live before:** App-CHTBJ_LA.js, no "Cutting started" in it.
+  **After:** App-CPde8EJq.js, entry index-DAK0YBoX.js, up within a
+  minute; found by "Cutting started", "Size: type first", "Pick the
+  section type, then the size.", "sizes filed under no type" and "no
+  line on the cut list uses", beside a made-up phrase that is not
+  there. The old save-on-leaving-the-box code is gone from the bundle.
+- **Seen on live, signed OUT only:** the sign-in page draws, no crash
+  screen, no request fails. The pane is signed out of live.
+- **What went live, in his area of Stock Manager too:** Sections' Add
+  row and changing a row, and the New stock item form's New size, draw
+  their boxes from `src/manager/SectionBoxes.jsx` (the same text,
+  moved); `takeFormNewSize` calls `addSectionSize`. Sections → PIPE's
+  Add row was seen drawing on practice; the rest of those screens was
+  opened by nobody after the move.
+- **Tried on live by nobody:** the cut list's Edit, the three boxes
+  against live's 94 sizes, New size, Add stock, the lock once cutting
+  has started. All of it was tried on practice, signed in.
+- **His answer on Mild Steel: "on its own plan".** A plan with
+  questions goes to him next; nothing of it is built.
+- **Still waiting from 28 Sep, on his sign-in on live:** JOB-0132's
+  delivery note (25 lines), and the look for long delivery notes made
+  before the fix, to rebuild.
