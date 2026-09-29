@@ -4875,3 +4875,45 @@ did: the two type-to-find boxes ran over the box beside them).
 - **Left on practice:** JOB-0008's cut list reads 6 × 500 SHS 50x50x2
   MS (was 5, "Mild Steel") and 2 × 1500 of the new pipe; Sections has
   the PIPE NB25 SCH40 row in MS; three lines in the job's History.
+
+### 29 Sep 2026, evening — what he had seen: the type and the size were one box. Now three boxes.
+
+- **His answer to "point at it": "section type and size should not be
+  the same pillbox".** That was the pipe matter all along: the row had
+  ONE Section box over every size of every type, with the type as a
+  hint beside each name. Stock Manager and the New stock item form pick
+  the type first. Two earlier readings of mine were wrong (the demo's
+  stand-in boxes, then New size's boxes); both things I put right on
+  the way were real, neither was what he meant.
+- **Built, NOT pushed:** the row, new or being changed, reads **Drawing
+  no, Section type, Material, Size**, then length, quantity and the
+  rest: the New stock item form's order.
+  - Section type offers the 18 fixed types in Stock Manager's order,
+    then any other word a size on the list is filed under, then "No
+    type" where a size has none.
+  - Material offers Stock Manager's Material Types.
+  - Size offers the sizes of that type held in that material, and
+    nothing until a type is picked ("Size: type first").
+  - Another type takes the size with it and leaves the material.
+    Another material keeps the size where it is held in that one too.
+  - New size has no type or material box of its own: it reads "New
+    size of Pipe, MS" and shows that type's boxes. No link until a
+    type with boxes is picked.
+  - The type is not saved: the line holds the size's name and
+    material, as before. No SQL.
+- Rules in `cutLineEdit.js` (`typeChoices`, `typeOfSection`,
+  `sizeChoices`, `materialChoices`, `draftWithType`,
+  `draftWithMaterial`), 24 tests there, 383 in all. `sectionChoices`
+  is gone. `newSize` is `{ onTake }` only.
+- **Tried on practice as Test, read back from the database**
+  (JOB-0008): Pipe picked, its one size offered; Square Tube picked,
+  the size cleared and the material kept; Flat Bar offers nothing; New
+  size of Pipe, MS made NB50 SCH40 and a line of 3 × 800 was added;
+  line 1 opened reading Square Tube, MS, SHS 50x50x2, moved to the
+  pipe (Save refused with "Pick the size." until one was picked) and
+  moved back. Nothing overlaps at 904 wide. No console errors.
+- **Not tried:** phone width after this change; the demo page after
+  this change; a list as long as live's (94 sizes).
+- **Left on practice now:** JOB-0008's cut list has three lines (the
+  third is 3 × 800 of PIPE NB50 SCH40 in MS); Sections has two pipe
+  rows; line 1 is as it was, with two more lines in the History.
