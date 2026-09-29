@@ -5008,3 +5008,55 @@ did: the two type-to-find boxes ran over the box beside them).
   customers keeps the full name; the app way or the one-off; what
   stays as history; build here or in Stock Manager; when. And to sign
   in on live, so where "Mild Steel" is written can be counted first.
+
+### 29 Sep 2026 — a material's short name goes everywhere: BUILT, NOT pushed, SQL on NEITHER database
+
+- **His answers:** the short name is "MS"; screens and floor paper show
+  it, purchase orders and customer documents print "Mild Steel" in
+  full; build it into the app; old purchase orders and printed
+  documents stay; build here; **"we will schedule the update"**: the
+  change of Mild Steel itself on live is his to time. Nothing here
+  renames anything.
+- **`setup-material-short-name.sql`** (new; functions only, no table,
+  column or rule, and it changes no data): `material_places()`, the one
+  list of where a material is written, and
+  `set_material_short_name(name, short)`, which saves the short name on
+  the Material Types row and rewrites every place, all or none. Runs as
+  the caller. Registered in `build-test-database.sh` and
+  `CHECK-which-setup-files-are-run.sql`; `setup-ALL.sql` regenerated
+  and holds the new file and nothing else new.
+- **Proven on pglite, 34 checks** (`prove-material-short-name.mjs`,
+  scratchpad): every place rewritten, capitals put right, CNC bar,
+  fasteners, a raised purchase order and supplier prices untouched,
+  "Galvanised Mild Steel" not taken for Mild Steel, the same short name
+  twice changes nothing, another short name follows, none puts the
+  full name back, a place the login may not change (whole value or end
+  of text) stops it all with nothing changed, somebody not signed in
+  changes nothing, a database without the quoting and tube tables is
+  renamed all the same, the file runs twice.
+- **App:** `src/manager/materialNames.js` (rules and words, 10 tests),
+  `src/manager/ShortNameBox.jsx`, `changeMaterialShortName` in App.jsx;
+  `updateGradeShortName` is gone. The box is taken on leaving it (it
+  saved at every letter), asks first, waits for the lists' own saves,
+  calls the function, says what changed and reloads the app. The
+  ordinary save of Material Types no longer writes `short_name` for a
+  material already there. `poLineDescription` prints the material in
+  full for plate and section requisitions.
+- **Tried on practice, signed in as Test, WITHOUT the SQL:** typing
+  sends nothing; leaving the box asks; No puts the box back and sends
+  nothing; Yes is refused in words ("The database has not been updated
+  for changing a short name yet"), the list row unchanged; a long dash
+  is refused before anything is asked. Practice's one material is
+  named "MS" with no short name: nothing of it was changed.
+- **NOT tried by anybody:** a rename that goes through, anywhere but
+  pglite; the reload afterwards; a purchase order raised after it (the
+  full name on the paper); a login that is not an admin.
+- **One thing he may not expect:** the full name on purchase orders
+  holds for every material with a short name. A new order for SS304
+  plate will read "Stainless 304 — ...", where it read "SS304 — ..."
+  until now. Told to him with the report.
+- **Names 0, 393 tests, build clean, the same 5 unchecked writes.**
+- **Waiting on him:** the SQL on practice (asked whether I may paste
+  it), then a rename tried there and read back; the SQL on live, his
+  paste; "push from here"; and his time for Mild Steel itself, after
+  the floor has stopped, everybody reloading afterwards.
