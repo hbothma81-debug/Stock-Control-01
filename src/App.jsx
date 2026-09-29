@@ -62,10 +62,8 @@ import UserManagement from "./UserManagement.jsx";
 import CompanyDetails from "./manager/CompanyDetails.jsx";
 import AppErrors from "./manager/AppErrors.jsx";
 import { countRecentCrashes } from "./lib/appErrors.js";
-import {
-  SECTION_SHAPES, shapeForType, shapeTitle, buildSection, missingBoxes,
-  PIPE_STANDARDS, SCHEDULES, SANS62_CLASSES, pipeSizes, sectionKgPerMetre,
-} from "./manager/sectionShapes.js";
+import { SECTION_SHAPES, shapeForType, shapeTitle, buildSection, missingBoxes, sectionKgPerMetre } from "./manager/sectionShapes.js";
+import { sectionBoxInputs } from "./manager/SectionBoxes.jsx";
 import CutToSize from "./jobs/CutToSize.jsx";
 import BuyOuts from "./jobs/BuyOuts.jsx";
 import Materials from "./jobs/Materials.jsx";
@@ -16133,47 +16131,8 @@ export default function StockControl() {
     setSectionEdit(null);
   }
 
-  // A type's boxes, for the Add row and for changing a row. `setD` takes
-  // an updater, like a state setter. Plain functions, not components:
-  // declared inside App() a component would remount on every keystroke and
-  // throw the cursor out of the box.
-  function sectionBoxInputs(shape, d, setD) {
-    const set = (k, v) => setD((prev) => ({ ...prev, [k]: v }));
-    const boxStyle = { display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 90 };
-    const caption = (text) => <span style={{ fontSize: 12, color: C.muted }}>{text}</span>;
-    const numBox = (k, label) => (
-      <label key={k} style={boxStyle}>
-        {caption(label)}
-        <input style={S.input} inputMode="decimal" value={d[k] ?? ""} onChange={(e) => set(k, e.target.value)} />
-      </label>
-    );
-    // A fixed handful of choices, so a plain select.
-    const pick = (k, label, options, onPick) => (
-      <label key={k} style={boxStyle}>
-        {caption(label)}
-        <select style={S.input} value={d[k] ?? ""} onChange={(e) => (onPick ? onPick(e.target.value) : set(k, e.target.value))}>
-          <option value="">Choose…</option>
-          {options.map(([value, text]) => (
-            <option key={value} value={value}>
-              {text}
-            </option>
-          ))}
-        </select>
-      </label>
-    );
-    if (shape.key !== "PIPE") return shape.boxes.map(([k, label]) => numBox(k, label));
-    const fromTable = d.std === "SCH" || d.std === "SANS62";
-    return [
-      pick("std", "Standard", PIPE_STANDARDS.map((s) => [s.key, s.label]), (v) => setD(() => ({ std: v }))),
-      d.std === "SCH" &&
-        pick("sch", "Schedule", SCHEDULES.map((s) => [s, /^\d+$/.test(s) ? `SCH${s}` : s]), (v) => setD((p) => ({ ...p, sch: v, nb: "" }))),
-      d.std === "SANS62" && pick("cls", "Class", SANS62_CLASSES.map((c) => [c, c]), (v) => setD((p) => ({ ...p, cls: v, nb: "" }))),
-      fromTable && pick("nb", "NB", pipeSizes(d.std, d.std === "SCH" ? d.sch : d.cls).map((n) => [String(n), `NB${n}`])),
-      d.std === "SABS719" && numBox("nb", "NB"),
-      d.std === "SABS719" && numBox("od", "Outside dia"),
-      d.std === "SABS719" && numBox("t", "Wall"),
-    ];
-  }
+  // A type's boxes (`sectionBoxInputs`) are src/manager/SectionBoxes.jsx
+  // since 29 Sep 2026: one copy, which a job's cut list uses too.
 
   function renderShapedSectionAdd(shape) {
     const d = sectionBoxes;
@@ -26827,7 +26786,6 @@ export default function StockControl() {
                   canAccessStockManager
                     ? {
                         grades: (master.grades || []).map((g) => g.shortName || g.name),
-                        renderBoxes: sectionBoxInputs,
                         onTake: ({ shape, built, grade }) => addSectionSize(shape, built, grade),
                       }
                     : null

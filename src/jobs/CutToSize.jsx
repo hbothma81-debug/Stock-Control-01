@@ -3,6 +3,7 @@ import { Plus, Trash2, AlertTriangle, FileText, Pencil, Check, X, PackagePlus, L
 import { C, S } from "../theme.js";
 import TypeToFind from "../TypeToFind.jsx";
 import { SECTION_SHAPES, shapeForType, buildSection, missingBoxes } from "../manager/sectionShapes.js";
+import { sectionBoxInputs } from "../manager/SectionBoxes.jsx";
 import {
   KERF_MM,
   TRIM_MM,
@@ -45,8 +46,9 @@ import {
 // line reads as words with a pencil; the pencil opens it in the boxes a
 // new line is typed in, with Save and Cancel. A line with a piece cut is
 // locked. The section and its material are picked from Stock Manager's
-// Sections list; a size that is not there is made from its type's boxes
-// (`newSize`, for the people who can open Stock Manager), and bars are
+// Sections list; a size that is not there is made from its type's boxes,
+// the same boxes Stock Manager has (`newSize` holds the materials and what
+// to do with the size, for the people who can open Stock Manager), and bars are
 // booked into stock from the Bars needed row (`onAddStock`, for the
 // people who can add stock).
 
@@ -191,8 +193,9 @@ export default function CutToSize({
           value={d.section}
           onChange={(v) => setD((p) => draftWithSection(p, sections, v))}
           emptyLabel="Section"
-          title="The size, from Stock Manager's Sections list"
-          style={{ width: 170 }}
+          title={d.section || "The size, from Stock Manager's Sections list"}
+          // As wide as its name needs: a pipe's is forty letters long.
+          style={{ width: Math.min(360, Math.max(170, String(d.section || "").length * 8.5 + 36)), maxWidth: "100%" }}
           inputStyle={findCell}
         />
         {gradeOptions.length > 0 ? (
@@ -306,9 +309,11 @@ export default function CutToSize({
             style={{ flex: 1, minWidth: 140 }}
           />
         </div>
+        {/* Stock Manager's own boxes for the type, pipe's Standard,
+            Schedule and NB included: one copy (SectionBoxes.jsx). */}
         {shape && (
           <div style={{ ...S.managerAddRow, flexWrap: "wrap", alignItems: "flex-end", marginTop: 6 }}>
-            {newSize.renderBoxes(shape, sizing.boxes || {}, (fn) => setSizing((s) => ({ ...s, boxes: fn(s.boxes || {}) })))}
+            {sectionBoxInputs(shape, sizing.boxes || {}, (fn) => setSizing((s) => ({ ...s, boxes: fn(s.boxes || {}) })))}
           </div>
         )}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", fontSize: 13, color: C.muted, marginTop: 6 }}>

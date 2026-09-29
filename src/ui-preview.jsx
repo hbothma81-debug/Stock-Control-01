@@ -368,16 +368,6 @@ const PREVIEW_CUT_LINES = [
   { id: "c2", drawing_no: "", section: "EA 50x50x5", grade: "300WA", cut_length_mm: 2450, qty: 4, qty_cut: 2, stock_length_m: 6, trim_front: true, note: "two are cut" },
   { id: "c3", drawing_no: "", section: "50x50 sq tube", grade: "mild", cut_length_mm: 600, qty: 3, qty_cut: 0, stock_length_m: 6, trim_front: false, note: "typed before the rule" },
 ];
-// The app hands in Stock Manager's own boxes (pipe's included); these
-// stand in for the plain ones.
-const previewSizeBoxes = (shape, d, setD) =>
-  (shape.boxes || []).map(([k, label]) => (
-    <label key={k} style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 90 }}>
-      <span style={{ fontSize: 12, color: C.muted }}>{label}</span>
-      <input style={S.input} inputMode="decimal" value={d[k] ?? ""} onChange={(e) => setD((p) => ({ ...p, [k]: e.target.value }))} />
-    </label>
-  ));
-
 function CutToSizeDemo() {
   const [sections, setSections] = React.useState(PREVIEW_SECTIONS);
   const [lines, setLines] = React.useState(PREVIEW_CUT_LINES);
@@ -425,7 +415,6 @@ function CutToSizeDemo() {
         onAddStock={canEdit ? (g) => say(`Add stock opened: ${g.section} ${g.grade}, ${g.stockLengthM} m`) : null}
         newSize={{
           grades: ["300WA", "304", "S355"],
-          renderBoxes: previewSizeBoxes,
           onTake: ({ shape, built, grade }) => {
             setSections((p) => (p.some((s) => same(s.name, built.name) && same(s.grade, grade)) ? p : [...p, { name: built.name, grade, type: shape.label, factor: 0, price: 0 }]));
             say(`new size: ${built.name} ${grade} (${shape.label})`);
