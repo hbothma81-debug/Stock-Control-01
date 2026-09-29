@@ -4616,3 +4616,98 @@ been sent to a building conversation. He asked for it to be built here.
      17:50; requests sent after that are not known.
 - **Nothing of the new code has been pressed on live:** not a long
   note, not Rebuild PDF.
+
+---
+
+## 29 Sep 2026 — App health: state of play at wrap-up
+
+Covers 27 and 28 Sep. The entries above hold the detail; this is where
+to start from.
+
+### Done, and live
+
+Live tip `089af4e`, bundle App-CHTBJ_LA.js. Nothing of this
+conversation's holds app code back: the queue is handover notes only.
+
+- **The crash screen**, whole: the net around the app, the small red
+  boxes around pieces (groups A, B, C), every crash written to
+  `app_errors` and read on Stock Manager → App errors, the red number
+  on the Stock Manager button.
+- **The four hidden NUL characters** in App.jsx, and a test that fails
+  on any hidden character from now on.
+- **A delivery note with every invoice request**, by every route, and
+  delivery notes working again at all (live had been jammed since
+  DN-0005 on 31 Aug).
+- **"Not offered on new jobs"** on a stage, and **Delivery Note marked
+  so on live** (28 Sep, his word; the 46 job stages untouched).
+- **DN-0006, DN-0007, DN-0008 made on live** for three of the four
+  requests of 28 Sep (his word).
+- **A long delivery note prints a page a copy**, and **Rebuild PDF** on
+  a note for admins.
+
+### Half-done
+
+- **JOB-0132's delivery note** (Tilvis Engineering, R 2,372.09, 25
+  lines) is not made. Held while the paper was wrong; the fix is live;
+  the Browser pane was signed out of live by then.
+- **The look for long notes made on live on 28 Sep** between about
+  14:00 and 19:00, to rebuild: not done, same reason.
+
+### Every `setup-*.sql` this conversation wrote
+
+Checked 29 Sep from outside, each beside a made-up name that answers
+NO.
+
+| File | Practice | Live |
+|---|---|---|
+| `setup-app-errors.sql` | The table answers. Pasted by the session on his word, both pastes; the check row read "ready"; a crash was written and read back. | The table answers. Paste 1 by the session, paste 2 by him (the session's safety check refused to confirm the query Supabase flagged). The 90-day clearing is a function and a trigger, rules only: not seen from outside; the live check row read "ready" on 27 Sep. |
+| `setup-delivery-notes-per-request.sql` | The three columns answer; `take_delivery_note_number` is there (signed-out call). Pasted by the session on his word; check row "ready". | The three columns answer; the function is there. His paste. The dropped one-row-per-number rule is proven by DN-0006 holding six rows. **The UPDATE rule on `delivery_notes` is rules only and unproven on live:** Check back in has not been pressed there. |
+
+Both are registered in `build-test-database.sh` and
+`CHECK-which-setup-files-are-run.sql`. No other SQL is waiting.
+
+### Built, and not yet tried by Heinrich
+
+He has pressed none of this himself. "Tried" below is the session, on
+practice as Test, read back from the database.
+
+| Feature | Tried by the session | Tried by nobody |
+|---|---|---|
+| Crash screen, whole page | Practice, with a fault put in on purpose | A real crash on live: none has happened |
+| Red boxes around pieces | Count box, both Laser Status screens, laser tabs, job tabs, PDF viewer, Info Request ask window, email button | The answer window, the card's cut list, a count box inside plate Laser Status, a crash with the email window open |
+| App errors list and red number | Practice: a crash written, listed, searched. Live: reads "No crashes in the last 90 days" | The red number showing on live; the 90-day clearing |
+| Note made by itself with a request | The Items tab's Invoice button: 3 lines and 13 lines | **Invoice Now, the floor's Request invoice, closing Invoicing.** Any request sent by a person on live |
+| "Make delivery note" on a sent request | Practice; live three times | JOB-0132's |
+| By-hand Delivery Note, several lines | Practice, to a supplier | To a customer; on live |
+| Check back in writing on the note | Practice | Live |
+| Not offered on new jobs | Practice (Drilling, put back); live for Delivery Note, Edit processes looked at on two jobs | **Copy job** of a job that carries the stage; the **Then box** |
+| Long note, a page a copy | Practice, 13 lines, two pages | A note running on to a second page a copy; a supplier's address of several lines; anything on live |
+| Rebuild PDF | Practice: a customer's and a supplier's note, Cancel, the refusal | From Records → Delivery Notes; live |
+| Paged master lists (18 Sep) | Practice and live, lists and drawings | **Delete for customer**, never run anywhere |
+
+### Waiting on Heinrich
+
+1. **Sign in on live in the Browser pane**, and say so. Then JOB-0132's
+   note and the look for long notes, on the word he gave on 28 Sep.
+2. **Unanswered since 27 Sep:** should a crash tell the admins by
+   itself (a notice), or is the red number enough.
+3. **To try when he is at a screen:** one invoice request by Invoice
+   Now, one by the floor's Request invoice, and a Copy job of a job
+   with Delivery Note on it.
+4. No SQL to run. No permission ticks.
+
+### For the next session
+
+- The two live follow-ups above, by the method in CLAUDE.md ("Pressing
+  one of the app's own buttons on live").
+- Then what the health check left, none started, each a plan with
+  questions first: read Supabase usage after a full working week (2% on
+  27 Sep; the grace period ends 14 Oct); bound the whole-table loads
+  (`loadLaserRaw`, `fetchJobs`, `fetchShortages`); Vite 5 to 8.
+- **Left on practice:** JOB-0008 carries six invoice requests, notes
+  DN-0002 to DN-0007, line 109 out with Test Steel Supplies and two
+  "PDF rebuilt" lines in its History; one test crash in `app_errors`.
+- **The scratchpad goes with the session:** the pglite proofs
+  (`prove-app-errors.mjs`, `prove-delivery-notes.mjs`), the layout
+  measure and the check scripts. What they proved is in the tests and
+  in these notes.
