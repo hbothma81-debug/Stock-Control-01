@@ -4975,3 +4975,36 @@ did: the two type-to-find boxes ran over the box beside them).
 - **Still waiting from 28 Sep, on his sign-in on live:** JOB-0132's
   delivery note (25 lines), and the look for long delivery notes made
   before the fix, to rebuild.
+
+### 29 Sep 2026 — Mild Steel by a short name: PLANNED, six questions asked, nothing built
+
+- **His word:** "Mild steel on its own plan". He wants Mild Steel shown
+  by a short name on live. The area is Stock Manager's.
+- **Why it is not one box:** a material is STORED by its short name
+  where it has one (CLAUDE.md, 16 Sep 2026), and Mild Steel was left
+  with none on purpose: `setup-material-spellings.sql` rewrote every
+  "MS" on live to "Mild Steel" that day. Typing a short name into
+  Material Types changes the list row only (`updateGradeShortName`);
+  every row holding "Mild Steel" would then stop matching stock,
+  sections and prices. That a rename must rewrite the rows was decided
+  on 16 Sep and never built.
+- **Where the name is held:** whole value in `stock_items.grade`,
+  sections' `grade`, `requisitions.item_grade`, `job_cut_items.grade`,
+  `quote_parts.grade` and `.material`, `bom_parts.grade`; at the end of
+  longer text in `laser_programs.material`,
+  `job_quote_items.material_type` and
+  `tube_section_aliases.section_name`. Left alone: CNC bar and
+  fasteners (their own lists), purchase orders already raised,
+  supplier prices (filed under the full name).
+  `setup-material-spellings-2.sql` did exactly this for Galvanised and
+  is the model; `CHECK-material-spellings.sql` reads where each
+  spelling sits.
+- **Recommended to him:** build the rename into the app once (one
+  database function, all tables or none, called when a short name is
+  changed in Stock Manager), then give Mild Steel its short name on
+  that screen, after hours, everybody reloading afterwards. The other
+  way is a one-off SQL for Mild Steel alone.
+- **Asked:** the short name itself; whether paper to suppliers and
+  customers keeps the full name; the app way or the one-off; what
+  stays as history; build here or in Stock Manager; when. And to sign
+  in on live, so where "Mild Steel" is written can be counted first.
