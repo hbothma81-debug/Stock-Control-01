@@ -5110,3 +5110,24 @@ did: the two type-to-find boxes ran over the box beside them).
   Stock Manager -> Material Types on live yet. **Nothing is renamed
   on live: Mild Steel becomes "MS" at the time he picks, the floor
   stopped, every screen reloaded afterwards.**
+- **29 Sep 2026, the three notes made on live, his word ("do three
+  requests"):** DN-0019 for JOB-0168 (4 lines), DN-0020 for JOB-0152
+  (1 line), DN-0021 for JOB-0154 (4 lines), each through Make
+  delivery note on Records -> Invoicing, each read back: the
+  request's own lines and quantities, to FSS, one sheet with both
+  copies. Live seen signed in on the new build (App-BRo_lN_V.js),
+  no console errors, Material Types opens.
+- **FOUND on live, not changed: the Material Types row of Mild Steel
+  ALREADY reads short name "MS"**, while the rows still read "Mild
+  Steel": 77 stock lines, 19 sections, 11 requisitions, 10 cut list
+  lines, 279 laser programs. Written "MS" so far: 4 stock lines, 1
+  section, 1 requisition, 8 programs, and growing, because every
+  picker offers "MS" now. Nearly every material has a short name on
+  that list. The earlier note that Mild Steel had none on live was
+  wrong or has been overtaken (the old box saved at every letter, to
+  the list row only). **So typing "MS" in the box changes nothing:
+  the box sees no change and rewrites nothing.** Ways through, none
+  chosen: empty the box and leave it (everything goes to "Mild
+  Steel"), then type MS (everything goes to "MS"), two renames the
+  same evening; or a button that brings the rows in line with the
+  list, to be planned. Asked of him.
