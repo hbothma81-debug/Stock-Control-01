@@ -5060,3 +5060,12 @@ did: the two type-to-find boxes ran over the box beside them).
   it), then a rename tried there and read back; the SQL on live, his
   paste; "push from here"; and his time for Mild Steel itself, after
   the floor has stopped, everybody reloading afterwards.
+- **The same evening, the SQL file cut into FIVE short pastes** (21,
+  25, 36, 44 and 6 lines; its one function was a paste of about 90).
+  Four functions now: `material_places`, `material_where`,
+  `material_rewrite_place`, `set_material_short_name`. What they do is
+  unchanged. `material_rewrite_place` takes only a place that is on
+  `material_places`'s list, because it builds its statement from what
+  it is handed. pglite: 39 checks, each paste run by itself in order
+  on an empty database included. The app's build is the same file,
+  byte for byte: no app code changed.
