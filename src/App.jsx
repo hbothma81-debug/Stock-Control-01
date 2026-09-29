@@ -26783,14 +26783,7 @@ export default function StockControl() {
                 onAdd={(line) => addJobCutItem(jobDetail.job, line)}
                 onSave={(item, patch, words) => saveJobCutItem(jobDetail.job, item, patch, words)}
                 onAddStock={canAdd ? (group) => openAddStockForCutList(group) : null}
-                newSize={
-                  canAccessStockManager
-                    ? {
-                        grades: (master.grades || []).map((g) => g.shortName || g.name),
-                        onTake: ({ shape, built, grade }) => addSectionSize(shape, built, grade),
-                      }
-                    : null
-                }
+                newSize={canAccessStockManager ? { onTake: ({ shape, built, grade }) => addSectionSize(shape, built, grade) } : null}
                 onRemove={(item) => removeJobCutItem(jobDetail.job, item)}
                 onPrint={() => printCuttingList(jobDetail.job, jobDetail.cutItems || [], jobDetail.allocations || [])}
                 allocations={jobDetail.allocations || []}

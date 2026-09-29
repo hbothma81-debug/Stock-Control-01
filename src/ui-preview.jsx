@@ -415,7 +415,6 @@ function CutToSizeDemo() {
         onRequisition={(g, n) => say(`requisition ${n} of ${g.section}`)}
         onAddStock={canEdit ? (g) => say(`Add stock opened: ${g.section} ${g.grade}, ${g.stockLengthM} m`) : null}
         newSize={{
-          grades: ["300WA", "304", "S355"],
           onTake: ({ shape, built, grade }) => {
             setSections((p) => (p.some((s) => same(s.name, built.name) && same(s.grade, grade)) ? p : [...p, { name: built.name, grade, type: shape.label, factor: 0, price: 0 }]));
             say(`new size: ${built.name} ${grade} (${shape.label})`);

@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  cutHasStarted, blankDraft, draftOfLine, sectionOnList, sectionChoices, gradesOfSection, draftWithSection,
+  cutHasStarted, blankDraft, draftOfLine, sectionOnList, gradesOfSection, draftWithSection,
   checkCutDraft, cutLineChanges, changesMaterial, pileStillUsed, materialAsListed,
+  NO_TYPE, typeOfSection, typeChoices, sizeChoices, materialChoices, draftWithType, draftWithMaterial,
 } from "./cutLineEdit.js";
 
 // Stock Manager's Sections list: a row per size and material.
@@ -19,7 +20,7 @@ const LINE = {
   cut_length_mm: 1200, qty: 4, qty_cut: 0, stock_length_m: 6, trim_front: true, note: "",
 };
 
-const draft = (over) => ({ ...draftOfLine(LINE), ...over });
+const draft = (over) => ({ ...draftOfLine(LINE, SECTIONS), ...over });
 
 test("a line is locked once a piece of it has been cut", () => {
   assert.equal(cutHasStarted({ qty_cut: 0 }), false);
@@ -30,22 +31,108 @@ test("a line is locked once a piece of it has been cut", () => {
 });
 
 test("the boxes of a new line and of a line being changed", () => {
-  assert.deepEqual(blankDraft(), { drawingNo: "", section: "", grade: "", cutLengthMm: "", qty: "", stockLengthM: "6", trimFront: true, note: "" });
-  assert.deepEqual(draftOfLine(LINE), {
-    drawingNo: "P-001", section: "SHS 50x50x3", grade: "300WA", cutLengthMm: "1200", qty: "4", stockLengthM: "6", trimFront: true, note: "",
+  assert.deepEqual(blankDraft(), {
+    drawingNo: "", sectionType: "", section: "", grade: "", cutLengthMm: "", qty: "", stockLengthM: "6", trimFront: true, note: "",
   });
-  assert.equal(draftOfLine({ ...LINE, trim_front: false }).trimFront, false);
-  assert.equal(draftOfLine({ ...LINE, stock_length_m: null }).stockLengthM, "6");
+  // The type is found from the size, on the list: the line does not hold it.
+  assert.deepEqual(draftOfLine(LINE, SECTIONS), {
+    drawingNo: "P-001", sectionType: "Square Tube", section: "SHS 50x50x3", grade: "300WA",
+    cutLengthMm: "1200", qty: "4", stockLengthM: "6", trimFront: true, note: "",
+  });
+  assert.equal(draftOfLine({ ...LINE, section: "50x50 sq tube" }, SECTIONS).sectionType, "");
+  assert.equal(draftOfLine({ ...LINE, trim_front: false }, SECTIONS).trimFront, false);
+  assert.equal(draftOfLine({ ...LINE, stock_length_m: null }, SECTIONS).stockLengthM, "6");
 });
 
-test("the Section box offers every size once, numbers read as numbers, with its type", () => {
-  assert.deepEqual(sectionChoices(SECTIONS), [
-    { value: "EA 50x50x5", label: "EA 50x50x5", hint: "Equal angle" },
-    { value: "FB 40x5", label: "FB 40x5", hint: "Flat bar" },
-    { value: "SHS 50x50x3", label: "SHS 50x50x3", hint: "Square tube" },
-    { value: "SHS 100x100x4", label: "SHS 100x100x4", hint: "Square tube" },
+// As a list grows in the wild: pipes under an old word, a size whose
+// second row lost its type, a size filed under a word of its own, and
+// one under nothing.
+const WILD = [
+  ...SECTIONS,
+  { name: "PIPE NB25 SCH40 33.4OD 26.64ID 3.38WT", grade: "300WA", type: "Seamless Pipe" },
+  { name: "PIPE NB50 SCH40 60.3OD 52.48ID 3.91WT", grade: "300WA", type: "Pipe" },
+  { name: "PIPE NB50 SCH40 60.3OD 52.48ID 3.91WT", grade: "304", type: "" },
+  { name: "Grating 30x3", grade: "300WA", type: "Grating" },
+  { name: "75x75x6", grade: "300WA", type: "" },
+];
+
+test("type and size are two boxes: the types offered", () => {
+  const plain = typeChoices(SECTIONS);
+  // The eighteen fixed types, in Stock Manager's order, whatever is on the list.
+  assert.equal(plain.length, 18);
+  assert.deepEqual(plain.slice(0, 4), [
+    { value: "Square Tube", label: "Square Tube", hint: "SHS" },
+    { value: "Rectangular Tube", label: "Rectangular Tube", hint: "RHS" },
+    { value: "Round Tube", label: "Round Tube", hint: "CHS" },
+    { value: "Pipe", label: "Pipe", hint: "PIPE" },
   ]);
-  assert.deepEqual(sectionChoices(null), []);
+  assert.equal(typeChoices(null).length, 18);
+  // Then any other word in use, then the sizes under no type.
+  const wild = typeChoices(WILD);
+  assert.deepEqual(wild.slice(18), [
+    { value: "Grating", label: "Grating", hint: "" },
+    { value: NO_TYPE, label: NO_TYPE, hint: "sizes filed under no type" },
+  ]);
+  // An old word for a fixed type is not a type of its own.
+  assert.equal(wild.some((t) => t.value === "Seamless Pipe"), false);
+});
+
+test("the type of a size: its shape's word, an old word read as its shape, the first row that has one", () => {
+  assert.equal(typeOfSection(WILD, "SHS 50x50x3"), "Square Tube");
+  assert.equal(typeOfSection(WILD, "shs 50x50x3"), "Square Tube");
+  assert.equal(typeOfSection(WILD, "PIPE NB25 SCH40 33.4OD 26.64ID 3.38WT"), "Pipe");
+  assert.equal(typeOfSection(WILD, "PIPE NB50 SCH40 60.3OD 52.48ID 3.91WT"), "Pipe");
+  assert.equal(typeOfSection(WILD, "Grating 30x3"), "Grating");
+  assert.equal(typeOfSection(WILD, "75x75x6"), NO_TYPE);
+  assert.equal(typeOfSection(WILD, "not on the list"), "");
+  assert.equal(typeOfSection(null, "SHS 50x50x3"), "");
+});
+
+test("the Size box offers the sizes of the type picked, and nothing until one is", () => {
+  assert.deepEqual(sizeChoices(WILD, "", ""), []);
+  assert.deepEqual(sizeChoices(WILD, "Square Tube", ""), ["SHS 50x50x3", "SHS 100x100x4"]);
+  assert.deepEqual(sizeChoices(WILD, "square tube", ""), ["SHS 50x50x3", "SHS 100x100x4"]);
+  // A pipe is found under Pipe, and nowhere else.
+  assert.deepEqual(sizeChoices(WILD, "Pipe", ""), ["PIPE NB25 SCH40 33.4OD 26.64ID 3.38WT", "PIPE NB50 SCH40 60.3OD 52.48ID 3.91WT"]);
+  assert.deepEqual(sizeChoices(WILD, "Round Tube", ""), []);
+  assert.deepEqual(sizeChoices(WILD, "Grating", ""), ["Grating 30x3"]);
+  assert.deepEqual(sizeChoices(WILD, NO_TYPE, ""), ["75x75x6"]);
+});
+
+test("with a material picked, the Size box offers the sizes held in it", () => {
+  assert.deepEqual(sizeChoices(WILD, "Square Tube", "304"), ["SHS 50x50x3"]);
+  assert.deepEqual(sizeChoices(WILD, "Square Tube", "300wa"), ["SHS 50x50x3", "SHS 100x100x4"]);
+  assert.deepEqual(sizeChoices(WILD, "Pipe", "304"), ["PIPE NB50 SCH40 60.3OD 52.48ID 3.91WT"]);
+  assert.deepEqual(sizeChoices(WILD, "Square Tube", "S355"), []);
+  // A size held with no material is offered only while none is picked.
+  assert.deepEqual(sizeChoices(WILD, "Flat Bar", ""), ["FB 40x5"]);
+  assert.deepEqual(sizeChoices(WILD, "Flat Bar", "300WA"), []);
+});
+
+test("the Material box offers Stock Manager's materials, by the name the list holds them under", () => {
+  const materials = [{ name: "Stainless 304", shortName: "304" }, { name: "Mild Steel", shortName: "MS" }, { name: "3CR12", shortName: "" }, { name: "ms" }];
+  assert.deepEqual(materialChoices(materials, SECTIONS), ["3CR12", "304", "MS"]);
+  // Without them, the materials the list's sizes are held in.
+  assert.deepEqual(materialChoices(null, SECTIONS), ["300WA", "304"]);
+  assert.deepEqual(materialChoices([], null), []);
+});
+
+test("another type takes the size with it and leaves the material", () => {
+  const d = { ...blankDraft(), sectionType: "Square Tube", section: "SHS 50x50x3", grade: "300WA", qty: "4" };
+  assert.deepEqual(draftWithType(d, "Pipe"), { ...d, sectionType: "Pipe", section: "" });
+  assert.deepEqual(draftWithType(d, ""), { ...d, sectionType: "", section: "" });
+  // The same type again changes nothing.
+  assert.deepEqual(draftWithType(d, "Square Tube"), d);
+});
+
+test("another material keeps the size where it is held in that one too", () => {
+  const d = { ...blankDraft(), sectionType: "Square Tube", section: "SHS 50x50x3", grade: "300WA" };
+  assert.deepEqual(draftWithMaterial(d, SECTIONS, "304"), { ...d, grade: "304" });
+  assert.deepEqual(draftWithMaterial(d, SECTIONS, "S355"), { ...d, grade: "S355", section: "" });
+  assert.deepEqual(draftWithMaterial(d, SECTIONS, ""), { ...d, grade: "" });
+  // No size yet, or a size from before the rule: only the material moves.
+  assert.deepEqual(draftWithMaterial({ ...d, section: "" }, SECTIONS, "S355"), { ...d, section: "", grade: "S355" });
+  assert.deepEqual(draftWithMaterial({ ...d, section: "50x50 sq tube" }, SECTIONS, "S355"), { ...d, section: "50x50 sq tube", grade: "S355" });
 });
 
 test("a section is on the list whatever its capitals, and comes back as the list spells it", () => {
@@ -62,7 +149,12 @@ test("the materials a size is held in", () => {
   assert.deepEqual(gradesOfSection(SECTIONS, "not there"), []);
 });
 
-test("picking a section fills in its only material, keeps one it shares, clears one it has not", () => {
+test("picking a size sets its type where none was picked", () => {
+  assert.equal(draftWithSection(blankDraft(), SECTIONS, "EA 50x50x5").sectionType, "Equal Angle");
+  assert.equal(draftWithSection({ ...blankDraft(), sectionType: "Square Tube" }, SECTIONS, "SHS 50x50x3").sectionType, "Square Tube");
+});
+
+test("picking a size fills in its only material, keeps one it shares, clears one it has not", () => {
   assert.equal(draftWithSection(blankDraft(), SECTIONS, "EA 50x50x5").grade, "300WA");
   assert.equal(draftWithSection(blankDraft(), SECTIONS, "SHS 50x50x3").grade, "");
   assert.equal(draftWithSection({ ...blankDraft(), grade: "304" }, SECTIONS, "SHS 50x50x3").grade, "304");
@@ -86,7 +178,8 @@ test("a section is picked, never typed: one that is not on the list is refused",
   assert.equal(got.ok, false);
   assert.match(got.why, /50x50x3 square is not on the Sections list/);
   assert.match(got.why, /New size/);
-  assert.equal(checkCutDraft(draft({ section: "" }), SECTIONS).why, "Pick a section first.");
+  assert.equal(checkCutDraft(draft({ section: "" }), SECTIONS).why, "Pick the size.");
+  assert.equal(checkCutDraft(blankDraft(), SECTIONS).why, "Pick the section type, then the size.");
 });
 
 test("the material is one the size is held in", () => {
@@ -111,18 +204,18 @@ test("the numbers: a length, a whole number of pieces, a bar", () => {
 
 test("a line from before the rule keeps its own section while the section is left alone", () => {
   const old = { ...LINE, section: "50x50x3 SQ TUBE", grade: "mild" };
-  const kept = checkCutDraft({ ...draftOfLine(old), qty: "9" }, SECTIONS, old);
+  const kept = checkCutDraft({ ...draftOfLine(old, SECTIONS), qty: "9" }, SECTIONS, old);
   assert.equal(kept.ok, true);
   assert.equal(kept.values.section, "50x50x3 SQ TUBE");
   assert.equal(kept.values.grade, "mild");
   assert.equal(kept.values.qty, 9);
   // As a new line it could not be saved.
-  assert.equal(checkCutDraft(draftOfLine(old), SECTIONS).ok, false);
+  assert.equal(checkCutDraft(draftOfLine(old, SECTIONS), SECTIONS).ok, false);
   // Changed to another spelling that is not on the list: refused.
-  assert.equal(checkCutDraft({ ...draftOfLine(old), section: "50x50x3 tube" }, SECTIONS, old).ok, false);
+  assert.equal(checkCutDraft({ ...draftOfLine(old, SECTIONS), section: "50x50x3 tube" }, SECTIONS, old).ok, false);
   // Moved on to the list: its material must then be one of the size's.
-  assert.equal(checkCutDraft({ ...draftOfLine(old), section: "SHS 50x50x3" }, SECTIONS, old).ok, false);
-  assert.equal(checkCutDraft({ ...draftOfLine(old), section: "SHS 50x50x3", grade: "304" }, SECTIONS, old).ok, true);
+  assert.equal(checkCutDraft({ ...draftOfLine(old, SECTIONS), section: "SHS 50x50x3" }, SECTIONS, old).ok, false);
+  assert.equal(checkCutDraft({ ...draftOfLine(old, SECTIONS), section: "SHS 50x50x3", grade: "304" }, SECTIONS, old).ok, true);
 });
 
 test("what a save changes, in columns and in words", () => {

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Plus, Trash2, AlertTriangle, FileText, Pencil, Check, X, PackagePlus, Lock } from "lucide-react";
 import { C, S } from "../theme.js";
 import TypeToFind from "../TypeToFind.jsx";
-import { SECTION_SHAPES, shapeForType, buildSection, missingBoxes } from "../manager/sectionShapes.js";
+import { shapeForType, buildSection, missingBoxes } from "../manager/sectionShapes.js";
 import { sectionBoxInputs } from "../manager/SectionBoxes.jsx";
 import {
   KERF_MM,
@@ -24,8 +24,12 @@ import {
   blankDraft,
   draftOfLine,
   sectionOnList,
-  sectionChoices,
+  typeChoices,
+  sizeChoices,
+  materialChoices,
   gradesOfSection,
+  draftWithType,
+  draftWithMaterial,
   draftWithSection,
   checkCutDraft,
   cutLineChanges,
@@ -47,11 +51,14 @@ import {
 // line reads as words with a pencil; the pencil opens it in the boxes a
 // new line is typed in, with Save and Cancel. A line with a piece cut is
 // locked. The section and its material are picked from Stock Manager's
-// Sections list; a size that is not there is made from its type's boxes,
-// the same boxes Stock Manager has (`newSize` holds the materials and what
-// to do with the size, for the people who can open Stock Manager), and bars are
-// booked into stock from the Bars needed row (`onAddStock`, for the
-// people who can add stock).
+// Sections list, in three boxes in the order of the New stock item form:
+// Section type, Material, Size. The type and the size are never one box
+// (his word the same day): the first build had one box over every size of
+// every type. A size that is not on the list is made from its type's
+// boxes, the same boxes Stock Manager has, for the type and material the
+// row already reads (`newSize`, for the people who can open Stock
+// Manager), and bars are booked into stock from the Bars needed row
+// (`onAddStock`, for the people who can add stock).
 
 const sameText = (a, b) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
 
@@ -104,7 +111,8 @@ export default function CutToSize({
   const [edit, setEdit] = useState(null);
   const [saving, setSaving] = useState(false);
   // The New size boxes, under whichever form asked for them:
-  // { where: "add" or a line's id, type, boxes, grade }.
+  // { where: "add" or a line's id, boxes }. The type and the material are
+  // the row's own.
   const [sizing, setSizing] = useState(null);
 
   const partNumbers = [...new Set((customerItems || []).map((i) => i.partNumber || i.name).filter(Boolean))].sort();
@@ -135,13 +143,20 @@ export default function CutToSize({
     // Keep the section and stock length: the next line is usually more of
     // the same bar.
     if (ok) {
-      setDraft((d) => ({ ...blankDraft(), section: d.section, grade: d.grade, stockLengthM: d.stockLengthM, trimFront: d.trimFront }));
+      setDraft((d) => ({
+        ...blankDraft(),
+        sectionType: d.sectionType,
+        section: d.section,
+        grade: d.grade,
+        stockLengthM: d.stockLengthM,
+        trimFront: d.trimFront,
+      }));
       setSizing(null);
     }
   }
 
   function startEdit(line) {
-    const d = draftOfLine(line);
+    const d = draftOfLine(line, sections);
     // As the list spells them, so the boxes show what is chosen: the
     // section by its listed name, the material by the name the list holds
     // it under ("Mild Steel" on an old line is the list's "MS").
@@ -177,12 +192,21 @@ export default function CutToSize({
   // function, not a component: declared in here a component would be made
   // afresh on every keystroke and throw the cursor out of the box.
   function lineBoxes(d, setD, was, onEnter) {
-    const choices = sectionChoices(sections);
+    const types = typeChoices(sections);
+    const allMaterials = materialChoices(materials, sections);
+    // A material from before the rule that nobody lists is kept on show.
+    const materialOptions =
+      d.grade && !allMaterials.some((g) => sameText(g, d.grade))
+        ? [...allMaterials, { value: d.grade, label: d.grade, hint: "not on the Material Types list" }]
+        : allMaterials;
+    const sizes = sizeChoices(sections, d.sectionType, d.grade);
     const offList = d.section && !sectionOnList(sections, d.section);
-    const sectionOptions = offList ? [...choices, { value: d.section, label: d.section, hint: "not on the Sections list" }] : choices;
-    const grades = gradesOfSection(sections, d.section);
-    const oddGrade = d.grade && !grades.some((g) => sameText(g, d.grade));
-    const gradeOptions = oddGrade ? [...grades, { value: d.grade, label: d.grade, hint: offList ? "as the line was saved" : "not a material of this size" }] : grades;
+    // So is a size: one typed before the rule, or one not held in the
+    // material the row now reads.
+    const sizeOptions =
+      d.section && !sizes.some((s) => sameText(s, d.section))
+        ? [...sizes, { value: d.section, label: d.section, hint: offList ? "not on the Sections list" : "not held in this material" }]
+        : sizes;
     return (
       <>
         <input
@@ -192,29 +216,43 @@ export default function CutToSize({
           onChange={(e) => setD((p) => ({ ...p, drawingNo: e.target.value }))}
           style={cell(110)}
         />
+        {/* Three boxes, in the order of the New stock item form. The type
+            and the size are never one box. */}
         <TypeToFind
-          options={sectionOptions}
-          value={d.section}
-          onChange={(v) => setD((p) => draftWithSection(p, sections, v))}
-          emptyLabel="Section"
-          title={d.section || "The size, from Stock Manager's Sections list"}
-          // As wide as its name needs: a pipe's is forty letters long.
-          style={{ width: Math.min(360, Math.max(170, String(d.section || "").length * 8.5 + 36)), maxWidth: "100%" }}
+          options={types}
+          value={d.sectionType}
+          onChange={(v) => {
+            setD((p) => draftWithType(p, v));
+            // Another type has other boxes: New size starts again.
+            setSizing((s) => (s ? { ...s, boxes: {} } : s));
+          }}
+          emptyLabel="Section type"
+          title="Square Tube, Pipe, Flat Bar: the type first, then a size of it"
+          // Every type, not the first twelve: the list is short.
+          maxShown={types.length}
+          style={{ width: 170 }}
           inputStyle={findCell}
         />
-        {gradeOptions.length > 0 ? (
-          <TypeToFind
-            options={gradeOptions}
-            value={d.grade}
-            onChange={(v) => setD((p) => ({ ...p, grade: v }))}
-            emptyLabel="Material"
-            title="The materials this size is held in"
-            style={{ width: 120 }}
-            inputStyle={findCell}
-          />
-        ) : (
-          d.section && <span style={{ fontSize: 12, color: C.muted }}>no material</span>
-        )}
+        <TypeToFind
+          options={materialOptions}
+          value={d.grade}
+          onChange={(v) => setD((p) => draftWithMaterial(p, sections, v))}
+          emptyLabel="Material"
+          title="The material. With one picked, the Size box lists the sizes held in it."
+          maxShown={Math.max(12, materialOptions.length)}
+          style={{ width: 120 }}
+          inputStyle={findCell}
+        />
+        <TypeToFind
+          options={sizeOptions}
+          value={d.section}
+          onChange={(v) => setD((p) => draftWithSection(p, sections, v))}
+          emptyLabel={d.sectionType ? "Size" : "Size: type first"}
+          title={d.section || (d.sectionType ? `The sizes of ${d.sectionType} on Stock Manager's Sections list` : "Pick the section type first")}
+          // As wide as its name needs: a pipe's is forty letters long.
+          style={{ width: Math.min(360, Math.max(150, String(d.section || "").length * 8.5 + 36)), maxWidth: "100%" }}
+          inputStyle={findCell}
+        />
         <UnitInput
           unit="mm"
           min="1"
@@ -265,27 +303,26 @@ export default function CutToSize({
   }
 
   // A size that is not on the list, made from its type's fixed boxes as
-  // Stock Manager makes it, then picked for the line being typed.
+  // Stock Manager makes it, then picked for the line being typed. The
+  // type and the material are the ones the row reads, as on the New stock
+  // item form: there is nothing to pick twice.
   function sizeBlock(where, d, setD) {
     if (!newSize) return null;
+    const shape = shapeForType(d.sectionType);
+    // A type that has no boxes of its own (a word from before the fixed
+    // types, or none) has no way to make a size here: Stock Manager does.
+    if (!shape) return null;
     if (!sizing || sizing.where !== where) {
       return (
-        <button
-          type="button"
-          className="stk-btn"
-          style={linkBtn}
-          onClick={() =>
-            setSizing({ where, type: shapeForType(findSectionType ? findSectionType(d.section) : "")?.label || "", boxes: {}, grade: d.grade || "" })
-          }
-        >
+        <button type="button" className="stk-btn" style={linkBtn} onClick={() => setSizing({ where, boxes: {} })}>
           Size not on the list? New size
         </button>
       );
     }
-    const shape = shapeForType(sizing.type);
-    const grade = String(sizing.grade || "").trim();
-    const built = shape && grade ? buildSection(shape, sizing.boxes) : null;
-    const missing = shape ? missingBoxes(shape, sizing.boxes) : [];
+    const grade = String(d.grade || "").trim();
+    const gradeListed = materialChoices(materials, sections).some((g) => sameText(g, grade));
+    const built = grade && gradeListed ? buildSection(shape, sizing.boxes) : null;
+    const missing = missingBoxes(shape, sizing.boxes);
     const onList = built && gradesOfSection(sections, built.name).some((g) => sameText(g, grade));
     const take = async () => {
       if (!built) return;
@@ -296,32 +333,15 @@ export default function CutToSize({
     };
     return (
       <div style={{ marginTop: 8, padding: 8, border: `1px dashed ${C.border}`, borderRadius: 6 }}>
-        <label style={S.label}>New size</label>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-          <TypeToFind
-            options={SECTION_SHAPES.map((s) => ({ value: s.label, label: s.label, hint: s.key }))}
-            value={sizing.type}
-            onChange={(v) => setSizing((s) => ({ ...s, type: v, boxes: {} }))}
-            emptyLabel="Section type"
-            // Every type, not the first twelve: the list is fixed and short.
-            maxShown={SECTION_SHAPES.length}
-            style={{ flex: 1, minWidth: 170 }}
-          />
-          <TypeToFind
-            options={newSize.grades || []}
-            value={sizing.grade}
-            onChange={(v) => setSizing((s) => ({ ...s, grade: v }))}
-            emptyLabel="Material"
-            style={{ flex: 1, minWidth: 140 }}
-          />
-        </div>
+        <label style={S.label}>
+          New size of {shape.label}
+          {grade ? `, ${grade}` : ""}
+        </label>
         {/* Stock Manager's own boxes for the type, pipe's Standard,
             Schedule and NB included: one copy (SectionBoxes.jsx). */}
-        {shape && (
-          <div style={{ ...S.managerAddRow, flexWrap: "wrap", alignItems: "flex-end", marginTop: 6 }}>
-            {sectionBoxInputs(shape, sizing.boxes || {}, (fn) => setSizing((s) => ({ ...s, boxes: fn(s.boxes || {}) })))}
-          </div>
-        )}
+        <div style={{ ...S.managerAddRow, flexWrap: "wrap", alignItems: "flex-end", marginTop: 6 }}>
+          {sectionBoxInputs(shape, sizing.boxes || {}, (fn) => setSizing((s) => ({ ...s, boxes: fn(s.boxes || {}) })))}
+        </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", fontSize: 13, color: C.muted, marginTop: 6 }}>
           <span style={{ flex: 1, minWidth: 160 }}>
             {built ? (
@@ -332,10 +352,10 @@ export default function CutToSize({
                 </b>
                 {onList ? "" : " to Stock Manager → Sections"}.
               </>
-            ) : !shape ? (
-              "Pick the section type first."
             ) : !grade ? (
-              "Pick the material, from the list."
+              "Pick the material in the row above first."
+            ) : !gradeListed ? (
+              `${grade} is not on the Material Types list. Pick the material in the row above.`
             ) : (
               `Still needed: ${missing.join(", ")}.`
             )}

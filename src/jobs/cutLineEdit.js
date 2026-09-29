@@ -15,17 +15,27 @@
 //     not on the list is made from its type's boxes (New size).
 //   - A line saved before this rule keeps a section that is not on the
 //     list for as long as its section is left alone.
+//   - The section's TYPE and its SIZE are two boxes, never one ("section
+//     type and size should not be the same pillbox"): the type first
+//     (Pipe, Square Tube), then the material, then a size of that type,
+//     in the order of the New stock item form. The first build had one
+//     box over every size of every type, and a pipe was lost in it. The
+//     type is for finding the size only: the line saves the size's name
+//     and its material, as it always did.
 
 import { DEFAULT_STOCK_M } from "./cutToSize.js";
+import { SECTION_SHAPES, shapeForType } from "../manager/sectionShapes.js";
 
 const sameText = (a, b) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+const byName = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 
 // Cutting has started on the line: it is locked.
 export const cutHasStarted = (line) => Number(line?.qty_cut || 0) > 0;
 
-// What the boxes hold: text, as boxes do.
+// What the boxes hold: text, as boxes do. `sectionType` is never saved.
 export const blankDraft = () => ({
   drawingNo: "",
+  sectionType: "",
   section: "",
   grade: "",
   cutLengthMm: "",
@@ -35,10 +45,11 @@ export const blankDraft = () => ({
   note: "",
 });
 
-export function draftOfLine(line) {
+export function draftOfLine(line, sections) {
   const text = (v) => (v === null || v === undefined ? "" : String(v));
   return {
     drawingNo: text(line?.drawing_no),
+    sectionType: typeOfSection(sections, line?.section),
     section: text(line?.section),
     grade: text(line?.grade),
     cutLengthMm: text(line?.cut_length_mm),
@@ -55,16 +66,90 @@ export function sectionOnList(sections, name) {
   return hit ? String(hit.name).trim() : null;
 }
 
-// Every size once, A to Z with numbers read as numbers, each with its type
-// as a hint: what the Section box offers.
-export function sectionChoices(sections) {
-  const seen = new Map();
-  for (const s of sections || []) {
-    const name = String(s?.name || "").trim();
-    if (!name || seen.has(name.toLowerCase())) continue;
-    seen.set(name.toLowerCase(), { value: name, label: name, hint: String(s?.type || "").trim() });
+// Sizes filed under no type at all are found under this.
+export const NO_TYPE = "No type";
+
+// The type a Sections row files under: its shape's own word where its
+// type is one of the fixed ones or an old word for one ("Seamless Pipe"
+// is Pipe), else the row's own word, else NO_TYPE.
+function typeOfRow(row) {
+  const word = String(row?.type || "").trim();
+  if (!word) return NO_TYPE;
+  return shapeForType(word)?.label || word;
+}
+
+// The type of a size on the list, or "" for one that is not on it. A size
+// has a row per material, and one of them may have lost its type: the
+// first row that has one speaks for the size.
+export function typeOfSection(sections, name) {
+  const rows = (sections || []).filter((s) => String(s?.name || "").trim() && sameText(s?.name, name));
+  if (rows.length === 0) return "";
+  return typeOfRow(rows.find((r) => String(r?.type || "").trim()) || rows[0]);
+}
+
+// Every size on the list once, with its type and the materials it is held
+// in: one pass over the list, however long it grows.
+function sizesOnList(sections) {
+  const sizes = new Map();
+  for (const row of sections || []) {
+    const name = String(row?.name || "").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (!sizes.has(key)) sizes.set(key, { name, type: "", grades: [] });
+    const size = sizes.get(key);
+    if (!size.type && String(row?.type || "").trim()) size.type = typeOfRow(row);
+    const grade = String(row?.grade || "").trim();
+    if (grade && !size.grades.some((g) => sameText(g, grade))) size.grades.push(grade);
   }
-  return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }));
+  for (const size of sizes.values()) if (!size.type) size.type = NO_TYPE;
+  return [...sizes.values()];
+}
+
+// What the Section type box offers: the fixed types in Stock Manager's
+// order, then any other word a size on the list is filed under, then
+// NO_TYPE where a size has none.
+export function typeChoices(sections) {
+  const out = SECTION_SHAPES.map((s) => ({ value: s.label, label: s.label, hint: s.key }));
+  const seen = new Set(out.map((o) => o.value.toLowerCase()));
+  const others = [];
+  let untyped = false;
+  for (const size of sizesOnList(sections)) {
+    if (size.type === NO_TYPE) untyped = true;
+    else if (!seen.has(size.type.toLowerCase())) {
+      seen.add(size.type.toLowerCase());
+      others.push(size.type);
+    }
+  }
+  for (const type of others.sort(byName)) out.push({ value: type, label: type, hint: "" });
+  if (untyped) out.push({ value: NO_TYPE, label: NO_TYPE, hint: "sizes filed under no type" });
+  return out;
+}
+
+// What the Size box offers: the sizes of one type, each once, A to Z with
+// numbers read as numbers. With a material picked, only the sizes held in
+// it: a size in a material it is not held in is made with New size.
+export function sizeChoices(sections, type, grade) {
+  if (!String(type || "").trim()) return [];
+  const material = String(grade || "").trim();
+  return sizesOnList(sections)
+    .filter((size) => sameText(size.type, type))
+    .filter((size) => !material || size.grades.some((g) => sameText(g, material)))
+    .map((size) => size.name)
+    .sort(byName);
+}
+
+// What the Material box offers: Stock Manager's Material Types, each by
+// the name the Sections list holds it under (its short name where it has
+// one). Without them, the materials the list's sizes are held in.
+export function materialChoices(materials, sections) {
+  const out = [];
+  const add = (name) => {
+    const n = String(name || "").trim();
+    if (n && !out.some((g) => sameText(g, n))) out.push(n);
+  };
+  for (const m of materials || []) add(m?.shortName || m?.name);
+  if (out.length === 0) for (const s of sections || []) add(s?.grade);
+  return out.sort(byName);
 }
 
 // The materials a size is held in, each once, in the list's order.
@@ -94,12 +179,37 @@ export function materialAsListed(materials, sections, sectionName, grade) {
   return held.find((g) => sameText(g, material.shortName) || sameText(g, material.name)) || typed;
 }
 
-// Picking a section fills its material in where there is only one, and
-// clears a material the new section is not held in.
+// Another type: its sizes are other sizes, so the size goes. The material
+// stays, it is the same steel.
+export function draftWithType(draft, type) {
+  if (sameText(draft?.sectionType, type)) return { ...draft, sectionType: type };
+  return { ...draft, sectionType: type, section: "" };
+}
+
+// Another material: the size stays where it is held in that material too,
+// and goes where it is not (the Size box then lists the ones that are).
+// A size from before the rule, not on the list at all, is left alone.
+export function draftWithMaterial(draft, sections, grade) {
+  const size = String(draft?.section || "").trim();
+  const keeps =
+    !size ||
+    !String(grade || "").trim() ||
+    !sectionOnList(sections, size) ||
+    gradesOfSection(sections, size).some((g) => sameText(g, grade));
+  return { ...draft, grade, section: keeps ? draft.section : "" };
+}
+
+// Picking a size fills its material in where there is only one, clears a
+// material the size is not held in, and sets the type where none was.
 export function draftWithSection(draft, sections, name) {
   const grades = gradesOfSection(sections, name);
   const kept = grades.find((g) => sameText(g, draft.grade));
-  return { ...draft, section: name, grade: kept || (grades.length === 1 ? grades[0] : "") };
+  return {
+    ...draft,
+    sectionType: draft?.sectionType || typeOfSection(sections, name),
+    section: name,
+    grade: kept || (grades.length === 1 ? grades[0] : ""),
+  };
 }
 
 const wholeNumber = (v) => Number.isInteger(Number(v)) && String(v).trim() !== "";
@@ -109,7 +219,9 @@ const wholeNumber = (v) => Number.isInteger(Number(v)) && String(v).trim() !== "
 // them, or { ok: false, why } with words for the person.
 export function checkCutDraft(draft, sections, was = null) {
   const typed = String(draft?.section || "").trim();
-  if (!typed) return { ok: false, why: "Pick a section first." };
+  if (!typed) {
+    return { ok: false, why: String(draft?.sectionType || "").trim() ? "Pick the size." : "Pick the section type, then the size." };
+  }
   const keepsSection = !!was && sameText(was.section, typed);
   const listed = sectionOnList(sections, typed);
   if (!listed && !keepsSection) {
