@@ -175,7 +175,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-material-short-name.sql',   'function material_rewrite_place',
       exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'material_rewrite_place')),
     ('setup-material-short-name.sql',   'function set_material_short_name',
-      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'set_material_short_name'))
+      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'set_material_short_name')),
+    ('setup-material-out-of-line.sql',  'function material_rows_out_of_line',
+      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'material_rows_out_of_line'))
 )
 select
   setup_file,

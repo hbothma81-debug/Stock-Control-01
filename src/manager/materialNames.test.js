@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   storedName, materialNamed, fullNameOf, withFullMaterial, shortNameRefusal, shortNameChanged,
-  renameQuestion, renameSummary, renameRefusalWords,
+  renameQuestion, renameSummary, renameRefusalWords, outOfLineByMaterial, outOfLineFor, outOfLineWords, bringInLineQuestion,
 } from "./materialNames.js";
 
 // Stock Manager's Material Types, as live has them.
@@ -120,4 +120,46 @@ test("every place the database rewrites has its words here, or is counted with a
   const said = renameSummary({ material: "Mild Steel", now: "MS", changed: counts });
   assert.doesNotMatch(said, / in [a-z_]+\.[a-z_]+/, "a place has no words: " + said);
   assert.equal(said.split(",").length, 9);
+});
+
+// Live on 29 Sep 2026: the list said "MS", the rows still said "Mild Steel".
+const OUT = [
+  { material: "Mild Steel", place: "stock_items.grade", rows_out: 77 },
+  { material: "Mild Steel", place: "master_factor_items.grade", rows_out: 19 },
+  { material: "Mild Steel", place: "requisitions.item_grade", rows_out: 11 },
+  { material: "Mild Steel", place: "requisitions.item_label", rows_out: 11 },
+  { material: "Mild Steel", place: "laser_programs.material", rows_out: "279" },
+  { material: "Stainless 304", place: "stock_items.grade", rows_out: 1 },
+  { material: "Galvanised", place: "some_new_table.grade", rows_out: 2 },
+  { material: "Galvanised", place: "stock_items.grade", rows_out: 0 },
+];
+
+test("rows out of line: one entry a material, a requisition's label not counted twice", () => {
+  const by = outOfLineByMaterial(OUT);
+  const ms = outOfLineFor(by, { name: "mild steel ", shortName: "MS" });
+  assert.equal(ms.total, 386);
+  assert.deepEqual(ms.parts, ["77 stock lines", "19 sections", "11 requisitions", "279 laser programs"]);
+  assert.equal(outOfLineFor(by, { name: "Stainless 304" }).total, 1);
+  assert.deepEqual(outOfLineFor(by, { name: "Galvanised" }).parts, ["2 in some_new_table.grade"]);
+  assert.equal(outOfLineFor(by, { name: "Domex" }), null);
+  assert.equal(outOfLineFor(null, { name: "Mild Steel" }), null);
+  assert.equal(outOfLineByMaterial(null).size, 0);
+});
+
+test("rows out of line: the words on the row and the question", () => {
+  const by = outOfLineByMaterial(OUT);
+  const material = { name: "Mild Steel", shortName: "MS" };
+  assert.equal(
+    outOfLineWords(material, outOfLineFor(by, material)),
+    '386 rows are not written "MS": 77 stock lines, 19 sections, 11 requisitions, 279 laser programs.'
+  );
+  const one = { name: "Stainless 304", shortName: "SS304" };
+  assert.equal(outOfLineWords(one, outOfLineFor(by, one)), '1 row is not written "SS304": 1 stock line.');
+  const q = bringInLineQuestion(material, outOfLineFor(by, material));
+  assert.match(q, /^Write every row of Mild Steel as "MS"\?/);
+  assert.match(q, /77 stock lines, 19 sections, 11 requisitions, 279 laser programs are written another way/);
+  assert.match(q, /when the floor has stopped/);
+  // A material with no short name is held by its full name.
+  const domex = { name: "Domex" };
+  assert.match(bringInLineQuestion(domex, { total: 1, parts: ["1 stock line"] }), /as "Domex"\?[\s\S]*1 stock line is written another way/);
 });

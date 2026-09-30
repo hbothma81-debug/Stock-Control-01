@@ -65,7 +65,10 @@ import { countRecentCrashes } from "./lib/appErrors.js";
 import { SECTION_SHAPES, shapeForType, shapeTitle, buildSection, missingBoxes, sectionKgPerMetre } from "./manager/sectionShapes.js";
 import { sectionBoxInputs } from "./manager/SectionBoxes.jsx";
 import ShortNameBox from "./manager/ShortNameBox.jsx";
-import { withFullMaterial, shortNameRefusal, shortNameChanged, renameQuestion, renameSummary, renameRefusalWords } from "./manager/materialNames.js";
+import {
+  withFullMaterial, shortNameRefusal, shortNameChanged, renameQuestion, renameSummary, renameRefusalWords,
+  outOfLineByMaterial, outOfLineFor, outOfLineWords, bringInLineQuestion,
+} from "./manager/materialNames.js";
 import CutToSize from "./jobs/CutToSize.jsx";
 import BuyOuts from "./jobs/BuyOuts.jsx";
 import Materials from "./jobs/Materials.jsx";
@@ -2221,6 +2224,10 @@ export default function StockControl() {
   // The material whose short name is being changed in the database right
   // now, by its name: the boxes wait while it is.
   const [renamingMaterial, setRenamingMaterial] = useState(null);
+  // Materials whose rows are written another way than the list holds them
+  // (outOfLineByMaterial, materialNames.js). Null until an admin opens
+  // Material Types, and on a database without the count.
+  const [materialsOutOfLine, setMaterialsOutOfLine] = useState(null);
   const [managerPrice, setManagerPrice] = useState("");
   const [stockCodeQuery, setStockCodeQuery] = useState("");
   const [stockCodeCustomerFilter, setStockCodeCustomerFilter] = useState("");
@@ -2637,8 +2644,29 @@ export default function StockControl() {
       ...(tab === "jobs" && jobsStageFilter && jobsList !== null ? [refreshJobStages()] : []),
       // An admin's red number of crashes: a number, no rows.
       readCrashCount(),
+      // The "not written MS" lines, while Material Types is the screen.
+      ...(showManager && managerTab === "grades" ? [readMaterialsOutOfLine()] : []),
     ]);
     setIsRefreshing(false);
+  }
+
+  // Which materials are written another way than the Material Types list
+  // holds them (material_rows_out_of_line, setup-material-out-of-line.sql):
+  // a handful of numbers, no rows. Admins only, because only an admin is
+  // offered "Bring in line". When Material Types is opened and on Refresh
+  // while it shows; never on a timer. A database without the function
+  // answers an error: nothing is shown and nothing is said. A function,
+  // not a const, because isAdmin is declared further down.
+  async function readMaterialsOutOfLine() {
+    if (!isAdmin || !supabase) return;
+    try {
+      const { data, error } = await supabase.rpc("material_rows_out_of_line");
+      if (error) throw error;
+      setMaterialsOutOfLine(outOfLineByMaterial(data));
+    } catch (err) {
+      if (err?.code !== "PGRST202") console.error("The rows written another way than the Material Types list could not be counted:", err);
+      setMaterialsOutOfLine(null);
+    }
   }
 
   // The red number on the Stock Manager button (src/lib/appErrors.js).
@@ -12335,6 +12363,12 @@ export default function StockControl() {
     if (isAdmin) readCrashCount();
   }, [isAdmin]);
 
+  // An admin opens Stock Manager -> Material Types: count the rows written
+  // another way than the list holds each material.
+  useEffect(() => {
+    if (isAdmin && showManager && managerTab === "grades") readMaterialsOutOfLine();
+  }, [isAdmin, showManager, managerTab]);
+
   useEffect(() => {
     // Needed by more than just admin/User Management now — the Sales
     // Person picker on the item form needs real account names too, so this
@@ -16102,6 +16136,36 @@ export default function StockControl() {
       console.error("The short name could not be changed:", err);
       alert(renameRefusalWords(err));
       return false;
+    } finally {
+      setRenamingMaterial(null);
+    }
+  }
+
+  // "Bring in line" on a material's row, admins only (Heinrich, 30 Sep
+  // 2026): the rows still written by another of the material's names are
+  // rewritten to the one the list holds. Live's Mild Steel row read "MS"
+  // while 386 rows read "Mild Steel", and the box cannot mend that: "MS"
+  // typed over "MS" is no change. The same work as a change of short name,
+  // by the same function, handed the short name the list already has; the
+  // same waits, the same reload.
+  async function bringMaterialInLine(entry) {
+    if (!supabase || !isAdmin || renamingMaterial) return;
+    const held = outOfLineFor(materialsOutOfLine, entry);
+    if (!held) return;
+    if (masterSaveQueueRef.current?.busy()) {
+      alert("A change to the lists is still being saved. Wait a moment and try again. Nothing was changed.");
+      return;
+    }
+    if (!window.confirm(bringInLineQuestion(entry, held))) return;
+    setRenamingMaterial(entry.name);
+    try {
+      const { data, error } = await supabase.rpc("set_material_short_name", { p_name: entry.name, p_short: entry.shortName || "" });
+      if (error) throw error;
+      alert(`${renameSummary(data)}\n\nThe app reloads now. Every other tablet and computer must reload too.`);
+      window.location.reload();
+    } catch (err) {
+      console.error("The material's rows could not be brought in line:", err);
+      alert(renameRefusalWords(err));
     } finally {
       setRenamingMaterial(null);
     }
@@ -23931,6 +23995,23 @@ export default function StockControl() {
                               <Trash2 size={13} />
                             </button>
                             {supplierPriceControls(managerTab, entry, "R/kg").lines}
+                            {/* Rows still written by another of this
+                                material's names: said on its own row, with
+                                the button that mends it. Admins only. */}
+                            {managerTab === "grades" && isAdmin && outOfLineFor(materialsOutOfLine, entry) && (
+                              <div style={{ flexBasis: "100%", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
+                                <span style={{ ...S.roleHint, color: C.danger }}>{outOfLineWords(entry, outOfLineFor(materialsOutOfLine, entry))}</span>
+                                <button
+                                  type="button"
+                                  className="stk-btn"
+                                  style={S.reqActionBtnAlert}
+                                  disabled={!!renamingMaterial}
+                                  onClick={() => bringMaterialInLine(entry)}
+                                >
+                                  {renamingMaterial === entry.name ? "Working…" : "Bring in line"}
+                                </button>
+                              </div>
+                            )}
                           </div>
                         ))
                     : master[managerTab]

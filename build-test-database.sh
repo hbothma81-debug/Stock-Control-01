@@ -100,6 +100,10 @@ ORDER=(
   # --- a material's short name goes everywhere it is written (functions
   #     only; reads the tables above when it is called, not when it is made)
   setup-material-short-name.sql
+
+  # --- which materials are written another way than the list holds them
+  #     (one counting function; needs the file above)
+  setup-material-out-of-line.sql
 )
 
 OUT=setup-ALL.sql

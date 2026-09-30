@@ -110,6 +110,59 @@ export function renameSummary(result) {
   return `${head} Changed: ${parts.join(", ")}.`;
 }
 
+// ---- Rows written another way than the list holds the material ----
+//
+// Found on live, 29 Sep 2026: Mild Steel's row already read short name
+// "MS", typed into the old box, which changed the list's row and nothing
+// else. Hundreds of rows still said "Mild Steel" while new ones were
+// written "MS", and the box could not mend it: "MS" over "MS" is no change.
+// So the database counts such rows (material_rows_out_of_line,
+// setup-material-out-of-line.sql: the rename's own rule for "this row is
+// that material"), the material's row says so to an admin, and "Bring in
+// line" hands set_material_short_name the short name the list already has.
+
+// The database's answer, a row per material and place, as one entry per
+// material: { total, parts: ["77 stock lines", ...] }. A requisition's
+// label is counted with its material, not twice.
+export function outOfLineByMaterial(rows) {
+  const found = new Map();
+  for (const r of rows || []) {
+    const n = Number(r?.rows_out);
+    const name = clean(r?.material).toLowerCase();
+    if (!name || !(n > 0) || COUNTED_ELSEWHERE.includes(r.place)) continue;
+    const held = found.get(name) || { total: 0, counts: {} };
+    held.total += n;
+    held.counts[r.place] = (held.counts[r.place] || 0) + n;
+    found.set(name, held);
+  }
+  for (const held of found.values()) {
+    held.parts = PLACES.filter(([key]) => held.counts[key] > 0).map(([key, word]) => plural(held.counts[key], word));
+    for (const [key, n] of Object.entries(held.counts)) if (!PLACES.some(([k]) => k === key)) held.parts.push(`${n} in ${key}`);
+  }
+  return found;
+}
+
+// What one material's row is out of line by, or nothing.
+export const outOfLineFor = (byMaterial, material) => byMaterial?.get(clean(material?.name).toLowerCase()) || null;
+
+// The line on the material's row.
+export function outOfLineWords(material, held) {
+  return `${plural(held.total, "row")} ${held.total === 1 ? "is" : "are"} not written "${storedName(material)}": ${held.parts.join(", ")}.`;
+}
+
+// What the person is asked before the rows are brought in line.
+export function bringInLineQuestion(material, held) {
+  const now = storedName(material);
+  const full = clean(material?.name);
+  return (
+    `Write every row of ${full} as "${now}"?\n\n` +
+    `${held.parts.join(", ")} ${held.total === 1 ? "is" : "are"} written another way and will say "${now}". ` +
+    `All of it changes together, or none of it.\n\n` +
+    `Not changed: CNC bar and fasteners, purchase orders already raised, documents already printed.\n\n` +
+    `Do this when the floor has stopped. Every other tablet and computer must reload the app afterwards: one left open can write the old name back.`
+  );
+}
+
 // What the person is told when the database says no. `hint` is the tag
 // the function raises with; a database that has no such function answers
 // PGRST202.
