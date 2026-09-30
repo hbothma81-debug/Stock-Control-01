@@ -5131,3 +5131,40 @@ did: the two type-to-find boxes ran over the box beside them).
   Steel"), then type MS (everything goes to "MS"), two renames the
   same evening; or a button that brings the rows in line with the
   list, to be planned. Asked of him.
+
+## 30 Sep 2026 — Jobs page (PO search, Force complete, whole job urgent): state of play at wrap-up
+
+**Done and live**
+- Job search finds the customer's PO number, on the Jobs page and the
+  Production tab (`src/jobs/jobSearch.js`); live 18 Sep (`972a956`), tried
+  on practice with Heinrich signed in.
+- Force complete and Mark whole job urgent on the job page's Overview, and
+  the warning when Invoicing is closed with stages open (`9c669e6`,
+  `src/jobs/forceComplete.js`). Pushed live 21 Sep in the Jobs page
+  conversation's whole-queue push (entry above). Tried on practice by this
+  conversation, read back from the database: urgent on and off (JOB-0011);
+  the Invoicing tick refused for a faked non-admin non-sales profile, Cancel
+  writes nothing, carrying on forces and completes (JOB-0006); the button
+  with a re-cut run open and a program set uncut, the warning naming the
+  program, no request for a job with no Invoicing stage (JOB-0003); Request
+  invoice on a Production card shaped like JOB-0055 (own stages done, re-cut
+  run open): one question, request made, job complete. That covers three of
+  the "still not tried" items listed in the 21 Sep push entry.
+
+**Waiting on Heinrich**
+- JOB-0055 on live: he was to press Force complete himself. Not checked
+  since (the pane was signed out on 30 Sep). If it still reads Active with
+  the re-cut's Welding and Grinding/Polishing open, the button is there.
+- Not built, deferred by him ("manual is fine for now"): the Jobs list goes
+  stale while its stage chips stay fresh (JOB-0042, 18 Sep; a reload fixes
+  it); the row's chips still leave re-cut stages out.
+
+**Not tried by anyone:** a real sales login forcing a job (practice has only
+the admin account); the "material still set aside" lines of the warning on
+screen (unit tests only).
+
+**Practice leftovers:** JOB-0003 has one test invoice request row (R 3.98)
+whose PDF was removed (rows cannot be deleted), so its Open request fails;
+test History lines and notices on JOB-0003, 0006, 0011.
+
+**SQL written by this conversation:** none.
