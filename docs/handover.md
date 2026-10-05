@@ -5273,3 +5273,13 @@ that says which line a cut came off.
 - **Waiting on him:** his word to push with the Yes press untried;
   then, at his time, floor stopped: Material Types -> Mild Steel ->
   Bring in line on live, every screen reloaded afterwards.
+- **5 Oct 2026, PUSHED on his word ("your recommendation, and push
+  other notes"): `8e1121f..ebe0ca0`.** Six commits: App health's
+  Bring in line (497cd6e) and three handover notes, plus two notes
+  of other conversations he named: 9924976 (Jobs page wrap-up) and
+  8489c3d (Laser production's wrap-up, CLAUDE.md and handover), both
+  read first: notes only. Clean clone: names 0, 395 tests, build
+  clean. Live's bundle went from App-BRo_lN_V.js to App-ZAQQc5fW.js
+  and holds "Bring in line". Live not opened signed in since. **The
+  first real press is his, on Mild Steel on live, floor stopped;
+  every screen reloads afterwards.**
