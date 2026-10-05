@@ -5246,3 +5246,30 @@ App.jsx is parsed. Left alone; for Procurement.
 after a tube program off several lines, ask first whether the operator
 cut in the order the card shows: the order listed is the only thing
 that says which line a cut came off.
+
+## 5 Oct 2026, App health: Bring in line (497cd6e), NOT pushed
+
+- **Built 30 Sep on his answers** (the line on the material's own row;
+  admins only; each material its own press): `setup-material-out-of-line.sql`
+  (`material_rows_out_of_line`, counts only, 15 checks on pglite) and
+  the line with **Bring in line** under Stock Manager -> Material Types.
+- **SQL on both:** practice by my paste through his Chrome on his word
+  (30 Sep), live by his own paste; both checked signed out beside a
+  made-up name on 5 Oct.
+- **Tried on practice, signed in as Test:** practice has no material
+  out of line, so the count's answer was replaced in the page only
+  (nothing written): the line reads "8 rows are not written "MS": 6
+  stock lines, 2 laser programs." (a requisition's label not counted
+  twice), one button, the question names the material and the counts,
+  No sends nothing.
+- **NOT tried on any screen: the Yes press.** The session refused both
+  a made-up split written to practice and the press itself. What
+  stands behind it: the same function call the short name box makes
+  (tried for real on practice 29 Sep), and the split case proven on
+  pglite. A login that is not an admin but opens Stock Manager: not
+  seen either.
+- **The queue also holds 9924976, the Jobs page's wrap-up note**
+  (notes only). Asked of him whether it goes with the push.
+- **Waiting on him:** his word to push with the Yes press untried;
+  then, at his time, floor stopped: Material Types -> Mild Steel ->
+  Bring in line on live, every screen reloaded afterwards.
