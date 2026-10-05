@@ -5168,3 +5168,81 @@ whose PDF was removed (rows cannot be deleted), so its Open request fails;
 test History lines and notices on JOB-0003, 0006, 0011.
 
 **SQL written by this conversation:** none.
+
+---
+
+## 5 Oct 2026 — Laser production (tube program off several lengths and offcuts): state of play at wrap-up
+
+The work was done on 28 Sep; this is the wrap-up. The entry of 28 Sep
+above ("Tube laser: a program cut off several lengths and offcuts") has
+the push; this one is where it stands now.
+
+**Done and live**
+- "Add another length or offcut" on both typed tube nesting forms and in
+  Import nesting report; one Cut box, stock off the shelf in the order
+  listed; the lengths shown on the Cutting card, the job's open row and
+  the Programs waiting to be cut list (`f194d1b`, `a982957`; on live as
+  `d29ccce`, `205d5b1`, pushed alone from this conversation on his word,
+  28 Sep).
+- The stock warnings after a tube cut name the length, "30x30x2 6m"
+  (`6daaa99`, wording in `consumeProgramStock` in App.jsx). Live 28 Sep:
+  pushed by the App health conversation with the whole queue on his
+  second word; confirmed from here against `origin/main`.
+- The decision and its rules are in `CLAUDE.md` (Decisions already made)
+  and `docs/TUBE-LASER-HOW-IT-WORKS.md`. The plate laser is untouched.
+
+**SQL written by this conversation**
+
+| File | Adds | Practice | Live |
+| --- | --- | --- | --- |
+| `setup-laser-program-stock-lines.sql` | column `laser_programs.stock_lines` | yes (Heinrich's paste 28 Sep; read through the signed-in practice page beside a made-up column; a program with a list saved and read back) | yes (Heinrich's paste 28 Sep; answers 200 beside a made-up column, checked again 5 Oct) |
+
+A column only: no rules, functions or triggers. In
+`CHECK-which-setup-files-are-run.sql`; not in `build-test-database.sh`,
+like the other laser files.
+
+**Built, live, and not yet tried by Heinrich**
+- Import nesting report with an extra offcut row under a section. Tried
+  by nobody: a file cannot be picked from the Browser pane. Try on
+  practice with MARCH.xlsx: add a row, check the "The file has N
+  lengths: x off the stock line picked first, y off the rest" line, and
+  that the program reads the right lengths.
+- "Nest it on Tube Laser" on a job's own row with an extra row. Same
+  rows and the same save as New program, which was driven on practice;
+  this form itself was not.
+- A program off several lines on a job that has the stock reserved on
+  its Materials tab: the reservation's used count should rise per line.
+  JOB-0012 on practice had nothing reserved, so only the "not set
+  aside" warning was seen.
+- The warning for the offcut line itself, and the "the shelf only had"
+  warning with a length: only the 6m line's "not set aside" warning was
+  seen on practice.
+- The refusal on a database without the column: never seen, both
+  databases had the column before a program with rows was made.
+- Anything on live signed in. App health looked at the five Tube Laser
+  screens on live (drawing only, no cut).
+- The floor tablets need a page reload to have the new version.
+
+**Tried on practice by this conversation, read back from the database**
+(28 Sep): New program 2 × 6m + 2 × 2.2m saved as 00007 with its list;
+the extra row offered only the same section's other lengths; Cut 3 took
+2 off the 6m line and 1 off the offcut with a usage line each; Undo 2
+and Undo one put them back last cut first; the Programs waiting list
+reads the lengths; the 6m warning reads "30x30x2 6m".
+
+**Practice leftovers:** tube program 00007 (OFFCUT-TEST, JOB-0012),
+uncut, stock as it was (6m 18, 2.2m 2). Seven usage-log lines from the
+test cuts and undos are left in the log.
+
+**Waiting on Heinrich:** nothing to paste, nothing to decide. The tries
+listed above.
+
+**Noticed, not this conversation's:** in the purchase order receiving
+code in App.jsx one object writes `jobNumber` twice (about line 14067
+and 14069 on 28 Sep) and the second wins; esbuild warns about it when
+App.jsx is parsed. Left alone; for Procurement.
+
+**Next session:** nothing open here. If he reports the shelf wrong
+after a tube program off several lines, ask first whether the operator
+cut in the order the card shows: the order listed is the only thing
+that says which line a cut came off.
