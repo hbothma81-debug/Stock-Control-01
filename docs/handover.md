@@ -5559,3 +5559,19 @@ not checked from here. Live went App-CJod77Oe.js -> App-CwpMiDMk.js.
 **Next session:**
 1. The purchasing crash nets, once the requisitions work is committed.
 2. Then plan the next move, using the same parser-driven copy script. The script was in this session's scratchpad and will be gone; it can be rebuilt from the method in the plan docs.
+
+---
+## 7 Oct 2026 — the PO job rule PUSHED alone (`48d2e4c..efecd29`, live App-Dn0GJsDx.js)
+
+His "push from here". 84fc38b (Raise PO from the Requisitions tab
+carries the requests' job onto the order; `src/purchasing/poJob.js`,
+tested) cherry-picked onto live's 48d2e4c as efecd29 in the scratch
+clone: build clean (App-D0plgWpb.js local), names check clean, 415
+tests; `git log origin/main..x` read in the repo as its own step,
+exactly the one commit; pushed; live went App-CwpMiDMk.js ->
+App-Dn0GJsDx.js with the new wording in it. Merged back clean (aa749ca).
+**Held back, notes only:** dbdea20 (mine) and 5eca4c1 (Planning's
+wrap-up: CLAUDE.md and handover); the two touch the end of this file
+and conflict when picked apart, so they go together with the next push.
+Lesson: the scratch clone's `origin` is this folder, not GitHub, so in
+the clone branch from live's hash, and read `origin/main..x` only here.
