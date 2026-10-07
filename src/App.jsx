@@ -3516,13 +3516,14 @@ export default function StockControl() {
     setShowManager(false);
     setManagerTab(null);
     closeRequisition();
-    closeRequisitionPicker();
+    closeRequest();
     setSelectedGradeGroup(null);
     setSelectedItemDetail(null);
     setAssetManufacturerOpen(null);
     setAssetDetailOpen(null);
     closeServiceNow();
     closeRepairList();
+    closeAssetHistory();
   }
 
   useEffect(() => {
@@ -9209,17 +9210,29 @@ export default function StockControl() {
   // would come from, with the count and the job filled in. Same form,
   // same approvals, same Requisitions tab as any other request.
   function requisitionBarsForCutList(job, group, count) {
-    const candidates = matchingStock(group, items || []);
-    const target = candidates.find((it) => Number(it.length) === Number(group.stockLengthM)) || candidates[0];
-    if (!target) {
-      alert(
-        `There is no ${materialName(group, findSectionType)} line in structural stock at ${group.stockLengthM} m, so there is nothing to requisition against. Add it under Structural first, even at zero.`
-      );
-      return;
+    requisitionAllForCutList(job, [{ group, count }]);
+  }
+  // The same for several lines at once: the Request stock basket opens
+  // with a line per section, the job filled in on each. A section with no
+  // stock line is named and left out, the rest still go in.
+  function requisitionAllForCutList(job, shorts) {
+    const lines = [];
+    const missing = [];
+    for (const { group, count } of shorts) {
+      const candidates = matchingStock(group, items || []);
+      const target = candidates.find((it) => Number(it.length) === Number(group.stockLengthM)) || candidates[0];
+      if (!target) {
+        missing.push(`${materialName(group, findSectionType)} at ${group.stockLengthM} m`);
+        continue;
+      }
+      lines.push({ item: target, qty: Math.floor(Number(count)) || "", notes: `For job ${job.job_number} cut list — ${group.stockLengthM} m lengths` });
     }
-    openRequisition(target);
-    setRequisitionQty(String(Math.floor(Number(count)) || ""));
-    setRequisitionNotes(`For job ${job.job_number} cut list — ${group.stockLengthM} m lengths`);
+    if (missing.length > 0) {
+      alert(
+        `No structural stock line for: ${missing.join("; ")}. Add ${missing.length === 1 ? "it" : "them"} under Structural first, even at zero.${lines.length > 0 ? " The rest are in the basket." : ""}`
+      );
+    }
+    if (lines.length > 0) openRequest({ lines, job: { id: job.id, job_number: job.job_number } });
   }
 
   // Books one bar off the shelf for a bar on the cutting order. Goes
@@ -13884,9 +13897,9 @@ export default function StockControl() {
 
   // Requisitions, purchase orders, receiving and the PO report: src/purchasing/usePurchasing.jsx
   const { addPoLineItem, buildPoDoc, cancelPurchaseOrder, closePoBuilder, closeReceiving, closeRequisition,
-    closeRequisitionPicker, copyPurchaseOrder, createItemForRequisition, fillPoLineFromDescription,
+    copyPurchaseOrder, createItemForRequisition, fillPoLineFromDescription,
     fillPoLineFromPartNumber, generatePoReport, handleFlagClick, openPoBuilder, openReceiving,
-    openRequisition, openRequisitionPicker, pickItemForRequisition, poDescriptionLookup, poExclusive,
+    openRequisition, poDescriptionLookup, poExclusive,
     poIsOpen, poMonthKey, poMonthLabel, poPartLookup, poSupplierName, raisePoForSupplierGroup,
     raisePoFromSelected, removePoLineItem, renderRequisitionCard, reqTargetLines, submitPurchaseOrder,
     submitReceiving, submitRequisition, updatePoLineItem, updateReceivingLineQty, viewPoPdf,
@@ -15761,11 +15774,11 @@ export default function StockControl() {
     setRequestBasket, submitRequest, updateBasketLine,
     addPoLineItem, archiveDateFrom, archiveDateTo, archiveTypeFilter, buildPoDoc,
     canAdd, canManageRequisitions, canRaisePO, canRequisition, canSeeSpendTotals, canSeeValue, cancelPoModal,
-    cancelPurchaseOrder, closePoBuilder, closeReceiving, closeRequisition, closeRequisitionPicker,
+    cancelPurchaseOrder, closePoBuilder, closeReceiving, closeRequisition,
     copyPurchaseOrder, createItemForRequisition, currentUser, editingRequisitionId, emailSentTick,
     expandedPoId, expandedReceivingId, fillPoLineFromDescription, fillPoLineFromPartNumber, generatePoReport,
-    generatedDocuments, items, jobsList, master, openPoBuilder, openReceiving, openRequisitionPicker,
-    pickItemForRequisition, poBuilder, poDescriptionLookup, poExclusive, poIsOpen, poMonthKey, poMonthLabel,
+    generatedDocuments, items, jobsList, master, openPoBuilder, openReceiving,
+    poBuilder, poDescriptionLookup, poExclusive, poIsOpen, poMonthKey, poMonthLabel,
     poPartLookup, poReportFrom, poReportMonths, poReportStatus, poReportSupplier, poReportTo,
     poReportsDateFrom, poReportsDateTo, poSearchQuery, poSupplierFilter, poSupplierName, purchaseOrders,
     raisePoForSupplierGroup, raisePoFromSelected, receivingAdjustingIdx, receivingDeliveryNote,
@@ -16857,7 +16870,7 @@ export default function StockControl() {
             openDrawingPreview={openDrawingPreview}
             items={items}
             canRequisition={canRequisition}
-            openRequisition={openRequisition}
+            openRequisition={(it) => openRequest({ lines: [{ item: it }] })}
             packing={tubePackingProps({ canTake: false })}
             ItemProgress={SafeQtyProgressControl}
             onLogNestedItem={(row, item, qty, progress) => logNestedItem(row, item, qty, progress, tubeLaser)}
@@ -24989,6 +25002,7 @@ export default function StockControl() {
                 findSectionType={findSectionType}
                 onSetAside={(group, count) => setAsideBarsForCutList(jobDetail.job, group, count)}
                 onRequisition={canRequisition ? (group, count) => requisitionBarsForCutList(jobDetail.job, group, count) : null}
+                onRequestAll={canRequisition ? (shorts) => requisitionAllForCutList(jobDetail.job, shorts) : null}
                 SavedCheck={SavedCheck}
               />
             </ErrorBoundary>

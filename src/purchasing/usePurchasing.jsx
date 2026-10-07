@@ -215,16 +215,6 @@ export function usePurchasing(deps) {
     setRequisitionSupplier(req.supplier || "");
   }
 
-  function openRequisitionPicker() {
-    setShowRequisitionPicker(true);
-    setRequisitionPickerQuery("");
-  }
-
-  function closeRequisitionPicker() {
-    setShowRequisitionPicker(false);
-    setRequisitionPickerQuery("");
-  }
-
   // Opens the real Add Item form, pre-filled with whatever was typed in
   // the requisition search — same "not found? create it" pattern as
   // service consumables. On save, addItem() sees addingItemForRequisition
@@ -235,18 +225,9 @@ export function usePurchasing(deps) {
     setEditingId(null);
     setAllowDuplicate(false);
     setShowAdd(true);
-    closeRequisitionPicker();
     // The add-item form draws under the basket, so the basket steps aside
     // and keeps its lines; the saved item comes back in through addToRequest.
     setRequestBasket((b) => (b ? { ...b, hidden: true } : b));
-  }
-
-  // Picking an item from the search hands straight off into the same
-  // request form every other requisition uses — this only replaces how
-  // the item gets found, not what happens once it's chosen.
-  function pickItemForRequisition(it) {
-    closeRequisitionPicker();
-    openRequisition(it);
   }
 
   function closeRequisition() {
@@ -1517,9 +1498,9 @@ export function usePurchasing(deps) {
 
   return { addBasketLine, addPoLineItem, addToRequest, buildPoDoc, cancelPurchaseOrder, closePoBuilder,
     closeReceiving, closeRequest, closeRequisition, openRequest, removeBasketLine, submitRequest, updateBasketLine,
-    closeRequisitionPicker, copyPurchaseOrder, createItemForRequisition, fillPoLineFromDescription,
+    copyPurchaseOrder, createItemForRequisition, fillPoLineFromDescription,
     fillPoLineFromPartNumber, generatePoReport, handleFlagClick, openPoBuilder, openReceiving,
-    openRequisition, openRequisitionPicker, pickItemForRequisition, poDescriptionLookup, poExclusive,
+    openRequisition, poDescriptionLookup, poExclusive,
     poIsOpen, poMonthKey, poMonthLabel, poPartLookup, poSupplierName, raisePoForSupplierGroup,
     raisePoFromSelected, removePoLineItem, renderRequisitionCard, reqTargetLines, submitPurchaseOrder,
     submitReceiving, submitRequisition, updatePoLineItem, updateReceivingLineQty, viewPoPdf };

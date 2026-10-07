@@ -104,6 +104,7 @@ export default function CutToSize({
   findSectionType,
   onSetAside,
   onRequisition,
+  onRequestAll,
   onAddStock,
   newSize,
   onCount,
@@ -385,7 +386,26 @@ export default function CutToSize({
       {/* The shopping list. One line per section, grade and bar length. */}
       {groups.length > 0 && (
         <div style={{ marginBottom: 10 }}>
-          <label style={S.label}>Bars needed</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <label style={S.label}>Bars needed</label>
+            {/* One press asks for every bar not on the floor or on order
+                (Heinrich, 7 Oct 2026): the Request stock basket opens with
+                a line per section, to change, add to or create from. */}
+            {canEdit &&
+              onRequestAll &&
+              (() => {
+                const shorts = groups
+                  .map((g) => ({ group: g, count: Math.max(0, g.bars.length - barsOnShelf(g, items) - barsOnOrder(g, requisitions, items)) }))
+                  .filter((x) => x.count > 0);
+                if (shorts.length === 0) return null;
+                const bars = shorts.reduce((n, x) => n + x.count, 0);
+                return (
+                  <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => onRequestAll(shorts)} title="Open the Request stock basket with every bar still to order on it">
+                    Request all outstanding ({bars} bar{bars === 1 ? "" : "s"})
+                  </button>
+                );
+              })()}
+          </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
             {groups.map((g) => {
               const shelf = barsOnShelf(g, items);
