@@ -105,6 +105,7 @@ Which conversation owns what, so far:
 - **Dropdowns and the Production tab** — the shared `TypeToFind` box, keeping lists alphabetical, the Production tab's ready and waiting pills, and Info Request (`src/lib/infoRequests.js`)
 - **Email** — sending documents through Outlook (`src/email`), and the Send button on each document that has one (new 21 Sep 2026)
 - **Laser quoting** — the DXF laser quoting module, its own screen and its own pricing tables; brief in `docs/LASER-QUOTING-PLAN.md` (new 15 Sep 2026, nothing built yet). The Quoting module's laser line is to call it, not repeat it.
+- **CNC** — the CNC tab (lathe programs from STEP models: `src/cnc/`, `cnc_` tables, the CNC permission tick); brief in `docs/CNC-MODULE-PLAN.md` (new 7 Oct 2026, nothing built yet). Its Python engine lives in the ERS TURNING APP folder and its own repository. Kept self-contained: it is to be sold later. The Quoting module's CNC line reads the program's Costing tab, not a second CNC calculator.
 
 `src/App.jsx` is the one file all of you have to touch, because it wires
 everything together. That is the collision point. When your work naturally
