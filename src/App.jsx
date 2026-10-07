@@ -14363,14 +14363,11 @@ export default function StockControl() {
         // item, regardless of what quantity got entered while creating it.
         setAddingItemForRequisition(false);
         addToRequest(newItem);
-      } else if (Number(newItem.qty) === 0 && canRequisition && newItem.mainCat !== "custom") {
-        // A brand-new item saved at zero stock would otherwise vanish from
-        // the home page the instant it's added (zero-qty items only stay
-        // visible once a requisition is tracking them) — so if this login
-        // can request stock, walk straight into that instead of leaving
-        // the item stranded.
-        openRequisition(newItem);
       }
+      // A new item saved at zero used to jump straight into the request
+      // form. Dropped on Heinrich's word (7 Oct 2026, his 18 Sep note):
+      // requests are raised from the Request stock basket, where "Not in
+      // Stock yet? Create" makes the item and brings it back in.
     }
   }
 
@@ -18688,8 +18685,8 @@ export default function StockControl() {
             Sales adds new items
           </div>
         )}
-        {canRequisition && tab !== "custom" && (
-          <button className="stk-btn" style={S.roleChip} onClick={openRequisitionPicker} title="Request stock for any item, including anything at zero">
+        {canRequisition && (
+          <button className="stk-btn" style={S.roleChip} onClick={() => openRequest()} title="Request stock for any item, including anything at zero">
             <ClipboardList size={13} strokeWidth={2.5} />
             Request stock
           </button>
@@ -19367,8 +19364,8 @@ export default function StockControl() {
                           </div>
                           )}
                           <div style={S.rowActionIcons}>
-                            {canRequisition && tab !== "custom" && (
-                              <button className="stk-btn" style={S.iconRowBtn} onClick={() => openRequisition(it)} title="Request stock for this item">
+                            {canRequisition && (
+                              <button className="stk-btn" style={S.iconRowBtn} onClick={() => openRequest({ lines: [{ item: it }] })} title="Request stock for this item">
                                 <ClipboardList size={14} />
                               </button>
                             )}
