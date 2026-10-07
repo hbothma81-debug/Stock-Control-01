@@ -798,11 +798,25 @@ const REQ_DB_FIELDS = [
 function dbRowToRequisition(row) {
   const r = { id: row.id };
   for (const [jsKey, dbKey] of REQ_DB_FIELDS) r[jsKey] = row[dbKey];
+  // Which job the request is for, empty for Stores (setup-requisitions-job.sql).
+  // Outside REQ_DB_FIELDS like paid_price on stock: written only once a
+  // loaded row has shown the columns exist, so a database without them
+  // still saves every requisition.
+  if ("job_number" in row) {
+    reqHasJob = true;
+    r.jobId = row.job_id || "";
+    r.jobNumber = row.job_number || "";
+  }
   return r;
 }
+let reqHasJob = false;
 function requisitionToDbRow(r) {
   const row = { id: r.id };
   for (const [jsKey, dbKey] of REQ_DB_FIELDS) row[dbKey] = r[jsKey] ?? "";
+  if (reqHasJob) {
+    row.job_id = r.jobId ?? "";
+    row.job_number = r.jobNumber ?? "";
+  }
   return row;
 }
 
@@ -1737,7 +1751,7 @@ export default function StockControl() {
     setRepairListDescription, repairListBusy, setRepairListBusy, repairListResolvedOpen,
     setRepairListResolvedOpen } = useAssetsState();
   // Purchasing's screen state: src/purchasing/usePurchasing.jsx
-  const { poBuilder, setPoBuilder, poSearchQuery, setPoSearchQuery, poSupplierFilter, setPoSupplierFilter,
+  const { requestBasket, setRequestBasket, poBuilder, setPoBuilder, poSearchQuery, setPoSearchQuery, poSupplierFilter, setPoSupplierFilter,
     expandedPoId, setExpandedPoId, receivingSearchQuery, setReceivingSearchQuery, expandedReceivingId,
     setExpandedReceivingId, receivingHistoryDateFrom, setReceivingHistoryDateFrom, receivingHistoryDateTo,
     setReceivingHistoryDateTo, receivingHistorySearchQuery, setReceivingHistorySearchQuery, showPoReport,
@@ -3452,7 +3466,7 @@ export default function StockControl() {
     usageModal || assetRemoveModal || shortageModal || infoRequestModal || infoAnswerModal || jobDetail || newStockItemModal ||
     markInvoicedModal || deliveryNoteBatchModal || copyJobModal || previewItem ||
     showAddStockItemModal || showStockImportModal || showBuyoutImportModal || editProcessesModal || productionSelectedDept ||
-    productionSelectedProcessId || showManager || requisitionTarget || showRequisitionPicker ||
+    productionSelectedProcessId || showManager || requisitionTarget || showRequisitionPicker || requestBasket ||
     assetManufacturerOpen || assetDetailOpen || serviceNowItem || repairListItem ||
     selectedGradeGroup || selectedItemDetail
   );
@@ -13096,7 +13110,9 @@ export default function StockControl() {
     openRequisition, openRequisitionPicker, pickItemForRequisition, poDescriptionLookup, poExclusive,
     poIsOpen, poMonthKey, poMonthLabel, poPartLookup, poSupplierName, raisePoForSupplierGroup,
     raisePoFromSelected, removePoLineItem, renderRequisitionCard, reqTargetLines, submitPurchaseOrder,
-    submitReceiving, submitRequisition, updatePoLineItem, updateReceivingLineQty, viewPoPdf } = usePurchasing({
+    submitReceiving, submitRequisition, updatePoLineItem, updateReceivingLineQty, viewPoPdf,
+    addBasketLine, addToRequest, closeRequest, openRequest, removeBasketLine, submitRequest, updateBasketLine } = usePurchasing({
+    requestBasket, setRequestBasket,
     addCompanyLogo, byName, byText, canManageRequisitions, canMarkReceivedPerm, canRaisePO, cncBarWeight,
     currentUser, editingRequisitionId, emptyForm, expandedReqId, fetchAllocations, findMaterialEntry,
     findPrice, findSectionEntry, findSectionPrice, formatPoNumber, generateAndStoreDocument, getPdf, items,
@@ -13567,7 +13583,7 @@ export default function StockControl() {
         // the explicit intent here was always to request stock for this
         // item, regardless of what quantity got entered while creating it.
         setAddingItemForRequisition(false);
-        openRequisition(newItem);
+        addToRequest(newItem);
       } else if (Number(newItem.qty) === 0 && canRequisition && newItem.mainCat !== "custom") {
         // A brand-new item saved at zero stock would otherwise vanish from
         // the home page the instant it's added (zero-qty items only stay
@@ -14965,7 +14981,9 @@ export default function StockControl() {
   const RoleIcon = isAdmin ? ShieldCheck : User;
 
   // Everything the purchasing tabs and pop-ups read.
-  const purchasingCtx = { addPoLineItem, archiveDateFrom, archiveDateTo, archiveTypeFilter, buildPoDoc,
+  const purchasingCtx = { addBasketLine, addToRequest, closeRequest, openRequest, removeBasketLine, requestBasket,
+    setRequestBasket, submitRequest, updateBasketLine,
+    addPoLineItem, archiveDateFrom, archiveDateTo, archiveTypeFilter, buildPoDoc,
     canAdd, canManageRequisitions, canRaisePO, canRequisition, canSeeSpendTotals, canSeeValue, cancelPoModal,
     cancelPurchaseOrder, closePoBuilder, closeReceiving, closeRequisition, closeRequisitionPicker,
     copyPurchaseOrder, createItemForRequisition, currentUser, editingRequisitionId, emailSentTick,
