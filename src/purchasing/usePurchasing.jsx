@@ -991,12 +991,13 @@ export function usePurchasing(deps) {
     setShowPoReport(false);
   }
 
-  function openPoBuilder(linkedRequisitionIds = [], prefillSupplierId = "", prefillLineItems = []) {
+  function openPoBuilder(linkedRequisitionIds = [], prefillSupplierId = "", prefillLineItems = [], job = null) {
     setPoBuilder({
       supplierId: prefillSupplierId,
       lineItems: prefillLineItems.length ? prefillLineItems : [{ description: "", partNumber: "", qty: "", unitPrice: "" }],
-      jobId: null,
-      jobNumber: "",
+      // Started from a job's own Purchase orders tab: that job, filled in.
+      jobId: job?.id || null,
+      jobNumber: job?.job_number || "",
       jobQuery: "",
       notes: "",
       linkedRequisitionIds,

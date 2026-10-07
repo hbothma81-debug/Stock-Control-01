@@ -177,7 +177,7 @@ import { makeSaveQueue } from "./lib/saveQueue.js";
 // programs.
 import { parsePartInfo, findSheet, PART_INFO_SHEET, referenceFromFileName } from "./laser/nestingReport.js";
 import { usePurchasingState, usePurchasing } from "./purchasing/usePurchasing.jsx";
-import { RequisitionsTab, PurchaseOrdersTab, ReceivingTab, PoReportsTab } from "./purchasing/PurchasingTabs.jsx";
+import { RequisitionsTab, PurchaseOrdersTab, ReceivingTab, PoReportsTab, JobPurchaseOrders } from "./purchasing/PurchasingTabs.jsx";
 import { PurchasingPopups, RequestStockPopups } from "./purchasing/PurchasingPopups.jsx";
 
 // window.storage is installed in main.jsx before this component ever
@@ -23349,6 +23349,14 @@ export default function StockControl() {
                 label: `Buy-outs${jobDetail.buyoutItems?.length ? ` (${jobDetail.buyoutItems.length})` : ""}`,
               },
               {
+                key: "orders",
+                label: `Purchase orders${
+                  (purchaseOrders || []).filter((po) => po.jobId === jobDetail.job.id).length
+                    ? ` (${(purchaseOrders || []).filter((po) => po.jobId === jobDetail.job.id).length})`
+                    : ""
+                }`,
+              },
+              {
                 key: "materials",
                 label: `Materials${
                   (jobDetail.allocations || []).filter((a) => a.status !== "released").length
@@ -25037,6 +25045,11 @@ export default function StockControl() {
             </ErrorBoundary>
           )}
 
+          {jobDetailTab === "orders" && (
+            <ErrorBoundary box what="the Purchase orders tab" where={crashPlace(jobDetail.job)}>
+              <JobPurchaseOrders ctx={purchasingCtx} job={jobDetail.job} canSeeValue={canSeeValue} />
+            </ErrorBoundary>
+          )}
           {jobDetailTab === "materials" && (
             <ErrorBoundary box what="the Materials tab" where={crashPlace(jobDetail.job)}>
               <Materials

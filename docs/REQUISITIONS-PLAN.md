@@ -1,8 +1,8 @@
 # Requesting stock: one system, every page
 
-Planned 7 Oct 2026 with Heinrich. Status: steps 1 and 2 built and
-committed (search fix 52ebd05; the basket on the Requisitions tab, with
-`setup-requisitions-job.sql` still to paste on practice and live), neither
+Planned 7 Oct 2026 with Heinrich. Status: ALL FIVE STEPS BUILT and
+committed the same day (52ebd05, 8d140d8, 342261f, a7e7b95, and the
+Purchase orders tab), SQL on practice and live, nothing pushed, nothing
 tried signed in. Customer Stock gets its own review (below).
 
 ## Why
@@ -124,6 +124,24 @@ same PO view as the Purchase Orders tab, and sent (emailed) from there.
 The Buy-outs tab's own Raise PO stays as it is for now (answer 2); that tab
 gets its own review later: files linked to a PO, and whether the PO lives
 only inside the job.
+
+### What was built (7 Oct)
+
+- Every door opens `RequestStock.jsx`: Requisitions tab, the Stock tabs'
+  chip and row icon (Customer Stock too), the cut list's per-row button
+  and its new "Request all outstanding (n bars)", the tube laser's
+  nothing-on-the-shelf door. The add-item form's Create comes back into
+  the basket; the quantity-0 auto-jump is gone. The old pick-an-item
+  pop-up is deleted; the one-item form only edits an existing request.
+- `requisitions.job_id` / `job_number` (`setup-requisitions-job.sql`, on
+  both databases 7 Oct); the list says "For job X" or "For stores".
+- The job page has a **Purchase orders** tab (`JobPurchaseOrders`) drawing
+  the same card as the Purchase Orders tab (`PoCard`, lifted out of it):
+  View PDF, Email to supplier, Copy, Cancel; total hidden without Rand
+  values. "Raise Purchase Order for JOB-x" starts the builder on the job.
+- NOT done: the PO builder does not yet carry a requisition's job onto the
+  PO when raised from the Requisitions tab (it fills the job only from the
+  job page and Buy-outs). Next small step.
 
 ### Order of work
 
