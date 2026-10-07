@@ -100,6 +100,9 @@ export default function RequestStock({ ctx }) {
                     <span>{divisionLabel(it.mainCat)}</span>
                     {it.size && <span>{it.size}</span>}
                     {it.thickness && <span>{it.thickness}</span>}
+                    {/* The length tells the three 30x30x2 rows apart (6 m, 2.2 m, 0.5 m). */}
+                    {Number(it.length) > 0 && <span>{it.length} m</span>}
+                    {it.diameter && <span>{it.diameter}</span>}
                     {it.customer && <span>{it.customer}</span>}
                     {it.supplier && <span>{it.supplier}</span>}
                   </div>
@@ -137,6 +140,7 @@ export default function RequestStock({ ctx }) {
                   </div>
                   <div className="stk-meta-row" style={S.rowMeta}>
                     <span>{divisionLabel(it.mainCat)}</span>
+                    {Number(it.length) > 0 && <span>{it.length} m</span>}
                     {it.customer && <span>{it.customer}</span>}
                     <span>{Number(it.qty) > 0 ? `${it.qty} in stock` : "0 in stock"}</span>
                   </div>
