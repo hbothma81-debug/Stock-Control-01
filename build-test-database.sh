@@ -88,6 +88,7 @@ ORDER=(
   setup-stock-paid-price.sql
   setup-stock-removed-details.sql
   setup-requisitions-job.sql
+  setup-stock-customer-revision.sql
 
   # --- extra columns and permissions on profiles
   setup-production-access.sql

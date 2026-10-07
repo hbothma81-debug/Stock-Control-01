@@ -179,6 +179,7 @@ import { parsePartInfo, findSheet, PART_INFO_SHEET, referenceFromFileName } from
 import { usePurchasingState, usePurchasing } from "./purchasing/usePurchasing.jsx";
 import { RequisitionsTab, PurchaseOrdersTab, ReceivingTab, PoReportsTab, JobPurchaseOrders } from "./purchasing/PurchasingTabs.jsx";
 import { PurchasingPopups, RequestStockPopups } from "./purchasing/PurchasingPopups.jsx";
+import CustomerStock from "./stock/CustomerStock.jsx";
 import { useDrawingsState, useDrawings } from "./drawings/useDrawings.jsx";
 import { DrawingsTab, DrawingUploadPopup } from "./drawings/DrawingsScreens.jsx";
 import { useAssetsState, useAssets } from "./assets/useAssets.jsx";
@@ -301,10 +302,19 @@ function dbRowToItem(row) {
     item.removedDate = row.removed_date || "";
     item.removedBy = row.removed_by || "";
   }
+  // The customer's own revision on a Customer Stock part
+  // (setup-stock-customer-revision.sql). The importer and the "Cust. rev"
+  // box have set customerRevision since August, but it was never mapped,
+  // so it was lost at every reload. Same guard as paid_price.
+  if ("customer_revision" in row) {
+    stockHasCustomerRevision = true;
+    item.customerRevision = row.customer_revision || "";
+  }
   return item;
 }
 let stockHasPaidPrice = false;
 let stockHasRemovedDetails = false;
+let stockHasCustomerRevision = false;
 function itemToDbRow(item) {
   const row = { id: item.id };
   for (const [jsKey, dbKey, type] of ITEM_DB_FIELDS) {
@@ -313,6 +323,7 @@ function itemToDbRow(item) {
     row[dbKey] = v === undefined || v === null ? fallback : v;
   }
   if (stockHasPaidPrice) row.paid_price = Number(item.paidPrice) > 0 ? Number(item.paidPrice) : null;
+  if (stockHasCustomerRevision) row.customer_revision = String(item.customerRevision ?? "").trim() || null;
   if (stockHasRemovedDetails) {
     row.removed_reason = item.removedReason || null;
     row.removed_date = item.removedDate || null;
@@ -18002,7 +18013,7 @@ export default function StockControl() {
         </div>
       )}
 
-      {(tab === "custom" || tab === "stores" || tab === "fasteners") && (
+      {(tab === "stores" || tab === "fasteners") && (
         <div style={{ marginBottom: 4 }} ref={customerChipsRef}>
           <button
             className="stk-btn"
@@ -18264,6 +18275,19 @@ export default function StockControl() {
               );
             })()
           )
+        ) : tab === "custom" ? (
+          // Customer Stock has its own screen since 7 Oct 2026: every part,
+          // zero included, one pill per customer A to Z, rows A to Z by
+          // stock code, a row opening in place (src/stock/CustomerStock.jsx).
+          <ErrorBoundary box what="the Customer Stock list">
+            <CustomerStock
+              ctx={{
+                allocationsForItem, canDelete, canEditItems, canEditQty, canRequisition, canSeeValue, canView, drawingLookup,
+                isLowStock, items, master, openDrawingPreviewByPartNumber, openDuplicate, openEdit, openPreview, openRequest,
+                openUsageModal, query, removeItem, updateCustomerStockField,
+              }}
+            />
+          </ErrorBoundary>
         ) : (
           <>
         {grouped.length === 0 && (
@@ -19911,7 +19935,7 @@ export default function StockControl() {
                             />
                           </div>
                           <div>
-                            <label style={S.label}>Price (R)</label>
+                            <label style={S.label}>Cost (R)</label>
                             <input
                               type="number"
                               step="0.01"
@@ -19919,7 +19943,7 @@ export default function StockControl() {
                               placeholder="0"
                               onChange={(e) => updateCustomerStockField(it.id, "value", e.target.value)}
                               style={{ ...S.managerFactorInput, display: "block" }}
-                              title="Unit price (R)"
+                              title="What we pay, each (R)"
                             />
                           </div>
                           <div>
