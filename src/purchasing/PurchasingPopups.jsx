@@ -4,6 +4,7 @@
 
 import TypeToFind from "../TypeToFind.jsx";
 import RequestStock from "./RequestStock.jsx";
+import { mixedJobsWords } from "./poJob.js";
 import { C, S } from "../theme.js";
 import { Plus, Trash2, X } from "lucide-react";
 import { stockSearchText, searchWords, matchesWords } from "../lib/stockSearch.js";
@@ -408,6 +409,9 @@ export function PurchasingPopups({ ctx }) {
                 <div style={S.roleHint}>
                   Everything received against this order will be set aside for {poBuilder.jobNumber}.
                 </div>
+              )}
+              {!poBuilder.jobId && mixedJobsWords(poBuilder.mixedJobs) && (
+                <div style={{ ...S.roleHint, color: C.danger }}>{mixedJobsWords(poBuilder.mixedJobs)}</div>
               )}
             </div>
 

@@ -15,6 +15,7 @@ import { S } from "../theme.js";
 import { cheapest as cheapestPrice, sectionLines } from "../manager/supplierPrices.js";
 import { supabase } from "../lib/supabaseClient.js";
 import { withFullMaterial } from "../manager/materialNames.js";
+import { jobForPurchaseOrder } from "./poJob.js";
 
 export function usePurchasingState() {
   const [poBuilder, setPoBuilder] = useState(null); // { supplierId, lineItems: [...], linkedRequisitionIds: [...], notes }
@@ -991,13 +992,16 @@ export function usePurchasing(deps) {
     setShowPoReport(false);
   }
 
-  function openPoBuilder(linkedRequisitionIds = [], prefillSupplierId = "", prefillLineItems = [], job = null) {
+  function openPoBuilder(linkedRequisitionIds = [], prefillSupplierId = "", prefillLineItems = [], job = null, mixedJobs = []) {
     setPoBuilder({
       supplierId: prefillSupplierId,
       lineItems: prefillLineItems.length ? prefillLineItems : [{ description: "", partNumber: "", qty: "", unitPrice: "" }],
-      // Started from a job's own Purchase orders tab: that job, filled in.
+      // Started from a job's own Purchase orders tab, or from requests
+      // all for one job: that job, filled in. Requests for several jobs
+      // leave it empty and name them (mixedJobs, shown under the box).
       jobId: job?.id || null,
       jobNumber: job?.job_number || "",
+      mixedJobs,
       jobQuery: "",
       notes: "",
       linkedRequisitionIds,
@@ -1214,7 +1218,10 @@ export function usePurchasing(deps) {
     // try to match it to a real supplier record to prefill the picker.
     const supplierNames = [...new Set(selected.map((r) => r.supplier).filter(Boolean))];
     const matched = supplierNames.length === 1 ? master.suppliers.find((s) => s.name === supplierNames[0]) : null;
-    openPoBuilder(selected.map((r) => r.id), matched?.id || "", lineItems);
+    // The requests' job goes onto the order (src/purchasing/poJob.js):
+    // one job fills the box, several leave it empty and are named.
+    const { job, mixed } = jobForPurchaseOrder(selected);
+    openPoBuilder(selected.map((r) => r.id), matched?.id || "", lineItems, job, mixed);
   }
 
   // One-click version of the same bundling, for an entire supplier's group
@@ -1230,7 +1237,8 @@ export function usePurchasing(deps) {
       unitPrice: resolvePoLineUnitPrice(r),
     }));
     const matched = master.suppliers.find((s) => s.name === supplierName);
-    openPoBuilder(reqList.map((r) => r.id), matched?.id || "", lineItems);
+    const { job, mixed } = jobForPurchaseOrder(reqList);
+    openPoBuilder(reqList.map((r) => r.id), matched?.id || "", lineItems, job, mixed);
   }
 
   // Shared by both the supplier-grouped pending list and the flat ordered
