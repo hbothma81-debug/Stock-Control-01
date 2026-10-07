@@ -148,6 +148,18 @@ import {
   forceHistoryText,
   wholeJobUrgent,
 } from "./jobs/forceComplete.js";
+import {
+  CLOSED,
+  isDoneStatus,
+  isClosedWithoutInvoice,
+  finishedJobStatus,
+  closeFields,
+  closedNoticeText,
+  completeNoticeText,
+  closedHistoryText,
+  closedStatusLine,
+  finishedAt,
+} from "./jobs/completeWithoutInvoice.js";
 import { invoicingMatchesSearch, invoicingMatchesPicks, inDayRange } from "./jobs/invoicingSearch.js";
 import { markInvoicedRefusal } from "./jobs/markInvoiced.js";
 import { sageInvoicesOf, requestsOnInvoice, suggestedSageAmount, sageNumbersLabel, notYetFullyInvoiced, partlyInvoicedBanner } from "./jobs/sageInvoices.js";
@@ -3724,22 +3736,37 @@ export default function StockControl() {
     return (stages || []).length > 0 && stages.every((p) => p.is_complete);
   }
 
+  // Whether accounts already has the job: any invoice request, or any
+  // Sage invoice. Such a job is never closed without an invoice.
+  function jobIsBilled(jobId) {
+    return (
+      (jobInvoiceRequests || []).some((r) => r.job_id === jobId) ||
+      (jobSageInvoices || []).some((s) => s.job_id === jobId)
+    );
+  }
+
   // Returns true if any job changed, so the caller knows to reload.
+  //
+  // A finished job with an Invoicing stage goes to Complete (To invoice);
+  // one with no Invoicing stage goes to Closed (Completed, no invoice), and
+  // so does a job already sitting on Complete with no Invoicing stage and
+  // nothing ever asked of accounts (src/jobs/completeWithoutInvoice.js).
   async function settleFinishedJobs(stagesByJob, jobs) {
     if (!supabase) return false;
-    const finished = (jobs || []).filter(
-      (j) => j.status === "in_progress" && jobFinishedOnFloor(stagesByJob[j.id])
-    );
+    const moves = (jobs || [])
+      .map((j) => ({ job: j, to: finishedJobStatus(j, stagesByJob[j.id], { billed: jobIsBilled(j.id) }) }))
+      .filter((m) => m.to);
     let changed = false;
-    for (const job of finished) {
+    for (const { job, to } of moves) {
       // The status test on the update is what stops two people loading
       // the list at the same moment from both marking it and both telling
       // the rep: only the one whose update returns the row says anything.
+      const fields = to === CLOSED ? closeFields({ hasClosedAt: "closed_at" in job }) : { status: to };
       const { data, error } = await supabase
         .from("jobs")
-        .update({ status: "complete" })
+        .update(fields)
         .eq("id", job.id)
-        .eq("status", "in_progress")
+        .eq("status", job.status)
         .select("id");
       if (error) {
         console.error("Could not mark the finished job complete:", job.job_number, error);
@@ -3747,12 +3774,13 @@ export default function StockControl() {
       }
       if (!data || data.length === 0) continue;
       changed = true;
+      if (to === CLOSED) await logJobEvent(job.id, "completed", closedHistoryText());
       if (job.sales_rep) {
         await sendNotifications({
           job_id: job.id,
           job_number: job.job_number,
           sales_rep: job.sales_rep,
-          message: `${job.job_number} (${job.customer || "no customer"}) is finished — every stage done. It is under Invoicing now, ready to bill.`,
+          message: to === CLOSED ? closedNoticeText(job) : completeNoticeText(job),
         });
       }
     }
@@ -3768,8 +3796,10 @@ export default function StockControl() {
     if (!supabase || !jobId) return;
     try {
       const [{ data: job, error: jobError }, { data: stages, error: stagesError }] = await Promise.all([
-        supabase.from("jobs").select("id, job_number, customer, sales_rep, status").eq("id", jobId).single(),
-        supabase.from("job_processes").select("id, is_complete").eq("job_id", jobId),
+        // The whole row: whether it carries closed_at decides what a
+        // close may write (src/jobs/completeWithoutInvoice.js).
+        supabase.from("jobs").select("*").eq("id", jobId).single(),
+        supabase.from("job_processes").select("id, process_name, is_complete, shortage_id").eq("job_id", jobId),
       ]);
       if (jobError) throw jobError;
       if (stagesError) throw stagesError;
@@ -3790,7 +3820,7 @@ export default function StockControl() {
         .from("jobs")
         .update({ status: "in_progress" })
         .eq("id", jobId)
-        .eq("status", "complete")
+        .in("status", ["complete", CLOSED])
         .select("id");
       if (error) throw error;
       if (data && data.length > 0) await fetchJobs();
@@ -3800,11 +3830,11 @@ export default function StockControl() {
   }
 
   async function refreshJobStages(jobs) {
-    // Invoiced and cancelled jobs show no stage bar, and nothing settles
-    // them, so their stages are not fetched: they would only lengthen the
-    // id list with every job that has ever finished.
+    // Invoiced, closed and cancelled jobs show no stage bar, and nothing
+    // settles them, so their stages are not fetched: they would only
+    // lengthen the id list with every job that has ever finished.
     const ids = (jobs || jobsList || [])
-      .filter((j) => j.status !== "invoiced" && j.status !== "cancelled")
+      .filter((j) => !isDoneStatus(j.status) && j.status !== "cancelled")
       .map((j) => j.id);
     if (ids.length === 0) {
       setJobStagesByJob({});
@@ -5193,7 +5223,7 @@ export default function StockControl() {
   // match a flow set afterwards would rewrite history, and it is why a
   // completed job's checklist appeared to scramble itself.
   function isFrozenJob(job) {
-    return job?.status === "complete" || job?.status === "invoiced" || job?.status === "cancelled";
+    return job?.status === "complete" || isDoneStatus(job?.status) || job?.status === "cancelled";
   }
 
   function inFlowOrder(processes, job) {
@@ -6958,7 +6988,7 @@ export default function StockControl() {
 
   // The question before a force (src/jobs/forceComplete.js). True to carry
   // on. Somebody who may not force is told what is open and who can.
-  async function confirmForce(job, open, { withInvoicing = false } = {}) {
+  async function confirmForce(job, open, { withInvoicing = false, closesWithoutInvoice = false } = {}) {
     if (!mayForceComplete({ isAdmin, isSalesPerson: profile?.isSalesPerson })) {
       alert(forceRefusedText({ jobNumber: job.job_number, open, salesRep: job.sales_rep }));
       return false;
@@ -6973,6 +7003,7 @@ export default function StockControl() {
         open,
         actor: roleLabel,
         withInvoicing,
+        closesWithoutInvoice,
         uncutPrograms: await uncutProgramsForJob(job.id),
         reserved,
       })
@@ -7047,7 +7078,15 @@ export default function StockControl() {
         await refreshJobDetail();
         return;
       }
-      if (!(await confirmForce(job, open, { withInvoicing: open.some((p) => closingSendsInvoiceRequest(p)) }))) return;
+      if (
+        !(await confirmForce(job, open, {
+          withInvoicing: open.some((p) => closingSendsInvoiceRequest(p)),
+          // No Invoicing stage and nothing asked of accounts: the warning
+          // says the job closes as Completed with no invoice.
+          closesWithoutInvoice: !hasInvoicing && !jobIsBilled(job.id),
+        }))
+      )
+        return;
       if (hasInvoicing && !(await sendInvoiceRequestBeforeClosing(job))) return;
       if (!(await closeStagesByForce(job, open))) return;
       // Clears the laser's queue number and settles the job, as a hand tick
@@ -9240,7 +9279,7 @@ export default function StockControl() {
       ]);
       for (const r of [jobRead, lineRead, stageRead, requestRead, sageRead]) if (r.error) throw r.error;
       const job = jobRead.data;
-      if (!job || job.status === "invoiced" || job.status === "cancelled") return;
+      if (!job || isDoneStatus(job.status) || job.status === "cancelled") return;
       if ((sageRead.data || []).length === 0) return;
       if (notYetFullyInvoiced(job, requestRead.data, lineRead.data, stageRead.data)) return;
       const total = (sageRead.data || []).reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
@@ -9374,7 +9413,7 @@ export default function StockControl() {
     const seesAccounts = isAdmin || !!profile?.canManageInvoicing;
     const outstandingAll = seesAccounts
       ? (jobsList || []).filter(
-          (j) => j.status !== "invoiced" && j.status !== "cancelled" && (j.status === "complete" || requestsOf.has(j.id))
+          (j) => !isDoneStatus(j.status) && j.status !== "cancelled" && (j.status === "complete" || requestsOf.has(j.id))
         )
       : [];
     const invoicedAll = seesAccounts ? (jobsList || []).filter((j) => j.status === "invoiced") : [];
@@ -11695,7 +11734,7 @@ export default function StockControl() {
   // Once a job is fully invoiced, nothing about it should be editable by
   // anyone — this is the single source of truth for that lock, used
   // throughout the Job Detail modal alongside the normal permission check.
-  const jobIsLocked = jobDetail?.job?.status === "invoiced";
+  const jobIsLocked = isDoneStatus(jobDetail?.job?.status);
   // An admin can still edit a locked job. The lock is there to stop
   // invoiced work being changed by accident, not to make a job
   // unrepairable — and a job carrying stages from an old process list has
@@ -15559,8 +15598,8 @@ export default function StockControl() {
               const daysOnJob = (job) => {
                 const from = job.created_at ? new Date(job.created_at) : null;
                 if (!from || Number.isNaN(from.getTime())) return null;
-                const to =
-                  job.status === "invoiced" && job.invoiced_at ? new Date(job.invoiced_at) : new Date();
+                const stopped = finishedAt(job);
+                const to = stopped ? new Date(stopped) : new Date();
                 const days = Math.floor((to - from) / 86400000);
                 return days >= 0 ? days : null;
               };
@@ -15666,7 +15705,7 @@ export default function StockControl() {
                     // starts being a question. Only while it is still open --
                     // on an invoiced one the number is history, and colouring
                     // history red says something is wrong when nothing is.
-                    const tooLong = days >= JOB_AGE_WARNING_DAYS && job.status !== "invoiced";
+                    const tooLong = days >= JOB_AGE_WARNING_DAYS && !isDoneStatus(job.status);
                     return (
                       <span
                         style={{
@@ -15675,8 +15714,8 @@ export default function StockControl() {
                           ...(tooLong ? { color: C.danger, borderColor: C.danger, fontWeight: 700 } : {}),
                         }}
                         title={
-                          job.status === "invoiced"
-                            ? `Took ${days} day${days === 1 ? "" : "s"} from being booked in to being invoiced`
+                          isDoneStatus(job.status)
+                            ? `Took ${days} day${days === 1 ? "" : "s"} from being booked in to being ${job.status === "invoiced" ? "invoiced" : "completed"}`
                             : tooLong
                               ? `Booked in ${days} days ago — over ${JOB_AGE_WARNING_DAYS}`
                               : `Booked in ${days} day${days === 1 ? "" : "s"} ago`
@@ -15692,7 +15731,18 @@ export default function StockControl() {
                       at now is amber, the rest are outlines. Beside it,
                       the current stage by name, so the list answers
                       "where is it stuck" without opening anything. */}
-                  {job.status !== "invoiced" &&
+                  {/* A job closed with no invoice says so on its row, so a
+                      job that should have had an Invoicing stage is seen
+                      under Completed and not taken for billed. */}
+                  {isClosedWithoutInvoice(job) && (
+                    <span
+                      style={{ ...S.chip, flexShrink: 0, color: C.muted, fontStyle: "italic" }}
+                      title="Every stage done and the job has no Invoicing stage, so nothing went to accounts"
+                    >
+                      No invoice
+                    </span>
+                  )}
+                  {!isDoneStatus(job.status) &&
                     (() => {
                       const stages = inFlowOrder((jobStagesByJob[job.id] || []).filter((p) => !p.shortage_id), job);
                       if (stages.length === 0) return null;
@@ -15828,6 +15878,9 @@ export default function StockControl() {
 
               const jobsWith = (status) =>
                 sortJobs(jobsList.filter((j) => j.status === status && matchesFilters(j)), jobsOrder);
+              // Completed: invoiced, or closed with nothing to invoice
+              // (src/jobs/completeWithoutInvoice.js).
+              const doneJobs = sortJobs(jobsList.filter((j) => isDoneStatus(j.status) && matchesFilters(j)), jobsOrder);
               return (
                 <>
                   <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
@@ -16003,9 +16056,11 @@ export default function StockControl() {
 
                   {/* A job's life on this page: Active while the floor has it,
                       To invoice once every stage is ticked, Completed once
-                      accounts has raised the invoice. The moves are automatic:
-                      the last tick sets Complete, Mark as Invoiced sets Invoiced.
-                      Nobody drags anything. */}
+                      accounts has raised the invoice. A job with no Invoicing
+                      stage skips To invoice: its last tick closes it straight
+                      to Completed, marked "No invoice". The moves are
+                      automatic: the last tick sets Complete or Closed, Mark as
+                      Invoiced sets Invoiced. Nobody drags anything. */}
                   <Section
                     title="To invoice"
                     count={jobsWith("complete").length}
@@ -16021,11 +16076,11 @@ export default function StockControl() {
                   <Section
                     title="Completed"
                     defaultOpen={false}
-                    count={jobsWith("invoiced").length}
+                    count={doneJobs.length}
                   >
                     <div style={S.managerListFullPage}>
-                      {jobsWith("invoiced").map((j) => renderJobRow(j))}
-                      {jobsWith("invoiced").length === 0 && <div style={S.empty}>Nothing matches that.</div>}
+                      {doneJobs.map((j) => renderJobRow(j))}
+                      {doneJobs.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
                     </div>
                   </Section>
                   </>
@@ -22174,6 +22229,12 @@ export default function StockControl() {
                   <option value="in_progress">In Progress</option>
                   <option value="complete">Complete</option>
                   <option value="cancelled">Cancelled</option>
+                  {/* Where the job is, never a choice: Invoiced comes from
+                      accounts, Closed from the last tick on a job with no
+                      Invoicing stage. An admin puts either back with In
+                      Progress. */}
+                  <option value="invoiced" disabled>Invoiced</option>
+                  <option value={CLOSED} disabled>Completed — no invoice</option>
                 </select>
                 {/* The whole job in one press, while any stage is open, a
                     re-cut's run included: urgent on every open stage, and
@@ -22249,6 +22310,9 @@ export default function StockControl() {
               <div style={{ ...S.roleHint, marginTop: 8, color: C.accentFinished }}>
                 Invoiced — #{jobDetail.job.invoice_number} — by {jobDetail.job.invoiced_by} on {new Date(jobDetail.job.invoiced_at).toLocaleDateString()}
               </div>
+            )}
+            {isClosedWithoutInvoice(jobDetail.job) && (
+              <div style={{ ...S.roleHint, marginTop: 8, color: C.accentFinished }}>{closedStatusLine(jobDetail.job)}</div>
             )}
 
             {jobDetail.job.description && (

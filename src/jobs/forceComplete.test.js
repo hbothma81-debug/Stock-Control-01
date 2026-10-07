@@ -62,6 +62,13 @@ test("the warning names every open stage and who it will be closed as", () => {
   assert.doesNotMatch(text, /set aside/);
 });
 
+test("a job with no Invoicing stage is told it closes with no invoice, not To invoice", () => {
+  const text = forceWarningText({ jobNumber: "JOB-0253", open: [job55[3]], actor: "Heinrich", closesWithoutInvoice: true });
+  assert.match(text, /the job is closed as Completed with no invoice: it has no Invoicing stage\./);
+  assert.doesNotMatch(text, /To invoice/);
+  assert.match(text, /Mark it complete\?$/);
+});
+
 test("from the Invoicing tick it says the request goes and Invoicing is ticked", () => {
   const text = forceWarningText({ jobNumber: "JOB-0001", open: [job55[3]], actor: "Mark", withInvoicing: true });
   assert.match(text, /still has 1 stage open/);
