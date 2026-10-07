@@ -304,176 +304,7 @@ export function PurchaseOrdersTab({ ctx }) {
             (po.poNumber || "").toLowerCase().includes(pq) ||
             (po.supplierName || "").toLowerCase().includes(pq) ||
             (po.reference || "").toLowerCase().includes(pq));
-        const renderPoCard = (po) => {
-          const isOpen = expandedPoId === po.id;
-          return (
-            <div key={po.id} style={S.reqCard}>
-              <button
-                type="button"
-                className="stk-btn"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  width: "100%",
-                  textAlign: "left",
-                  cursor: "pointer",
-                  gap: 10,
-                  background: "transparent",
-                  border: "none",
-                  padding: 0,
-                  color: "inherit",
-                  font: "inherit",
-                }}
-                onClick={() => setExpandedPoId(isOpen ? null : po.id)}
-              >
-                <span style={S.itemName}>{po.poNumber}</span>
-                <span style={{ flex: 1, minWidth: 0, color: C.muted, fontSize: 14 }}>
-                  {po.supplierName || "No supplier"}
-                </span>
-                <span style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-                  <span
-                    style={{
-                      ...S.reqStatusTag,
-                      ...(po.status === "received" ? S.reqStatus_received : S.reqStatus_ordered),
-                      ...(po.status === "cancelled"
-                        ? { color: C.danger, borderColor: C.danger, textDecoration: "line-through" }
-                        : {}),
-                    }}
-                  >
-                    R{po.totalValue.toFixed(2)}
-                  </span>
-                  <ChevronDown size={16} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
-                </span>
-              </button>
-              {isOpen && (
-                <>
-                  <div className="stk-meta-row" style={{ ...S.rowMeta, marginTop: 6 }}>
-                    <span>Raised by {po.createdBy}</span>
-                    <span>{new Date(po.dateCreated).toLocaleDateString()}</span>
-                    {po.reference && <span>Ref {po.reference}</span>}
-                    {po.jobNumber && <span>For {po.jobNumber}</span>}
-                    {po.status === "received" && (
-                      <>
-                        <span>Received by {po.receivedBy} on {new Date(po.receivedDate).toLocaleDateString()}</span>
-                        {po.deliveryNoteNumber && <span>Delivery note: {po.deliveryNoteNumber}</span>}
-                      </>
-                    )}
-                    {po.status === "cancelled" && (
-                      <span style={{ color: C.danger }}>
-                        Cancelled by {po.cancelledBy || "—"}
-                        {po.cancelledDate ? ` on ${new Date(po.cancelledDate).toLocaleDateString()}` : ""}
-                      </span>
-                    )}
-                  </div>
-                  {po.notes && <div style={S.itemComment}>{po.notes}</div>}
-                  {/* The reason is the point of the button, so it sits with
-                      the order rather than only in the audit trail. */}
-                  {po.status === "cancelled" && po.cancelReason && (
-                    <div style={{ ...S.itemComment, color: C.danger }}>Cancelled: {po.cancelReason}</div>
-                  )}
-
-                  {/* The lines themselves, priced. Saying "3 lines" meant
-                      opening the PDF to find out what had been ordered and
-                      for how much, which is the one thing this screen is
-                      for. */}
-                  {(() => {
-                    const rate = po.vatRate != null ? po.vatRate : 15;
-                    const excl = (po.lineItems || []).reduce((sum, li) => sum + Number(li.qty) * Number(li.unitPrice), 0);
-                    const vat = po.vatTotal != null ? po.vatTotal : excl * (rate / 100);
-                    return (
-                      <div style={{ marginTop: 8 }}>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                          {(po.lineItems || []).map((li, i) => (
-                            <div
-                              key={i}
-                              style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", fontSize: 14 }}
-                            >
-                              <span style={{ color: C.muted, minWidth: 16, textAlign: "right" }}>{i + 1}</span>
-                              {li.partNumber && <span style={{ color: C.muted }}>{li.partNumber}</span>}
-                              <span style={{ flex: "1 1 160px", minWidth: 0 }}>{li.description}</span>
-                              <span style={{ fontWeight: 600 }}>{li.qty}</span>
-                              <span style={{ color: C.muted }}>@ R {Number(li.unitPrice || 0).toFixed(2)}</span>
-                              <span style={{ fontWeight: 600, minWidth: 74, textAlign: "right" }}>
-                                R {(Number(li.qty) * Number(li.unitPrice)).toFixed(2)}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                        <div
-                          style={{
-                            marginTop: 6,
-                            paddingTop: 6,
-                            borderTop: `1px solid ${C.border}`,
-                            display: "flex",
-                            justifyContent: "flex-end",
-                            gap: 14,
-                            flexWrap: "wrap",
-                            fontSize: 14,
-                          }}
-                        >
-                          <span style={{ color: C.muted }}>Excl. R {excl.toFixed(2)}</span>
-                          <span style={{ color: C.muted }}>VAT ({rate}%) R {vat.toFixed(2)}</span>
-                          <span style={{ fontWeight: 700 }}>Total R {po.totalValue.toFixed(2)}</span>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  <div style={S.reqActions}>
-                    <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => viewPoPdf(po)}>
-                      <FileText size={13} /> View PDF
-                    </button>
-                    {/* Sent from the person's own Outlook mailbox, PDF
-                        attached (src/email). Anyone who may raise an
-                        order may send one; a cancelled order is not
-                        sent. Draws nothing until the Microsoft setup's
-                        IDs are in the build. */}
-                    {canRaisePO && po.status !== "cancelled" && (
-                      <ErrorBoundary box what="the email button" where={po.poNumber}>
-                        <SendEmailButton
-                          label="Email to supplier"
-                          title="Send this order to the supplier from your Outlook"
-                          appUser={{ id: currentUser?.id, name: roleLabel }}
-                          getDefaults={() =>
-                            poEmailDefaults({
-                              po,
-                              supplier: master.suppliers.find((s) => s.id === po.supplierId),
-                              company: master.companyDetails || {},
-                              senderName: roleLabel,
-                            })
-                          }
-                          buildAttachment={async () => ({ fileName: `${po.poNumber}.pdf`, blob: (await buildPoDoc(po)).output("blob") })}
-                          record={{ documentType: "purchase_order", relatedId: po.poNumber, jobId: po.jobId }}
-                          onSent={() => setEmailSentTick((n) => n + 1)}
-                        />
-                      </ErrorBoundary>
-                    )}
-                    {canRaisePO && (
-                      <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => copyPurchaseOrder(po)}>
-                        <Copy size={13} /> Copy
-                      </button>
-                    )}
-                    {/* Only while it is still coming. A received order is a
-                        record of goods that arrived, and cancelling one would
-                        be rewriting history rather than stopping anything. */}
-                    {canRaisePO && poIsOpen(po) && (
-                      <button
-                        type="button"
-                        className="stk-btn"
-                        style={{ ...S.reqActionBtnMuted, color: C.danger, borderColor: C.danger }}
-                        onClick={() => setCancelPoModal({ po, reason: "" })}
-                      >
-                        <X size={13} /> Cancel
-                      </button>
-                    )}
-                  </div>
-                  <SentEmailLines documentType="purchase_order" relatedId={po.poNumber} refresh={emailSentTick} />
-                </>
-              )}
-            </div>
-          );
-        };
+        const renderPoCard = (po) => <PoCard key={po.id} ctx={ctx} po={po} />;
 
         // One list, newest first. Grouping by supplier meant hunting for
         // a PO number across several collapsed headings when the number
@@ -768,6 +599,217 @@ export function PoReportsTab({ ctx }) {
             </Section>
           );
         })()
+      )}
+    </div>
+  );
+}
+
+// One purchase order as a card: shut, its number, supplier and total; open,
+// the lines, the PDF, Email to supplier, Copy and Cancel. Drawn by the
+// Purchase Orders tab and by a job's own Purchase orders tab (7 Oct 2026),
+// so the two never differ. showMoney hides the total from people who may
+// not see Rand values on the job page.
+export function PoCard({ ctx, po, showMoney = true }) {
+  const { buildPoDoc, canRaisePO, copyPurchaseOrder, currentUser, emailSentTick, expandedPoId, master,
+    poIsOpen, roleLabel, setCancelPoModal, setEmailSentTick, setExpandedPoId, viewPoPdf } = ctx;
+  const isOpen = expandedPoId === po.id;
+  return (
+    <div key={po.id} style={S.reqCard}>
+      <button
+        type="button"
+        className="stk-btn"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          width: "100%",
+          textAlign: "left",
+          cursor: "pointer",
+          gap: 10,
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          color: "inherit",
+          font: "inherit",
+        }}
+        onClick={() => setExpandedPoId(isOpen ? null : po.id)}
+      >
+        <span style={S.itemName}>{po.poNumber}</span>
+        <span style={{ flex: 1, minWidth: 0, color: C.muted, fontSize: 14 }}>
+          {po.supplierName || "No supplier"}
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          <span
+            style={{
+              ...S.reqStatusTag,
+              ...(po.status === "received" ? S.reqStatus_received : S.reqStatus_ordered),
+              ...(po.status === "cancelled"
+                ? { color: C.danger, borderColor: C.danger, textDecoration: "line-through" }
+                : {}),
+            }}
+          >
+            {showMoney ? `R${po.totalValue.toFixed(2)}` : po.status}
+          </span>
+          <ChevronDown size={16} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+        </span>
+      </button>
+      {isOpen && (
+        <>
+          <div className="stk-meta-row" style={{ ...S.rowMeta, marginTop: 6 }}>
+            <span>Raised by {po.createdBy}</span>
+            <span>{new Date(po.dateCreated).toLocaleDateString()}</span>
+            {po.reference && <span>Ref {po.reference}</span>}
+            {po.jobNumber && <span>For {po.jobNumber}</span>}
+            {po.status === "received" && (
+              <>
+                <span>Received by {po.receivedBy} on {new Date(po.receivedDate).toLocaleDateString()}</span>
+                {po.deliveryNoteNumber && <span>Delivery note: {po.deliveryNoteNumber}</span>}
+              </>
+            )}
+            {po.status === "cancelled" && (
+              <span style={{ color: C.danger }}>
+                Cancelled by {po.cancelledBy || "—"}
+                {po.cancelledDate ? ` on ${new Date(po.cancelledDate).toLocaleDateString()}` : ""}
+              </span>
+            )}
+          </div>
+          {po.notes && <div style={S.itemComment}>{po.notes}</div>}
+          {/* The reason is the point of the button, so it sits with
+              the order rather than only in the audit trail. */}
+          {po.status === "cancelled" && po.cancelReason && (
+            <div style={{ ...S.itemComment, color: C.danger }}>Cancelled: {po.cancelReason}</div>
+          )}
+
+          {/* The lines themselves, priced. Saying "3 lines" meant
+              opening the PDF to find out what had been ordered and
+              for how much, which is the one thing this screen is
+              for. */}
+          {(() => {
+            const rate = po.vatRate != null ? po.vatRate : 15;
+            const excl = (po.lineItems || []).reduce((sum, li) => sum + Number(li.qty) * Number(li.unitPrice), 0);
+            const vat = po.vatTotal != null ? po.vatTotal : excl * (rate / 100);
+            return (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  {(po.lineItems || []).map((li, i) => (
+                    <div
+                      key={i}
+                      style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", fontSize: 14 }}
+                    >
+                      <span style={{ color: C.muted, minWidth: 16, textAlign: "right" }}>{i + 1}</span>
+                      {li.partNumber && <span style={{ color: C.muted }}>{li.partNumber}</span>}
+                      <span style={{ flex: "1 1 160px", minWidth: 0 }}>{li.description}</span>
+                      <span style={{ fontWeight: 600 }}>{li.qty}</span>
+                      <span style={{ color: C.muted }}>@ R {Number(li.unitPrice || 0).toFixed(2)}</span>
+                      <span style={{ fontWeight: 600, minWidth: 74, textAlign: "right" }}>
+                        R {(Number(li.qty) * Number(li.unitPrice)).toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div
+                  style={{
+                    marginTop: 6,
+                    paddingTop: 6,
+                    borderTop: `1px solid ${C.border}`,
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: 14,
+                    flexWrap: "wrap",
+                    fontSize: 14,
+                  }}
+                >
+                  <span style={{ color: C.muted }}>Excl. R {excl.toFixed(2)}</span>
+                  <span style={{ color: C.muted }}>VAT ({rate}%) R {vat.toFixed(2)}</span>
+                  <span style={{ fontWeight: 700 }}>Total R {po.totalValue.toFixed(2)}</span>
+                </div>
+              </div>
+            );
+          })()}
+
+          <div style={S.reqActions}>
+            <button type="button" className="stk-btn" style={S.reqActionBtn} onClick={() => viewPoPdf(po)}>
+              <FileText size={13} /> View PDF
+            </button>
+            {/* Sent from the person's own Outlook mailbox, PDF
+                attached (src/email). Anyone who may raise an
+                order may send one; a cancelled order is not
+                sent. Draws nothing until the Microsoft setup's
+                IDs are in the build. */}
+            {canRaisePO && po.status !== "cancelled" && (
+              <ErrorBoundary box what="the email button" where={po.poNumber}>
+                <SendEmailButton
+                  label="Email to supplier"
+                  title="Send this order to the supplier from your Outlook"
+                  appUser={{ id: currentUser?.id, name: roleLabel }}
+                  getDefaults={() =>
+                    poEmailDefaults({
+                      po,
+                      supplier: master.suppliers.find((s) => s.id === po.supplierId),
+                      company: master.companyDetails || {},
+                      senderName: roleLabel,
+                    })
+                  }
+                  buildAttachment={async () => ({ fileName: `${po.poNumber}.pdf`, blob: (await buildPoDoc(po)).output("blob") })}
+                  record={{ documentType: "purchase_order", relatedId: po.poNumber, jobId: po.jobId }}
+                  onSent={() => setEmailSentTick((n) => n + 1)}
+                />
+              </ErrorBoundary>
+            )}
+            {canRaisePO && (
+              <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => copyPurchaseOrder(po)}>
+                <Copy size={13} /> Copy
+              </button>
+            )}
+            {/* Only while it is still coming. A received order is a
+                record of goods that arrived, and cancelling one would
+                be rewriting history rather than stopping anything. */}
+            {canRaisePO && poIsOpen(po) && (
+              <button
+                type="button"
+                className="stk-btn"
+                style={{ ...S.reqActionBtnMuted, color: C.danger, borderColor: C.danger }}
+                onClick={() => setCancelPoModal({ po, reason: "" })}
+              >
+                <X size={13} /> Cancel
+              </button>
+            )}
+          </div>
+          <SentEmailLines documentType="purchase_order" relatedId={po.poNumber} refresh={emailSentTick} />
+        </>
+      )}
+    </div>
+  );
+}
+
+// The purchase orders raised for one job, on the job page (Heinrich,
+// 7 Oct 2026: "if a PO is linked to a job it should show in the job on its
+// own main pillbox", sent from there). Same cards as the Purchase Orders
+// tab. Raise Purchase Order here starts one with the job filled in.
+export function JobPurchaseOrders({ ctx, job, canSeeValue }) {
+  const { canRaisePO, openPoBuilder, poIsOpen, purchaseOrders } = ctx;
+  const mine = (purchaseOrders || [])
+    .filter((po) => po.jobId === job.id)
+    .sort((a, b) => new Date(b.dateCreated) - new Date(a.dateCreated));
+  const open = mine.filter(poIsOpen);
+  const done = mine.filter((po) => !poIsOpen(po));
+  return (
+    <div style={S.list}>
+      {canRaisePO && (
+        <button type="button" className="stk-btn" style={S.addBtn} onClick={() => openPoBuilder([], "", [], job)}>
+          <Plus size={15} strokeWidth={2.5} /> Raise Purchase Order for {job.job_number}
+        </button>
+      )}
+      {mine.length === 0 && <div style={{ ...S.empty, marginTop: 10 }}>No purchase orders on this job yet.</div>}
+      {open.length > 0 && (
+        <Section title="Outstanding" count={open.length} quiet>
+          {open.map((po) => <PoCard key={po.id} ctx={ctx} po={po} showMoney={canSeeValue} />)}
+        </Section>
+      )}
+      {done.length > 0 && (
+        <Section title="Received / Cancelled" count={done.length} defaultOpen={false} quiet>
+          {done.map((po) => <PoCard key={po.id} ctx={ctx} po={po} showMoney={canSeeValue} />)}
+        </Section>
       )}
     </div>
   );
