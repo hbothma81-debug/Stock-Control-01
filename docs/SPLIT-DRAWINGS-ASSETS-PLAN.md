@@ -97,3 +97,13 @@ This is the Purchasing method, reused:
 
 - No fixes, no renames and no tidying.
 - The two problems noted in the Purchasing run stay as they are until they get their own small fix: the ON ORDER flag as a button inside a button, and the Low stock jump to an empty item.
+
+## How it went (7 Oct 2026)
+
+- **Drawings: commit e680916.** App.jsx 26,069 -> 25,548. Tried on practice: upload, a second revision (rev 1 went to superseded), search, preview, delete both revisions (rows and files gone). Not clicked: opening a drawing by part number from a job.
+- **Assets: commit 22be579.** App.jsx 25,548 -> 24,773. Tried on practice with a test asset and Stores part, both removed afterwards: the overdue mark, a reading, a note with a file (opened, then deleted), Service now with a Stores part (5 -> 4, a usage-log line, a history entry), a repair item added and fixed, Back closing the repair list, removing the asset.
+- **The purchasing crash nets: NOT done.** The requisitions conversation was editing App.jsx and every purchasing file while this ran (a request basket, a job on each requisition). The script `nets-purchasing` stopped before writing. Do it once that work is committed: four tab nets in App.jsx (with `key`), six pop-up nets inside their conditions in PurchasingPopups.jsx.
+- **Found, not changed (they were so before the move):**
+  - Deleting a drawing's current revision leaves the older one "superseded", with no current revision.
+  - The asset history window is not on the Back button's list (`anyModalOpen` / `closeAllModals`).
+  - **An asset's removal reason, date and who are never saved to the database**: `removedReason`, `removedDate` and `removedBy` are not in `ITEM_DB_FIELDS`, so they vanish on the next load.
