@@ -45,14 +45,28 @@ export function openStages(stages, except = null) {
 
 // The words of the warning. `uncutPrograms` are program numbers still to be
 // cut for this job; `reserved` are lines such as "Flat bar: 3 still reserved".
-export function forceWarningText({ jobNumber, open, actor, withInvoicing = false, uncutPrograms = [], reserved = [] }) {
+// `closesWithoutInvoice`: the job has no Invoicing stage and nothing was
+// asked of accounts, so it closes as Completed with no invoice
+// (src/jobs/completeWithoutInvoice.js) instead of moving to To invoice.
+export function forceWarningText({
+  jobNumber,
+  open,
+  actor,
+  withInvoicing = false,
+  closesWithoutInvoice = false,
+  uncutPrograms = [],
+  reserved = [],
+}) {
   const n = open.length;
   const parts = [
     `${jobNumber || "This job"} still has ${n} stage${n === 1 ? "" : "s"} open:\n\n` +
       open.map((p) => `  • ${stageLabel(p)}`).join("\n"),
     `Carrying on marks ${n === 1 ? "it" : "them"} complete as "${forcedBy(actor)}"` +
       (withInvoicing ? ", sends the invoice request and ticks Invoicing" : "") +
-      `. It is written in the job's History, and the job moves to To invoice.`,
+      `. It is written in the job's History, and ` +
+      (closesWithoutInvoice
+        ? `the job is closed as Completed with no invoice: it has no Invoicing stage.`
+        : `the job moves to To invoice.`),
   ];
   if (uncutPrograms.length > 0) {
     parts.push(

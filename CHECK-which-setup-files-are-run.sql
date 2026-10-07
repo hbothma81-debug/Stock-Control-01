@@ -142,6 +142,8 @@ with checks (setup_file, looks_for, found) as (
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'jobs' and column_name = 'laser_priority')),
     ('setup-jobs-invoiced-amount.sql',  'column jobs.invoiced_amount',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'jobs' and column_name = 'invoiced_amount')),
+    ('setup-jobs-closed-at.sql',        'column jobs.closed_at',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'jobs' and column_name = 'closed_at')),
     ('setup-job-sage-invoices.sql',     'table job_sage_invoices',
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'job_sage_invoices')),
     ('setup-job-sage-invoices.sql',     'column job_invoice_requests.sage_invoice_id',

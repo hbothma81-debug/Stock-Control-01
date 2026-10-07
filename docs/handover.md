@@ -5326,3 +5326,60 @@ to 8; whether a crash should notify admins.
 **Queue at wrap-up:** c9e6ddd (mine, notes), 5f0d661 (another
 conversation: "Purchasing moved out of App.jsx into src/purchasing/",
 app code, NOT mine, not pushed from here), and this note.
+
+---
+
+## 7 Oct 2026 — Jobs page: a job with no Invoicing stage skips To invoice
+
+**His report.** He force-completed a job he had not given an Invoicing
+stage (it was additional to an existing job and will never be invoiced)
+and it landed under To invoice. "If invoice is not selected the job
+should just complete on its own and skip invoicing."
+
+**Read from live, signed in, from the Jobs page itself** (a direct
+read of the live database through his tab was refused by the session's
+permission layer, so this is the screen, not the rows):
+
+- 145 Active, 24 To invoice, 74 Completed.
+- **13 of the 24 under To invoice have no Invoicing stage** and were
+  never going anywhere: JOB-0253 (Cash Sale, R 10), 0228 (RSI, not
+  priced), 0225 (Tilvis, R 133), 0202 (Factory, R 20), 0199/0198/0197
+  (HPE, R 1,013 / R 1,991 / R 2,117), 0190/0189 (ARL Solutions,
+  R 9,572 / R 5,122), 0158 (Tilvis, R 131), 0110 (MIT, not priced),
+  0063 and 0059 (Factory, R 208 / R 287). The other 11 have Invoicing
+  ticked and are accounts' to mark.
+- **27 Active jobs have no Invoicing stage** and would have done the
+  same when finished: 8 Factory jobs, 8 not priced, and 12 priced
+  customer jobs worth about R 126,000 together, the big ones JOB-0081
+  (FSS, R 53,950), JOB-0230 (FSS, R 36,795), JOB-0136 (ER Products,
+  R 8,813), JOB-0237 (HPE, R 8,002), JOB-0220 (VAN GROUP, R 5,474).
+  Told to him: if any of these should be billed, they need an
+  Invoicing stage added before they finish, because the new rule
+  closes them without one.
+
+**Built (this commit; tests 410 pass, names check clean, build
+clean).** `src/jobs/completeWithoutInvoice.js` (tested): a finished
+job with no Invoicing stage and nothing asked of accounts becomes
+status `closed`, shown under Completed with a "No invoice" chip; the
+Overview, History and the rep's notice say so; the Force complete
+warning says "closed as Completed with no invoice" instead of "moves
+to To invoice". Jobs already on Complete in that shape close on the
+next Jobs list load (the 13 above). `isDoneStatus` replaces every
+`status === "invoiced"` that meant "finished and gone" (stage fetch,
+Records Outstanding, the lock, the days chip, the stage bar,
+`isFrozenJob`, `settleSageInvoicedJob`); un-ticking reopens a closed
+job too; the Status box shows Invoiced and "Completed — no invoice"
+as read-only words. Rule in CLAUDE.md.
+
+**SQL: `setup-jobs-closed-at.sql`** (one column, `jobs.closed_at`;
+proven on pglite twice; registered in `build-test-database.sh` and
+`CHECK-which-setup-files-are-run.sql`; setup-ALL.sql regenerated).
+**On neither database yet.** The app writes the column only where the
+row shows it exists, so the push can go first; until the paste closed
+jobs carry no date and their days chip keeps counting.
+
+**Not pushed. Tried on no screen:** the practice pane was not signed
+in. To try on practice: give a job no Invoicing stage, tick its last
+stage (or Force complete), read `jobs.status = 'closed'` back; open
+the Jobs page and see it under Completed with "No invoice"; In
+Progress in the Status box puts it back.

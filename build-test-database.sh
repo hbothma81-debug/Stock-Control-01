@@ -51,6 +51,7 @@ ORDER=(
   setup-job-invoice-requests.sql
   setup-invoice-notes.sql
   setup-jobs-invoiced-amount.sql
+  setup-jobs-closed-at.sql
   setup-job-sage-invoices.sql
   setup-invoice-request-function.sql
   setup-delivery-notes-per-request.sql
