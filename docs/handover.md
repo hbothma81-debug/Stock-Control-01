@@ -5501,3 +5501,28 @@ job onto the PO when Raise PO is pressed on the Requisitions tab (it
 fills the job only from the job page and Buy-outs today); the Customer
 Stock review (optional supplier box on the form; whether Buy-outs
 folds in), his word "look at separately".
+
+---
+## 7 Oct 2026 — the whole queue PUSHED from the Requisitions conversation (`3344b86..48d2e4c`)
+
+His word "look at what is ready to push, check if safe and push from
+here". The queue (19 commits) was the Drawings and Assets split
+(e680916, 22be579, 91ded6e), 9029c95 (deleting the current drawing
+revision makes the newest one left current), f8a762f (an asset's
+removal reason, date and who kept; Back closes asset history), the Jobs
+page notes and FIX file (af9cb77 already live as afa3e51, dde3b93,
+faf50a8, 28f38cf with two CLAUDE.md gotchas), and this conversation's
+own commits already live plus their merge and handover. Every code
+commit's message said it was tried on practice by its own conversation;
+`setup-stock-removed-details.sql` is guarded (the app writes the three
+columns only once a loaded row shows them).
+
+Checked before the push: clean clone at 48d2e4c, build clean
+(App-Dw5hAGca.js local), names check clean, 410 tests; on practice
+signed in, Records -> Drawings and Stock -> Assets both draw, no console
+errors, no crash boxes. Pushed; `removed_reason` is in the live bundle.
+
+`setup-stock-removed-details.sql` was already on live at the push
+(`CHECK-live-table.cjs "stock_items?select=removed_reason"` answered
+200), so Remove asset keeps the reason from this build on. Practice
+not checked from here. Live went App-CJod77Oe.js -> App-CwpMiDMk.js.
