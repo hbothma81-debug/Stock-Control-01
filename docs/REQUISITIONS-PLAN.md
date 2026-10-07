@@ -139,9 +139,12 @@ only inside the job.
   the same card as the Purchase Orders tab (`PoCard`, lifted out of it):
   View PDF, Email to supplier, Copy, Cancel; total hidden without Rand
   values. "Raise Purchase Order for JOB-x" starts the builder on the job.
-- NOT done: the PO builder does not yet carry a requisition's job onto the
-  PO when raised from the Requisitions tab (it fills the job only from the
-  job page and Buy-outs). Next small step.
+- The PO builder carries the requests' job onto the PO from the
+  Requisitions tab too (`src/purchasing/poJob.js`, tested, 7 Oct later):
+  one job among the requests fills the box (Stores lines beside it do not
+  count), two or more leave it empty with a red line naming them so the
+  person picks one or leaves it for stores. Tried on practice: Raise PO
+  for all on a supplier group opened on JOB-0012.
 
 ### Order of work
 
