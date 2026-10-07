@@ -5383,3 +5383,18 @@ in. To try on practice: give a job no Invoicing stage, tick its last
 stage (or Force complete), read `jobs.status = 'closed'` back; open
 the Jobs page and see it under Completed with "No invoice"; In
 Progress in the Status box puts it back.
+
+**PUSHED 7 Oct 2026 on his "push from here only your changes", one
+commit ahead of the queue** (the scratch-clone method in CLAUDE.md):
+afa3e51 = af9cb77 plus the two registration lines that 8d140d8 had
+swept up and the regenerated setup-ALL.sql, cherry-picked onto live's
+2861f46; clean clone: 405 tests, names check clean, build clean
+(App-DojFcioa.js local); `git log origin/main..x` read as its own step,
+exactly the one commit; pushed; live went App-DcD4YizN.js ->
+App-Cc2wDe9z.js with both new wordings in it. origin/main merged back
+into the shared branch (6da66cb). **Held back, not mine, told to him:**
+6277fe4, 52ebd05, e680916, 22be579, 91ded6e, 8d140d8 and 342261f
+(Drawings and Assets out of App.jsx, the Request stock basket), plus
+another conversation's uncommitted work in App.jsx, useDrawings.jsx,
+the SQL lists and `setup-stock-removed-details.sql`. The SQL
+`setup-jobs-closed-at.sql` is still on neither database: his paste.
