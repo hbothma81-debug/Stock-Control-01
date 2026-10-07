@@ -5283,3 +5283,46 @@ that says which line a cut came off.
   and holds "Bring in line". Live not opened signed in since. **The
   first real press is his, on Mild Steel on live, floor stopped;
   every screen reloads afterwards.**
+
+## 7 Oct 2026, App health: wrap-up
+
+**State of play.** Everything this conversation built is LIVE: the
+delivery note fixes (28 Sep), the cut list editor (29 Sep), a
+material's short name going everywhere (29 Sep), Bring in line
+(5 Oct, App-ZAQQc5fW.js). He said "ok done" on 7 Oct after the
+Bring in line step: taken as the press made on Mild Steel on live.
+**Not read back:** the pane was signed out, so nobody from here has
+seen live's rows reading "MS". Next session, signed in: Stock Manager
+-> Material Types should show no red line under Mild Steel, and
+`CHECK-material-spellings.sql` (or a read through his tab) should
+find no stock line, section, requisition, cut line or program
+reading "Mild Steel".
+
+**Every `setup-*.sql` this conversation wrote, and where it is:**
+
+| file | practice | live |
+| --- | --- | --- |
+| setup-delivery-notes-per-request.sql | yes (28 Sep) | yes (28 Sep) |
+| setup-material-short-name.sql (functions only) | yes, my paste 29 Sep | yes, his paste 29 Sep, checked signed out |
+| setup-material-out-of-line.sql (one counting function) | yes, my paste 30 Sep | yes, his paste, checked signed out 5 Oct |
+
+**Built but not tried by Heinrich (or anybody):**
+- Bring in line: the Yes press was tried on no screen before his own
+  press on live 7 Oct; whether it worked is his word only until read
+  back. A non-admin who can open Stock Manager: not seen that the
+  line is hidden.
+- The cut list on live: pressed by nobody (Edit, Save, Cancel, the
+  lock once a piece is cut, New size, Add stock).
+- A purchase order raised after the rename: should print "Mild
+  Steel" in full (and "Stainless 304" for SS304 plate).
+- Delivery notes: Copy job with a retired stage, the Then box with a
+  retired stage, Rebuild PDF pressed on live by nobody.
+- Delete for customer: never run anywhere.
+
+**Still open from earlier, none started:** the egress reading after a
+working week; the whole-table loads (laser, jobs, shortages); Vite 5
+to 8; whether a crash should notify admins.
+
+**Queue at wrap-up:** c9e6ddd (mine, notes), 5f0d661 (another
+conversation: "Purchasing moved out of App.jsx into src/purchasing/",
+app code, NOT mine, not pushed from here), and this note.
