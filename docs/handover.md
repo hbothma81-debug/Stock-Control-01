@@ -5526,3 +5526,36 @@ errors, no crash boxes. Pushed; `removed_reason` is in the live bundle.
 (`CHECK-live-table.cjs "stock_items?select=removed_reason"` answered
 200), so Remove asset keeps the reason from this build on. Practice
 not checked from here. Live went App-CJod77Oe.js -> App-CwpMiDMk.js.
+
+---
+## 7 Oct 2026 — Planning (App.jsx split): state of play at wrap-up
+
+**Live.** Purchasing moved out of App.jsx into `src/purchasing/` (5f0d661, pushed by this conversation 7 Oct 08:11). Drawings into `src/drawings/` (e680916) and Assets into `src/assets/` (22be579), plus three faults found while moving them (9029c95, f8a762f): all went live in the Requisitions conversation's push at 11:05 (48d2e4c). This conversation checked the live bundle afterwards, and the live page loads signed in with no console errors. App.jsx is 24,894 lines (28,686 on 5 Oct). The method and the test runs are in `docs/SPLIT-PURCHASING-PLAN.md` and `docs/SPLIT-DRAWINGS-ASSETS-PLAN.md`; the split rule is now in CLAUDE.md.
+
+**SQL written here:**
+- `setup-stock-removed-details.sql` (three columns on stock_items).
+  - **Practice: run.** His first paste did not land; the second did, and I checked by reading the columns back.
+  - **Live: run.** `CHECK-live-table.cjs` answers 200 for all three columns, next to a made-up column that answers 400.
+
+**Half done.** Crash nets for the purchasing screens are owed. CLAUDE.md requires a net on every page lifted out of App.jsx, and the Purchasing move added none.
+- Wanted: four tab nets in App.jsx, each with a `key`, and a net inside each pop-up's condition in `PurchasingPopups.jsx`. There are 5 pop-ups now that a7e7b95 removed the pick-an-item one.
+- Held back because the requisitions conversation keeps editing those files. Its uncommitted `PurchasingPopups.jsx`, `usePurchasing.jsx` and `poJob.js` are in the folder as I write this.
+- Do it once that work is committed.
+
+**Built but not tried by Heinrich:**
+- **Purchasing, Drawings and Assets screens** after the move. They should behave exactly as before.
+  - Tried on practice by this conversation; nobody has used them on live yet.
+  - Not clicked by anyone since the move: opening a drawing by part number from a job; Raise PO from a job's buy-out line; ordering bars from a cut list.
+- **Removing an asset now keeps its reason, date and who.** Remove one, reload, and look under Assets → Removed / Archive. Assets removed before 7 Oct have none.
+- **Back closes an asset's History window** (with the asset view behind it, like every pop-up).
+- **Deleting a drawing's current revision makes the newest one left current.** It used to leave none current.
+
+**Waiting on Heinrich:**
+- Which area moves next. My recommendation: Invoicing and delivery notes together with Jobs, because their code sits in four places; Stock last. Production is the other mid-size candidate.
+- Two older faults noted on 5 Oct, not fixed, which he has not asked for:
+  - the ON ORDER flag on a stock row is a button inside a button, so clicking it opens the row;
+  - the Low stock list's jump to an item at 0 shows "Nothing matches".
+
+**Next session:**
+1. The purchasing crash nets, once the requisitions work is committed.
+2. Then plan the next move, using the same parser-driven copy script. The script was in this session's scratchpad and will be gone; it can be rebuilt from the method in the plan docs.
