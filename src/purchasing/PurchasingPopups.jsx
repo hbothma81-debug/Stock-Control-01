@@ -481,86 +481,16 @@ export function PurchasingPopups({ ctx }) {
   );
 }
 
-// The pick-an-item list and the Request stock form.
+// The Request stock basket, and the one-item form that now only edits an
+// existing request (openEditRequisition); new requests all go through the
+// basket since 7 Oct 2026.
 export function RequestStockPopups({ ctx }) {
-  const { canAdd, closeRequisition, closeRequisitionPicker, createItemForRequisition, editingRequisitionId,
-    items, master, pickItemForRequisition, reqTargetLines, requisitionNotes, requisitionPickerQuery,
+  const { closeRequisition, editingRequisitionId, master, reqTargetLines, requisitionNotes,
     requisitionQty, requisitionSupplier, requisitionTarget, sameText, setRequisitionNotes,
-    setRequisitionPickerQuery, setRequisitionQty, setRequisitionSupplier, showRequisitionPicker,
-    submitRequisition, supplierPriceChips } = ctx;
+    setRequisitionQty, setRequisitionSupplier, submitRequisition, supplierPriceChips } = ctx;
   return (
     <>
       {ctx.requestBasket && !ctx.requestBasket.hidden && <RequestStock ctx={ctx} />}
-      {showRequisitionPicker && (
-        <div style={S.modalOverlay}>
-          <div style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
-            <div style={S.modalHead}>
-              <span style={S.modalTitle}>Request stock</span>
-              <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeRequisitionPicker}>
-                <X size={18} />
-              </button>
-            </div>
-            <div style={S.roleHint}>Find the item to request — this searches everything, including items already at zero.</div>
-            <input
-              autoFocus
-              style={{ ...S.input, marginTop: 10 }}
-              value={requisitionPickerQuery}
-              onChange={(e) => setRequisitionPickerQuery(e.target.value)}
-              placeholder="Search anything on the row: name, grade, size, supplier, customer…"
-            />
-            <div style={{ ...S.managerList, marginTop: 10, maxHeight: "60vh", overflowY: "auto" }}>
-              {(() => {
-                // The same every-field, word-by-word search as the Stock
-                // tab (src/lib/stockSearch.js), so what Stock finds, this
-                // finds. Customer Stock included (his answer, 7 Oct 2026);
-                // assets are not stock to request.
-                const words = searchWords(requisitionPickerQuery);
-                if (words.length === 0) return <div style={S.empty}>Start typing to search.</div>;
-                const all = (items || [])
-                  .filter((it) => it.mainCat !== "assets")
-                  .filter((it) => matchesWords(stockSearchText(it), words));
-                const matches = all.slice(0, 60);
-                return (
-                  <>
-                    {matches.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
-                    {all.length > matches.length && (
-                      <div style={S.roleHint}>Showing {matches.length} of {all.length} — type more to narrow it down.</div>
-                    )}
-                    {matches.map((it) => (
-                      <button
-                        key={it.id}
-                        type="button"
-                        className="stk-btn"
-                        style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer" }}
-                        onClick={() => pickItemForRequisition(it)}
-                      >
-                        <div style={S.reqCardTop}>
-                          <span style={S.itemName}>{it.grade ? `${it.grade} — ` : ""}{it.name}</span>
-                          <span style={{ ...S.reqStatusTag, ...(Number(it.qty) > 0 ? S.reqStatus_received : S.reqStatus_ordered) }}>
-                            {Number(it.qty) > 0 ? `${it.qty} in stock` : "0 in stock"}
-                          </span>
-                        </div>
-                        {it.customer && <div className="stk-meta-row" style={S.rowMeta}><span>{it.customer}</span></div>}
-                      </button>
-                    ))}
-                    {canAdd && (
-                      <button
-                        type="button"
-                        className="stk-btn"
-                        style={{ ...S.reqActionBtnMuted, width: "100%", marginTop: matches.length > 0 ? 6 : 0 }}
-                        onClick={() => createItemForRequisition(requisitionPickerQuery.trim())}
-                      >
-                        <Plus size={13} /> Not in Stock yet? Create "{requisitionPickerQuery.trim()}" as a new item
-                      </button>
-                    )}
-                  </>
-                );
-              })()}
-            </div>
-          </div>
-        </div>
-      )}
-
       {requisitionTarget && (
         <div style={S.modalOverlay}>
           <form style={S.modal} onClick={(e) => e.stopPropagation()} onSubmit={submitRequisition}>
