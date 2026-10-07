@@ -1,7 +1,9 @@
 # Requesting stock: one system, every page
 
-Planned 7 Oct 2026 with Heinrich. Status: his answers in (below the
-questions); step 1 under way.
+Planned 7 Oct 2026 with Heinrich. Status: steps 1 and 2 built and
+committed (search fix 52ebd05; the basket on the Requisitions tab, with
+`setup-requisitions-job.sql` still to paste on practice and live), neither
+tried signed in. Customer Stock gets its own review (below).
 
 ## Why
 
@@ -144,6 +146,19 @@ only inside the job.
 - `src/App.jsx` (the doors), `src/jobs/CutToSize.jsx`,
   `src/laser/LaserTab.jsx`, `NestingView.jsx`, `ImportReportModal.jsx`
 - `setup-requisitions-job.sql` if question 1 is yes
+
+## Customer Stock review (separate, his word 7 Oct)
+
+"All customer items should have an optional supplier, so that we don't
+need two databases. Some items I buy and sell directly." The second
+database he means is the Buy-outs division. What the code has: every stock
+row already has a `supplier` column; the Customer Stock add and edit form
+simply never shows the Supplier box (`formSupplierField` is drawn on the
+plate, structural and CNC bar forms only). So the first step is a form
+change, no SQL. The bigger question, whether Buy-outs folds into Customer
+Stock with a supplier, is a review of its own, not started. For the basket:
+a Customer Stock line takes the item's supplier when it has one, else the
+supplier is picked like any other line.
 
 ## His answers (7 Oct)
 

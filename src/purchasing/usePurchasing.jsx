@@ -54,7 +54,11 @@ export function usePurchasingState() {
   const [archiveTypeFilter, setArchiveTypeFilter] = useState("");
   const [archiveDateFrom, setArchiveDateFrom] = useState("");
   const [archiveDateTo, setArchiveDateTo] = useState("");
-  return { poBuilder, setPoBuilder, poSearchQuery, setPoSearchQuery, poSupplierFilter, setPoSupplierFilter,
+  // The Request stock basket: null when shut, else { query, lines, hidden }
+  // with one line per item { item, qty, supplier, jobId, jobNumber, notes }.
+  // hidden is set while the add-item form is open over it.
+  const [requestBasket, setRequestBasket] = useState(null);
+  return { requestBasket, setRequestBasket, poBuilder, setPoBuilder, poSearchQuery, setPoSearchQuery, poSupplierFilter, setPoSupplierFilter,
     expandedPoId, setExpandedPoId, receivingSearchQuery, setReceivingSearchQuery, expandedReceivingId,
     setExpandedReceivingId, receivingHistoryDateFrom, setReceivingHistoryDateFrom, receivingHistoryDateTo,
     setReceivingHistoryDateTo, receivingHistorySearchQuery, setReceivingHistorySearchQuery, showPoReport,
@@ -78,8 +82,9 @@ export function usePurchasing(deps) {
     findMaterialEntry, findPrice, findSectionEntry, findSectionPrice, formatPoNumber,
     generateAndStoreDocument, getPdf, items, jobDetail, logJobEvent, master, materialSupplierLines,
     openJobDetail, plateWeight, poBuilder, poReportFrom, poReportMonths, poReportStatus, poReportSupplier,
-    poReportTo, purchaseOrders, receivingDeliveryNote, receivingLines, receivingPo, requisitionNotes,
+    poReportTo, purchaseOrders, receivingDeliveryNote, receivingLines, receivingPo, requestBasket, requisitionNotes,
     requisitionQty, requisitionSupplier, requisitionTarget, requisitions, roleLabel, sameText, selectedReqIds,
+    setRequestBasket,
     setAddingItemForRequisition, setAllowDuplicate, setCancelPoModal, setEditingId, setEditingRequisitionId,
     setExpandedReqId, setForm, setItems, setMaster, setPoBuilder, setPurchaseOrders, setReceivingAdjustingIdx,
     setReceivingDeliveryNote, setReceivingLines, setReceivingPo, setRequisitionNotes,
@@ -88,19 +93,110 @@ export function usePurchasing(deps) {
     setShowRequisitionPicker, setSupplierPrice, setTab, setUsageLog, stockHasPaidPrice, supplierNameOf, tab,
     uid } = deps;
 
+  // The cheapest supplier is filled in (his answer, 21 Sep 2026), unless
+  // the no-supplier price beats every supplier's; the row's own
+  // supplier when the material has no supplier prices.
+  function defaultSupplierFor(it) {
+    const lines = reqTargetLines(it);
+    const best = cheapestPrice(lines);
+    const mat = stockItemMaterial(it);
+    const base = !mat ? 0 : mat.listKey === "sections" ? findSectionEntry(mat.name, mat.grade)?.price || 0 : findMaterialEntry(mat.listKey, mat.name)?.price || 0;
+    return best && !(base > 0 && base < best.price) ? supplierNameOf(best.supplierId) || it.supplier || "" : it.supplier || "";
+  }
   function openRequisition(it) {
     setRequisitionTarget(it);
     setEditingRequisitionId(null);
     setRequisitionQty("");
     setRequisitionNotes("");
-    // The cheapest supplier is filled in (his answer, 21 Sep 2026), unless
-    // the no-supplier price beats every supplier's; the row's own
-    // supplier when the material has no supplier prices.
-    const lines = reqTargetLines(it);
-    const best = cheapestPrice(lines);
-    const mat = stockItemMaterial(it);
-    const base = !mat ? 0 : mat.listKey === "sections" ? findSectionEntry(mat.name, mat.grade)?.price || 0 : findMaterialEntry(mat.listKey, mat.name)?.price || 0;
-    setRequisitionSupplier(best && !(base > 0 && base < best.price) ? supplierNameOf(best.supplierId) || it.supplier || "" : it.supplier || "");
+    setRequisitionSupplier(defaultSupplierFor(it));
+  }
+
+  // ---- The Request stock basket (docs/REQUISITIONS-PLAN.md, 7 Oct 2026) ----
+  // One pop-up for every door. openRequest({ lines, job }) opens it, with
+  // any lines already in ({ item, qty, notes }) and a job every line
+  // starts on. A basket hidden behind the add-item form comes back with
+  // its lines kept.
+  function basketLine(it, extra = {}, job = null) {
+    return {
+      item: it,
+      qty: extra.qty != null ? String(extra.qty) : "",
+      supplier: extra.supplier != null ? extra.supplier : defaultSupplierFor(it),
+      jobId: extra.jobId != null ? extra.jobId : job?.id || "",
+      jobNumber: extra.jobNumber != null ? extra.jobNumber : job?.job_number || "",
+      notes: extra.notes || "",
+    };
+  }
+  function openRequest({ lines = [], job = null } = {}) {
+    setRequestBasket((b) => {
+      const kept = b?.hidden ? b.lines : [];
+      const seen = new Set(kept.map((l) => l.item.id));
+      const added = lines.filter((l) => l.item && !seen.has(l.item.id)).map((l) => basketLine(l.item, l, job));
+      return { query: "", lines: [...kept, ...added], hidden: false, error: "" };
+    });
+  }
+  function closeRequest() {
+    setRequestBasket(null);
+  }
+  function addBasketLine(it, extra = {}) {
+    setRequestBasket((b) => {
+      if (!b) return { query: "", lines: [basketLine(it, extra)], hidden: false, error: "" };
+      if (b.lines.some((l) => l.item.id === it.id)) return { ...b, hidden: false };
+      // A new line takes the job the line above it is for.
+      const last = b.lines[b.lines.length - 1];
+      const job = last ? { id: last.jobId, job_number: last.jobNumber } : null;
+      return { ...b, lines: [...b.lines, basketLine(it, extra, job)], hidden: false, error: "" };
+    });
+  }
+  // The add-item form's way back in: a basket that is open gets the new
+  // item as a line; none open, one opens with it.
+  function addToRequest(it) {
+    addBasketLine(it);
+  }
+  function updateBasketLine(itemId, fields) {
+    setRequestBasket((b) => (b ? { ...b, error: "", lines: b.lines.map((l) => (l.item.id === itemId ? { ...l, ...fields } : l)) } : b));
+  }
+  function removeBasketLine(itemId) {
+    setRequestBasket((b) => (b ? { ...b, lines: b.lines.filter((l) => l.item.id !== itemId) } : b));
+  }
+  function requisitionLabel(it) {
+    return it.mainCat === "plate" || it.mainCat === "structural"
+      ? `${it.grade} — ${it.name}`
+      : `${it.customer ? it.customer + " — " : ""}${it.name}`;
+  }
+  // One requisition row per line, the same row the one-item form wrote.
+  function submitRequest() {
+    if (!requestBasket) return;
+    const lines = requestBasket.lines;
+    const short = lines.filter((l) => !(Number(l.qty) > 0));
+    if (short.length > 0) {
+      setRequestBasket((b) => ({ ...b, error: `Every line needs a quantity: ${short.map((l) => l.item.name).join(", ")}.` }));
+      return;
+    }
+    const now = new Date().toISOString();
+    setRequisitions((prev) => [
+      ...prev,
+      ...lines.map((l) => ({
+        id: uid(),
+        mainCat: l.item.mainCat,
+        itemId: l.item.id,
+        itemLabel: requisitionLabel(l.item),
+        itemGrade: l.item.grade || "",
+        itemRawName: l.item.name || "",
+        qty: String(l.qty).trim(),
+        notes: (l.notes || "").trim(),
+        requestedBy: roleLabel,
+        dateRequested: now,
+        status: "pending",
+        supplier: l.supplier || "",
+        jobId: l.jobId || "",
+        jobNumber: l.jobNumber || "",
+        orderedBy: "",
+        dateOrdered: "",
+        receivedBy: "",
+        dateReceived: "",
+      })),
+    ]);
+    closeRequest();
   }
   // The price lines for the stock row a requisition is being made for.
   function reqTargetLines(it) {
@@ -140,6 +236,9 @@ export function usePurchasing(deps) {
     setAllowDuplicate(false);
     setShowAdd(true);
     closeRequisitionPicker();
+    // The add-item form draws under the basket, so the basket steps aside
+    // and keeps its lines; the saved item comes back in through addToRequest.
+    setRequestBasket((b) => (b ? { ...b, hidden: true } : b));
   }
 
   // Picking an item from the search hands straight off into the same
@@ -1215,6 +1314,7 @@ export function usePurchasing(deps) {
                 <span>Ordered by {r.orderedBy} on {new Date(r.dateOrdered).toLocaleDateString()}</span>
               )}
               {r.supplier && <span>Supplier: {r.supplier}</span>}
+              <span>{r.jobNumber ? `For job ${r.jobNumber}` : "For stores"}</span>
             </div>
             {r.notes && <div style={S.itemComment}>{r.notes}</div>}
             {canManageRequisitions && r.mainCat !== "custom" && (
@@ -1415,7 +1515,8 @@ export function usePurchasing(deps) {
     return rate;
   }
 
-  return { addPoLineItem, buildPoDoc, cancelPurchaseOrder, closePoBuilder, closeReceiving, closeRequisition,
+  return { addBasketLine, addPoLineItem, addToRequest, buildPoDoc, cancelPurchaseOrder, closePoBuilder,
+    closeReceiving, closeRequest, closeRequisition, openRequest, removeBasketLine, submitRequest, updateBasketLine,
     closeRequisitionPicker, copyPurchaseOrder, createItemForRequisition, fillPoLineFromDescription,
     fillPoLineFromPartNumber, generatePoReport, handleFlagClick, openPoBuilder, openReceiving,
     openRequisition, openRequisitionPicker, pickItemForRequisition, poDescriptionLookup, poExclusive,

@@ -3,6 +3,7 @@
 // sits on top of the Low stock list it can be opened from.
 
 import TypeToFind from "../TypeToFind.jsx";
+import RequestStock from "./RequestStock.jsx";
 import { C, S } from "../theme.js";
 import { Plus, Trash2, X } from "lucide-react";
 import { stockSearchText, searchWords, matchesWords } from "../lib/stockSearch.js";
@@ -489,6 +490,7 @@ export function RequestStockPopups({ ctx }) {
     submitRequisition, supplierPriceChips } = ctx;
   return (
     <>
+      {ctx.requestBasket && !ctx.requestBasket.hidden && <RequestStock ctx={ctx} />}
       {showRequisitionPicker && (
         <div style={S.modalOverlay}>
           <div style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>

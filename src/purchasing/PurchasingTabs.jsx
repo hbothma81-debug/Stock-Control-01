@@ -15,14 +15,14 @@ import { requisitionSearchText, searchWords, matchesWords } from "../lib/stockSe
 // Requisitions tab.
 export function RequisitionsTab({ ctx }) {
   const { archiveDateFrom, archiveDateTo, archiveTypeFilter, canManageRequisitions, canRaisePO,
-    canRequisition, master, openRequisitionPicker, raisePoForSupplierGroup, raisePoFromSelected,
+    canRequisition, master, openRequest, raisePoForSupplierGroup, raisePoFromSelected,
     renderRequisitionCard, requisitions, requisitionsSearchQuery, requisitionsSupplierFilter, roleLabel,
     selectedReqIds, setArchiveDateFrom, setArchiveDateTo, setArchiveTypeFilter, setRequisitionsSearchQuery,
     setRequisitionsSupplierFilter, setSelectedReqIds } = ctx;
   return (
     <div style={S.list}>
       {canRequisition && (
-        <button type="button" className="stk-btn" style={S.addBtn} onClick={openRequisitionPicker}>
+        <button type="button" className="stk-btn" style={S.addBtn} onClick={() => openRequest()}>
           <Plus size={15} strokeWidth={2.5} /> New requisition
         </button>
       )}
@@ -178,6 +178,7 @@ export function RequisitionsTab({ ctx }) {
                       </div>
                       <div className="stk-meta-row" style={S.rowMeta}>
                         <span>Qty: {r.qty}</span>
+                        {r.jobNumber && <span>For job {r.jobNumber}</span>}
                         <span>Requested by {r.requestedBy}</span>
                         {r.orderedBy && <span>Ordered by {r.orderedBy} on {new Date(r.dateOrdered).toLocaleDateString()}</span>}
                         {r.receivedBy && <span>Received by {r.receivedBy} on {new Date(r.dateReceived).toLocaleDateString()}</span>}
