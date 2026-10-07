@@ -5398,3 +5398,47 @@ into the shared branch (6da66cb). **Held back, not mine, told to him:**
 another conversation's uncommitted work in App.jsx, useDrawings.jsx,
 the SQL lists and `setup-stock-removed-details.sql`. The SQL
 `setup-jobs-closed-at.sql` is still on neither database: his paste.
+
+### State of play at wrap-up, 7 Oct 2026 (Jobs page)
+
+**Done and LIVE.** A finished job with no Invoicing stage closes
+itself as Completed ("No invoice"), never To invoice. The 13 live
+jobs that were stuck closed on the first Jobs page load after the
+push (To invoice 24 -> 11, Completed 74 -> 87, read on screen).
+
+**Every `setup-*.sql` this conversation wrote:**
+
+| file | practice | live |
+| --- | --- | --- |
+| setup-jobs-closed-at.sql (one column, `jobs.closed_at`) | yes: his "done on both", the column answers 200 from the practice address in `.env` beside a made-up column at 400 | yes: his paste, its check listed the 13 closed jobs; `CHECK-live-table.cjs "jobs?select=closed_at"` 200 |
+
+`FIX-closed-jobs-missing-date.sql` (not a setup file): pasted on live
+by him 7 Oct, "all show the same"; JOB-0253's Overview read back as
+"Completed on 10/7/2026 — no invoice". Not for practice (no such jobs).
+
+**Built but not tried by Heinrich (or anybody) on a screen:**
+- A fresh close: tick the last stage, or Force complete, on a job with
+  no Invoicing stage and see it go straight to Completed with its date
+  (the 13 closed by the catch-up rule for jobs already on Complete; the
+  tick-time path ran on no screen). Practice JOB-0003/0005/0006/0009
+  have Invoicing stages; pick one without.
+- The Force complete warning's new last sentence ("closed as Completed
+  with no invoice").
+- The sales rep's notice for a closed job (practice has one account, so
+  it cannot be seen there).
+- An admin putting a closed job back with the Status box's In Progress,
+  and un-ticking a stage on a closed job (admins only; the job is locked
+  like an invoiced one).
+- A job with no Invoicing stage that has an invoice request from the
+  Items tab: must stay To invoice.
+
+**Waiting on Heinrich:** nothing for this feature. Told to him, his
+call: JOB-0189 and JOB-0190 (ARL Solutions, R 14,694 together) are now
+Completed unbilled; 27 Active jobs have no Invoicing stage, 12 of them
+priced customer jobs (~R 126k, JOB-0081 and JOB-0230 the big ones),
+and will close the same way unless an Invoicing stage is added.
+
+**Queue at wrap-up:** my dde3b93 and faf50a8 (notes and the FIX file),
+the wrap-up commit, and eleven commits from other conversations
+(Drawings, Assets, Request stock basket, Purchase orders tab on the
+job page), none pushed from here.
