@@ -24172,9 +24172,20 @@ export default function StockControl() {
             >
               Flag Shortage
             </button>
-            {!(shortageModal.reasonNote || "").trim() && (
-              <div style={{ ...S.roleHint, marginTop: 6 }}>Say what happened before flagging it.</div>
-            )}
+            {/* A greyed button with no reason reads as a broken one (JOB-0248,
+                7 Oct 2026): every check that holds it off says so here. */}
+            {[
+              !shortageModal.lines.some((l) => (l.description || "").trim() && Number(l.qty) > 0) &&
+                "Type the part and how many are missing.",
+              !(shortageModal.reasonNote || "").trim() && "Say what happened before flagging it.",
+              !shortageModal.lane && "Pick Plate laser or Tube laser.",
+            ]
+              .filter(Boolean)
+              .map((t) => (
+                <div key={t} style={{ ...S.roleHint, marginTop: 6 }}>
+                  {t}
+                </div>
+              ))}
           </div>
         </div>
       )}
