@@ -169,6 +169,8 @@ import { RequisitionsTab, PurchaseOrdersTab, ReceivingTab, PoReportsTab } from "
 import { PurchasingPopups, RequestStockPopups } from "./purchasing/PurchasingPopups.jsx";
 import { useDrawingsState, useDrawings } from "./drawings/useDrawings.jsx";
 import { DrawingsTab, DrawingUploadPopup } from "./drawings/DrawingsScreens.jsx";
+import { useAssetsState, useAssets } from "./assets/useAssets.jsx";
+import { AssetRemovePopup, AssetHistoryPopup, ServiceNowPopup, RepairListPopup } from "./assets/AssetPopups.jsx";
 
 // window.storage is installed in main.jsx before this component ever
 // renders — backed by Supabase. See src/lib/storage.js.
@@ -1723,7 +1725,17 @@ export default function StockControl() {
   // The operator confirming they've used their material, and saying what
   // came back. { allocation, item, qty, offcut }
   const [useAllocationModal, setUseAllocationModal] = useState(null);
-  const [assetRemoveModal, setAssetRemoveModal] = useState(null); // { item, reason, date }
+  // The Assets screens' state: src/assets/useAssets.jsx
+  const { assetRemoveModal, setAssetRemoveModal, assetHistoryItem, setAssetHistoryItem, assetHistoryEntries,
+    setAssetHistoryEntries, assetHistoryNote, setAssetHistoryNote, assetHistoryFile, setAssetHistoryFile,
+    assetHistoryReading, setAssetHistoryReading, assetHistoryBusy, setAssetHistoryBusy, serviceNowItem,
+    setServiceNowItem, serviceNowConsumableSearch, setServiceNowConsumableSearch, serviceNowCustomName,
+    setServiceNowCustomName, serviceNowCustomQty, setServiceNowCustomQty, serviceNowReading,
+    setServiceNowReading, serviceNowFile, setServiceNowFile, serviceNowNote, setServiceNowNote,
+    serviceNowBusy, setServiceNowBusy, repairListItem, setRepairListItem, repairListEntries,
+    setRepairListEntries, repairListFailed, setRepairListFailed, repairListDescription,
+    setRepairListDescription, repairListBusy, setRepairListBusy, repairListResolvedOpen,
+    setRepairListResolvedOpen } = useAssetsState();
   // Purchasing's screen state: src/purchasing/usePurchasing.jsx
   const { poBuilder, setPoBuilder, poSearchQuery, setPoSearchQuery, poSupplierFilter, setPoSupplierFilter,
     expandedPoId, setExpandedPoId, receivingSearchQuery, setReceivingSearchQuery, expandedReceivingId,
@@ -1758,12 +1770,6 @@ export default function StockControl() {
   // Received — dedicated state, separate from Usage Log's own, since
   // they're now two independent places in the app rather than one shared
   // view.
-  const [assetHistoryItem, setAssetHistoryItem] = useState(null);
-  const [assetHistoryEntries, setAssetHistoryEntries] = useState(null);
-  const [assetHistoryNote, setAssetHistoryNote] = useState("");
-  const [assetHistoryFile, setAssetHistoryFile] = useState(null);
-  const [assetHistoryReading, setAssetHistoryReading] = useState("");
-  const [assetHistoryBusy, setAssetHistoryBusy] = useState(false);
   // Assets tab navigation: manufacturer list -> that manufacturer's assets
   // -> one asset's own full detail page. Same list-then-detail pattern as
   // Production, Sections, and Stock Manager elsewhere in the app.
@@ -1773,15 +1779,7 @@ export default function StockControl() {
   // Stores, deducting real stock, or typed as custom entries that don't
   // touch stock), an optional document, and for hours/km-tracked assets,
   // the reading at time of service (the new baseline for the interval).
-  const [serviceNowItem, setServiceNowItem] = useState(null);
   const [serviceNowConsumables, setServiceNowConsumables] = useState([]);
-  const [serviceNowConsumableSearch, setServiceNowConsumableSearch] = useState("");
-  const [serviceNowCustomName, setServiceNowCustomName] = useState("");
-  const [serviceNowCustomQty, setServiceNowCustomQty] = useState("");
-  const [serviceNowReading, setServiceNowReading] = useState("");
-  const [serviceNowFile, setServiceNowFile] = useState(null);
-  const [serviceNowNote, setServiceNowNote] = useState("");
-  const [serviceNowBusy, setServiceNowBusy] = useState(false);
   // Set while the Add Item form is open specifically to create a new
   // Stores item for a service consumable that wasn't in Stores yet — on
   // save, the new item is linked into serviceNowConsumables as a real,
@@ -1794,14 +1792,8 @@ export default function StockControl() {
   // stock for that brand-new item instead of leaving the picker stranded.
   // Repair list — per-asset, like History, but with real open/resolved
   // state rather than being a permanent log.
-  const [repairListItem, setRepairListItem] = useState(null);
-  const [repairListEntries, setRepairListEntries] = useState(null);
   // "Nothing outstanding" about a machine is a statement somebody acts
   // on. It must not be what a failed load looks like.
-  const [repairListFailed, setRepairListFailed] = useState(false);
-  const [repairListDescription, setRepairListDescription] = useState("");
-  const [repairListBusy, setRepairListBusy] = useState(false);
-  const [repairListResolvedOpen, setRepairListResolvedOpen] = useState(false);
   const [jobsList, setJobsList] = useState(null);
   const [productionQueue, setProductionQueue] = useState(null);
   // Per process type: whether it releases the next stage when started
@@ -3607,300 +3599,6 @@ export default function StockControl() {
 
   async function signOutUser() {
     await supabase.auth.signOut();
-  }
-
-  // ---- Asset maintenance history ----
-
-  async function fetchAssetHistory(itemId) {
-    if (!supabase) return [];
-    const { data, error } = await supabase
-      .from("asset_history")
-      .select("*")
-      .eq("item_id", itemId)
-      .order("created_at", { ascending: false });
-    if (error) throw error;
-    return data || [];
-  }
-
-  async function uploadAssetAttachment(file, itemId) {
-    if (!supabase) return null;
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const path = `${itemId}/${Date.now()}-${safeName}`;
-    const { error } = await supabase.storage.from("asset-attachments").upload(path, file);
-    if (error) throw error;
-    return path;
-  }
-
-  async function getAssetAttachmentUrl(path) {
-    if (!supabase) return null;
-    const { data, error } = await supabase.storage.from("asset-attachments").createSignedUrl(path, 3600);
-    if (error) throw error;
-    return data.signedUrl;
-  }
-
-  async function addAssetHistoryEntry({ itemId, entryType, note, reading, attachmentFile, serviceMode, consumables }) {
-    if (!supabase) return;
-    let attachmentPath = null;
-    let attachmentName = null;
-    if (attachmentFile) {
-      attachmentPath = await uploadAssetAttachment(attachmentFile, itemId);
-      attachmentName = attachmentFile.name;
-    }
-    const row = {
-      item_id: itemId,
-      entry_type: entryType,
-      note: note || null,
-      hours_reading: entryType === "meter_reading" && serviceMode === "hours" ? reading : null,
-      km_reading: entryType === "meter_reading" && serviceMode === "km" ? reading : null,
-      attachment_path: attachmentPath,
-      attachment_name: attachmentName,
-      logged_by: roleLabel,
-      consumables: consumables && consumables.length ? consumables : null,
-    };
-    const { error } = await supabase.from("asset_history").insert(row);
-    if (error) throw error;
-    // A logged reading is also the asset's new "current" reading, used for
-    // the service-due calculation.
-    if (entryType === "meter_reading") {
-      setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, currentReading: reading } : it)));
-    }
-  }
-
-  async function deleteAssetHistoryEntry(entry) {
-    if (!supabase) return;
-    const ok = window.confirm("Delete this history entry permanently? This can't be undone.");
-    if (!ok) return;
-    try {
-      if (entry.attachment_path) await supabase.storage.from("asset-attachments").remove([entry.attachment_path]);
-      const { error } = await supabase.from("asset_history").delete().eq("id", entry.id);
-      if (error) throw error;
-      return true;
-    } catch (err) {
-      console.error("Failed to delete history entry:", err);
-      alert("Couldn't delete that entry — check your connection and try again.");
-      return false;
-    }
-  }
-
-  // ---- Asset repair list — per-asset, open/resolved, separate from the
-  // permanent History log above ----
-
-  async function fetchAssetRepairs(itemId) {
-    if (!supabase) return [];
-    const { data, error } = await supabase
-      .from("asset_repairs")
-      .select("*")
-      .eq("item_id", itemId)
-      .order("created_at", { ascending: false });
-    if (error) throw error;
-    return data || [];
-  }
-
-  async function openRepairList(item) {
-    setRepairListItem(item);
-    setRepairListEntries(null);
-    setRepairListDescription("");
-    setRepairListResolvedOpen(false);
-    setRepairListFailed(false);
-    try {
-      setRepairListEntries(await fetchAssetRepairs(item.id));
-    } catch (err) {
-      console.error("Failed to load repair list:", err);
-      setRepairListEntries([]);
-      setRepairListFailed(true);
-    }
-  }
-
-  function closeRepairList() {
-    setRepairListItem(null);
-    setRepairListEntries(null);
-    setRepairListDescription("");
-  }
-
-  async function refreshRepairList() {
-    if (!repairListItem) return;
-    try {
-      setRepairListEntries(await fetchAssetRepairs(repairListItem.id));
-    } catch (err) {
-      console.error("Failed to refresh repair list:", err);
-    }
-  }
-
-  async function submitRepairEntry(e) {
-    e.preventDefault();
-    if (!repairListDescription.trim()) return;
-    setRepairListBusy(true);
-    try {
-      const { error } = await supabase.from("asset_repairs").insert({
-        item_id: repairListItem.id,
-        description: repairListDescription.trim(),
-        status: "open",
-        logged_by: roleLabel,
-      });
-      if (error) throw error;
-      setRepairListDescription("");
-      await refreshRepairList();
-    } catch (err) {
-      console.error("Failed to add repair entry:", err);
-      alert("Couldn't save that — check your connection and try again.");
-    }
-    setRepairListBusy(false);
-  }
-
-  async function resolveRepairEntry(entry) {
-    try {
-      const { error } = await supabase
-        .from("asset_repairs")
-        .update({ status: "resolved", resolved_by: roleLabel, resolved_at: new Date().toISOString() })
-        .eq("id", entry.id);
-      if (error) throw error;
-      await refreshRepairList();
-    } catch (err) {
-      console.error("Failed to resolve repair entry:", err);
-      alert("Couldn't save that — check your connection and try again.");
-    }
-  }
-
-  async function deleteRepairEntry(entry) {
-    const ok = window.confirm("Delete this repair note permanently? This can't be undone.");
-    if (!ok) return;
-    try {
-      const { error } = await supabase.from("asset_repairs").delete().eq("id", entry.id);
-      if (error) throw error;
-      await refreshRepairList();
-    } catch (err) {
-      console.error("Failed to delete repair entry:", err);
-      alert("Couldn't delete that — check your connection and try again.");
-    }
-  }
-
-  // ---- "Service now" — records a completed service, deducts any Stores
-  // consumables used from real stock, and advances the service interval ----
-
-  function openServiceNow(item) {
-    setServiceNowItem(item);
-    setServiceNowConsumables([]);
-    setServiceNowConsumableSearch("");
-    setServiceNowCustomName("");
-    setServiceNowCustomQty("");
-    setServiceNowReading(String(item.currentReading || ""));
-    setServiceNowFile(null);
-    setServiceNowNote("");
-  }
-
-  function closeServiceNow() {
-    setServiceNowItem(null);
-    setServiceNowConsumables([]);
-    setServiceNowConsumableSearch("");
-    setServiceNowCustomName("");
-    setServiceNowCustomQty("");
-    setServiceNowReading("");
-    setServiceNowFile(null);
-    setServiceNowNote("");
-    setAddingServiceConsumableQty(null);
-  }
-
-  function addServiceConsumableFromStores(it) {
-    setServiceNowConsumables((prev) => [
-      ...prev,
-      { source: "stores", itemId: it.id, name: it.name, qty: "1", unit: it.unit || "" },
-    ]);
-    setServiceNowConsumableSearch("");
-  }
-
-  function addServiceConsumableCustom() {
-    const name = serviceNowCustomName.trim();
-    if (!name) return;
-    // Opens the real Add Item form, pre-filled for Stores — not the
-    // current tab, since servicing an asset happens from the Assets tab.
-    // On successful save, this new item gets linked into the consumables
-    // list as a real, stock-deducting entry rather than a throwaway note.
-    setAddingServiceConsumableQty(serviceNowCustomQty.trim() || "1");
-    setForm({ ...emptyForm, id: uid(), mainCat: "stores", name });
-    setEditingId(null);
-    setAllowDuplicate(false);
-    setShowAdd(true);
-    setServiceNowCustomName("");
-    setServiceNowCustomQty("");
-  }
-
-  function updateServiceConsumableQty(idx, qty) {
-    setServiceNowConsumables((prev) => prev.map((c, i) => (i === idx ? { ...c, qty } : c)));
-  }
-
-  function removeServiceConsumable(idx) {
-    setServiceNowConsumables((prev) => prev.filter((_, i) => i !== idx));
-  }
-
-  async function submitServiceNow(e) {
-    e.preventDefault();
-    if (!serviceNowItem) return;
-    setServiceNowBusy(true);
-    try {
-      const item = serviceNowItem;
-      const nowIso = new Date().toISOString();
-
-      // Deduct real stock for every Stores consumable used — same effect
-      // as a normal "Use" action, logged the same way, for the same
-      // reason: this is genuine stock leaving the shelf, not just a note.
-      const storesUsed = serviceNowConsumables.filter((c) => c.source === "stores");
-      if (storesUsed.length > 0) {
-        setItems((prev) =>
-          prev.map((it) => {
-            const used = storesUsed.find((c) => c.itemId === it.id);
-            return used ? { ...it, qty: Math.max(0, Number(it.qty) - (Number(used.qty) || 0)) } : it;
-          })
-        );
-        setUsageLog((prev) => [
-          ...prev,
-          ...storesUsed.map((c) => ({
-            id: uid(),
-            itemId: c.itemId,
-            itemName: c.name,
-            mainCat: "stores",
-            qty: Number(c.qty) || 0,
-            direction: "use",
-            by: roleLabel,
-            jobNumber: "",
-            customer: "",
-            note: `Used servicing ${item.name} (${item.partNumber || "no part number"})`,
-            lineCost: 0,
-            timestamp: nowIso,
-          })),
-        ]);
-      }
-
-      // Log the service itself as a history entry, carrying the full
-      // consumables list (Stores and custom together) and any document.
-      await addAssetHistoryEntry({
-        itemId: item.id,
-        entryType: "service",
-        note: serviceNowNote.trim(),
-        attachmentFile: serviceNowFile,
-        consumables: serviceNowConsumables,
-      });
-
-      // Advance the service interval — by-date resets the last-serviced
-      // date to now; by-hours/km takes the reading entered here as the new
-      // baseline the next interval counts from.
-      const reading = parseFloat(serviceNowReading);
-      setItems((prev) =>
-        prev.map((it) => {
-          if (it.id !== item.id) return it;
-          if (it.serviceMode === "months") return { ...it, lastServiceDate: nowIso.slice(0, 10) };
-          if ((it.serviceMode === "hours" || it.serviceMode === "km") && !isNaN(reading)) {
-            return { ...it, lastServiceReading: reading, currentReading: reading };
-          }
-          return it;
-        })
-      );
-
-      closeServiceNow();
-    } catch (err) {
-      console.error("Failed to record service:", err);
-      alert("Couldn't save that — check your connection and try again.");
-    }
-    setServiceNowBusy(false);
   }
 
   // ---- Jobs ----
@@ -11335,121 +11033,6 @@ export default function StockControl() {
     }
   }
 
-  // Whether an asset is overdue or approaching its next service, based on
-  // whichever tracking mode it uses. Returns null if service tracking isn't
-  // set up for this asset at all.
-  function getServiceStatus(item) {
-    if (!item.serviceMode || item.serviceMode === "none") return null;
-    if (item.serviceMode === "months") {
-      if (!item.lastServiceDate || !item.serviceIntervalMonths) return null;
-      const due = new Date(item.lastServiceDate);
-      due.setMonth(due.getMonth() + Number(item.serviceIntervalMonths));
-      const daysUntil = (due - new Date()) / (1000 * 60 * 60 * 24);
-      if (daysUntil <= 0) return { level: "overdue", detail: `Overdue since ${due.toLocaleDateString()}` };
-      if (daysUntil <= 14) return { level: "soon", detail: `Due ${due.toLocaleDateString()}` };
-      return { level: "ok", detail: `Next due ${due.toLocaleDateString()}` };
-    }
-    const interval = item.serviceMode === "hours" ? item.serviceIntervalHours : item.serviceIntervalKm;
-    if (!interval) return null;
-    const unit = item.serviceMode === "hours" ? "hrs" : "km";
-    const used = Number(item.currentReading || 0) - Number(item.lastServiceReading || 0);
-    const remaining = interval - used;
-    if (remaining <= 0) return { level: "overdue", detail: `${Math.abs(remaining)}${unit} over interval` };
-    if (remaining <= interval * 0.1) return { level: "soon", detail: `${remaining}${unit} remaining` };
-    return { level: "ok", detail: `${remaining}${unit} remaining` };
-  }
-
-  async function openAssetHistory(item) {
-    setAssetHistoryItem(item);
-    setAssetHistoryEntries(null);
-    setAssetHistoryNote("");
-    setAssetHistoryFile(null);
-    setAssetHistoryReading(String(item.currentReading || ""));
-    try {
-      const entries = await fetchAssetHistory(item.id);
-      setAssetHistoryEntries(entries);
-    } catch (err) {
-      console.error("Failed to load asset history:", err);
-      setAssetHistoryEntries([]);
-    }
-  }
-
-  function closeAssetHistory() {
-    setAssetHistoryItem(null);
-    setAssetHistoryEntries(null);
-    setAssetHistoryNote("");
-    setAssetHistoryFile(null);
-    setAssetHistoryReading("");
-  }
-
-  async function refreshAssetHistoryEntries() {
-    if (!assetHistoryItem) return;
-    try {
-      const entries = await fetchAssetHistory(assetHistoryItem.id);
-      setAssetHistoryEntries(entries);
-    } catch (err) {
-      console.error("Failed to refresh asset history:", err);
-    }
-  }
-
-  async function submitAssetNote(e) {
-    e.preventDefault();
-    if (!assetHistoryNote.trim() && !assetHistoryFile) return;
-    setAssetHistoryBusy(true);
-    try {
-      await addAssetHistoryEntry({
-        itemId: assetHistoryItem.id,
-        entryType: "note",
-        note: assetHistoryNote.trim(),
-        attachmentFile: assetHistoryFile,
-      });
-      setAssetHistoryNote("");
-      setAssetHistoryFile(null);
-      await refreshAssetHistoryEntries();
-    } catch (err) {
-      console.error("Failed to add note:", err);
-      alert("Couldn't save that note — check your connection and try again.");
-    }
-    setAssetHistoryBusy(false);
-  }
-
-  async function submitAssetReading(e) {
-    e.preventDefault();
-    const reading = parseFloat(assetHistoryReading);
-    if (isNaN(reading) || reading < 0) return;
-    setAssetHistoryBusy(true);
-    try {
-      await addAssetHistoryEntry({
-        itemId: assetHistoryItem.id,
-        entryType: "meter_reading",
-        reading,
-        serviceMode: assetHistoryItem.serviceMode,
-      });
-      setAssetHistoryItem((prev) => ({ ...prev, currentReading: reading }));
-      await refreshAssetHistoryEntries();
-    } catch (err) {
-      console.error("Failed to log reading:", err);
-      alert("Couldn't save that reading — check your connection and try again.");
-    }
-    setAssetHistoryBusy(false);
-  }
-
-  async function viewAssetAttachment(entry) {
-    try {
-      const url = await getAssetAttachmentUrl(entry.attachment_path);
-      setPreviewItem({ id: entry.id, attachmentType: entry.attachment_name.toLowerCase().endsWith(".pdf") ? "pdf" : "image", attachmentName: entry.attachment_name });
-      setPreviewData(url);
-      setPreviewLoading(false);
-    } catch (err) {
-      console.error("Couldn't open attachment:", err);
-    }
-  }
-
-  async function handleDeleteAssetHistoryEntry(entry) {
-    const ok = await deleteAssetHistoryEntry(entry);
-    if (ok) refreshAssetHistoryEntries();
-  }
-
   // The master switch. It is the way out of a bad lockout, so it has to be
   // reachable from a screen rather than from a SQL editor -- at seven on a
   // Monday with half the floor unable to sign in, nobody should be hunting
@@ -12070,6 +11653,24 @@ export default function StockControl() {
     roleLabel, setDrawingLookup, setDrawingSearchFailed, setDrawingSearchLoading, setDrawingSearchResults,
     setDrawingUploadBusy, setDrawingUploadCustomer, setDrawingUploadFiles, setDrawingUploadResult,
     setPreviewData, setPreviewItem, setPreviewLoading, setShowDrawingUpload
+  });
+
+  // Assets: src/assets/useAssets.jsx
+  const { addServiceConsumableCustom, addServiceConsumableFromStores, closeAssetHistory,
+    closeAssetRemoveModal, closeRepairList, closeServiceNow, deleteRepairEntry, getServiceStatus,
+    handleDeleteAssetHistoryEntry, openAssetHistory, openAssetRemoveModal, openRepairList, openServiceNow,
+    removeServiceConsumable, resolveRepairEntry, submitAssetNote, submitAssetReading, submitAssetRemoveModal,
+    submitRepairEntry, submitServiceNow, updateServiceConsumableQty, viewAssetAttachment } = useAssets({
+    assetHistoryFile, assetHistoryItem, assetHistoryNote, assetHistoryReading, assetRemoveModal, emptyForm,
+    repairListDescription, repairListItem, roleLabel, serviceNowConsumables, serviceNowCustomName,
+    serviceNowCustomQty, serviceNowFile, serviceNowItem, serviceNowNote, serviceNowReading,
+    setAddingServiceConsumableQty, setAllowDuplicate, setAssetHistoryBusy, setAssetHistoryEntries,
+    setAssetHistoryFile, setAssetHistoryItem, setAssetHistoryNote, setAssetHistoryReading,
+    setAssetRemoveModal, setEditingId, setForm, setItems, setPreviewData, setPreviewItem, setPreviewLoading,
+    setRepairListBusy, setRepairListDescription, setRepairListEntries, setRepairListFailed, setRepairListItem,
+    setRepairListResolvedOpen, setServiceNowBusy, setServiceNowConsumableSearch, setServiceNowConsumables,
+    setServiceNowCustomName, setServiceNowCustomQty, setServiceNowFile, setServiceNowItem, setServiceNowNote,
+    setServiceNowReading, setShowAdd, setUsageLog, uid
   });
 
   function canEditQty(section) {
@@ -13438,34 +13039,6 @@ export default function StockControl() {
       },
     ]);
     closeUsageModal();
-  }
-
-  function openAssetRemoveModal(item) {
-    setAssetRemoveModal({ item, reason: "", date: new Date().toISOString().slice(0, 10) });
-  }
-
-  function closeAssetRemoveModal() {
-    setAssetRemoveModal(null);
-  }
-
-  function submitAssetRemoveModal(e) {
-    e.preventDefault();
-    if (!assetRemoveModal.reason.trim()) return;
-    const itemId = assetRemoveModal.item.id;
-    setItems((prev) =>
-      prev.map((it) =>
-        it.id === itemId
-          ? {
-              ...it,
-              status: "removed",
-              removedReason: assetRemoveModal.reason.trim(),
-              removedDate: assetRemoveModal.date,
-              removedBy: roleLabel,
-            }
-          : it
-      )
-    );
-    closeAssetRemoveModal();
   }
 
   function removeItem(id) {
@@ -15424,6 +14997,20 @@ export default function StockControl() {
     expandedDrawingHistory, handleDrawingFilesSelected, isAdmin, master, openDrawingPreview, refreshDrawings,
     removeDrawingUploadFile, setDrawingCustomerFilter, setDrawingSearchQuery, setDrawingUploadCustomer,
     setExpandedDrawingHistory, setShowDrawingUpload, submitDrawingUpload };
+
+  // Everything the assets screens read.
+  const assetsCtx = { addServiceConsumableCustom, addServiceConsumableFromStores, assetHistoryBusy,
+    assetHistoryEntries, assetHistoryFile, assetHistoryItem, assetHistoryNote, assetHistoryReading,
+    assetRemoveModal, canEditQty, closeAssetHistory, closeAssetRemoveModal, closeRepairList, closeServiceNow,
+    deleteRepairEntry, getServiceStatus, handleDeleteAssetHistoryEntry, isAdmin, items,
+    removeServiceConsumable, repairListBusy, repairListDescription, repairListEntries, repairListFailed,
+    repairListItem, repairListResolvedOpen, resolveRepairEntry, serviceNowBusy, serviceNowConsumableSearch,
+    serviceNowConsumables, serviceNowCustomName, serviceNowCustomQty, serviceNowFile, serviceNowItem,
+    serviceNowNote, serviceNowReading, setAssetHistoryFile, setAssetHistoryNote, setAssetHistoryReading,
+    setAssetRemoveModal, setRepairListDescription, setRepairListResolvedOpen, setServiceNowConsumableSearch,
+    setServiceNowCustomName, setServiceNowCustomQty, setServiceNowFile, setServiceNowNote,
+    setServiceNowReading, submitAssetNote, submitAssetReading, submitAssetRemoveModal, submitRepairEntry,
+    submitServiceNow, updateServiceConsumableQty, viewAssetAttachment };
 
   return (
     <div style={S.page} data-stk-theme={profile?.theme || "dark"}>
@@ -21746,389 +21333,27 @@ export default function StockControl() {
       )}
 
       {assetRemoveModal && (
-        <div style={S.modalOverlay}>
-          <form style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()} onSubmit={submitAssetRemoveModal}>
-            <div style={S.modalHead}>
-              <span style={S.modalTitle}>Remove asset</span>
-              <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeAssetRemoveModal}>
-                <X size={18} />
-              </button>
-            </div>
-            <div style={S.roleHint}>
-              {assetRemoveModal.item.partNumber ? `${assetRemoveModal.item.partNumber} — ` : ""}
-              {assetRemoveModal.item.name}
-            </div>
-            <div style={{ marginTop: 10 }}>
-              <label style={S.label}>Reason (required)</label>
-              <input
-                autoFocus
-                style={S.input}
-                value={assetRemoveModal.reason}
-                onChange={(e) => setAssetRemoveModal((m) => ({ ...m, reason: e.target.value }))}
-                placeholder="e.g. Broken, Stolen, Sold, Scrapped"
-              />
-            </div>
-            <div style={{ marginTop: 10 }}>
-              <label style={S.label}>Date</label>
-              <input
-                type="date"
-                style={S.input}
-                value={assetRemoveModal.date}
-                onChange={(e) => setAssetRemoveModal((m) => ({ ...m, date: e.target.value }))}
-              />
-            </div>
-            <button type="submit" style={{ ...S.submitBtn, background: C.danger }} className="stk-btn">
-              Confirm removal
-            </button>
-          </form>
-        </div>
+        <ErrorBoundary popup what="the Remove asset window" onClose={closeAssetRemoveModal}>
+          <AssetRemovePopup ctx={assetsCtx} />
+        </ErrorBoundary>
       )}
 
       {assetHistoryItem && (
-        <div style={S.modalOverlay}>
-          <div style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
-            <div style={S.modalHead}>
-              <span style={S.modalTitle}>{assetHistoryItem.name}</span>
-              <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeAssetHistory}>
-                <X size={18} />
-              </button>
-            </div>
-            <div style={S.roleHint}>{assetHistoryItem.partNumber}</div>
-
-            {(() => {
-              const svc = getServiceStatus(assetHistoryItem);
-              if (!svc) return null;
-              return (
-                <div
-                  style={{
-                    ...S.roleHint,
-                    marginTop: 6,
-                    padding: "6px 10px",
-                    borderRadius: 6,
-                    background: svc.level === "overdue" ? C.dangerTint : svc.level === "soon" ? C.accentTint : C.bg,
-                    color: svc.level === "overdue" ? C.danger : svc.level === "soon" ? C.accentRaw : C.muted,
-                  }}
-                >
-                  {svc.level === "overdue" ? "Service overdue" : svc.level === "soon" ? "Service due soon" : "Service on track"} — {svc.detail}
-                </div>
-              );
-            })()}
-
-            {canEditQty("assets") && (assetHistoryItem.serviceMode === "hours" || assetHistoryItem.serviceMode === "km") && (
-              <form onSubmit={submitAssetReading} style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "flex-end" }}>
-                <div style={{ flex: 1 }}>
-                  <label style={S.label}>Log current {assetHistoryItem.serviceMode === "hours" ? "hours" : "kilometers"}</label>
-                  <input
-                    type="number"
-                    min="0"
-                    style={S.input}
-                    value={assetHistoryReading}
-                    onChange={(e) => setAssetHistoryReading(e.target.value)}
-                    placeholder="0"
-                  />
-                </div>
-                <button type="submit" className="stk-btn" style={{ ...S.addBtn, marginBottom: 1 }} disabled={assetHistoryBusy}>
-                  Log
-                </button>
-              </form>
-            )}
-
-            {canEditQty("assets") && (
-              <form onSubmit={submitAssetNote} style={{ marginTop: 12 }}>
-                <label style={S.label}>Add a note</label>
-                <input
-                  style={S.input}
-                  value={assetHistoryNote}
-                  onChange={(e) => setAssetHistoryNote(e.target.value)}
-                  placeholder="e.g. Replaced brushes"
-                />
-                <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <label className="stk-btn" style={{ ...S.reqActionBtnMuted, cursor: "pointer" }}>
-                    <Paperclip size={13} /> {assetHistoryFile ? assetHistoryFile.name : "Attach photo/file"}
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      style={{ display: "none" }}
-                      onChange={(e) => setAssetHistoryFile(e.target.files[0] || null)}
-                    />
-                  </label>
-                  <button
-                    type="submit"
-                    className="stk-btn"
-                    style={S.addBtn}
-                    disabled={assetHistoryBusy || (!assetHistoryNote.trim() && !assetHistoryFile)}
-                  >
-                    Submit
-                  </button>
-                </div>
-              </form>
-            )}
-
-            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 8 }}>
-              {assetHistoryEntries === null && <div style={S.empty}>Loading history…</div>}
-              {assetHistoryEntries?.length === 0 && <div style={S.empty}>Nothing here yet — add a note or log a reading above.</div>}
-              {assetHistoryEntries?.map((entry) => (
-                <div key={entry.id} style={S.reqCard}>
-                  <div style={S.reqCardTop}>
-                    <span style={S.itemName}>
-                      {entry.entry_type === "meter_reading"
-                        ? `Reading logged: ${entry.hours_reading ?? entry.km_reading}${entry.hours_reading != null ? "hrs" : "km"}`
-                        : entry.entry_type === "service"
-                        ? `Serviced${entry.note ? " — " + entry.note : ""}`
-                        : entry.note}
-                    </span>
-                    {isAdmin && (
-                      <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => handleDeleteAssetHistoryEntry(entry)}>
-                        <Trash2 size={13} />
-                      </button>
-                    )}
-                  </div>
-                  <div className="stk-meta-row" style={S.rowMeta}>
-                    <span>{entry.logged_by}</span>
-                    <span>{new Date(entry.created_at).toLocaleString()}</span>
-                  </div>
-                  {entry.entry_type === "service" && entry.consumables && entry.consumables.length > 0 && (
-                    <div style={{ ...S.roleHint, marginTop: 4 }}>
-                      Used: {entry.consumables.map((c) => `${c.name} × ${c.qty}${c.unit || ""}`).join(", ")}
-                    </div>
-                  )}
-                  {entry.attachment_path && (
-                    <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 6 }} onClick={() => viewAssetAttachment(entry)}>
-                      <Paperclip size={13} /> {entry.attachment_name}
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        <ErrorBoundary popup what="the asset history window" onClose={closeAssetHistory}>
+          <AssetHistoryPopup ctx={assetsCtx} />
+        </ErrorBoundary>
       )}
 
       {serviceNowItem && !showAdd && (
-        <div style={S.modalOverlay}>
-          <form style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()} onSubmit={submitServiceNow}>
-            <div style={S.modalHead}>
-              <span style={S.modalTitle}>Service now — {serviceNowItem.name}</span>
-              <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeServiceNow}>
-                <X size={18} />
-              </button>
-            </div>
-            <div style={S.roleHint}>Recording this updates the service counter and works out the next due date automatically.</div>
-
-            {(serviceNowItem.serviceMode === "hours" || serviceNowItem.serviceMode === "km") && (
-              <div style={{ marginTop: 10 }}>
-                <label style={S.label}>Reading at time of service ({serviceNowItem.serviceMode === "hours" ? "hours" : "km"})</label>
-                <input
-                  type="number"
-                  min="0"
-                  style={S.input}
-                  value={serviceNowReading}
-                  onChange={(e) => setServiceNowReading(e.target.value)}
-                  placeholder="0"
-                />
-              </div>
-            )}
-
-            <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-              <label style={S.label}>Consumables used</label>
-              {serviceNowConsumables.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-                  {serviceNowConsumables.map((c, idx) => (
-                    <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <span style={{ flex: 1, fontSize: 14 }}>
-                        {c.name} {c.source === "stores" && <span style={{ color: C.muted }}>(Stores)</span>}
-                      </span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        style={{ ...S.managerFactorInput, width: 70 }}
-                        value={c.qty}
-                        onChange={(e) => updateServiceConsumableQty(idx, e.target.value)}
-                      />
-                      <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeServiceConsumable(idx)}>
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div style={{ marginTop: 8 }}>
-                <input
-                  style={S.input}
-                  value={serviceNowConsumableSearch}
-                  onChange={(e) => setServiceNowConsumableSearch(e.target.value)}
-                  placeholder="Search Stores to add a consumable…"
-                />
-                {serviceNowConsumableSearch.trim() && (
-                  <div style={{ ...S.managerList, marginTop: 6, maxHeight: 160 }}>
-                    {items
-                      .filter((it) => it.mainCat === "stores")
-                      .filter((it) => it.name.toLowerCase().includes(serviceNowConsumableSearch.trim().toLowerCase()))
-                      .slice(0, 20)
-                      .map((it) => (
-                        <button
-                          key={it.id}
-                          type="button"
-                          className="stk-btn"
-                          style={{ ...S.reqActionBtnMuted, justifyContent: "space-between", width: "100%" }}
-                          onClick={() => addServiceConsumableFromStores(it)}
-                        >
-                          <span>{it.name}</span>
-                          <span style={{ color: C.muted }}>{it.qty} {it.unit} in stock</span>
-                        </button>
-                      ))}
-                  </div>
-                )}
-              </div>
-
-              <div style={{ ...S.roleHint, marginTop: 10 }}>Not in Stores yet? Type its name below — this creates a real Stores item and uses it.</div>
-              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                <input
-                  style={{ ...S.input, flex: 2 }}
-                  value={serviceNowCustomName}
-                  onChange={(e) => setServiceNowCustomName(e.target.value)}
-                  placeholder="New item name…"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  style={{ ...S.input, flex: 1 }}
-                  value={serviceNowCustomQty}
-                  onChange={(e) => setServiceNowCustomQty(e.target.value)}
-                  placeholder="Qty"
-                />
-                <button type="button" className="stk-btn" style={S.addBtn} onClick={addServiceConsumableCustom} disabled={!serviceNowCustomName.trim()}>
-                  <Plus size={15} strokeWidth={2.5} />
-                </button>
-              </div>
-            </div>
-
-            <div style={{ marginTop: 12 }}>
-              <label style={S.label}>Note (optional)</label>
-              <input
-                style={S.input}
-                value={serviceNowNote}
-                onChange={(e) => setServiceNowNote(e.target.value)}
-                placeholder="e.g. Full service, replaced filters"
-              />
-            </div>
-
-            <div style={{ marginTop: 8 }}>
-              <label className="stk-btn" style={{ ...S.reqActionBtnMuted, cursor: "pointer" }}>
-                <Paperclip size={13} /> {serviceNowFile ? serviceNowFile.name : "Attach document (optional)"}
-                <input
-                  type="file"
-                  accept="image/*,application/pdf"
-                  style={{ display: "none" }}
-                  onChange={(e) => setServiceNowFile(e.target.files[0] || null)}
-                />
-              </label>
-            </div>
-
-            <button type="submit" className="stk-btn" style={S.submitBtn} disabled={serviceNowBusy}>
-              {serviceNowBusy ? "Saving…" : "Mark serviced"}
-            </button>
-          </form>
-        </div>
+        <ErrorBoundary popup what="the Service now window" onClose={closeServiceNow}>
+          <ServiceNowPopup ctx={assetsCtx} />
+        </ErrorBoundary>
       )}
 
       {repairListItem && (
-        <div style={S.modalOverlay}>
-          <div style={{ ...S.modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
-            <div style={S.modalHead}>
-              <span style={S.modalTitle}>Repair list — {repairListItem.name}</span>
-              <button type="button" className="stk-btn" style={S.iconBtn} onClick={closeRepairList}>
-                <X size={18} />
-              </button>
-            </div>
-            <div style={S.roleHint}>Small problems to come back to later — not urgent enough to stop using it now.</div>
-
-            {canEditQty("assets") && (
-              <form onSubmit={submitRepairEntry} style={{ marginTop: 10, display: "flex", gap: 8 }}>
-                <input
-                  style={{ ...S.input, flex: 1 }}
-                  value={repairListDescription}
-                  onChange={(e) => setRepairListDescription(e.target.value)}
-                  placeholder="e.g. Guard is loose, needs a new bolt"
-                />
-                <button type="submit" className="stk-btn" style={S.addBtn} disabled={repairListBusy || !repairListDescription.trim()}>
-                  <Plus size={15} strokeWidth={2.5} />
-                </button>
-              </form>
-            )}
-
-            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 8 }}>
-              {repairListEntries === null && <div style={S.empty}>Loading…</div>}
-              {repairListEntries?.filter((e) => e.status === "open").length === 0 && repairListEntries !== null && (
-                repairListFailed ? (
-                  <div style={{ ...S.empty, color: C.danger }}>
-                    Couldn't load the repair list — check your signal. This is not the same as nothing being
-                    outstanding.
-                  </div>
-                ) : (
-                  <div style={S.empty}>Nothing outstanding.</div>
-                )
-              )}
-              {repairListEntries?.filter((e) => e.status === "open").map((entry) => (
-                <div key={entry.id} style={S.reqCard}>
-                  <div style={S.reqCardTop}>
-                    <span style={S.itemName}>{entry.description}</span>
-                    {isAdmin && (
-                      <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => deleteRepairEntry(entry)}>
-                        <Trash2 size={13} />
-                      </button>
-                    )}
-                  </div>
-                  <div className="stk-meta-row" style={S.rowMeta}>
-                    <span>{entry.logged_by}</span>
-                    <span>{new Date(entry.created_at).toLocaleString()}</span>
-                  </div>
-                  {canEditQty("assets") && (
-                    <button type="button" className="stk-btn" style={{ ...S.reqActionBtn, marginTop: 6 }} onClick={() => resolveRepairEntry(entry)}>
-                      <Check size={13} /> Mark fixed
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {repairListEntries?.some((e) => e.status === "resolved") && (
-              <div style={{ marginTop: 10 }}>
-                <button
-                  type="button"
-                  className="stk-btn"
-                  style={S.reqActionBtnMuted}
-                  onClick={() => setRepairListResolvedOpen((v) => !v)}
-                >
-                  {repairListResolvedOpen ? "Hide" : "Show"} fixed ({repairListEntries.filter((e) => e.status === "resolved").length})
-                </button>
-                {repairListResolvedOpen && (
-                  <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
-                    {repairListEntries.filter((e) => e.status === "resolved").map((entry) => (
-                      <div key={entry.id} style={{ ...S.reqCard, opacity: 0.7 }}>
-                        <div style={S.reqCardTop}>
-                          <span style={S.itemName}>{entry.description}</span>
-                          {isAdmin && (
-                            <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => deleteRepairEntry(entry)}>
-                              <Trash2 size={13} />
-                            </button>
-                          )}
-                        </div>
-                        <div className="stk-meta-row" style={S.rowMeta}>
-                          <span>Fixed by {entry.resolved_by}</span>
-                          <span>{new Date(entry.resolved_at).toLocaleString()}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
+        <ErrorBoundary popup what="the repair list window" onClose={closeRepairList}>
+          <RepairListPopup ctx={assetsCtx} />
+        </ErrorBoundary>
       )}
 
       {/* Pulling stock from inside a process. Two steps — pick the
