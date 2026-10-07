@@ -10,6 +10,7 @@ import { C, S } from "../theme.js";
 import { Check, ChevronDown, Copy, FileText, Plus, X } from "lucide-react";
 import { TABS } from "../constants.js";
 import { poEmailDefaults } from "../email/emailRules.js";
+import { requisitionSearchText, searchWords, matchesWords } from "../lib/stockSearch.js";
 
 // Requisitions tab.
 export function RequisitionsTab({ ctx }) {
@@ -32,7 +33,7 @@ export function RequisitionsTab({ ctx }) {
             style={{ ...S.input, flex: 2, minWidth: 160 }}
             value={requisitionsSearchQuery}
             onChange={(e) => setRequisitionsSearchQuery(e.target.value)}
-            placeholder="Search item, supplier, or who requested it…"
+            placeholder="Search item, supplier, who requested it, or the note…"
           />
           <TypeToFind
             style={{ flex: 1, minWidth: 130 }}
@@ -44,18 +45,14 @@ export function RequisitionsTab({ ctx }) {
         </div>
       )}
       {["pending", "ordered"].map((status) => {
-        const rq = requisitionsSearchQuery.trim().toLowerCase();
+        // Word by word over the whole request, notes included
+        // (src/lib/stockSearch.js), the same way the Stock tab searches.
+        const words = searchWords(requisitionsSearchQuery);
         const list = requisitions
           .filter((r) => r.status === status)
           .filter((r) => canManageRequisitions || r.requestedBy === roleLabel)
           .filter((r) => !requisitionsSupplierFilter || r.supplier === requisitionsSupplierFilter)
-          .filter(
-            (r) =>
-              !rq ||
-              (r.itemLabel || "").toLowerCase().includes(rq) ||
-              (r.supplier || "").toLowerCase().includes(rq) ||
-              (r.requestedBy || "").toLowerCase().includes(rq)
-          )
+          .filter((r) => matchesWords(requisitionSearchText(r), words))
           .sort((a, b) => new Date(b.dateRequested) - new Date(a.dateRequested));
         if (list.length === 0) return null;
         return (
@@ -169,15 +166,7 @@ export function RequisitionsTab({ ctx }) {
                   .filter((r) => !archiveDateFrom || new Date(r.dateRequested) >= new Date(archiveDateFrom))
                   .filter((r) => !archiveDateTo || new Date(r.dateRequested) <= new Date(archiveDateTo + "T23:59:59"))
                   .filter((r) => !requisitionsSupplierFilter || r.supplier === requisitionsSupplierFilter)
-                  .filter((r) => {
-                    const rq = requisitionsSearchQuery.trim().toLowerCase();
-                    return (
-                      !rq ||
-                      (r.itemLabel || "").toLowerCase().includes(rq) ||
-                      (r.supplier || "").toLowerCase().includes(rq) ||
-                      (r.requestedBy || "").toLowerCase().includes(rq)
-                    );
-                  })
+                  .filter((r) => matchesWords(requisitionSearchText(r), searchWords(requisitionsSearchQuery)))
                   .sort((a, b) => new Date(b.dateRequested) - new Date(a.dateRequested))
                   .map((r) => (
                     <div key={r.id} style={S.reqCard}>
