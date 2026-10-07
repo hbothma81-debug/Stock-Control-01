@@ -5442,3 +5442,62 @@ and will close the same way unless an Invoicing stage is added.
 the wrap-up commit, and eleven commits from other conversations
 (Drawings, Assets, Request stock basket, Purchase orders tab on the
 job page), none pushed from here.
+
+---
+## 7 Oct 2026 — Requisitions: one Request stock basket everywhere, PUSHED (`afa3e51..3344b86`)
+
+Plan and his answers: `docs/REQUISITIONS-PLAN.md`. Owner: the
+Requisitions conversation (new 7 Oct).
+
+**What is LIVE** (six commits, all his word "you test and push"):
+- `52ebd05` the Request stock search reads every field word by word
+  (`src/lib/stockSearch.js`, tested); the Requisitions list search too.
+- `8d140d8` the basket, `src/purchasing/RequestStock.jsx`: search on
+  top, a line per item with quantity, supplier (cheapest, chips), job
+  (open jobs; empty = Stores) and note; Send writes one `requisitions`
+  row per line. `setup-requisitions-job.sql` (`job_id`, `job_number`)
+  on BOTH databases by his paste 7 Oct, checked beside a made-up column
+  (practice 200/400 from the `.env` address; live `CHECK-live-table.cjs`).
+- `342261f` the Stock tabs' Request stock chip and the row icon open
+  the basket, on Customer Stock too; the quantity-0 auto-jump is gone.
+- `a7e7b95` the cut list's "Request all outstanding (n bars)" and its
+  per-row button, and the tube laser's door; the old pick-an-item
+  pop-up deleted (the one-item form stays for Edit of a request).
+- `939d44e` the job page's **Purchase orders** tab: `JobPurchaseOrders`
+  draws `PoCard`, lifted word for word out of the Purchase Orders tab;
+  "Raise Purchase Order for JOB-x" starts the builder on the job.
+- `7d37bbb` the length on each search row and basket line.
+
+**Tried on practice signed in (Test), 7 Oct:** two-word search; two
+lines sent with JOB-0012 on both, read back from `requisitions` with
+`job_id` and `job_number`; the Structural row icon (opens a row's
+detail first); Cut to size on JOB-0008: the missing-line message for
+both pipes, then with a zero test row added (and deleted after) the
+basket preloaded with qty 1, the job and the "cut list — 6 m lengths"
+note; JOB-0004's Purchase orders tab showing PO-0001 with its lines,
+View PDF, Email and Copy. Not tried: the tube laser's door (same
+function as the row icon), the add-item Create path back into the
+basket, the PO builder from the job's tab.
+
+**The push:** scratch clone, `x` from live's afa3e51, six cherry-picks
+clean, `npm ci`, build (App-YqEIAhFc.js local), names check clean,
+410 tests; `git log origin/main..x` read as its own step, exactly the
+six; pushed; live went App-Cc2wDe9z.js -> App-CJod77Oe.js with all
+three new wordings in it; the live page loads with no console errors.
+origin/main merged back into the shared branch (887a559): App.jsx and
+the three SQL lists conflicted because the Drawings split sat between,
+resolved by keeping the shared branch's copies, proven by `git diff
+origin/main` showing only other conversations' work and every
+purchasing file identical to live.
+
+**Held back, not mine:** 6277fe4, e680916, 22be579, 91ded6e, 9029c95,
+f8a762f (Drawings and Assets out of App.jsx), af9cb77/dde3b93/faf50a8/
+28f38cf (Jobs page notes and FIX file; af9cb77 is live as afa3e51),
+plus uncommitted work in App.jsx, useDrawings.jsx, the SQL lists and
+`setup-stock-removed-details.sql`.
+
+**Next for this conversation:** the PO builder carrying a request's
+job onto the PO when Raise PO is pressed on the Requisitions tab (it
+fills the job only from the job page and Buy-outs today); the Customer
+Stock review (optional supplier box on the form; whether Buy-outs
+folds in), his word "look at separately".
