@@ -5,6 +5,7 @@
 import TypeToFind from "../TypeToFind.jsx";
 import { C, S } from "../theme.js";
 import { Plus, Trash2, X } from "lucide-react";
+import { stockSearchText, searchWords, matchesWords } from "../lib/stockSearch.js";
 
 // Receive, Cancel PO, PO report and the PO builder.
 export function PurchasingPopups({ ctx }) {
@@ -503,25 +504,26 @@ export function RequestStockPopups({ ctx }) {
               style={{ ...S.input, marginTop: 10 }}
               value={requisitionPickerQuery}
               onChange={(e) => setRequisitionPickerQuery(e.target.value)}
-              placeholder="Search name, grade, or customer…"
+              placeholder="Search anything on the row: name, grade, size, supplier, customer…"
             />
             <div style={{ ...S.managerList, marginTop: 10, maxHeight: "60vh", overflowY: "auto" }}>
               {(() => {
-                const q = requisitionPickerQuery.trim().toLowerCase();
-                if (!q) return <div style={S.empty}>Start typing to search.</div>;
-                const matches = (items || [])
-                  .filter((it) => it.mainCat !== "custom")
-                  .filter(
-                    (it) =>
-                      (it.name || "").toLowerCase().includes(q) ||
-                      (it.grade || "").toLowerCase().includes(q) ||
-                      (it.customer || "").toLowerCase().includes(q) ||
-                      (it.partNumber || "").toLowerCase().includes(q)
-                  )
-                  .slice(0, 50);
+                // The same every-field, word-by-word search as the Stock
+                // tab (src/lib/stockSearch.js), so what Stock finds, this
+                // finds. Customer Stock included (his answer, 7 Oct 2026);
+                // assets are not stock to request.
+                const words = searchWords(requisitionPickerQuery);
+                if (words.length === 0) return <div style={S.empty}>Start typing to search.</div>;
+                const all = (items || [])
+                  .filter((it) => it.mainCat !== "assets")
+                  .filter((it) => matchesWords(stockSearchText(it), words));
+                const matches = all.slice(0, 60);
                 return (
                   <>
                     {matches.length === 0 && <div style={S.empty}>Nothing matches that.</div>}
+                    {all.length > matches.length && (
+                      <div style={S.roleHint}>Showing {matches.length} of {all.length} — type more to narrow it down.</div>
+                    )}
                     {matches.map((it) => (
                       <button
                         key={it.id}
