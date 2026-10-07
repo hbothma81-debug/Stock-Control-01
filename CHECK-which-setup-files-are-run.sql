@@ -152,6 +152,8 @@ with checks (setup_file, looks_for, found) as (
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'master_supplier_prices')),
     ('setup-stock-paid-price.sql',      'column stock_items.paid_price',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'stock_items' and column_name = 'paid_price')),
+    ('setup-stock-removed-details.sql', 'column stock_items.removed_reason',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'stock_items' and column_name = 'removed_reason')),
     ('setup-requisitions-job.sql',      'column requisitions.job_number',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'requisitions' and column_name = 'job_number')),
     ('setup-invoice-request-function.sql', 'column job_quote_item_invoices.request_id',

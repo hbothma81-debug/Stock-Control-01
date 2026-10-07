@@ -292,9 +292,19 @@ function dbRowToItem(row) {
     stockHasPaidPrice = true;
     item.paidPrice = row.paid_price == null ? null : Number(row.paid_price);
   }
+  // Why, when and by whom an asset was removed (setup-stock-removed-details.sql).
+  // Out of ITEM_DB_FIELDS the same way: until 7 Oct 2026 nothing kept them
+  // and they were gone at the next reload.
+  if ("removed_reason" in row) {
+    stockHasRemovedDetails = true;
+    item.removedReason = row.removed_reason || "";
+    item.removedDate = row.removed_date || "";
+    item.removedBy = row.removed_by || "";
+  }
   return item;
 }
 let stockHasPaidPrice = false;
+let stockHasRemovedDetails = false;
 function itemToDbRow(item) {
   const row = { id: item.id };
   for (const [jsKey, dbKey, type] of ITEM_DB_FIELDS) {
@@ -303,6 +313,11 @@ function itemToDbRow(item) {
     row[dbKey] = v === undefined || v === null ? fallback : v;
   }
   if (stockHasPaidPrice) row.paid_price = Number(item.paidPrice) > 0 ? Number(item.paidPrice) : null;
+  if (stockHasRemovedDetails) {
+    row.removed_reason = item.removedReason || null;
+    row.removed_date = item.removedDate || null;
+    row.removed_by = item.removedBy || null;
+  }
   return row;
 }
 // A stock row's own price when it has one, else the list's.
@@ -3479,7 +3494,7 @@ export default function StockControl() {
     markInvoicedModal || deliveryNoteBatchModal || copyJobModal || previewItem ||
     showAddStockItemModal || showStockImportModal || showBuyoutImportModal || editProcessesModal || productionSelectedDept ||
     productionSelectedProcessId || showManager || requisitionTarget || showRequisitionPicker || requestBasket ||
-    assetManufacturerOpen || assetDetailOpen || serviceNowItem || repairListItem ||
+    assetManufacturerOpen || assetDetailOpen || serviceNowItem || repairListItem || assetHistoryItem ||
     selectedGradeGroup || selectedItemDetail
   );
   const modalWasOpenRef = useRef(false);
