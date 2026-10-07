@@ -218,6 +218,27 @@ export function useDrawings(deps) {
       await supabase.storage.from("drawings").remove([drawing.storage_path]);
       const { error } = await supabase.from("drawings").delete().eq("id", drawing.id);
       if (error) throw error;
+      // The current revision gone, the newest one left becomes current, as
+      // it was before that upload (7 Oct 2026: it used to stay superseded,
+      // leaving the part with no current drawing).
+      if (drawing.status === "current") {
+        const { data: left, error: leftError } = await supabase
+          .from("drawings")
+          .select("id")
+          .eq("part_number", drawing.part_number)
+          .order("internal_revision", { ascending: false })
+          .limit(1);
+        if (leftError) throw leftError;
+        if (left && left.length) {
+          const { data: made, error: makeError } = await supabase
+            .from("drawings")
+            .update({ status: "current" })
+            .eq("id", left[0].id)
+            .select("id");
+          if (makeError) throw makeError;
+          if (!made || !made.length) console.warn("The older revision could not be made current:", left[0].id);
+        }
+      }
       refreshDrawings(drawingSearchQuery, drawingCustomerFilter);
     } catch (err) {
       console.error("Failed to delete drawing:", err);
