@@ -31,12 +31,27 @@ function draw(costing) {
   return { all: printed.join("\n"), report };
 }
 
-test("the report: heading, price, time, both bar sections, wastage that adds up", () => {
+test("the report: heading, price, time, both bar sections, material and offcut that add up", () => {
   const { all, report } = draw(COSTING);
   assert.equal(report.pages, 1);
-  for (const want of ["CNC COST REPORT · FOR ERS ONLY", "TEST PIN 16x30", "O00001031", "Batch quantity | 70", "Per part (batch)", "1-off material", "Machine rate", "1 x 6,000 mm", "3 puller bars, 3,003 mm", "what the job uses", "Where the steel goes", "Material used per part", "Costed in", "34% of the steel bought"]) {
+  for (const want of ["CNC COST REPORT · FOR ERS ONLY", "TEST PIN 16x30", "O00001031", "Batch quantity | 70", "Cost per part (batch)", "1-off material", "Machine rate", "1 x 6,000 mm", "3 puller bars, 3,003 mm", "what the job uses", "Material and offcut (per part)", "Costed in: material and offcut add up"]) {
     assert.ok(all.includes(want), `printed: ${want}`);
   }
+  // The chips are not printed as waste any more.
+  assert.ok(!all.includes("Chips (turned away)"));
+  assert.ok(!all.includes("of the steel bought"));
+});
+
+test("the markups and selling price, as the Costing tab shows them", () => {
+  const { all } = draw(COSTING);
+  for (const want of ["Selling per part (batch)", "Batch selling", "1-off selling", "material 60%, offcut 60%; machine time and setup at cost", "saw cut", "| 0.056 |", "Share of the offcut, 60% | 0.015 |", "Machine time and setup (at cost)", "Offcut charged for the batch"]) {
+    assert.ok(all.includes(want), `printed: ${want}`);
+  }
+  // The money is markup.js's (Rand is printed in the PC's own way, so the
+  // amounts are checked as numbers): material 1.79 + 0.15 + 0.18 = 2.12 at
+  // 60% = 3.39; offcut 0.583 at 60% = 0.93; machine and setup 25.50.
+  const { sell } = costReportData({ program: { settings: {} }, costing: COSTING });
+  assert.deepEqual([sell.perPart.material, sell.perPart.materialSell, sell.perPart.offcut, sell.perPart.offcutSell, sell.perPart.atCost], [2.12, 3.39, 0.58, 0.93, 25.5]);
 });
 
 test("until the engine sends them, the order and impacts say so; once sent they print", () => {

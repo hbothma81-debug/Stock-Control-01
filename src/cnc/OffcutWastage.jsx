@@ -89,7 +89,7 @@ function MaterialTab({ costing, canSeeValue }) {
   const [part, chips, kerf, offcut] = w.rows;
   const sum = (k) => [part, chips, kerf].reduce((t, r) => t + (r[k] || 0), 0);
   const rows = [
-    [`Material: the part, its chips and saw cut (${num(w.stockMm, 1)} mm of bar)`, `${num(sum("kg"), 3)} kg${canSeeValue ? ` · ${rand(sum("cost"))}` : ""}`],
+    [`Material: the part, its chips and saw cut${w.stockMm != null ? ` (${num(w.stockMm, 1)} mm of bar)` : ""}`, `${num(sum("kg"), 3)} kg${canSeeValue ? ` · ${rand(sum("cost"))}` : ""}`],
     ["Share of the offcut", `${num(offcut.kg, 3)} kg${canSeeValue ? ` · ${rand(offcut.cost)}` : ""}`],
     ["Material per part", `${num(w.usedKg, 3)} kg${canSeeValue ? ` · ${rand(w.total)}` : ""}`],
   ];

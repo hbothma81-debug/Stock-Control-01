@@ -68,7 +68,10 @@ export function sellingPrice(costing, settings) {
   const batchCost = n(costing.batch_total) ?? cost * qty;
   const oneOffCost = n(costing.one_off_price);
   // Per part, each column adds up to its total as shown, to the cent; the
-  // batch adds the markup per part as shown, times the batch.
+  // batch adds the markup per part as shown, times the batch. The batch's
+  // offcut is the engine's own figure where it sends one (offcut.batch_cost,
+  // which the Costing tab's bar section also prints), so one page never
+  // shows two.
   const part = {
     cost: cents(cost),
     material: cents(split.perPart.material),
@@ -83,7 +86,7 @@ export function sellingPrice(costing, settings) {
     markups: { material: m, offcut: o },
     split: materialSplit(costing),
     perPart: part,
-    batch: { cost: cents(batchCost), offcut: cents(split.perPart.offcut * qty), sell: cents(batchCost + (part.sell - part.cost) * qty) },
+    batch: { cost: cents(batchCost), offcut: cents(n(costing.offcut?.batch_cost) ?? split.perPart.offcut * qty), sell: cents(batchCost + (part.sell - part.cost) * qty) },
     oneOff: oneOffCost == null ? null : { cost: cents(oneOffCost), sell: cents(oneOffCost + added(split.oneOff)) },
   };
 }

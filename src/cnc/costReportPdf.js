@@ -5,9 +5,13 @@
 // block as saved with the program (no sums here); the document and its
 // table plug-in are handed in, so it is tested with the real thing
 // (costReportPdf.test.js). Sections the engine does not send yet are left
-// out with a line saying so.
+// out with a line saying so. The markups and selling price are
+// markup.js's, the one copy the Costing tab also shows (Heinrich, 8 Oct
+// 2026: the report gets the material / offcut split and the selling price;
+// the chips are in the material, not shown as waste).
 
 import { oNumber, rand, wastageRows } from "./cncRules.js";
+import { sellingPrice } from "./markup.js";
 
 const L = 14;
 const R = 196;
@@ -65,11 +69,12 @@ export function costReportData({ program, rev, costing, when = new Date() }) {
     when: when.toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
     c,
     chargeAll: !!(c.charge_all_material ?? c.stock?.charge_all_material ?? s.charge_all_material),
+    sell: sellingPrice(costing, s),
   };
 }
 
 export function drawCostReport({ doc, autoTable, data }) {
-  const { c } = data;
+  const { c, sell } = data;
   let y = 18;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(SIZE.body);
@@ -101,9 +106,13 @@ export function drawCostReport({ doc, autoTable, data }) {
   // ---- prices first: what the reader came for
   y = heading(doc, y, "Price");
   y = pairs(doc, autoTable, y, [
-    ["Per part (batch)", rand(c.price_per_part)],
-    ["Batch total", rand(c.batch_total)],
-    ["1-off incl. setup", rand(c.one_off_price)],
+    ["Cost per part (batch)", rand(c.price_per_part)],
+    ["Selling per part (batch)", rand(sell?.perPart.sell)],
+    ["Batch cost", rand(c.batch_total)],
+    ["Batch selling", rand(sell?.batch.sell)],
+    ["1-off cost incl. setup", rand(c.one_off_price)],
+    ["1-off selling", rand(sell?.oneOff?.sell)],
+    ["Markup", sell ? `material ${sell.markups.material}%, offcut ${sell.markups.offcut}%; machine time and setup at cost` : "-"],
     ["1-off material", c.one_off_material != null ? rand(c.one_off_material) : "-"],
   ]);
 
@@ -143,35 +152,46 @@ export function drawCostReport({ doc, autoTable, data }) {
   mat.push(["Material per part", rand(c.material_per_part)], ["Material for the batch", rand(c.material_total)]);
   y = pairs(doc, autoTable, y, mat);
 
-  // ---- wastage
+  // ---- material and offcut, per part, at cost and selling
   const w = wastageRows(c.wastage, c.material_per_part);
-  y = heading(doc, y, "Wastage (per part)");
-  if (w) {
+  y = heading(doc, y, "Material and offcut (per part)");
+  if (w && sell) {
+    const [part, chips, kerf, offcut] = w.rows;
+    const kg = [part, chips, kerf].reduce((t, r) => t + (r.kg || 0), 0);
+    const p = sell.perPart;
+    const bold = (x) => ({ content: safe(x), styles: { fontStyle: "bold" } });
     autoTable(doc, {
       ...table,
       startY: y,
-      head: [["Where the steel goes", "mm", "kg", "Cost"]],
+      head: [["", "kg", "Cost", "Selling"]],
       body: [
-        ...w.rows.map((r) => [r.what, r.mm == null ? "" : num(r.mm, 2), num(r.kg, 3), rand(r.cost)]),
-        [{ content: "Material used per part", styles: { fontStyle: "bold" } }, "", { content: num(w.usedKg, 3), styles: { fontStyle: "bold" } }, { content: rand(w.total), styles: { fontStyle: "bold" } }],
+        [`Material: the part, its chips and saw cut${w.stockMm != null ? ` (${num(w.stockMm, 1)} mm of bar)` : ""}, ${sell.markups.material}%`, num(kg, 3), rand(p.material), rand(p.materialSell)],
+        [`Share of the offcut, ${sell.markups.offcut}%`, num(offcut.kg, 3), rand(p.offcut), rand(p.offcutSell)],
+        ["Machine time and setup (at cost)", "", rand(p.atCost), rand(p.atCost)],
+        [bold(`Per part, batch of ${sell.qty}`), "", bold(rand(p.cost)), bold(rand(p.sell))],
+        [bold("Batch"), "", bold(rand(sell.batch.cost)), bold(rand(sell.batch.sell))],
       ].map((r) => r.map((x) => (typeof x === "string" ? safe(x) : x))),
-      columnStyles: { 1: { halign: "right", cellWidth: 22 }, 2: { halign: "right", cellWidth: 22 }, 3: { halign: "right", cellWidth: 30 } },
+      columnStyles: { 1: { halign: "right", cellWidth: 20 }, 2: { halign: "right", cellWidth: 28 }, 3: { halign: "right", cellWidth: 28 } },
     });
     y = doc.lastAutoTable.finalY + 2;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(SIZE.body);
     doc.setTextColor(...(w.ok === false ? RED : INK));
-    const batchWaste = c.wastage?.batch_waste_cost;
     doc.text(
       safe(
-        `${w.ok === false ? `Does not add up: ${rand(w.total)} against ${rand(w.costed)}.` : `Costed in: the four add up to the material per part, ${rand(w.costed)}.`}  Waste ${num(w.wastePct)}% of the steel bought${batchWaste != null ? `; offcut and wastage ${rand(batchWaste)} for the batch` : ""}.`
+        `${w.ok === false ? `Does not add up: ${rand(w.total)} against ${rand(w.costed)}.` : `Costed in: material and offcut add up to the material per part, ${rand(w.costed)}.`}  Offcut charged for the batch ${rand(sell.batch.offcut)}.`
       ),
       L,
       y + 3
     );
     y += 9;
+  } else if (sell) {
+    y = pairs(doc, autoTable, y, [
+      [`Material (${sell.markups.material}%)`, `${rand(sell.perPart.material)} cost, ${rand(sell.perPart.materialSell)} selling`],
+      ["Machine time and setup", `${rand(sell.perPart.atCost)} at cost`],
+    ]);
   } else {
-    y = note(doc, y, "No wastage figures with this price: press Price again on the Costing tab.");
+    y = note(doc, y, "No material figures with this price: press Price again on the Costing tab.");
   }
 
   // ---- to order, tools, what can change the cost

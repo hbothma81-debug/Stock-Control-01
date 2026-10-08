@@ -47,6 +47,7 @@ test("the selling price adds the markups to the engine's cost and nothing else",
   assert.equal(Math.round((p.perPart.materialSell + p.perPart.offcutSell + p.perPart.atCost) * 100) / 100, p.perPart.sell);
   assert.equal(p.batch.sell, 7193.23);
   assert.equal(p.batch.offcut, 6.72);
+  assert.equal(sellingPrice({ ...O1029, offcut: { batch_cost: 6.734 } }, {}).batch.offcut, 6.73);
   assert.equal(p.oneOff.sell, 929.67);
 });
 
