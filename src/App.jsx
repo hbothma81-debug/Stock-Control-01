@@ -17844,6 +17844,7 @@ export default function StockControl() {
               density: g.factor,
             }))}
             canSeeValue={canSeeValue}
+            isAdmin={isAdmin}
             onSaveMaterialPrice={(name, price) => setMaterialPrice("cncGrades", name, price)}
             onAddMaterial={(name, density, price) => setMaterialPrice("cncGrades", name, price, { factor: density })}
             canEdit={canEditQty("cnc")}

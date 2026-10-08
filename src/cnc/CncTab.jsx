@@ -21,13 +21,16 @@ import NewProgram from "./NewProgram.jsx";
 import ProgramView from "./ProgramView.jsx";
 import ShapeIcon from "./ShapeIcon.jsx";
 import MaterialsList from "./MaterialsList.jsx";
+import CuttingDataScreen from "./CuttingDataScreen.jsx";
+import MachinesScreen from "./MachinesScreen.jsx";
+import { loadMachines } from "./cncTables.js";
 
 // S.chipActive sets borderColor, which React will not mix with S.chip's
 // border shorthand once a chip switches on; the whole border is given.
 const { borderColor: _unused, ...chipActiveRest } = S.chipActive;
 const CHIP_ON = { ...chipActiveRest, border: `1px solid ${C.accentFinished}` };
 
-export default function CncTab({ customers, materials, canEdit, canDelete, canSeeValue, onSaveMaterialPrice, onAddMaterial, userName }) {
+export default function CncTab({ customers, materials, canEdit, canDelete, canSeeValue, isAdmin, onSaveMaterialPrice, onAddMaterial, userName }) {
   const [programs, setPrograms] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -69,6 +72,8 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
         ["list", "Programs"],
         ["shapes", "Shapes"],
         ["materials", "Materials"],
+        ["cutting", "Cutting data"],
+        ["machines", "Machines"],
       ].map(([key, label]) => (
         <button
           key={key}
@@ -85,6 +90,28 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
       ))}
     </div>
   );
+
+  if (screen === "cutting") {
+    return (
+      <div style={S.list}>
+        {subTabs}
+        <ErrorBoundary box what="the Cutting data">
+          <CuttingHost isAdmin={isAdmin} userName={userName} />
+        </ErrorBoundary>
+      </div>
+    );
+  }
+
+  if (screen === "machines") {
+    return (
+      <div style={S.list}>
+        {subTabs}
+        <ErrorBoundary box what="the Machines">
+          <MachinesScreen isAdmin={isAdmin} userName={userName} />
+        </ErrorBoundary>
+      </div>
+    );
+  }
 
   if (screen === "materials") {
     return (
@@ -297,5 +324,39 @@ function renderLine(p, open) {
       {bits.filter(Boolean).join(" · ")}
       {p.status !== "ready" && p.fault && <span style={{ color: C.danger }}>{" · "}{p.fault}</span>}
     </button>
+  );
+}
+
+// Cutting data is held per machine: the machines are read when the screen
+// opens, and with more than one a button per machine picks whose.
+function CuttingHost({ isAdmin, userName }) {
+  const [machines, setMachines] = useState(null);
+  const [pick, setPick] = useState(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    loadMachines()
+      .then((list) => {
+        setMachines(list);
+        setPick(list[0]?.id || null);
+      })
+      .catch((err) => setError(`The machines could not be loaded: ${err.message || err}`));
+  }, []);
+  if (error) return <div style={{ color: C.danger, fontSize: 14 }}>{error}</div>;
+  if (!machines) return <div style={S.empty}>Loading…</div>;
+  if (!machines.length) return <div style={S.empty}>No machine yet: the CNC database files are not all on this database.</div>;
+  const machine = machines.find((m) => m.id === pick) || machines[0];
+  return (
+    <>
+      {machines.length > 1 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {machines.map((m) => (
+            <button key={m.id} type="button" className="stk-btn" style={{ ...S.chip, ...(m.id === machine.id ? CHIP_ON : {}) }} onClick={() => setPick(m.id)}>
+              {m.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <CuttingDataScreen machine={machine} isAdmin={isAdmin} userName={userName} />
+    </>
   );
 }

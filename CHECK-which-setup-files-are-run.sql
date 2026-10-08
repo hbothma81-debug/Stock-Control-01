@@ -203,7 +203,10 @@ with checks (setup_file, looks_for, found) as (
     ('setup-cnc-8-costing.sql', 'column cnc_programs.costing (the price at the batch size)',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_programs' and column_name = 'costing')),
     ('setup-cnc-9-bar-prices.sql', 'table cnc_bar_prices (a price per bar size)',
-      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_bar_prices'))
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_bar_prices')),
+    ('setup-cnc-10-machines-cutting-data.sql', 'table cnc_cutting_data and the LEO 1600 machine',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_cutting_data')
+      and exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_machines'))
 )
 select
   setup_file,
