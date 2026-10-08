@@ -5575,3 +5575,30 @@ wrap-up: CLAUDE.md and handover); the two touch the end of this file
 and conflict when picked apart, so they go together with the next push.
 Lesson: the scratch clone's `origin` is this folder, not GitHub, so in
 the clone branch from live's hash, and read `origin/main..x` only here.
+
+---
+## 8 Oct 2026 — Customer Stock rebuilt, PUSHED alone (`efecd29..f6aec26`, live App-BhClBtFA.js)
+
+His "sql on both push from here". `setup-stock-customer-revision.sql`
+confirmed on practice (200 from the `.env` address, a made-up column
+400) and live (`CHECK-live-table.cjs`) before the push. e348aa8
+cherry-picked onto live's efecd29 as f6aec26 in the scratch clone
+(branched by hash, the clone's origin being this folder): build clean
+(App-C0D4GncI.js local), names check clean, 415 tests; `git log
+origin/main..x` read here as its own step, exactly the one commit;
+pushed; live went App-Dn0GJsDx.js -> App-BhClBtFA.js with "Has stock
+only" and `customer_revision` in it. Merged back (e2427c2, App.jsx
+auto-merged clean, shared-branch build and names clean). On live signed
+in: Stock -> Customer Stock reads "1732 parts for 7 customers, 8 with
+stock on hand", pills BPW 647, ER Products 2, Factory 1, FSS 238, HPE
+840, MIT 1, Stainless Steel Design 3; no console errors, no crash box.
+
+**Held back, not mine:** 3ddfed7 (Shortage form says why Flag Shortage
+is greyed out, Laser conversation, code), a18788b (CNC brief, notes),
+5eca4c1 (Planning wrap-up, notes), and my own two handover commits.
+
+**Next for him:** re-import each customer's sheet under Stock Manager ->
+Stock Codes -> Import with the "Replace the whole list" tick OFF, to
+bring the revisions back. **Next for this conversation:** the first-round
+supplier questions in `docs/CUSTOMER-STOCK-SUPPLIER-PLAN.md` (PO lookup,
+the job's Buy-outs tab, what becomes of Buy-outs, who sets the supplier).
