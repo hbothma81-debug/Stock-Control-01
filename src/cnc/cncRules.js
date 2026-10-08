@@ -206,3 +206,34 @@ export function matchMachineCopies(files, programNo, currentPrograms = []) {
     refused,
   };
 }
+
+// The day a time falls on in South Africa, as 2026-10-08 (never the UTC
+// day, which is a day early before 02:00).
+export function dayInSA(iso) {
+  if (!iso) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+  return parts;
+}
+
+// Export to Excel: one row per program, in program number order, for
+// review only (nothing reads the file back). cycleBy maps a program's id
+// to its current revision's cycle time in seconds.
+export function exportRows(programs, cycleBy = {}) {
+  return [...(programs || [])]
+    .sort((a, b) => a.program_no - b.program_no)
+    .map((p) => {
+      const s = cycleBy[p.id];
+      return {
+        "O number": oNumber(p.program_no),
+        Part: p.part_name || "",
+        Customer: p.customer || "",
+        Material: p.material || "",
+        Bar: p.stock || "",
+        Revision: p.current_rev || "none",
+        Status: p.status === "ready" ? "Ready" : "Not for machine",
+        Fault: p.status === "ready" ? "" : p.fault || "",
+        "Cycle time (min)": s == null ? "" : Math.round((Number(s) / 60) * 10) / 10,
+        "Last changed": dayInSA(p.updated_at),
+      };
+    });
+}

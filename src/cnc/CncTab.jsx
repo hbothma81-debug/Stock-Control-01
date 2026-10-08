@@ -8,11 +8,11 @@
 // timer; a program's settings, text and STEP file load when it is opened.
 
 import { useEffect, useState } from "react";
-import { Plus, RefreshCw } from "lucide-react";
+import { FileSpreadsheet, Plus, RefreshCw } from "lucide-react";
 import Section from "../Section.jsx";
 import ErrorBoundary from "../ErrorBoundary.jsx";
 import { C, F, S } from "../theme.js";
-import { loadPrograms } from "./cncData.js";
+import { exportPrograms, loadPrograms } from "./cncData.js";
 import { oNumber, splitPrograms } from "./cncRules.js";
 import NewProgram from "./NewProgram.jsx";
 import ProgramView from "./ProgramView.jsx";
@@ -21,6 +21,7 @@ export default function CncTab({ customers, materials, canEdit, canDelete, userN
   const [programs, setPrograms] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [search, setSearch] = useState("");
   // "list", "new", or a program's id
   const [screen, setScreen] = useState("list");
@@ -87,6 +88,19 @@ export default function CncTab({ customers, materials, canEdit, canDelete, userN
 
   const { notForMachine, ready } = splitPrograms(programs, search);
   const searching = !!search.trim();
+
+  // The programs the search shows (all of them with nothing typed).
+  async function exportShown() {
+    setExporting(true);
+    setLoadError("");
+    try {
+      await exportPrograms([...notForMachine, ...ready], searching ? "CNC-programs-search" : "CNC-programs");
+    } catch (err) {
+      setLoadError(`The Excel file could not be made: ${err.message || err}`);
+    } finally {
+      setExporting(false);
+    }
+  }
   return (
     <div style={S.list}>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -101,6 +115,16 @@ export default function CncTab({ customers, materials, canEdit, canDelete, userN
             <Plus size={15} strokeWidth={2.5} /> New program
           </button>
         )}
+        <button
+          type="button"
+          className="stk-btn"
+          style={S.chip}
+          onClick={exportShown}
+          disabled={exporting || !programs?.length}
+          title={searching ? "The programs this search shows, as an Excel file" : "Every program, as an Excel file"}
+        >
+          <FileSpreadsheet size={14} /> {exporting ? "…" : "Excel"}
+        </button>
         <button type="button" className="stk-btn" style={S.chip} onClick={refresh} disabled={loading} title="Load the programs again">
           <RefreshCw size={13} />
         </button>

@@ -4,7 +4,7 @@
 // are in setup-cnc-1..5.sql; what they mean on screen is in cncRules.js.
 
 import { supabase } from "../lib/supabaseClient.js";
-import { engineErrorText, faultText, stockText, MAX_STEP_BYTES } from "./cncRules.js";
+import { dayInSA, engineErrorText, exportRows, faultText, stockText, MAX_STEP_BYTES } from "./cncRules.js";
 
 // The engine (ERS TURNING APP, its own repository and Vercel project). It
 // answers only a signed-in user of this app's databases, practice or live.
@@ -28,6 +28,33 @@ export async function loadPrograms() {
     if (data.length < PAGE) break;
   }
   return rows;
+}
+
+// Export to Excel (review only): the programs on screen, with each one's
+// current cycle time. Read when the button is pressed, never otherwise:
+// three small columns of every revision, a page at a time.
+export async function exportPrograms(programs, title) {
+  const cycleBy = {};
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase.from("cnc_program_revisions").select("id, program_id, rev, cycle_s").order("id").range(from, from + PAGE - 1);
+    if (error) throw error;
+    for (const r of data) {
+      const p = programs.find((x) => x.id === r.program_id);
+      if (p && p.current_rev === r.rev) cycleBy[p.id] = r.cycle_s;
+    }
+    if (data.length < PAGE) break;
+  }
+  let XLSX;
+  try {
+    XLSX = await import("xlsx");
+  } catch {
+    throw new Error("The spreadsheet builder could not load. The app has probably been updated: reload the page and try again.");
+  }
+  const ws = XLSX.utils.json_to_sheet(exportRows(programs, cycleBy));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "CNC programs");
+  XLSX.writeFile(wb, `${title}-${dayInSA(new Date().toISOString())}.xlsx`);
 }
 
 // One program, opened: its row and every revision, oldest first.

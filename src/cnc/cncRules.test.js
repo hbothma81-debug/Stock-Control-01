@@ -153,3 +153,27 @@ test("a machine copy may bring the second program a part did not have, and short
   assert.deepEqual(r.programs.map((p) => p.number), [1027, 1028]);
   assert.deepEqual(r.imported, [{ number: 1028, fileName: "x.nc" }]);
 });
+
+import { exportRows, dayInSA } from "./cncRules.js";
+
+test("the Excel rows: program number order, words a reviewer reads, minutes to one place", () => {
+  const rows = exportRows(
+    [
+      { id: "b", program_no: 2001, part_name: "10t bush", customer: "BPW", material: "EN8", stock: "Pipe NPS 4 SCH80", current_rev: "A", status: "not_for_machine", fault: "bore too deep", updated_at: "2026-10-07T23:30:00Z" },
+      { id: "a", program_no: 1027, part_name: "Spacer", customer: "HPE", material: "EN8", stock: "D50 bar", current_rev: "D", status: "ready", fault: "stale", updated_at: "2026-10-08T08:00:00Z" },
+    ],
+    { a: 2613.6 }
+  );
+  assert.deepEqual(rows.map((r) => r["O number"]), ["O00001027", "O00002001"]);
+  assert.equal(rows[0].Status, "Ready");
+  assert.equal(rows[0].Fault, "");
+  assert.equal(rows[0]["Cycle time (min)"], 43.6);
+  assert.equal(rows[1]["Cycle time (min)"], "");
+  assert.equal(rows[1].Fault, "bore too deep");
+  assert.equal(rows[1]["Last changed"], "2026-10-08");
+});
+
+test("a South African day, not the UTC one", () => {
+  assert.equal(dayInSA("2026-10-07T22:30:00Z"), "2026-10-08");
+  assert.equal(dayInSA(null), "");
+});
