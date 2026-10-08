@@ -5602,3 +5602,55 @@ Stock Codes -> Import with the "Replace the whole list" tick OFF, to
 bring the revisions back. **Next for this conversation:** the first-round
 supplier questions in `docs/CUSTOMER-STOCK-SUPPLIER-PLAN.md` (PO lookup,
 the job's Buy-outs tab, what becomes of Buy-outs, who sets the supplier).
+
+---
+## 8 Oct 2026 — Requisitions: state of play at wrap-up
+
+**Done and LIVE** (all 7–8 Oct): the one Request stock basket from every
+door, a job per request line, the Purchase orders tab on the job page,
+Raise PO carrying the requests' job, and the Customer Stock tab rebuilt
+(every part, pills A to Z, rows by code, open in place, Cost, Supplier
+box, the revision saved). Live bundle App-BhClBtFA.js. Plans:
+`docs/REQUISITIONS-PLAN.md`, `docs/CUSTOMER-STOCK-SUPPLIER-PLAN.md`.
+
+**Every `setup-*.sql` this conversation wrote:**
+
+| file | practice | live |
+| --- | --- | --- |
+| `setup-requisitions-job.sql` (`requisitions.job_id`, `job_number`, index) | yes: his paste 7 Oct, `requisitions?select=job_number` 200 from the `.env` address beside a made-up column 400 | yes: `CHECK-live-table.cjs "requisitions?select=job_number"` On live, made-up column NO |
+| `setup-stock-customer-revision.sql` (`stock_items.customer_revision`) | yes: his paste 8 Oct, 200 beside a made-up column 400 | yes: `CHECK-live-table.cjs` On live, made-up column NO |
+
+Both are columns only, no rules, functions or triggers.
+
+**Built but not yet tried by Heinrich (or anybody) on a screen:**
+- The tube laser's nothing-on-the-shelf door into the basket (same
+  function as the Stock row icon, which was tried).
+- "Not in Stock yet? Create" inside the basket: the add-item form, then
+  the new item landing back in the basket (`addToRequest`).
+- Raise Purchase Order from a job's own Purchase orders tab (the builder
+  starting on that job).
+- A Raise PO over requests for two or more jobs: the empty job box and the
+  red line naming them (covered by `poJob.test.js` only).
+- Several lines in one basket sent from the Stock tabs (the Requisitions
+  tab's two-line send was tried).
+- On live, Customer Stock: typing a revision in a row's box and seeing it
+  after a reload (practice had no column at the time of the test, live
+  has it now); the "Has stock only" tick; the re-import.
+
+**Waiting on Heinrich:**
+- The re-import of each customer's sheet (Stock Manager -> Stock Codes ->
+  Import, "Replace the whole list" OFF) to bring the revisions back.
+- The first-round supplier questions in `docs/CUSTOMER-STOCK-SUPPLIER-PLAN.md`:
+  one cost or a price per supplier; may the PO form find a customer part
+  that has a supplier; does the job's Buy-outs tab offer them; what
+  becomes of the Buy-outs division; who may set the supplier.
+
+**Half-done:** nothing. **Queue at wrap-up:** my notes commits (dbdea20,
+07fc0cf, 46f507d, this one) and three from other conversations
+(3ddfed7 Shortage form wording, a18788b CNC brief, 5eca4c1 Planning
+wrap-up), none pushed from here.
+
+**Next session picks up:** his answers above, then step 1 of the
+supplier plan (the PO lookups and the request card's price row for a
+customer part with a supplier; the export/import Supplier column), then
+step 2 (the job's Buy-outs tab) if he says yes.
