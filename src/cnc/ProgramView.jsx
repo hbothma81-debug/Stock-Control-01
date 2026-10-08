@@ -303,6 +303,7 @@ function ProgramText({ rev }) {
       {rev.cycle_s != null && (
         <div style={{ fontSize: 14 }}>
           Cycle time {Math.floor(rev.cycle_s / 60)} min {Math.round(rev.cycle_s % 60)} s
+          {rev.costing?.data_source && <span style={{ color: C.muted }}> · made from {rev.costing.data_source}</span>}
         </div>
       )}
       {progs.map((pr, i) => (

@@ -6,10 +6,8 @@
 
 import { supabase } from "../lib/supabaseClient.js";
 
-// Until the engine reads these tables (it is switched over on Heinrich's
-// word, after the first import), it still reads its own spreadsheet and
-// machine file: the screens say so. Set true once it has switched.
-export const ENGINE_READS_TABLES = false;
+// Whether the engine reads these tables or still its own files is asked
+// of the engine itself when a screen opens (EngineSource.jsx).
 
 export async function loadMachines() {
   const { data, error } = await supabase.from("cnc_machines").select("*").order("sort").order("name");

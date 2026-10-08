@@ -10,7 +10,8 @@
 import { useEffect, useState } from "react";
 import { Plus } from "lucide-react";
 import { C, S } from "../theme.js";
-import { addMachine, ENGINE_READS_TABLES, loadMachines, saveMachine } from "./cncTables.js";
+import { addMachine, loadMachines, saveMachine } from "./cncTables.js";
+import EngineSource from "./EngineSource.jsx";
 
 const { borderColor: _unused, ...chipActiveRest } = S.chipActive;
 const CHIP_ON = { ...chipActiveRest, border: `1px solid ${C.accentFinished}` };
@@ -120,11 +121,7 @@ export default function MachinesScreen({ isAdmin, userName, onMachines }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {!ENGINE_READS_TABLES && (
-        <div style={{ fontSize: 13, color: C.accentRaw }}>
-          The program engine still reads its own machine file until it is switched over to this list: a change here does not reach programs yet.
-        </div>
-      )}
+      <EngineSource what="machine file" />
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
         {machines.map((x) => (
           <button key={x.id} type="button" className="stk-btn" style={{ ...S.chip, ...(x.id === pick ? CHIP_ON : {}) }} onClick={() => setPick(x.id)}>

@@ -203,6 +203,15 @@ async function runPriced({ name, stepText, settings, material, programNo, extra 
   return { result, sent };
 }
 
+// The engine's costing as saved, with where its cutting data and machine
+// came from (answer.data_source: "test cnc_ tables, version 12 (10
+// sheets)" or "engine files", from the engine's aefdd21) kept inside it,
+// so the Program and Costing tabs can say so. No new column.
+function withSource(result) {
+  if (!result?.costing) return null;
+  return result.data_source ? { ...result.costing, data_source: result.data_source } : result.costing;
+}
+
 // A revision row from the engine's answer. The letter is the database's
 // (setup-cnc-3-revisions.sql), which also makes it the program's current
 // revision in the same save.
@@ -223,7 +232,7 @@ function revisionRow({ programId, result, settings, stepPath, stepName, userName
     problems: result.problems || [],
     cycle_s: result.cycle_s ?? null,
     tool_s: result.tool_s ?? null,
-    costing: result.costing ?? null,
+    costing: withSource(result),
     settings,
     step_path: stepPath,
     step_name: stepName,
@@ -269,7 +278,7 @@ export async function createProgram({ partName, customer, material, settings, pr
     material: material?.name || "",
     stock: stockText(sent, result.costing, await loadEngineList("pipes")),
     settings: sent,
-    costing: result.costing ?? null,
+    costing: withSource(result),
     created_by: userName || "",
   });
   if (e1) {
@@ -308,7 +317,7 @@ export async function recost({ program, current, material, costingSettings }) {
   if (!result.costing) throw new Error("The engine did not send a price back.");
   const { data, error } = await supabase
     .from("cnc_programs")
-    .update({ settings, costing: result.costing })
+    .update({ settings, costing: withSource(result) })
     .eq("id", program.id)
     .select("*")
     .single();
@@ -402,7 +411,7 @@ export async function saveUpdate({ program, run, letter, partName, customer, mat
       customer: customer || "",
       material: material?.name || "",
       stock: stockText(sent, result.costing, await loadEngineList("pipes")),
-      costing: result.costing ?? null,
+      costing: withSource(result),
     })
     .eq("id", program.id)
     .select("id");
@@ -457,7 +466,7 @@ export async function saveMachineCopy({ program, current, programs, check, fileN
     problems: r?.problems || [],
     cycle_s: r?.cycle_s ?? null,
     tool_s: r?.tool_s ?? null,
-    costing: r?.costing ?? null,
+    costing: r ? withSource(r) : null,
     settings: check?.settings || current?.settings || program.settings || null,
     step_path: current?.step_path || check?.step?.path || null,
     step_name: current?.step_name || check?.step?.name || null,
@@ -467,7 +476,7 @@ export async function saveMachineCopy({ program, current, programs, check, fileN
   const { data, error } = await supabase.from("cnc_program_revisions").insert(row).select("rev").single();
   if (error) throw new Error(`The machine copy could not be saved: ${error.message}`);
   if (r?.costing) {
-    const { data: rows, error: e2 } = await supabase.from("cnc_programs").update({ costing: r.costing }).eq("id", program.id).select("id");
+    const { data: rows, error: e2 } = await supabase.from("cnc_programs").update({ costing: withSource(r) }).eq("id", program.id).select("id");
     if (e2 || !rows?.length) throw new Error(`Rev ${data.rev} was saved, but its price was not: ${e2?.message || "the database changed nothing"}.`);
   }
   return data.rev;
@@ -499,4 +508,23 @@ export async function deleteProgram(program) {
   if (error) throw error;
   if (!data?.length) throw new Error("The database did not delete it: only admins and people with the CNC delete tick may.");
   if (paths.length) await supabase.storage.from(BUCKET).remove(paths);
+}
+
+// Where the engine takes its cutting data and machine from, for the
+// Cutting data and Machines screens (GET ?source=1, signed in; the
+// engine's 6ba3ffc): "test cnc_ tables, version 702 (10 sheets)" or
+// "engine files (...)". null when the engine cannot say (not live yet, or
+// not reachable): the screens then say it still reads its own files.
+export async function engineSource() {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const token = data?.session?.access_token;
+    if (!token) return null;
+    const res = await fetch(`${ENGINE_URL}?source=1`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return typeof body?.data_source === "string" ? body.data_source : null;
+  } catch {
+    return null;
+  }
 }

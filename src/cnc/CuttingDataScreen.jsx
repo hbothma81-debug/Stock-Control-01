@@ -8,7 +8,8 @@
 import { useEffect, useState } from "react";
 import { Download, Plus, Trash2, Upload } from "lucide-react";
 import { C, F, S } from "../theme.js";
-import { addCuttingRow, ENGINE_READS_TABLES, importWorkbook, loadCuttingData, removeCuttingRow, saveCuttingRow } from "./cncTables.js";
+import { addCuttingRow, importWorkbook, loadCuttingData, removeCuttingRow, saveCuttingRow } from "./cncTables.js";
+import EngineSource from "./EngineSource.jsx";
 import { cellsFromTable, readCell, rowMatches, workbookSheets } from "./cuttingData.js";
 
 const { borderColor: _unused, ...chipActiveRest } = S.chipActive;
@@ -113,11 +114,7 @@ export default function CuttingDataScreen({ machine, isAdmin, userName }) {
     }
   }
 
-  const banner = !ENGINE_READS_TABLES && (
-    <div style={{ fontSize: 13, color: C.accentRaw }}>
-      The program engine still reads its own spreadsheet until it is switched over to this list: a change here does not reach programs yet.
-    </div>
-  );
+  const banner = <EngineSource what="spreadsheet" />;
 
   if (error && !data) return <div style={{ color: C.danger, fontSize: 14 }}>{error}</div>;
   if (!data) return <div style={S.empty}>Loading cutting data…</div>;
