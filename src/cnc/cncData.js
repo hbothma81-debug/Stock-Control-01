@@ -362,6 +362,8 @@ export async function runUpdate({ program, partName, current, material, settings
   // The batch size and bar figures are set on the Costing tab, not in the
   // questionnaire: carried from the program so an update keeps them.
   const base = { ...costingPart(program.settings), ...settings };
+  // turret: null hands the layout back to the engine's automatic pick.
+  if (base.turret == null) delete base.turret;
   const barHint = barSizeOf({}, program.costing || current?.costing);
   const priced = (stepText, extra) =>
     runPriced({ name: partName || program.part_name, stepText, settings: base, material, programNo: program.program_no, extra, barHint });
@@ -543,7 +545,9 @@ export async function readIsoCode(code) {
     const res = await fetch(`${ENGINE_URL}?iso=${encodeURIComponent(c)}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
     if (!res.ok) return null;
     const body = await res.json();
-    return body && typeof body === "object" && (body.kind === "insert" || body.kind === "holder") ? body : null;
+    // The engine names what it read (insert, holder, boring bar, thread
+    // holder, thread insert); anything with a kind and no error is a reading.
+    return body && typeof body === "object" && body.kind && !body.error ? body : null;
   } catch {
     return null;
   }

@@ -283,7 +283,11 @@ export function pipeLabel(pipe) {
 // the engine when none) and whether every bar bought is charged to the job
 // (charge_all_material, unticked by default): Heinrich, 8 Oct 2026, the B&W
 // bolt bought as 2 x 6 m and cut into 998 mm puller bars.
-export const COSTING_KEYS = ["qty", "parts_per_bar", "bar_length", "price_by", "piece_price", "setup_price", "rate_per_s", "rate_unit", "stock_length", "charge_all_material"];
+//
+// And the program's own turret from its Tool crib (turret: station -> tool
+// key), kept until changed or handed back to the automatic pick (Heinrich,
+// 8 Oct 2026: "can change tool crib later and recalculate").
+export const COSTING_KEYS = ["qty", "parts_per_bar", "bar_length", "price_by", "piece_price", "setup_price", "rate_per_s", "rate_unit", "stock_length", "charge_all_material", "turret"];
 
 export function costingPart(settings) {
   const out = {};

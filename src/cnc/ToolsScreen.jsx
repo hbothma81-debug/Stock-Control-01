@@ -184,11 +184,13 @@ function ToolForm({ machine, tools, tool = null, userName, onDone }) {
       if (ins) {
         next.insert = f.insert || codes.insert.trim().toUpperCase();
         if (ins.nose_r != null && !f.nose) next.nose = String(ins.nose_r);
-        for (const key of ["shape", "ic_mm", "thickness_mm", "clearance", "grade"]) if (ins[key] != null) extra[key] = ins[key];
+        for (const key of ["shape", "clearance_deg", "tolerance", "type", "ic_mm", "thickness_mm", "chipbreaker", "grade"]) if (ins[key] != null) extra[key] = ins[key];
       }
       if (hol) {
         next.holder = f.holder || codes.holder.trim().toUpperCase();
-        for (const key of ["approach_deg", "hand", "shank_mm"]) if (hol[key] != null) extra[key] = hol[key];
+        // A boring bar's reading carries its diameter.
+        if (hol.bar_dia_mm != null && !f.dia) next.dia = String(hol.bar_dia_mm);
+        for (const key of ["clamp", "insert_shape", "approach_deg", "hand", "shank_h_mm", "shank_w_mm", "length_mm", "edge_mm", "bar_type"]) if (hol[key] != null) extra[key] = hol[key];
       }
       return next;
     });
