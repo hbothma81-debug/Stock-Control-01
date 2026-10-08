@@ -194,7 +194,7 @@ export async function createProgram({ partName, customer, material, settings, pr
     part_name: partName,
     customer: customer || "",
     material: material?.name || "",
-    stock: stockText(sent, result.costing),
+    stock: stockText(sent, result.costing, await loadEngineList("pipes")),
     settings: sent,
     created_by: userName || "",
   });
@@ -268,7 +268,7 @@ export async function saveUpdate({ program, run, letter, partName, customer, mat
       part_name: partName,
       customer: customer || "",
       material: material?.name || "",
-      stock: stockText(sent, result.costing),
+      stock: stockText(sent, result.costing, await loadEngineList("pipes")),
     })
     .eq("id", program.id)
     .select("id");

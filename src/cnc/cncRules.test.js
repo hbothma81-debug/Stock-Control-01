@@ -80,6 +80,7 @@ test("the bar in shop words", () => {
   assert.equal(stockText({ stock_type: "tube", bar_dia: 71, bar_id: 50 }), "D71 x 50 tube");
   assert.equal(stockText({}, { bar_dia: 140, bar_id: 0 }), "D140 bar");
   assert.equal(stockText({ stock_type: "schedule", nps: "4", schedule: "80" }), "Pipe NPS 4 SCH80");
+  assert.equal(stockText({ stock_type: "schedule", nps: "4", schedule: "120" }, null, [{ nps: "4", nb: 100 }]), "Pipe 100NB SCH120");
   assert.equal(stockText({}), "");
 });
 

@@ -99,12 +99,15 @@ export function splitPrograms(programs, query = "") {
 const mm = (n) => String(Math.round(Number(n) * 100) / 100);
 
 // The bar a program is cut from, in shop words: "D50 bar", "D71 x 50
-// tube", "NPS 2 SCH80 pipe". Taken from the engine's costing where it says
-// (it knows the bar it picked), otherwise from what was typed.
-export function stockText(settings = {}, costing = null) {
+// tube", "Pipe 100NB SCH120". Taken from the engine's costing where it says
+// (it knows the bar it picked), otherwise from what was typed. A pipe size
+// is named in NB from the engine's pipe list when it is to hand.
+export function stockText(settings = {}, costing = null, pipes = null) {
   const s = settings || {};
   if (s.stock_type === "schedule") {
-    const words = ["Pipe", s.nps && `NPS ${s.nps}`, s.schedule && `SCH${String(s.schedule).replace(/^sch\s*/i, "")}`];
+    const pipe = (pipes || []).find((p) => String(p.nps) === String(s.nps ?? ""));
+    const size = pipe?.nb ? `${pipe.nb}NB` : s.nps && `NPS ${s.nps}`;
+    const words = ["Pipe", size, s.schedule && `SCH${String(s.schedule).replace(/^sch\s*/i, "")}`];
     return words.filter(Boolean).join(" ");
   }
   const od = costing?.bar_dia ?? s.bar_dia;
