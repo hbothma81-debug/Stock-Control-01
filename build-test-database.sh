@@ -121,6 +121,7 @@ ORDER=(
   setup-cnc-8-costing.sql
   setup-cnc-9-bar-prices.sql
   setup-cnc-10-machines-cutting-data.sql
+  setup-cnc-11-tools.sql
 )
 
 OUT=setup-ALL.sql

@@ -528,3 +528,23 @@ export async function engineSource() {
     return null;
   }
 }
+
+// The engine's ISO code reader for + New tool (GET ?iso=CODE): an insert
+// code (WNMG 080408) or a holder code (MWLNR 2525M08) read into shape,
+// size, nose radius, approach angle, shank. null when the engine cannot
+// read it (or does not have the reader yet): the form is then filled in
+// by hand.
+export async function readIsoCode(code) {
+  const c = String(code ?? "").replace(/\s+/g, "").toUpperCase();
+  if (!c) return null;
+  try {
+    const { data } = await supabase.auth.getSession();
+    const token = data?.session?.access_token;
+    const res = await fetch(`${ENGINE_URL}?iso=${encodeURIComponent(c)}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return body && typeof body === "object" && (body.kind === "insert" || body.kind === "holder") ? body : null;
+  } catch {
+    return null;
+  }
+}

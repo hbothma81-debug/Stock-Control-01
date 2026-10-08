@@ -23,6 +23,7 @@ import ShapeIcon from "./ShapeIcon.jsx";
 import MaterialsList from "./MaterialsList.jsx";
 import CuttingDataScreen from "./CuttingDataScreen.jsx";
 import MachinesScreen from "./MachinesScreen.jsx";
+import ToolsScreen from "./ToolsScreen.jsx";
 import { loadMachines } from "./cncTables.js";
 
 // S.chipActive sets borderColor, which React will not mix with S.chip's
@@ -72,6 +73,7 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
         ["list", "Programs"],
         ["shapes", "Shapes"],
         ["materials", "Materials"],
+        ["tools", "Tools"],
         ["cutting", "Cutting data"],
         ["machines", "Machines"],
       ].map(([key, label]) => (
@@ -96,7 +98,20 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
       <div style={S.list}>
         {subTabs}
         <ErrorBoundary box what="the Cutting data">
-          <CuttingHost isAdmin={isAdmin} userName={userName} />
+          <MachineHost render={(machine) => <CuttingDataScreen machine={machine} isAdmin={isAdmin} userName={userName} />} />
+        </ErrorBoundary>
+      </div>
+    );
+  }
+
+  if (screen === "tools") {
+    return (
+      <div style={S.list}>
+        {subTabs}
+        <ErrorBoundary box what="the Tools">
+          <MachineHost
+            render={(machine, setMachine) => <ToolsScreen machine={machine} isAdmin={isAdmin} userName={userName} onMachine={setMachine} />}
+          />
         </ErrorBoundary>
       </div>
     );
@@ -327,9 +342,11 @@ function renderLine(p, open) {
   );
 }
 
-// Cutting data is held per machine: the machines are read when the screen
-// opens, and with more than one a button per machine picks whose.
-function CuttingHost({ isAdmin, userName }) {
+// Cutting data and tools are held per machine: the machines are read when
+// the screen opens, and with more than one a button per machine picks
+// whose. render(machine, setMachine) draws the screen; setMachine takes a
+// machine saved by it (the default turret is part of the machine).
+function MachineHost({ render }) {
   const [machines, setMachines] = useState(null);
   const [pick, setPick] = useState(null);
   const [error, setError] = useState("");
@@ -356,7 +373,7 @@ function CuttingHost({ isAdmin, userName }) {
           ))}
         </div>
       )}
-      <CuttingDataScreen machine={machine} isAdmin={isAdmin} userName={userName} />
+      {render(machine, (saved) => setMachines((list) => list.map((m) => (m.id === saved.id ? saved : m))))}
     </>
   );
 }

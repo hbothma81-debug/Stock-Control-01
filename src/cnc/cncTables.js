@@ -87,3 +87,32 @@ export async function addMachine({ name, copyOf, userName }) {
   if (error) throw new Error(error.code === "23505" ? `${name} is on the list already.` : `Not added: ${error.message}`);
   return rows[0];
 }
+
+// A machine's tools (setup-cnc-11-tools.sql), sorted as the engine lists
+// them. Read when the Tools screen or a program's Tool crib opens.
+export async function loadTools(machineId) {
+  const { data, error } = await supabase.from("cnc_tools").select("*").eq("machine_id", machineId).order("sort").order("tool_key");
+  if (error) throw error;
+  return data || [];
+}
+
+export async function saveTool({ id, owned, data, userName }) {
+  const { data: rows, error } = await supabase.from("cnc_tools").update({ owned, data, updated_by: userName || "" }).eq("id", id).select("*");
+  if (error) throw new Error(`Not saved: ${error.message}`);
+  if (!rows?.length) throw new Error("Not saved: only an admin may change tools.");
+  return rows[0];
+}
+
+export async function addTool({ machineId, toolKey, owned, data, sort, userName }) {
+  const { data: rows, error } = await supabase
+    .from("cnc_tools")
+    .insert({ machine_id: machineId, tool_key: toolKey, owned, data, sort: sort ?? 500, updated_by: userName || "" })
+    .select("*");
+  if (error) throw new Error(error.code === "23505" ? `A tool called ${toolKey} is on this machine already.` : `Not added: ${error.message}`);
+  return rows[0];
+}
+
+export async function removeTool(id) {
+  const { data, error } = await supabase.from("cnc_tools").delete().eq("id", id).select("id");
+  if (error || !data?.length) throw new Error(`Not removed: ${error?.message || "only an admin may change tools"}`);
+}

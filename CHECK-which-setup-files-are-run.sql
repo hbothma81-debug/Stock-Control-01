@@ -206,7 +206,9 @@ with checks (setup_file, looks_for, found) as (
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_bar_prices')),
     ('setup-cnc-10-machines-cutting-data.sql', 'table cnc_cutting_data and the LEO 1600 machine',
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_cutting_data')
-      and exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_machines'))
+      and exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_machines')),
+    ('setup-cnc-11-tools.sql', 'table cnc_tools (the tools of each machine)',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_tools'))
 )
 select
   setup_file,
