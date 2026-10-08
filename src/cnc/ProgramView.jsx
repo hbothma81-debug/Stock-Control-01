@@ -6,7 +6,7 @@
 // sheet and Costing tabs come in the next pieces.
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, Download, FileInput, RefreshCw, Trash2, Usb } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, Download, FileInput, RefreshCw, Trash2, Usb } from "lucide-react";
 import { C, F, S } from "../theme.js";
 import { deleteProgram, loadProgram } from "./cncData.js";
 import { CNC_FIELDS } from "./cncFields.js";
@@ -15,6 +15,7 @@ import { canWriteToFolder, copyToFolder, downloadFiles } from "./programOut.js";
 import UpdateProgram from "./UpdateProgram.jsx";
 import ImportMachineCopy from "./ImportMachineCopy.jsx";
 import CostingTab from "./CostingTab.jsx";
+import TurnAround from "./TurnAround.jsx";
 
 const TABS = [
   { key: "program", label: "Program" },
@@ -37,6 +38,7 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
   const [deleting, setDeleting] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [turning, setTurning] = useState(false);
   // What the last Copy to USB or Download did, in words.
   const [outNote, setOutNote] = useState(null);
   // Bumped after a save, so the program and its revisions are read again.
@@ -63,6 +65,26 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
   const { program: p, revisions } = data;
   const current = revisions.find((r) => r.rev === p.current_rev) || revisions[revisions.length - 1] || null;
   const shown = revisions.find((r) => r.id === revId) || current;
+
+  if (turning) {
+    return (
+      <TurnAround
+        program={p}
+        revisions={revisions}
+        current={current}
+        materials={materials}
+        canSeeValue={canSeeValue}
+        userName={userName}
+        onCancel={() => setTurning(false)}
+        onSaved={() => {
+          setTurning(false);
+          setRevId(null);
+          setTab("program");
+          setReads((n) => n + 1);
+        }}
+      />
+    );
+  }
 
   if (importing) {
     return (
@@ -150,6 +172,11 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
         {canEdit && (
           <button type="button" className="stk-btn" style={S.chip} onClick={() => setImporting(true)}>
             <FileInput size={14} /> Import machine copy
+          </button>
+        )}
+        {canEdit && current && (
+          <button type="button" className="stk-btn" style={S.chip} onClick={() => setTurning(true)}>
+            <ArrowLeftRight size={14} /> Turn around
           </button>
         )}
         {canDelete && (

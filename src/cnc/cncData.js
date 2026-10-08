@@ -263,7 +263,9 @@ export async function storedStep(programId, rev) {
 // Update program, first half: run the engine on the changed answers (and
 // the new STEP, when one is chosen) with the program's own number. Nothing
 // is saved: the screen shows what changed, and saveUpdate saves it.
-export async function runUpdate({ program, partName, current, material, settings, stepFile, quick = null }) {
+// A STEP already read (a second run of the same model, Turn around) may be
+// handed in as step, so it is downloaded once.
+export async function runUpdate({ program, partName, current, material, settings, stepFile, quick = null, step: stepRead = null }) {
   // The batch size and bar figures are set on the Costing tab, not in the
   // questionnaire: carried from the program so an update keeps them.
   const sentNow = engineSettings({ settings: { ...costingPart(program.settings), ...settings }, material, programNo: program.program_no });
@@ -277,6 +279,8 @@ export async function runUpdate({ program, partName, current, material, settings
       throw new Error(`The STEP file is ${Math.round(stepFile.size / 1000)} kB; the engine takes up to ${MAX_STEP_BYTES / 1000} kB.`);
     }
     step = { file: stepFile, name: stepFile.name, text: await stepFile.text(), path: null };
+  } else if (stepRead) {
+    step = stepRead;
   } else {
     step = await storedStep(program.id, current);
     if (!step) throw new Error("No STEP file is stored for this program: choose one.");
