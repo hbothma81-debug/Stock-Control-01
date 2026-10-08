@@ -67,7 +67,7 @@ export function settingsToForm(settings, fields = CNC_FIELDS) {
 
 // One saved setting as the Settings tab shows it.
 export function settingText(field, value) {
-  if (value === undefined || value === null || value === "") return `blank (${field.blank})`;
+  if (value === undefined || value === null || value === "") return `Engine's choice: ${field.blank}`;
   if (field.choices) {
     const c = field.choices.find((x) => String(x.value) === String(value));
     if (c) return c.label;

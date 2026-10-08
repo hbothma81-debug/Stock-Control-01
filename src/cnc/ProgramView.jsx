@@ -300,7 +300,7 @@ function SettingsList({ program, rev }) {
   const s = rev?.settings || program.settings || {};
   const rows = [
     ["Customer", program.customer || "none"],
-    ["Material", program.material || "blank (EN8)"],
+    ["Material", program.material || "Engine's choice: EN8"],
     ["Program number", oNumber(s.program_no ?? program.program_no)],
     ...CNC_FIELDS.map((f) => [f.label, settingText(f, s[f.key])]),
   ];

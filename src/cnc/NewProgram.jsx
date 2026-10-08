@@ -31,7 +31,7 @@ export default function NewProgram({ customers, materials, userName, onCancel, o
     if (programNo.trim()) {
       typedNo = readNumber(programNo);
       if (!Number.isInteger(typedNo) || typedNo <= 0) {
-        setError("The program number must be a whole number, or blank for the next free one.");
+        setError("The program number must be a whole number, or left empty for the next free one.");
         return;
       }
     }
@@ -84,7 +84,7 @@ export default function NewProgram({ customers, materials, userName, onCancel, o
           <div style={S.formGrid}>
             <div>
               <label style={S.label}>Program number</label>
-              <input style={S.input} value={programNo} onChange={(e) => setProgramNo(e.target.value)} placeholder="blank = next free number" inputMode="numeric" />
+              <input style={S.input} value={programNo} onChange={(e) => setProgramNo(e.target.value)} placeholder="Empty: the next free number" inputMode="numeric" />
             </div>
           </div>
         }

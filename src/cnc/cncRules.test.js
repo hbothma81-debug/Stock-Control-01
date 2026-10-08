@@ -43,9 +43,9 @@ test("saved settings come back into the form as typed", () => {
   assert.deepEqual(cleanSettings(form).settings, saved);
 });
 
-test("the Settings tab says what a blank means", () => {
+test("the Settings tab says what the engine chooses for an empty answer", () => {
   const holding = CNC_FIELDS.find((f) => f.key === "holding");
-  assert.equal(settingText(holding, undefined), "blank (by size)");
+  assert.equal(settingText(holding, undefined), "Engine's choice: by size");
   assert.equal(settingText(holding, "bar puller"), "Bar puller");
   const nose = CNC_FIELDS.find((f) => f.key === "nose_comp");
   assert.equal(settingText(nose, false), "Off");

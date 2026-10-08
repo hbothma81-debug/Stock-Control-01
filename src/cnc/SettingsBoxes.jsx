@@ -1,5 +1,6 @@
-// The questionnaire's boxes, one per field in cncFields.js. A blank box
-// shows what the engine does when it is left blank. Used by New program,
+// The questionnaire's boxes, one per field in cncFields.js. An empty box
+// says what the engine chooses when it is left empty ("Engine's choice",
+// Heinrich asked what "blank" meant, 8 Oct 2026). Used by New program,
 // and by Update program next.
 
 import { S } from "../theme.js";
@@ -21,7 +22,7 @@ export default function SettingsBoxes({ form, setForm }) {
                 set(f.key, f.kind === "yesno" ? (v === "" ? "" : v === "true") : v);
               }}
             >
-              <option value="">{`Blank: ${f.blank}`}</option>
+              <option value="">{`Engine's choice: ${f.blank}`}</option>
               {f.choices.map((c) => (
                 <option key={String(c.value)} value={String(c.value)}>
                   {c.label}
@@ -33,7 +34,7 @@ export default function SettingsBoxes({ form, setForm }) {
               style={S.input}
               value={form[f.key] ?? ""}
               onChange={(e) => set(f.key, e.target.value)}
-              placeholder={`blank = ${f.blank}`}
+              placeholder={`Engine's choice: ${f.blank}`}
               inputMode={f.kind === "text" ? "text" : "decimal"}
             />
           )}
