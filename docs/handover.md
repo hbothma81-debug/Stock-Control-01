@@ -5654,3 +5654,25 @@ wrap-up), none pushed from here.
 supplier plan (the PO lookups and the request card's price row for a
 customer part with a supplier; the export/import Supplier column), then
 step 2 (the job's Buy-outs tab) if he says yes.
+
+## 8 Oct 2026 — Preferences template for other projects: state of play at wrap-up
+
+A one-task conversation on 7 Oct. Heinrich asked for a preference file
+to add to another coding project. Nothing in the app changed.
+
+**Done:** `CLAUDE-PREFERENCES-TEMPLATE.md` in the parent folder
+(`1.PRODUCTION APP`, outside this repo, synced by OneDrive to both PCs).
+It holds only his general working rules, with no Stock Control detail:
+about him, how to talk to him, plan-then-ask-then-build, never remove a
+feature he uses, screen design (fewer clicks, pills and rows,
+type-to-find, sorted lists, design for 10x), saving/testing/going live,
+git with several conversations on one branch, code fences as Run
+buttons. He copies it into a new project as `CLAUDE.md` or pastes it
+above an existing one. Sent to him as a file.
+
+**setup-*.sql written:** none. **Built but untested by Heinrich:**
+nothing in the app. **Waiting on Heinrich:** nothing.
+
+**Next session picks up:** nothing from here. When a new working-style
+rule is learned in any conversation, add it to the template too, in
+project-free words (memory: portable-preferences-template).
