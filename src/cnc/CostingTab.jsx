@@ -14,10 +14,11 @@
 // CNC Edit tick, and a price needs Rand values too.
 
 import { useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { FileText, RefreshCw } from "lucide-react";
 import NumberBox from "../manager/NumberBox.jsx";
 import { C, S } from "../theme.js";
 import { recost, saveBarPrice } from "./cncData.js";
+import { costReportData, drawCostReport } from "./costReportPdf.js";
 import { DEFAULT_RATE_PER_S, DEFAULT_SETUP_PRICE, costingFigures, rand, wasteCharged } from "./cncRules.js";
 import { PRICED_BY, barSizeOf, bothUnits, findBarPrice, kgPerMetre, materialPricing, sizeLabel } from "./pricing.js";
 
@@ -33,6 +34,7 @@ function Box({ label, value }) {
 }
 
 export default function CostingTab({ program, current, shown, materials, barPrices, pipes, canEdit, canSeeValue, userName, onBarPrices, onProgramSaved }) {
+  const [reporting, setReporting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const material = (materials || []).find((m) => m.name === program.material) || null;
@@ -67,6 +69,35 @@ export default function CostingTab({ program, current, shown, materials, barPric
       Charge all material to this job
     </label>
   );
+
+  // The cost report (Heinrich, 8 Oct 2026): one button, a PDF opened in a
+  // new tab to print or save; money, so Rand values only.
+  async function costReport() {
+    setError("");
+    setReporting(true);
+    const win = window.open("", "_blank");
+    try {
+      const [{ jsPDF }, table] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+      const doc = new jsPDF({ unit: "mm", format: "a4" });
+      drawCostReport({ doc, autoTable: table.default, data: costReportData({ program, rev: current, costing }) });
+      const url = URL.createObjectURL(doc.output("blob"));
+      if (win) win.location.href = url;
+      else {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${program.part_name} COST REPORT.pdf`.replace(/[\/:*?"<>|]+/g, " ");
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 120000);
+    } catch (err) {
+      if (win) win.close();
+      setError(`The cost report could not be made: ${err.message || err}`);
+    } finally {
+      setReporting(false);
+    }
+  }
 
   async function price(changes) {
     setError("");
@@ -359,11 +390,18 @@ export default function CostingTab({ program, current, shown, materials, barPric
           {priceBy !== "piece" && <div style={{ gridColumn: "1 / -1" }}>{chargeAllTick}</div>}
         </div>
       )}
-      {canEdit && (
-        <button type="button" className="stk-btn" style={{ ...S.chip, alignSelf: "flex-start" }} disabled={busy || !current} onClick={() => price({})}>
-          <RefreshCw size={13} /> {busy ? "Pricing…" : "Price again"}
-        </button>
-      )}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {canEdit && (
+          <button type="button" className="stk-btn" style={S.chip} disabled={busy || !current} onClick={() => price({})}>
+            <RefreshCw size={13} /> {busy ? "Pricing…" : "Price again"}
+          </button>
+        )}
+        {canSeeValue && costing && (
+          <button type="button" className="stk-btn" style={S.chip} disabled={reporting} onClick={costReport} title="The cost breakdown, wastage, what to order and what can change the cost, as a PDF (for ERS only)">
+            <FileText size={13} /> {reporting ? "Making…" : "Cost report"}
+          </button>
+        )}
+      </div>
       {error && <div style={{ color: C.danger, fontSize: 14 }}>{error}</div>}
     </div>
   );
