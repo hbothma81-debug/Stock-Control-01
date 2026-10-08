@@ -69,6 +69,9 @@ export default function CncTab({ customers, materials, canEdit, canDelete, userN
           id={screen}
           canEdit={canEdit}
           canDelete={canDelete}
+          customers={customers}
+          materials={materials}
+          userName={userName}
           onBack={() => {
             refresh();
             setScreen("list");

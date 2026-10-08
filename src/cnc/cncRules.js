@@ -147,3 +147,17 @@ export function engineErrorText(status, body) {
 // The engine takes up to about 4 MB per request (ERS TURNING APP,
 // api/generate.py MAX_BYTES). Checked before anything is sent.
 export const MAX_STEP_BYTES = 3_900_000;
+
+// The letter the next revision will get: A..Z, then AA. The database gives
+// the real one (cnc_revision_letter in setup-cnc-3-revisions.sql: change
+// both together); this only names the folder its STEP file is filed under
+// and the button ("Save as rev B").
+export function revisionLetter(count) {
+  let n = count;
+  let v = "";
+  do {
+    v = String.fromCharCode(65 + (n % 26)) + v;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return v;
+}

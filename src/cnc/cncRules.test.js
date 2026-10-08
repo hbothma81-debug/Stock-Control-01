@@ -103,3 +103,9 @@ test("the engine's refusals in plain words", () => {
   assert.match(engineErrorText(0, null), /could not be reached/);
   assert.match(engineErrorText(500, { error: "engine: StopIteration" }), /StopIteration/);
 });
+
+import { revisionLetter } from "./cncRules.js";
+
+test("revision letters run as the database gives them", () => {
+  assert.deepEqual([0, 1, 25, 26, 27, 51, 52].map(revisionLetter), ["A", "B", "Z", "AA", "AB", "AZ", "BA"]);
+});

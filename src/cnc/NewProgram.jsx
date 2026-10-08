@@ -5,29 +5,24 @@
 
 import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
-import Section from "../Section.jsx";
-import TypeToFind from "../TypeToFind.jsx";
 import { C, S } from "../theme.js";
 import { createProgram } from "./cncData.js";
 import { cleanSettings, partNameFromFile, readNumber } from "./cncRules.js";
-import SettingsBoxes from "./SettingsBoxes.jsx";
+import ProgramFields from "./ProgramFields.jsx";
 
 export default function NewProgram({ customers, materials, userName, onCancel, onSaved }) {
   const [stepFile, setStepFile] = useState(null);
-  const [partName, setPartName] = useState("");
-  const [customer, setCustomer] = useState("");
-  const [materialName, setMaterialName] = useState("");
+  const [fields, setFields] = useState({ partName: "", customer: "", materialName: "", form: {} });
   const [programNo, setProgramNo] = useState("");
-  const [form, setForm] = useState({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const material = (materials || []).find((m) => m.name === materialName) || null;
-  const ready = !!stepFile && !!partName.trim() && !!material && !busy;
+  const material = (materials || []).find((m) => m.name === fields.materialName) || null;
+  const ready = !!stepFile && !!fields.partName.trim() && !!material && !busy;
 
   async function generate() {
     setError("");
-    const { settings, errors } = cleanSettings(form);
+    const { settings, errors } = cleanSettings(fields.form);
     if (errors.length) {
       setError(`Check ${errors.join(", ")}: not a number the engine can use.`);
       return;
@@ -43,8 +38,8 @@ export default function NewProgram({ customers, materials, userName, onCancel, o
     setBusy(true);
     try {
       const id = await createProgram({
-        partName: partName.trim(),
-        customer,
+        partName: fields.partName.trim(),
+        customer: fields.customer,
         material,
         settings,
         programNo: typedNo,
@@ -76,44 +71,24 @@ export default function NewProgram({ customers, materials, userName, onCancel, o
           onChange={(e) => {
             const f = e.target.files?.[0] || null;
             setStepFile(f);
-            if (f && !partName.trim()) setPartName(partNameFromFile(f.name));
+            if (f) setFields((x) => (x.partName.trim() ? x : { ...x, partName: partNameFromFile(f.name) }));
           }}
         />
       </div>
-      <div style={S.formGrid}>
-        <div>
-          <label style={S.label}>Part name</label>
-          <input style={S.input} value={partName} onChange={(e) => setPartName(e.target.value)} placeholder="From the STEP file's name" />
-        </div>
-        <div>
-          <label style={S.label}>Customer</label>
-          <TypeToFind options={customers || []} value={customer} onChange={(v) => setCustomer(v || "")} placeholder="Type to find…" />
-        </div>
-        <div>
-          <label style={S.label}>Material (Stock Manager → CNC Bar Grades)</label>
-          <TypeToFind
-            options={(materials || []).map((m) => m.name)}
-            value={materialName}
-            onChange={(v) => setMaterialName(v || "")}
-            placeholder="Type to find…"
-          />
-          {(materials || []).length === 0 && (
-            <div style={{ fontSize: 12.5, color: C.danger, marginTop: 4 }}>
-              No CNC Bar Grades yet: add them under Stock Manager → CNC Bar Grades.
+      <ProgramFields
+        fields={fields}
+        setFields={setFields}
+        customers={customers}
+        materials={materials}
+        moreAbove={
+          <div style={S.formGrid}>
+            <div>
+              <label style={S.label}>Program number</label>
+              <input style={S.input} value={programNo} onChange={(e) => setProgramNo(e.target.value)} placeholder="blank = next free number" inputMode="numeric" />
             </div>
-          )}
-        </div>
-      </div>
-
-      <Section title="More settings" defaultOpen={false} quiet>
-        <div style={S.formGrid}>
-          <div>
-            <label style={S.label}>Program number</label>
-            <input style={S.input} value={programNo} onChange={(e) => setProgramNo(e.target.value)} placeholder="blank = next free number" inputMode="numeric" />
           </div>
-        </div>
-        <SettingsBoxes form={form} setForm={setForm} />
-      </Section>
+        }
+      />
 
       {error && <div style={{ color: C.danger, fontSize: 14 }}>{error}</div>}
       <button

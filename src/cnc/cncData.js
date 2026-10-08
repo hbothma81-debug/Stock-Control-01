@@ -152,6 +152,65 @@ export async function createProgram({ partName, customer, material, settings, pr
   return id;
 }
 
+// The STEP model a program was last made from: the shown revision's file,
+// or for a program whose revision was never saved, the file filed under it.
+export async function storedStep(programId, rev) {
+  let path = rev?.step_path || null;
+  if (!path) path = (await programFiles(programId)).find((p) => /\.(step|stp)$/i.test(p)) || null;
+  if (!path) return null;
+  const { data, error } = await supabase.storage.from(BUCKET).download(path);
+  if (error) throw new Error(`The STEP file could not be read: ${error.message}`);
+  return { path, name: path.split("/").pop(), text: await data.text() };
+}
+
+// Update program, first half: run the engine on the changed answers (and
+// the new STEP, when one is chosen) with the program's own number. Nothing
+// is saved: the screen shows what changed, and saveUpdate saves it.
+export async function runUpdate({ program, partName, current, material, settings, stepFile }) {
+  let step;
+  if (stepFile) {
+    if (stepFile.size > MAX_STEP_BYTES) {
+      throw new Error(`The STEP file is ${Math.round(stepFile.size / 1000)} kB; the engine takes up to ${MAX_STEP_BYTES / 1000} kB.`);
+    }
+    step = { file: stepFile, name: stepFile.name, text: await stepFile.text(), path: null };
+  } else {
+    step = await storedStep(program.id, current);
+    if (!step) throw new Error("No STEP file is stored for this program: choose one.");
+  }
+  const sent = engineSettings({ settings, material, programNo: program.program_no });
+  const result = await runEngine({ name: partName || program.part_name, stepText: step.text, settings: sent });
+  return { result, sent, step };
+}
+
+// Update program, second half: the new revision (the database gives its
+// letter and makes it current), a new STEP filed under that letter, then
+// the program's name, customer, material and bar. A STEP left as it was is
+// pointed at, not copied.
+export async function saveUpdate({ program, run, letter, partName, customer, material, userName }) {
+  const { result, sent, step } = run;
+  let stepPath = step.path;
+  if (step.file) {
+    stepPath = `${program.id}/${letter}/${step.name}`;
+    const up = await supabase.storage.from(BUCKET).upload(stepPath, step.file, { contentType: "text/plain", upsert: true });
+    if (up.error) throw new Error(`The STEP file could not be stored: ${up.error.message}. Nothing was saved.`);
+  }
+  const { data: rev, error: e1 } = await supabase
+    .from("cnc_program_revisions")
+    .insert(revisionRow({ programId: program.id, result, settings: sent, stepPath, stepName: step.name, userName }))
+    .select("rev")
+    .single();
+  if (e1) throw new Error(`The new revision could not be saved: ${e1.message}`);
+  const { data: rows, error: e2 } = await supabase
+    .from("cnc_programs")
+    .update({ part_name: partName, customer: customer || "", material: material?.name || "", stock: stockText(sent, result.costing) })
+    .eq("id", program.id)
+    .select("id");
+  if (e2 || !rows?.length) {
+    throw new Error(`Rev ${rev.rev} was saved, but the part name, customer and material were not: ${e2?.message || "the database changed nothing"}.`);
+  }
+  return rev.rev;
+}
+
 // Every file filed under a program (<id>/<rev>/<file>), including one left
 // by a save that stopped before its revision was written.
 async function programFiles(programId) {

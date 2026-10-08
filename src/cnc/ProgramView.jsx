@@ -1,14 +1,16 @@
 // One program: its heading, its revisions, and the Program and Settings
 // tabs. Read when opened (the program text and settings are not in the
-// list). Update program, Copy to USB, Download, Import machine copy and the
-// Toolpath, Setup sheet and Costing tabs come in the next pieces.
+// list). Update program opens in place of the tabs. Copy to USB, Download,
+// Import machine copy and the Toolpath, Setup sheet and Costing tabs come
+// in the next pieces.
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { ArrowLeft, RefreshCw, Trash2 } from "lucide-react";
 import { C, F, S } from "../theme.js";
 import { deleteProgram, loadProgram } from "./cncData.js";
 import { CNC_FIELDS } from "./cncFields.js";
 import { oNumber, settingText } from "./cncRules.js";
+import UpdateProgram from "./UpdateProgram.jsx";
 
 const TABS = [
   { key: "program", label: "Program" },
@@ -22,12 +24,15 @@ const CHIP_ON = { ...chipActiveRest, border: `1px solid ${C.accentFinished}` };
 
 const SOURCE = { generated: "Generated", machine_copy: "Machine copy" };
 
-export default function ProgramView({ id, canDelete, onBack, onDeleted }) {
+export default function ProgramView({ id, canEdit, canDelete, customers, materials, userName, onBack, onDeleted }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("program");
   const [revId, setRevId] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  // Bumped after a save, so the program and its revisions are read again.
+  const [reads, setReads] = useState(0);
 
   useEffect(() => {
     let gone = false;
@@ -37,7 +42,7 @@ export default function ProgramView({ id, canDelete, onBack, onDeleted }) {
     return () => {
       gone = true;
     };
-  }, [id]);
+  }, [id, reads]);
 
   const back = (
     <button type="button" className="stk-btn" style={S.chip} onClick={onBack}>
@@ -50,6 +55,26 @@ export default function ProgramView({ id, canDelete, onBack, onDeleted }) {
   const { program: p, revisions } = data;
   const current = revisions.find((r) => r.rev === p.current_rev) || revisions[revisions.length - 1] || null;
   const shown = revisions.find((r) => r.id === revId) || current;
+
+  if (updating) {
+    return (
+      <UpdateProgram
+        program={p}
+        revisions={revisions}
+        current={current}
+        customers={customers}
+        materials={materials}
+        userName={userName}
+        onCancel={() => setUpdating(false)}
+        onSaved={() => {
+          setUpdating(false);
+          setRevId(null);
+          setTab("program");
+          setReads((n) => n + 1);
+        }}
+      />
+    );
+  }
 
   async function remove() {
     if (!window.confirm(`Delete ${oNumber(p.program_no)} ${p.part_name} and all ${revisions.length} of its revisions? This cannot be undone.`)) return;
@@ -71,6 +96,11 @@ export default function ProgramView({ id, canDelete, onBack, onDeleted }) {
           <span style={{ fontFamily: F.mono }}>{oNumber(p.program_no)}</span> · {p.part_name}
           {p.current_rev ? ` · rev ${p.current_rev}` : ""}
         </div>
+        {canEdit && (
+          <button type="button" className="stk-btn" style={S.addBtn} onClick={() => setUpdating(true)}>
+            <RefreshCw size={14} /> Update program
+          </button>
+        )}
         {canDelete && (
           <button type="button" className="stk-btn" style={{ ...S.chip, color: C.danger }} onClick={remove} disabled={deleting}>
             <Trash2 size={13} /> {deleting ? "Deleting…" : "Delete program"}
@@ -86,7 +116,7 @@ export default function ProgramView({ id, canDelete, onBack, onDeleted }) {
         <div style={{ color: C.danger, fontWeight: 600 }}>Not for machine{p.fault ? `: ${p.fault}` : ""}</div>
       )}
       {!current && (
-        <div style={{ color: C.danger }}>No revision was saved for this program. Update program (next piece) will make one.</div>
+        <div style={{ color: C.danger }}>No revision was saved for this program: press Update program to make one.</div>
       )}
 
       {revisions.length > 1 && (
