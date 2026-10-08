@@ -161,3 +161,14 @@ export function revisionLetter(count) {
   } while (n >= 0);
   return v;
 }
+
+// The file name each program goes out under: its O number and the title it
+// carries on its O line ("O00001027(BPW 10t BUSH SIDE 1)" ->
+// "O00001027 BPW 10t BUSH SIDE 1.txt"), as the hand programs are filed.
+// A program with no title takes the part name.
+export function programFiles(programs, partName) {
+  return (programs || []).map((p) => {
+    const title = (String(p.text ?? "").match(/^O\d+\((.*?)\)/m) || [])[1];
+    return { name: programFileName(p.number, title || partName), text: String(p.text ?? "") };
+  });
+}

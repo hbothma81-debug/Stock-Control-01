@@ -1,15 +1,17 @@
 // One program: its heading, its revisions, and the Program and Settings
 // tabs. Read when opened (the program text and settings are not in the
-// list). Update program opens in place of the tabs. Copy to USB, Download,
+// list). Update program opens in place of the tabs. Copy to USB and
+// Download send out the revision on screen (anyone with the View tick).
 // Import machine copy and the Toolpath, Setup sheet and Costing tabs come
 // in the next pieces.
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, RefreshCw, Trash2, Usb } from "lucide-react";
 import { C, F, S } from "../theme.js";
 import { deleteProgram, loadProgram } from "./cncData.js";
 import { CNC_FIELDS } from "./cncFields.js";
-import { oNumber, settingText } from "./cncRules.js";
+import { oNumber, programFiles, settingText } from "./cncRules.js";
+import { canWriteToFolder, copyToFolder, downloadFiles } from "./programOut.js";
 import UpdateProgram from "./UpdateProgram.jsx";
 
 const TABS = [
@@ -31,6 +33,8 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
   const [revId, setRevId] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [updating, setUpdating] = useState(false);
+  // What the last Copy to USB or Download did, in words.
+  const [outNote, setOutNote] = useState(null);
   // Bumped after a save, so the program and its revisions are read again.
   const [reads, setReads] = useState(0);
 
@@ -76,6 +80,24 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
     );
   }
 
+  const files = shown ? programFiles(shown.programs, p.part_name) : [];
+  const fileWords = files.map((f) => f.name).join(" and ");
+
+  async function copyOut(pickNew) {
+    setOutNote(null);
+    if (!canWriteToFolder()) {
+      downloadFiles(files);
+      setOutNote({ ok: true, text: `This browser cannot write to a USB stick, so ${fileWords} went to Downloads: copy from there.` });
+      return;
+    }
+    try {
+      const where = await copyToFolder(files, { pickNew });
+      if (where) setOutNote({ ok: true, text: `Copied ${fileWords} to ${where}.`, again: true });
+    } catch (err) {
+      setOutNote({ ok: false, text: `Not copied: ${err.message || err}` });
+    }
+  }
+
   async function remove() {
     if (!window.confirm(`Delete ${oNumber(p.program_no)} ${p.part_name} and all ${revisions.length} of its revisions? This cannot be undone.`)) return;
     setDeleting(true);
@@ -115,6 +137,30 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
       ) : (
         <div style={{ color: C.danger, fontWeight: 600 }}>Not for machine{p.fault ? `: ${p.fault}` : ""}</div>
       )}
+      {files.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <button type="button" className="stk-btn" style={S.chip} onClick={() => copyOut(false)}>
+            <Usb size={14} /> Copy to USB{shown.id !== current?.id ? ` (rev ${shown.rev})` : ""}
+          </button>
+          <button
+            type="button"
+            className="stk-btn"
+            style={S.chip}
+            onClick={() => {
+              downloadFiles(files);
+              setOutNote({ ok: true, text: `Downloaded ${fileWords}.` });
+            }}
+          >
+            <Download size={14} /> Download
+          </button>
+          {outNote?.again && (
+            <button type="button" className="stk-btn" style={{ ...S.chip, fontSize: 13 }} onClick={() => copyOut(true)}>
+              Another stick or folder
+            </button>
+          )}
+        </div>
+      )}
+      {outNote && <div style={{ fontSize: 13.5, color: outNote.ok ? C.accentFinished : C.danger }}>{outNote.text}</div>}
       {!current && (
         <div style={{ color: C.danger }}>No revision was saved for this program: press Update program to make one.</div>
       )}

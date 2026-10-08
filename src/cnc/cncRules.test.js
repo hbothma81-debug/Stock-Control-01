@@ -109,3 +109,18 @@ import { revisionLetter } from "./cncRules.js";
 test("revision letters run as the database gives them", () => {
   assert.deepEqual([0, 1, 25, 26, 27, 51, 52].map(revisionLetter), ["A", "B", "Z", "AA", "AB", "AZ", "BA"]);
 });
+
+import { programFiles } from "./cncRules.js";
+
+test("each program goes out under its O number and its own title", () => {
+  const files = programFiles(
+    [
+      { number: 1027, text: "%\nO00001027(BPW 10t BUSH SIDE 1)\nG21\n%" },
+      { number: 1028, text: "%\nO00001028(BPW 10t BUSH SIDE 2)\n%" },
+      { number: 1030, text: "%\nO00001030\n%" },
+    ],
+    "BPW 10t BUSH"
+  );
+  assert.deepEqual(files.map((f) => f.name), ["O00001027 BPW 10t BUSH SIDE 1.txt", "O00001028 BPW 10t BUSH SIDE 2.txt", "O00001030 BPW 10t BUSH.txt"]);
+  assert.equal(files[0].text, "%\nO00001027(BPW 10t BUSH SIDE 1)\nG21\n%");
+});
