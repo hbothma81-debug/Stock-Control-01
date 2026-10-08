@@ -1,7 +1,7 @@
 -- ============================================================
 -- setup-ALL.sql — complete database setup, generated file
 --
--- Created by build-test-database.sh on 2026-10-07.
+-- Created by build-test-database.sh on 2026-10-08.
 -- Do not edit by hand; edit the individual setup-*.sql files
 -- and re-run the script instead.
 --
@@ -5277,4 +5277,330 @@ select 'function material_rows_out_of_line' as thing,
   case when count(*) = 1 then 'ready' else 'MISSING' end as status
 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public' and p.proname = 'material_rows_out_of_line';
+
+
+-- ============================================================
+-- setup-cnc-1-access.sql
+-- ============================================================
+-- CNC module, file 1 of 5: who may see, change and delete CNC programs.
+--
+-- The CNC tick under User Management is kept in profiles.permissions as
+-- "cnc": { view, edit, delete }. These three questions are asked by every
+-- rule on the cnc_ tables and the cnc-files store, so the database itself
+-- refuses anyone without the tick, not only the screen. Admins may do all.
+-- "security definer" lets the rule read profiles for whoever is asking.
+-- Mirrored in the app by canView("cnc") / canEdit("cnc") and the delete
+-- tick (src/UserManagement.jsx): change both together.
+--
+-- Run on PRACTICE first. Select nothing before pressing Run. Safe to run twice.
+
+create or replace function public.cnc_may(p_kind text)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $fn$
+  select coalesce((
+    select p.is_admin
+        or coalesce((p.permissions -> 'cnc' ->> p_kind)::boolean, false)
+        or (p_kind = 'view' and coalesce((p.permissions -> 'cnc' ->> 'edit')::boolean, false))
+      from public.profiles p where p.id = auth.uid()
+  ), false);
+$fn$;
+
+grant execute on function public.cnc_may(text) to authenticated;
+
+-- ============ Check ============
+
+select 'cnc access' as step,
+       case when exists (select 1 from pg_proc pr join pg_namespace n on n.oid = pr.pronamespace
+                          where n.nspname = 'public' and pr.proname = 'cnc_may')
+            then 'ready - the database knows the CNC tick'
+            else 'SOMETHING IS MISSING - tell Claude' end as result;
+
+
+-- ============================================================
+-- setup-cnc-2-programs.sql
+-- ============================================================
+-- CNC module, file 2 of 5: the programs list. One row per part.
+-- Needs setup-cnc-1-access.sql and touch_updated_at() (setup-updated-at-everywhere.sql).
+-- Every program keeps two O numbers, program_no and program_no + 1, so a
+-- part that later splits into side 1 and side 2 keeps its number
+-- (Heinrich, 8 Oct 2026). A typed number that overlaps another program's
+-- pair is refused. Two pastes: PASTE 1, then PASTE 2. Safe to run twice.
+
+-- ============ PASTE 1: the table ============
+
+create table if not exists public.cnc_programs (
+  id            uuid primary key default gen_random_uuid(),
+  program_no    integer not null unique check (program_no > 0),
+  part_name     text not null check (char_length(part_name) between 1 and 200),
+  customer      text not null default '',
+  material      text not null default '',
+  stock         text not null default '',
+  settings      jsonb not null default '{}'::jsonb,
+  current_rev   text,
+  status        text not null default 'not_for_machine' check (status in ('ready', 'not_for_machine')),
+  fault         text not null default '',
+  created_by    text not null default '',
+  created_by_id uuid default auth.uid(),
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+create index if not exists cnc_programs_updated_at_idx on public.cnc_programs (updated_at);
+
+drop trigger if exists cnc_programs_set_updated_at on public.cnc_programs;
+create trigger cnc_programs_set_updated_at before update on public.cnc_programs
+  for each row execute function public.touch_updated_at();
+
+alter table public.cnc_programs enable row level security;
+
+drop policy if exists "CNC people can read programs" on public.cnc_programs;
+do $$ begin
+  create policy "CNC people can read programs" on public.cnc_programs for select using (public.cnc_may('view'));
+exception when duplicate_object then null; end $$;
+drop policy if exists "CNC editors can add programs" on public.cnc_programs;
+do $$ begin
+  create policy "CNC editors can add programs" on public.cnc_programs for insert with check (public.cnc_may('edit'));
+exception when duplicate_object then null; end $$;
+drop policy if exists "CNC editors can change programs" on public.cnc_programs;
+do $$ begin
+  create policy "CNC editors can change programs" on public.cnc_programs for update using (public.cnc_may('edit'));
+exception when duplicate_object then null; end $$;
+drop policy if exists "CNC deleters can delete programs" on public.cnc_programs;
+do $$ begin
+  create policy "CNC deleters can delete programs" on public.cnc_programs for delete using (public.cnc_may('delete'));
+exception when duplicate_object then null; end $$;
+
+-- ============ PASTE 2: a program's two numbers stay its own ============
+
+create or replace function public.cnc_programs_keep_pair()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $body$
+declare
+  v_other integer;
+begin
+  select program_no into v_other from public.cnc_programs
+   where id <> new.id and abs(program_no - new.program_no) <= 1 limit 1;
+  if v_other is not null then
+    raise exception 'Program number % is too close to O% (each program keeps its number and the next one)', new.program_no, v_other
+      using errcode = 'P0001', hint = 'cnc_number_taken', detail = v_other::text;
+  end if;
+  return new;
+end;
+$body$;
+
+drop trigger if exists cnc_programs_keep_pair on public.cnc_programs;
+create trigger cnc_programs_keep_pair before insert or update of program_no on public.cnc_programs
+  for each row execute function public.cnc_programs_keep_pair();
+
+select 'cnc programs' as step,
+       case when exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_programs')
+             and (select count(*) from pg_policies where schemaname = 'public' and tablename = 'cnc_programs') = 4
+             and exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'cnc_programs' and cmd = 'UPDATE')
+             and exists (select 1 from pg_trigger where tgname = 'cnc_programs_set_updated_at')
+             and exists (select 1 from pg_trigger where tgname = 'cnc_programs_keep_pair')
+            then 'ready - the programs list is there'
+            else 'SOMETHING IS MISSING - tell Claude' end as result;
+
+
+-- ============================================================
+-- setup-cnc-3-revisions.sql
+-- ============================================================
+-- CNC module, file 3 of 5: a program's revisions (A, B, C...). Needs file 2.
+-- A revision is never changed or deleted (no update or delete rule); it
+-- goes only with its program. "generated" = made by the engine,
+-- "machine_copy" = the operator's edited program imported, its own letter
+-- (Heinrich, 8 Oct 2026). The app adds a revision with ONE insert and no
+-- letter: the database gives the next letter and, in the same save, makes
+-- it the program's current revision with its Ready / Not for machine and
+-- fault. Two pastes: PASTE 1, then PASTE 2. Safe to run twice.
+
+-- ============ PASTE 1: the table ============
+
+create table if not exists public.cnc_program_revisions (
+  id            uuid primary key default gen_random_uuid(),
+  program_id    uuid not null references public.cnc_programs(id) on delete cascade,
+  rev           text not null,
+  source        text not null default 'generated' check (source in ('generated', 'machine_copy')),
+  programs      jsonb not null default '[]'::jsonb,
+  report        text not null default '',
+  ready         boolean not null default false,
+  fault         text not null default '',
+  fails         jsonb not null default '[]'::jsonb,
+  warnings      jsonb not null default '[]'::jsonb,
+  problems      jsonb not null default '[]'::jsonb,
+  cycle_s       numeric,
+  tool_s        numeric,
+  costing       jsonb,
+  settings      jsonb,
+  step_path     text,
+  step_name     text,
+  note          text not null default '',
+  created_by    text not null default '',
+  created_by_id uuid default auth.uid(),
+  created_at    timestamptz not null default now(),
+  unique (program_id, rev)
+);
+
+alter table public.cnc_program_revisions enable row level security;
+
+drop policy if exists "CNC people can read revisions" on public.cnc_program_revisions;
+do $$ begin
+  create policy "CNC people can read revisions" on public.cnc_program_revisions for select using (public.cnc_may('view'));
+exception when duplicate_object then null; end $$;
+drop policy if exists "CNC editors can add revisions" on public.cnc_program_revisions;
+do $$ begin
+  create policy "CNC editors can add revisions" on public.cnc_program_revisions for insert with check (public.cnc_may('edit'));
+exception when duplicate_object then null; end $$;
+
+-- ============ PASTE 2: the letter, and the program follows ============
+
+create or replace function public.cnc_revision_letter()
+returns trigger
+language plpgsql
+set search_path = public
+as $body$
+declare
+  n integer;
+  v text := '';
+begin
+  perform 1 from public.cnc_programs where id = new.program_id for update;
+  select count(*) into n from public.cnc_program_revisions where program_id = new.program_id;
+  loop
+    v := chr(65 + n % 26) || v;
+    n := n / 26 - 1;
+    exit when n < 0;
+  end loop;
+  new.rev := v;
+  return new;
+end;
+$body$;
+
+create or replace function public.cnc_revision_is_current()
+returns trigger
+language plpgsql
+set search_path = public
+as $body$
+begin
+  update public.cnc_programs
+     set current_rev = new.rev,
+         status = case when new.ready then 'ready' else 'not_for_machine' end,
+         fault = new.fault,
+         settings = coalesce(new.settings, settings)
+   where id = new.program_id;
+  return null;
+end;
+$body$;
+
+drop trigger if exists cnc_revision_letter on public.cnc_program_revisions;
+create trigger cnc_revision_letter before insert on public.cnc_program_revisions
+  for each row execute function public.cnc_revision_letter();
+drop trigger if exists cnc_revision_is_current on public.cnc_program_revisions;
+create trigger cnc_revision_is_current after insert on public.cnc_program_revisions
+  for each row execute function public.cnc_revision_is_current();
+
+select 'cnc revisions' as step,
+       case when exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_program_revisions')
+             and (select count(*) from pg_policies where schemaname = 'public' and tablename = 'cnc_program_revisions') = 2
+             and exists (select 1 from pg_trigger where tgname = 'cnc_revision_letter')
+             and exists (select 1 from pg_trigger where tgname = 'cnc_revision_is_current')
+            then 'ready - revisions are kept'
+            else 'SOMETHING IS MISSING - tell Claude' end as result;
+
+
+-- ============================================================
+-- setup-cnc-4-numbers.sql
+-- ============================================================
+-- CNC module, file 4 of 5: the next free program number. Needs file 2.
+-- One counter, nextCncProgramNumber in master_counters, starting at 1027
+-- where the lathe app's NEXT PROGRAM NUMBER.txt stood (Heinrich, 8 Oct 2026).
+-- take_cnc_program_number() hands out a number whose pair (it and the next)
+-- no program uses, and moves the counter two on. Only CNC editors may take
+-- one. The app hands the number to the engine as settings.program_no.
+-- Safe to run twice.
+
+insert into master_counters (counter_name, value) values ('nextCncProgramNumber', 1027)
+  on conflict (counter_name) do nothing;
+
+create or replace function public.take_cnc_program_number()
+returns integer
+language plpgsql
+set search_path = public
+as $fn$
+declare
+  v_take integer;
+begin
+  if not public.cnc_may('edit') then
+    raise exception 'Only people with the CNC edit tick can make a program'
+      using errcode = 'P0001', hint = 'cnc_not_allowed';
+  end if;
+  insert into master_counters (counter_name, value) values ('nextCncProgramNumber', 1027)
+    on conflict (counter_name) do nothing;
+  select value into v_take from master_counters
+   where counter_name = 'nextCncProgramNumber' for update;
+  while exists (select 1 from cnc_programs where program_no between v_take - 1 and v_take + 2) loop
+    v_take := v_take + 1;
+  end loop;
+  update master_counters set value = v_take + 2 where counter_name = 'nextCncProgramNumber';
+  return v_take;
+end;
+$fn$;
+
+grant execute on function public.take_cnc_program_number() to authenticated;
+
+-- ============ Check ============
+
+select 'cnc program numbers' as step,
+       case when exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                          where n.nspname = 'public' and p.proname = 'take_cnc_program_number')
+             and exists (select 1 from master_counters where counter_name = 'nextCncProgramNumber')
+            then 'ready - next program number is ' || (select value from master_counters where counter_name = 'nextCncProgramNumber')
+            else 'SOMETHING IS MISSING - tell Claude' end as result;
+
+
+-- ============================================================
+-- setup-cnc-5-files.sql
+-- ============================================================
+-- CNC module, file 5 of 5: where a program's STEP files are kept.
+-- A private store of its own, "cnc-files", read only by people with the
+-- CNC tick (file 1). The app files each revision's model under
+-- <program id>/<revision letter>/<file name> and saves that path on the
+-- revision (cnc_program_revisions.step_path). A file is downloaded only
+-- when a program is opened, never for a list (CLAUDE.md, Loading data).
+-- Safe to run twice.
+
+insert into storage.buckets (id, name, public)
+values ('cnc-files', 'cnc-files', false)
+on conflict (id) do nothing;
+
+do $do$ begin
+  create policy "CNC people can read CNC files" on storage.objects for select
+    using (bucket_id = 'cnc-files' and public.cnc_may('view'));
+exception when duplicate_object then null; end $do$;
+do $do$ begin
+  create policy "CNC editors can add CNC files" on storage.objects for insert
+    with check (bucket_id = 'cnc-files' and public.cnc_may('edit'));
+exception when duplicate_object then null; end $do$;
+do $do$ begin
+  create policy "CNC editors can replace CNC files" on storage.objects for update
+    using (bucket_id = 'cnc-files' and public.cnc_may('edit'));
+exception when duplicate_object then null; end $do$;
+do $do$ begin
+  create policy "CNC deleters can delete CNC files" on storage.objects for delete
+    using (bucket_id = 'cnc-files' and public.cnc_may('delete'));
+exception when duplicate_object then null; end $do$;
+
+-- ============ Check ============
+
+select 'cnc files' as step,
+       case when exists (select 1 from storage.buckets where id = 'cnc-files' and public = false)
+             and (select count(*) from pg_policies where schemaname = 'storage' and tablename = 'objects'
+                   and policyname like '%CNC files') = 4
+            then 'ready - STEP files have a private home'
+            else 'SOMETHING IS MISSING - tell Claude' end as result;
 

@@ -207,6 +207,17 @@ export default function UserManagement({
                     />
                     Can manage Invoicing
                   </label>
+                  {/* Kept beside the CNC row's View and Edit in
+                      permissions.cnc, which the database's cnc_may reads
+                      (setup-cnc-1-access.sql). Admins may always delete. */}
+                  <label style={S.deptToggleItem}>
+                    <input
+                      type="checkbox"
+                      checked={!!p.permissions.cnc?.delete}
+                      onChange={(e) => updatePersonPermission(p.id, "cnc", "delete", e.target.checked)}
+                    />
+                    Can delete CNC programs
+                  </label>
                 </div>
               </>
             )}

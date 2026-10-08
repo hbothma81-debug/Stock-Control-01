@@ -108,6 +108,14 @@ ORDER=(
   # --- which materials are written another way than the list holds them
   #     (one counting function; needs the file above)
   setup-material-out-of-line.sql
+
+  # --- the CNC module (cnc_ tables, its own rules and file store; reads
+  #     profiles, master_counters and touch_updated_at above)
+  setup-cnc-1-access.sql
+  setup-cnc-2-programs.sql
+  setup-cnc-3-revisions.sql
+  setup-cnc-4-numbers.sql
+  setup-cnc-5-files.sql
 )
 
 OUT=setup-ALL.sql

@@ -185,7 +185,17 @@ with checks (setup_file, looks_for, found) as (
     ('setup-material-short-name.sql',   'function set_material_short_name',
       exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'set_material_short_name')),
     ('setup-material-out-of-line.sql',  'function material_rows_out_of_line',
-      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'material_rows_out_of_line'))
+      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'material_rows_out_of_line')),
+    ('setup-cnc-1-access.sql', 'function cnc_may',
+      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'cnc_may')),
+    ('setup-cnc-2-programs.sql', 'table cnc_programs',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_programs')),
+    ('setup-cnc-3-revisions.sql', 'table cnc_program_revisions',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_program_revisions')),
+    ('setup-cnc-4-numbers.sql', 'function take_cnc_program_number',
+      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'take_cnc_program_number')),
+    ('setup-cnc-5-files.sql', 'file store cnc-files',
+      exists (select 1 from storage.buckets where id = 'cnc-files'))
 )
 select
   setup_file,
