@@ -98,8 +98,21 @@ export async function loadProgram(id) {
 // kept with the program, never sent, because the engine refuses a key it
 // does not know.
 function forEngine(settings) {
-  const { price_by: _b, piece_price: _p, rate_unit: _r, ...rest } = settings || {};
+  const { price_by: _b, piece_price: _p, rate_unit: _r, markup_material: _m, markup_offcut: _o, ...rest } = settings || {};
   return rest;
+}
+
+// Program settings that need no engine run (the Costing tab's markups,
+// markup.js): merged into the settings as saved and the row handed back.
+export async function saveProgramSettings(program, patch) {
+  const { data, error } = await supabase
+    .from("cnc_programs")
+    .update({ settings: { ...(program.settings || {}), ...patch } })
+    .eq("id", program.id)
+    .select("*");
+  if (error) throw new Error(`Not saved: ${error.message}`);
+  if (!data?.length) throw new Error("Not saved: the database changed nothing (the CNC Edit tick is needed).");
+  return data[0];
 }
 
 // The engine, with the signed-in person's token. Throws an Error whose

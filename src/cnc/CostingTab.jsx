@@ -1,6 +1,9 @@
-// A program's Costing tab: machine time, material, the price per part at
-// its batch size and the 1-off price, every figure from the engine (its
-// costing block); this screen does no sums of money (Heinrich, 8 Oct 2026).
+// A program's Costing tab: machine time, material, the cost per part at
+// its batch size and the 1-off cost, every figure from the engine (its
+// costing block); this screen does no sums of money (Heinrich, 8 Oct 2026)
+// except the markups, which are markup.js's (a markup on the material and
+// one on the offcut, 60% unless the program has its own; machine time and
+// setup at cost), and give the selling price.
 //
 // Kept with the program: the batch quantity, bar length, parts per bar,
 // how the material is priced (Priced by: per kg, per metre, or per piece
@@ -17,9 +20,10 @@ import { useState } from "react";
 import { FileText, RefreshCw } from "lucide-react";
 import NumberBox from "../manager/NumberBox.jsx";
 import { C, S } from "../theme.js";
-import { recost, saveBarPrice } from "./cncData.js";
+import { recost, saveBarPrice, saveProgramSettings } from "./cncData.js";
+import { MARKUP_KEYS, markupOf, sellingPrice } from "./markup.js";
 import { costReportData, drawCostReport } from "./costReportPdf.js";
-import { DEFAULT_RATE_PER_S, DEFAULT_SETUP_PRICE, costingFigures, rand, wasteCharged } from "./cncRules.js";
+import { DEFAULT_RATE_PER_S, DEFAULT_SETUP_PRICE, costingFigures, rand } from "./cncRules.js";
 import { PRICED_BY, barSizeOf, bothUnits, findBarPrice, kgPerMetre, materialPricing, sizeLabel } from "./pricing.js";
 
 const minSec = (s) => (s == null ? "–" : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`);
@@ -42,7 +46,7 @@ export default function CostingTab({ program, current, shown, materials, barPric
   const priceBy = s.price_by || "kg";
   const costing = program.costing || current?.costing || null;
   const f = costingFigures(costing);
-  const charged = wasteCharged(costing);
+  const sell = sellingPrice(costing, s);
   const size = barSizeOf(s, costing);
   const kgm = size ? kgPerMetre(size.od, size.id, material?.density) : 0;
   const sizeRow = findBarPrice(barPrices, program.material, size);
@@ -117,7 +121,26 @@ export default function CostingTab({ program, current, shown, materials, barPric
         ...changes,
       };
       for (const k of Object.keys(costingSettings)) if (costingSettings[k] == null || costingSettings[k] === 0 || costingSettings[k] === "" || costingSettings[k] === false) delete costingSettings[k];
+      // A markup of 0% is kept: an empty one would be 60% again.
+      for (const k of Object.values(MARKUP_KEYS)) if (s[k] != null && s[k] !== "") costingSettings[k] = s[k];
       onProgramSaved(await recost({ program, current, material, costingSettings }));
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // A markup needs no engine run: saved with the program's settings.
+  async function setMarkup(which, n) {
+    setError("");
+    if (!(n >= 0) || n > 1000) {
+      setError("A markup is a % from 0 to 1000.");
+      return;
+    }
+    setBusy(true);
+    try {
+      onProgramSaved(await saveProgramSettings(program, { [MARKUP_KEYS[which]]: Math.round(n * 100) / 100 }));
     } catch (err) {
       setError(err.message || String(err));
     } finally {
@@ -158,8 +181,9 @@ export default function CostingTab({ program, current, shown, materials, barPric
             {canSeeValue ? (
               <>
                 <Box label="Material per part" value={rand(f.materialPerPart)} />
-                <Box label={`Per part, batch of ${f.qty ?? s.qty ?? 1}`} value={rand(f.pricePerPart)} />
-                <Box label="1-off incl. setup" value={rand(f.oneOff)} />
+                <Box label={`Cost per part, batch of ${f.qty ?? s.qty ?? 1}`} value={rand(f.pricePerPart)} />
+                <Box label="Selling price per part" value={rand(sell?.perPart.sell)} />
+                <Box label="1-off incl. setup: cost / selling" value={sell?.oneOff ? `${rand(sell.oneOff.cost)} / ${rand(sell.oneOff.sell)}` : rand(f.oneOff)} />
               </>
             ) : (
               <Box label="Material per part" value={f.kgPerPart != null ? `${f.kgPerPart} kg` : "–"} />
@@ -167,15 +191,56 @@ export default function CostingTab({ program, current, shown, materials, barPric
           </div>
           {canSeeValue && (
             <div style={{ fontSize: 14 }}>
-              Batch total {rand(f.batchTotal)} · material at{" "}
+              Batch cost {rand(f.batchTotal)}{sell ? ` · selling ${rand(sell.batch.sell)}` : ""} · material at{" "}
               {f.materialPrice != null ? (f.materialUnit === "billet" ? `R ${f.materialPrice} a piece` : `R ${f.materialPrice}${f.materialUnit ? f.materialUnit.replace(/^R/, "") : ""}`) : "–"}
               {f.barsNeeded != null ? ` · ${f.barsNeeded} bar${f.barsNeeded === 1 ? "" : "s"}` : ""}
             </div>
           )}
-          {canSeeValue && charged && (
+          {canSeeValue && sell && costing?.wastage && (
             <div style={{ fontSize: 14 }}>
-              Offcut and wastage charged: <b>{rand(charged.batch)}</b> for the batch of {charged.qty}, {rand(charged.perPart)} a part
-              <span style={{ color: C.muted }}> (chips, saw kerf and the offcut; see Offcut &amp; wastage)</span>
+              Offcut charged: <b>{rand(sell.batch.offcut)}</b> for the batch of {sell.qty}, {rand(sell.perPart.offcut)} a part
+              <span style={{ color: C.muted }}> (the chips and saw cut are in the material, as steel bought)</span>
+            </div>
+          )}
+          {canSeeValue && sell && (
+            <div style={sectionBox}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>Markup</div>
+              <div style={S.formGrid}>
+                {[
+                  ["material", "Material markup (%)"],
+                  ["offcut", "Offcut markup (%)"],
+                ].map(([which, label]) => (
+                  <div key={which}>
+                    <label style={S.label}>{label}</label>
+                    {mayPrice ? (
+                      <NumberBox style={S.input} value={markupOf(s, which)} placeholder="60" onCommit={(n) => setMarkup(which, n)} />
+                    ) : (
+                      <div style={{ fontSize: 15 }}>{markupOf(s, which)}%</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "auto auto auto", gap: "3px 16px", fontSize: 14, justifyContent: "start" }}>
+                <div style={{ color: C.muted }}>Per part</div>
+                <div style={{ color: C.muted }}>Cost</div>
+                <div style={{ color: C.muted }}>Selling</div>
+                <div>Material ({sell.markups.material}%)</div>
+                <div>{rand(sell.perPart.material)}</div>
+                <div>{rand(sell.perPart.materialSell)}</div>
+                <div>Offcut ({sell.markups.offcut}%)</div>
+                <div>{rand(sell.perPart.offcut)}</div>
+                <div>{rand(sell.perPart.offcutSell)}</div>
+                <div>Machine time and setup (at cost)</div>
+                <div>{rand(sell.perPart.atCost)}</div>
+                <div>{rand(sell.perPart.atCost)}</div>
+                <div style={{ fontWeight: 700 }}>Per part, batch of {sell.qty}</div>
+                <div style={{ fontWeight: 700 }}>{rand(sell.perPart.cost)}</div>
+                <div style={{ fontWeight: 700 }}>{rand(sell.perPart.sell)}</div>
+                <div style={{ fontWeight: 700 }}>Batch</div>
+                <div style={{ fontWeight: 700 }}>{rand(sell.batch.cost)}</div>
+                <div style={{ fontWeight: 700 }}>{rand(sell.batch.sell)}</div>
+              </div>
+              {costing?.wastage && <div style={{ fontSize: 13, color: C.muted }}>Material is what each part takes off the bar: the part, its chips and its saw cut. Offcut is the rest of the bar charged.</div>}
             </div>
           )}
           {f.notes.length > 0 && (

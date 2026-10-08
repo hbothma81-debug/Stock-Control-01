@@ -261,11 +261,3 @@ test("the wastage rows add up to the material per part", () => {
   assert.equal(wastageRows(null, 1), null);
   assert.equal(DEFAULT_SETUP_PRICE, 750);
 });
-
-import { wasteCharged } from "./cncRules.js";
-
-test("offcut and wastage charged, for the batch and a part", () => {
-  assert.deepEqual(wasteCharged({ qty: 20, wastage: { waste_cost: 66.002 } }), { qty: 20, batch: 1320.04, perPart: 66 });
-  assert.deepEqual(wasteCharged({ qty: 20, wastage: { waste_cost: 66.002, batch_waste_cost: 1350 } }), { qty: 20, batch: 1350, perPart: 67.5 });
-  assert.equal(wasteCharged({ qty: 5 }), null);
-});

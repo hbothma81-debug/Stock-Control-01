@@ -1,6 +1,7 @@
-// A program's Offcut & wastage tab (Heinrich, 8 Oct 2026: "offcut and
-// wastage tabs to see what we are using and to confirm that it is costed
-// in"; then one tab, not two). Both read the engine's costing block as saved with the program at
+// A program's Offcut tab (Heinrich, 8 Oct 2026: "offcut and wastage tabs
+// to see what we are using and to confirm that it is costed in"; then one
+// tab, not two; then "only wastage I need is offcuts": the chips are steel
+// bought and stay in the material, so they are no longer shown as waste). Both read the engine's costing block as saved with the program at
 // its batch size (costing.offcut, costing.wastage); no sums here except
 // the total line, which shows the four costs add up to the material per
 // part (wastageRows in cncRules.js). Rand only with "Can see Rand values".
@@ -40,8 +41,8 @@ export default function OffcutWastageTab({ costing, canSeeValue }) {
         <OffcutTab costing={costing} canSeeValue={canSeeValue} />
       </div>
       <div>
-        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Wastage</div>
-        <WastageTab costing={costing} canSeeValue={canSeeValue} />
+        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Material per part</div>
+        <MaterialTab costing={costing} canSeeValue={canSeeValue} />
       </div>
     </div>
   );
@@ -79,50 +80,29 @@ function OffcutTab({ costing, canSeeValue }) {
   return <Grid rows={rows} />;
 }
 
-function WastageTab({ costing, canSeeValue }) {
-  if (!costing) return <div style={{ color: C.muted, fontSize: 14 }}>{pricedNote(costing)}</div>;
+// Each part's material in two: what it takes off the bar (the part, its
+// chips and its saw cut) and its share of the offcut; the two add up to
+// the material per part it was costed at.
+function MaterialTab({ costing, canSeeValue }) {
   const w = wastageRows(costing.wastage, costing.material_per_part);
-  if (!w) return <div style={{ color: C.muted, fontSize: 14 }}>The engine sent no wastage for this price: press Price again on the Costing tab.</div>;
-  const cell = { padding: "4px 8px", borderBottom: `1px solid ${C.border}`, textAlign: "right" };
+  if (!w) return <div style={{ color: C.muted, fontSize: 14 }}>The engine sent no material split for this price: press Price again on the Costing tab.</div>;
+  const [part, chips, kerf, offcut] = w.rows;
+  const sum = (k) => [part, chips, kerf].reduce((t, r) => t + (r[k] || 0), 0);
+  const rows = [
+    [`Material: the part, its chips and saw cut (${num(w.stockMm, 1)} mm of bar)`, `${num(sum("kg"), 3)} kg${canSeeValue ? ` · ${rand(sum("cost"))}` : ""}`],
+    ["Share of the offcut", `${num(offcut.kg, 3)} kg${canSeeValue ? ` · ${rand(offcut.cost)}` : ""}`],
+    ["Material per part", `${num(w.usedKg, 3)} kg${canSeeValue ? ` · ${rand(w.total)}` : ""}`],
+  ];
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 14 }}>
-      <div style={{ color: C.muted, fontSize: 13 }}>Per part. Stock per part {num(w.stockMm, 1)} mm, {num(w.stockKg, 3)} kg.</div>
-      <table style={{ borderCollapse: "collapse", width: "100%" }}>
-        <thead>
-          <tr style={{ color: C.muted, fontSize: 12.5 }}>
-            <th style={{ ...cell, textAlign: "left" }}>Where the steel goes</th>
-            <th style={cell}>mm</th>
-            <th style={cell}>kg</th>
-            {canSeeValue && <th style={cell}>Cost</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {w.rows.map((r) => (
-            <tr key={r.what}>
-              <td style={{ ...cell, textAlign: "left" }}>{r.what}</td>
-              <td style={cell}>{r.mm == null ? "" : num(r.mm, 2)}</td>
-              <td style={cell}>{num(r.kg, 3)}</td>
-              {canSeeValue && <td style={cell}>{rand(r.cost)}</td>}
-            </tr>
-          ))}
-          <tr style={{ fontWeight: 700 }}>
-            <td style={{ ...cell, textAlign: "left" }}>Material used per part</td>
-            <td style={cell} />
-            <td style={cell}>{num(w.usedKg, 3)}</td>
-            {canSeeValue && <td style={cell}>{rand(w.total)}</td>}
-          </tr>
-        </tbody>
-      </table>
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 14 }}>
+      <Grid rows={rows} />
       {canSeeValue && w.ok != null && (
         <div style={{ color: w.ok ? C.accentFinished : C.danger, fontWeight: 600 }}>
           {w.ok
-            ? `Costed in: the four add up to the material per part, ${rand(w.costed)}.`
-            : `Does not add up: the four come to ${rand(w.total)}, the part was costed at ${rand(w.costed)}. Press Price again on the Costing tab.`}
+            ? `Costed in: the two add up to the material per part, ${rand(w.costed)}.`
+            : `Does not add up: they come to ${rand(w.total)}, the part was costed at ${rand(w.costed)}. Press Price again on the Costing tab.`}
         </div>
       )}
-      <div>
-        Waste {num(w.wasteKg, 3)} kg a part: <b>{num(w.wastePct, 0)}%</b> of the steel bought.
-      </div>
     </div>
   );
 }

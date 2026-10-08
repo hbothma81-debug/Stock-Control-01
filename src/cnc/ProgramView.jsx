@@ -29,7 +29,7 @@ const TABS = [
   { key: "crib", label: "Tool crib" },
   { key: "settings", label: "Settings" },
   { key: "costing", label: "Costing" },
-  { key: "waste", label: "Offcut & wastage" },
+  { key: "waste", label: "Offcut" },
 ];
 
 // S.chipActive sets borderColor, which React will not mix with S.chip's

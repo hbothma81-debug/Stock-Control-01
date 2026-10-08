@@ -311,7 +311,7 @@ export function pipeLabel(pipe) {
 // And the program's own turret from its Tool crib (turret: station -> tool
 // key), kept until changed or handed back to the automatic pick (Heinrich,
 // 8 Oct 2026: "can change tool crib later and recalculate").
-export const COSTING_KEYS = ["qty", "parts_per_bar", "bar_length", "price_by", "piece_price", "setup_price", "rate_per_s", "rate_unit", "stock_length", "charge_all_material", "turret"];
+export const COSTING_KEYS = ["qty", "parts_per_bar", "bar_length", "price_by", "piece_price", "setup_price", "rate_per_s", "rate_unit", "stock_length", "charge_all_material", "turret", "markup_material", "markup_offcut"];
 
 export function costingPart(settings) {
   const out = {};
@@ -382,14 +382,3 @@ export function wastageRows(w, materialPerPart) {
   };
 }
 
-// What the job is charged for offcut and wastage (Heinrich, 8 Oct 2026:
-// shown on the Costing sheet, divided by the batch quantity): the engine's
-// batch figure when it sends one (wastage.batch_waste_cost), otherwise its
-// per-part waste cost times the batch. perPart = batch / qty.
-export function wasteCharged(costing) {
-  const w = costing?.wastage;
-  if (!w) return null;
-  const qty = Number(costing.qty) || 1;
-  const batch = w.batch_waste_cost != null ? Number(w.batch_waste_cost) : Number(w.waste_cost || 0) * qty;
-  return { qty, batch: Math.round(batch * 100) / 100, perPart: Math.round((batch / qty) * 100) / 100 };
-}
