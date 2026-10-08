@@ -214,7 +214,9 @@ export function drawCostReport({ doc, autoTable, data }) {
       y = doc.lastAutoTable.finalY + 5;
     } else y = note(doc, y, "Nothing found.");
   }
-  if (Array.isArray(c.notes) && c.notes.length) {
+  // The engine's list of what can change the cost carries its notes too;
+  // the notes print on their own only when that list is not sent.
+  if (!Array.isArray(c.impacts) && Array.isArray(c.notes) && c.notes.length) {
     y = heading(doc, y, "Engine notes");
     doc.setFont("helvetica", "normal");
     doc.setFontSize(SIZE.body);
