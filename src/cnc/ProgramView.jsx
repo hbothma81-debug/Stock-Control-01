@@ -2,17 +2,18 @@
 // tabs. Read when opened (the program text and settings are not in the
 // list). Update program opens in place of the tabs. Copy to USB and
 // Download send out the revision on screen (anyone with the View tick).
-// Import machine copy and the Toolpath, Setup sheet and Costing tabs come
-// in the next pieces.
+// Import machine copy opens in place of the tabs too. The Toolpath, Setup
+// sheet and Costing tabs come in the next pieces.
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, Download, RefreshCw, Trash2, Usb } from "lucide-react";
+import { ArrowLeft, Download, FileInput, RefreshCw, Trash2, Usb } from "lucide-react";
 import { C, F, S } from "../theme.js";
 import { deleteProgram, loadProgram } from "./cncData.js";
 import { CNC_FIELDS } from "./cncFields.js";
 import { oNumber, programFiles, settingText } from "./cncRules.js";
 import { canWriteToFolder, copyToFolder, downloadFiles } from "./programOut.js";
 import UpdateProgram from "./UpdateProgram.jsx";
+import ImportMachineCopy from "./ImportMachineCopy.jsx";
 
 const TABS = [
   { key: "program", label: "Program" },
@@ -33,6 +34,7 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
   const [revId, setRevId] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [importing, setImporting] = useState(false);
   // What the last Copy to USB or Download did, in words.
   const [outNote, setOutNote] = useState(null);
   // Bumped after a save, so the program and its revisions are read again.
@@ -59,6 +61,24 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
   const { program: p, revisions } = data;
   const current = revisions.find((r) => r.rev === p.current_rev) || revisions[revisions.length - 1] || null;
   const shown = revisions.find((r) => r.id === revId) || current;
+
+  if (importing) {
+    return (
+      <ImportMachineCopy
+        program={p}
+        revisions={revisions}
+        current={current}
+        userName={userName}
+        onCancel={() => setImporting(false)}
+        onSaved={() => {
+          setImporting(false);
+          setRevId(null);
+          setTab("program");
+          setReads((n) => n + 1);
+        }}
+      />
+    );
+  }
 
   if (updating) {
     return (
@@ -121,6 +141,11 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
         {canEdit && (
           <button type="button" className="stk-btn" style={S.addBtn} onClick={() => setUpdating(true)}>
             <RefreshCw size={14} /> Update program
+          </button>
+        )}
+        {canEdit && (
+          <button type="button" className="stk-btn" style={S.chip} onClick={() => setImporting(true)}>
+            <FileInput size={14} /> Import machine copy
           </button>
         )}
         {canDelete && (

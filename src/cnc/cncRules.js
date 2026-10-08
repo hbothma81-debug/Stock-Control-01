@@ -172,3 +172,37 @@ export function programFiles(programs, partName) {
     return { name: programFileName(p.number, title || partName), text: String(p.text ?? "") };
   });
 }
+
+// Import machine copy: each file read off the stick is matched to this
+// program by the O number on its O line, never by its file name (the
+// operator may have renamed it). The program's own numbers are its two
+// (program_no and the next) and any its current revision carries. A file
+// for another program is refused and named; a program not among the files
+// is kept from the current revision as it was. The hand program wins
+// (0.RULES.md): its text is saved exactly as it came off the machine.
+export function matchMachineCopies(files, programNo, currentPrograms = []) {
+  const own = new Set([programNo, programNo + 1, ...currentPrograms.map((p) => p.number)]);
+  const byNumber = new Map();
+  const refused = [];
+  for (const f of files) {
+    const m = String(f.text ?? "").match(/^\s*O0*(\d+)/m);
+    if (!m) {
+      refused.push({ fileName: f.name, reason: "no O number in it" });
+      continue;
+    }
+    const number = Number(m[1]);
+    if (!own.has(number)) {
+      refused.push({ fileName: f.name, reason: `it is ${oNumber(number)}, not this program` });
+      continue;
+    }
+    byNumber.set(number, { number, text: String(f.text), fileName: f.name });
+  }
+  const numbers = [...new Set([...currentPrograms.map((p) => p.number), ...byNumber.keys()])].sort((a, b) => a - b);
+  const programs = numbers.map((n) => (byNumber.has(n) ? { number: n, text: byNumber.get(n).text } : currentPrograms.find((p) => p.number === n)));
+  return {
+    programs,
+    imported: [...byNumber.values()].map(({ number, fileName }) => ({ number, fileName })).sort((a, b) => a.number - b.number),
+    kept: currentPrograms.filter((p) => !byNumber.has(p.number)).map((p) => p.number),
+    refused,
+  };
+}

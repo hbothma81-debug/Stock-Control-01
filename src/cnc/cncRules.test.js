@@ -124,3 +124,32 @@ test("each program goes out under its O number and its own title", () => {
   assert.deepEqual(files.map((f) => f.name), ["O00001027 BPW 10t BUSH SIDE 1.txt", "O00001028 BPW 10t BUSH SIDE 2.txt", "O00001030 BPW 10t BUSH.txt"]);
   assert.equal(files[0].text, "%\nO00001027(BPW 10t BUSH SIDE 1)\nG21\n%");
 });
+
+import { matchMachineCopies } from "./cncRules.js";
+
+test("machine copies are matched by the O number inside, not the file name", () => {
+  const current = [
+    { number: 1027, text: "%\nO00001027(BUSH SIDE 1)\nG0Z5.\n%" },
+    { number: 1028, text: "%\nO00001028(BUSH SIDE 2)\n%" },
+  ];
+  const r = matchMachineCopies(
+    [
+      { name: "renamed by operator.txt", text: "%\r\nO00001027(BUSH SIDE 1)\r\nG0Z4.5\r\n%\r\n" },
+      { name: "other.txt", text: "%\nO00002001(BPW ROCKER)\n%" },
+      { name: "notes.txt", text: "just words" },
+    ],
+    1027,
+    current
+  );
+  assert.deepEqual(r.imported, [{ number: 1027, fileName: "renamed by operator.txt" }]);
+  assert.deepEqual(r.kept, [1028]);
+  assert.deepEqual(r.refused.map((x) => x.reason), ["it is O00002001, not this program", "no O number in it"]);
+  assert.equal(r.programs[0].text, "%\r\nO00001027(BUSH SIDE 1)\r\nG0Z4.5\r\n%\r\n");
+  assert.equal(r.programs[1], current[1]);
+});
+
+test("a machine copy may bring the second program a part did not have, and short O numbers read", () => {
+  const r = matchMachineCopies([{ name: "x.nc", text: "%\nO1028\n%" }], 1027, [{ number: 1027, text: "%\nO00001027\n%" }]);
+  assert.deepEqual(r.programs.map((p) => p.number), [1027, 1028]);
+  assert.deepEqual(r.imported, [{ number: 1028, fileName: "x.nc" }]);
+});

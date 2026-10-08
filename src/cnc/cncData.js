@@ -43,7 +43,7 @@ export async function loadProgram(id) {
 
 // The engine, with the signed-in person's token. Throws an Error whose
 // message is already in plain words.
-export async function runEngine({ name, stepText, settings }) {
+export async function runEngine({ name, stepText, settings, extra = {} }) {
   const { data } = await supabase.auth.getSession();
   const token = data?.session?.access_token;
   if (!token) throw new Error(engineErrorText(401, null));
@@ -52,7 +52,7 @@ export async function runEngine({ name, stepText, settings }) {
     res = await fetch(ENGINE_URL, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ name, step: stepText, settings }),
+      body: JSON.stringify({ ...extra, name, step: stepText, settings }),
     });
   } catch {
     throw new Error(engineErrorText(0, null));
@@ -209,6 +209,61 @@ export async function saveUpdate({ program, run, letter, partName, customer, mat
     throw new Error(`Rev ${rev.rev} was saved, but the part name, customer and material were not: ${e2?.message || "the database changed nothing"}.`);
   }
   return rev.rev;
+}
+
+// Import machine copy, first half: the engine's check of the hand program
+// against the model the program was made from (action 'check', live on the
+// engine since 8 Oct 2026): rapids into the stock, the jaws, the travel,
+// the cycle time and costing, and where the program and the model differ.
+// Nothing is saved. A program with no STEP stored is not checked.
+export async function checkMachineCopy({ program, current, programs }) {
+  const step = await storedStep(program.id, current);
+  if (!step) return { result: null, reason: "No STEP file is stored for this program, so the engine could not check it." };
+  const settings = current?.settings || program.settings || {};
+  const result = await runEngine({
+    name: program.part_name,
+    stepText: step.text,
+    settings,
+    extra: { action: "check", programs, previous: current?.programs || [] },
+  });
+  return { result, step, settings };
+}
+
+// Import machine copy, second half: the made revision. Ready, by
+// Heinrich's answer (8 Oct 2026: what ran on the machine is what is made);
+// whatever the check found is kept with it and shown. The STEP and the
+// answers stay those of the revision it came from.
+export async function saveMachineCopy({ program, current, programs, check, fileNames, userName }) {
+  const r = check?.result || null;
+  const differences = (r?.differences || []).map(String);
+  const report = [
+    `Machine copy imported from ${fileNames.join(", ")}${current ? ` over rev ${current.rev}` : ""}.`,
+    r ? "" : check?.reason || "The engine did not check it.",
+    differences.length ? "Where the hand program and the model differ (the program wins):" : "",
+    ...differences.map((d) => "- " + d),
+  ].filter(Boolean).join("\n");
+  const row = {
+    program_id: program.id,
+    source: "machine_copy",
+    programs,
+    report,
+    ready: true,
+    fault: "",
+    fails: r?.fails || [],
+    warnings: r?.warnings || [],
+    problems: r?.problems || [],
+    cycle_s: r?.cycle_s ?? null,
+    tool_s: r?.tool_s ?? null,
+    costing: r?.costing ?? null,
+    settings: check?.settings || current?.settings || program.settings || null,
+    step_path: current?.step_path || check?.step?.path || null,
+    step_name: current?.step_name || check?.step?.name || null,
+    note: `Imported from ${fileNames.join(", ")}`,
+    created_by: userName || "",
+  };
+  const { data, error } = await supabase.from("cnc_program_revisions").insert(row).select("rev").single();
+  if (error) throw new Error(`The machine copy could not be saved: ${error.message}`);
+  return data.rev;
 }
 
 // Every file filed under a program (<id>/<rev>/<file>), including one left
