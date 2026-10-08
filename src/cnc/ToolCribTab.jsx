@@ -87,6 +87,7 @@ export default function ToolCribTab({ program, revisions, current, materials, ca
       await saveUpdate({ program, run, letter: revisionLetter(revisions.length), partName: program.part_name, customer: program.customer, material, userName });
       setRun(null);
       setLayout(null);
+      setBusy("");
       onSaved();
     } catch (err) {
       setError(err.message || String(err));

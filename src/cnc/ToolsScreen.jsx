@@ -14,7 +14,7 @@ import { C, S } from "../theme.js";
 import { readIsoCode } from "./cncData.js";
 import { addTool, loadTools, removeTool, saveMachine, saveTool } from "./cncTables.js";
 import { formFromTool, kindOf, suggestKey, TOOL_KINDS, toolFromForm, toolLine } from "./toolKinds.js";
-import EngineSource from "./EngineSource.jsx";
+import EngineSource, { NEEDS } from "./EngineSource.jsx";
 
 export default function ToolsScreen({ machine, isAdmin, userName, onMachine }) {
   const [tools, setTools] = useState(null);
@@ -54,7 +54,7 @@ export default function ToolsScreen({ machine, isAdmin, userName, onMachine }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <EngineSource what="tool list" needs={/tool/i} />
+      <EngineSource what="tool list" needs={NEEDS.tools} />
       {error && <div style={{ color: C.danger, fontSize: 14 }}>{error}</div>}
 
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 10 }}>

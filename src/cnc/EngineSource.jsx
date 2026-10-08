@@ -6,13 +6,9 @@
 import { useEffect, useState } from "react";
 import { C } from "../theme.js";
 import { engineSource } from "./cncData.js";
+import { readsTables } from "./engineSourceRules.js";
 
-// needs: what the engine's answer must also mention for this screen's list
-// to count as read (the Tools screen asks for "tool": the engine read the
-// cutting data from the tables before it read the tools).
-export function readsTables(source, needs = null) {
-  return typeof source === "string" && /cnc_ tables/i.test(source) && (!needs || needs.test(source));
-}
+export { NEEDS } from "./engineSourceRules.js";
 
 export default function EngineSource({ what, needs = null }) {
   const [source, setSource] = useState(undefined);

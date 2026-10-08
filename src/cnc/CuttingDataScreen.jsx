@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { Download, Plus, Trash2, Upload } from "lucide-react";
 import { C, F, S } from "../theme.js";
 import { addCuttingRow, importWorkbook, loadCuttingData, removeCuttingRow, saveCuttingRow } from "./cncTables.js";
-import EngineSource from "./EngineSource.jsx";
+import EngineSource, { NEEDS } from "./EngineSource.jsx";
 import { cellsFromTable, readCell, rowMatches, workbookSheets } from "./cuttingData.js";
 
 const { borderColor: _unused, ...chipActiveRest } = S.chipActive;
@@ -114,7 +114,7 @@ export default function CuttingDataScreen({ machine, isAdmin, userName }) {
     }
   }
 
-  const banner = <EngineSource what="spreadsheet" />;
+  const banner = <EngineSource what="spreadsheet" needs={NEEDS.cutting} />;
 
   if (error && !data) return <div style={{ color: C.danger, fontSize: 14 }}>{error}</div>;
   if (!data) return <div style={S.empty}>Loading cutting data…</div>;
