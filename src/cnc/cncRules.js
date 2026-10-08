@@ -273,7 +273,12 @@ export function pipeLabel(pipe) {
 // Also how the material is priced (price_by: kg, m or piece) and the
 // price per piece, both per program (Heinrich, 8 Oct 2026); neither is an
 // engine setting, so runEngine leaves them out of what it sends.
-export const COSTING_KEYS = ["qty", "parts_per_bar", "bar_length", "price_by", "piece_price"];
+//
+// And, per job (Heinrich, 8 Oct 2026): the setup price (Rand per job,
+// R750 when a program has none) and the machine rate (rate_per_s, Rand per
+// second, the engine's R0.21 when none), typed as R/s or R/h (rate_unit,
+// how the box shows it; not sent).
+export const COSTING_KEYS = ["qty", "parts_per_bar", "bar_length", "price_by", "piece_price", "setup_price", "rate_per_s", "rate_unit"];
 
 export function costingPart(settings) {
   const out = {};
@@ -305,4 +310,41 @@ export function costingFigures(costing) {
 export function rand(v) {
   if (v == null) return "–";
   return "R " + Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// A new program's setup price, Rand per job (Heinrich, 8 Oct 2026: "Default
+// of 750 on all new programs but can change"). Sent to the engine as
+// setup_price, which then stands in for the 45 min first-off.
+export const DEFAULT_SETUP_PRICE = 750;
+
+// The engine's own machine rate when a program sets none (quote.py).
+export const DEFAULT_RATE_PER_S = 0.21;
+
+// The Wastage tab, per part, from the engine's costing.wastage: where the
+// material bought goes, kg and Rand, and the total that must equal the
+// material per part (finished + chips + saw kerf + offcut share; the
+// engine makes them add up exactly, quote.py). ok is false when the total
+// is more than a cent off what the part was costed at.
+export function wastageRows(w, materialPerPart) {
+  if (!w) return null;
+  const n = (v) => (v == null || Number.isNaN(Number(v)) ? null : Number(v));
+  const rows = [
+    { what: "Finished part", mm: n(w.part_mm), kg: n(w.finished_kg), cost: n(w.finished_cost) },
+    { what: "Chips (turned away)", mm: null, kg: n(w.chips_kg), cost: n(w.chips_cost) },
+    { what: "Saw / part-off kerf", mm: n(w.kerf_mm), kg: n(w.kerf_kg), cost: n(w.kerf_cost) },
+    { what: "Share of the bar offcut", mm: n(w.offcut_share_mm), kg: n(w.offcut_share_kg), cost: n(w.offcut_share_cost) },
+  ];
+  const total = rows.reduce((s, r) => s + (r.cost || 0), 0);
+  const costed = n(materialPerPart);
+  return {
+    rows,
+    total: Math.round(total * 100) / 100,
+    costed,
+    ok: costed == null ? null : Math.abs(total - costed) < 0.011,
+    usedKg: n(w.used_kg),
+    wasteKg: n(w.waste_kg),
+    wastePct: n(w.waste_pct),
+    stockMm: n(w.stock_mm),
+    stockKg: n(w.stock_kg),
+  };
 }

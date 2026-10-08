@@ -223,3 +223,16 @@ test("Rand to the cent", () => {
   assert.match(rand(1012.5), /^R 1.012,50$|^R 1 012,50$|^R 1,012.50$/);
   assert.equal(rand(null), "–");
 });
+
+import { wastageRows, DEFAULT_SETUP_PRICE } from "./cncRules.js";
+
+test("the wastage rows add up to the material per part", () => {
+  const w = { finished_kg: 0.782, chips_kg: 1.585, kerf_mm: 3, kerf_kg: 0.118, offcut_share_mm: 0.83, offcut_share_kg: 0.033, part_mm: 55, used_kg: 2.519, waste_kg: 1.736, waste_pct: 68.944, finished_cost: 29.73, chips_cost: 60.259, kerf_cost: 4.499, offcut_share_cost: 1.245, stock_mm: 63, stock_kg: 2.486 };
+  const r = wastageRows(w, 95.733);
+  assert.equal(r.rows.length, 4);
+  assert.equal(r.total, 95.73);
+  assert.equal(r.ok, true);
+  assert.equal(wastageRows(w, 99).ok, false);
+  assert.equal(wastageRows(null, 1), null);
+  assert.equal(DEFAULT_SETUP_PRICE, 750);
+});

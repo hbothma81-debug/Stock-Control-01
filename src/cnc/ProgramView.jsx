@@ -17,12 +17,15 @@ import ImportMachineCopy from "./ImportMachineCopy.jsx";
 import CostingTab from "./CostingTab.jsx";
 import TurnAround from "./TurnAround.jsx";
 import ToolpathTab from "./ToolpathTab.jsx";
+import { OffcutTab, WastageTab } from "./OffcutWastage.jsx";
 
 const TABS = [
   { key: "program", label: "Program" },
   { key: "toolpath", label: "Toolpath" },
   { key: "settings", label: "Settings" },
   { key: "costing", label: "Costing" },
+  { key: "offcut", label: "Offcut" },
+  { key: "wastage", label: "Wastage" },
 ];
 
 // S.chipActive sets borderColor, which React will not mix with S.chip's
@@ -267,6 +270,8 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
 
       {tab === "program" && shown && <ProgramText rev={shown} />}
       {tab === "toolpath" && <ToolpathTab program={p} rev={shown} answers={toolpaths} setAnswers={setToolpaths} />}
+      {tab === "offcut" && <OffcutTab costing={p.costing || current?.costing || null} canSeeValue={canSeeValue} />}
+      {tab === "wastage" && <WastageTab costing={p.costing || current?.costing || null} canSeeValue={canSeeValue} />}
       {tab === "costing" && (
         <CostingTab
           program={p}

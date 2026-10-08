@@ -18,7 +18,7 @@ import { RefreshCw } from "lucide-react";
 import NumberBox from "../manager/NumberBox.jsx";
 import { C, S } from "../theme.js";
 import { recost, saveBarPrice } from "./cncData.js";
-import { costingFigures, rand } from "./cncRules.js";
+import { DEFAULT_RATE_PER_S, DEFAULT_SETUP_PRICE, costingFigures, rand } from "./cncRules.js";
 import { PRICED_BY, barSizeOf, bothUnits, findBarPrice, kgPerMetre, materialPricing, sizeLabel } from "./pricing.js";
 
 const minSec = (s) => (s == null ? "–" : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`);
@@ -47,6 +47,7 @@ export default function CostingTab({ program, current, shown, materials, barPric
   const units = sizeRow ? bothUnits(sizeRow.price, sizeRow.unit, kgm) : { perKg: null, perM: null };
   const fallback = Number(material?.price) > 0 ? bothUnits(material.price, "R/kg", kgm) : null;
   const mayPrice = canEdit && canSeeValue && !busy;
+  const rateUnit = s.rate_unit === "R/h" ? "R/h" : "R/s";
 
   async function price(changes) {
     setError("");
@@ -58,6 +59,9 @@ export default function CostingTab({ program, current, shown, materials, barPric
         bar_length: s.bar_length,
         price_by: s.price_by,
         piece_price: s.piece_price,
+        setup_price: s.setup_price,
+        rate_per_s: s.rate_per_s,
+        rate_unit: s.rate_unit,
         ...changes,
       };
       for (const k of Object.keys(costingSettings)) if (costingSettings[k] == null || costingSettings[k] === 0 || costingSettings[k] === "") delete costingSettings[k];
@@ -165,6 +169,47 @@ export default function CostingTab({ program, current, shown, materials, barPric
           )}
         </div>
       </div>
+
+      {canSeeValue && (
+        <div style={S.formGrid}>
+          <div>
+            <label style={S.label}>Setup price per job (R)</label>
+            {mayPrice ? (
+              <NumberBox
+                style={S.input}
+                value={s.setup_price}
+                placeholder={`${DEFAULT_SETUP_PRICE} (default)`}
+                title="Empty: the default R750"
+                onCommit={(n) => price({ setup_price: n })}
+              />
+            ) : (
+              <div style={{ fontSize: 15 }}>R {s.setup_price || DEFAULT_SETUP_PRICE}</div>
+            )}
+          </div>
+          <div>
+            <label style={S.label}>Machine rate</label>
+            {mayPrice ? (
+              <div style={{ display: "flex", gap: 6 }}>
+                <NumberBox
+                  style={{ ...S.input, flex: 1 }}
+                  value={s.rate_per_s ? (rateUnit === "R/h" ? Math.round(s.rate_per_s * 3600 * 100) / 100 : s.rate_per_s) : 0}
+                  placeholder={rateUnit === "R/h" ? `${Math.round(DEFAULT_RATE_PER_S * 3600)} (default)` : `${DEFAULT_RATE_PER_S} (default)`}
+                  title="Empty: the default R0.21/s (R756/h)"
+                  onCommit={(n) => price({ rate_per_s: n > 0 ? (rateUnit === "R/h" ? n / 3600 : n) : 0 })}
+                />
+                <select style={{ ...S.input, width: 82 }} value={rateUnit} disabled={busy} onChange={(e) => price({ rate_unit: e.target.value })}>
+                  <option value="R/s">R/s</option>
+                  <option value="R/h">R/h</option>
+                </select>
+              </div>
+            ) : (
+              <div style={{ fontSize: 15 }}>
+                {rateUnit === "R/h" ? `R ${Math.round((s.rate_per_s || DEFAULT_RATE_PER_S) * 3600 * 100) / 100}/h` : `R ${s.rate_per_s || DEFAULT_RATE_PER_S}/s`}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {canSeeValue && (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 6 }}>

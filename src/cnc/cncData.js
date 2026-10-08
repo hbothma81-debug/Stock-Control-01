@@ -5,6 +5,7 @@
 
 import { supabase } from "../lib/supabaseClient.js";
 import { barSizeOf, findBarPrice, kgPerMetre, materialPricing, sameSize } from "./pricing.js";
+import { DEFAULT_SETUP_PRICE } from "./cncRules.js";
 import { COSTING_KEYS, costingPart, dayInSA, engineErrorText, exportRows, faultText, stockText, MAX_STEP_BYTES } from "./cncRules.js";
 
 // The engine (ERS TURNING APP, its own repository and Vercel project). It
@@ -73,7 +74,7 @@ export async function loadProgram(id) {
 // kept with the program, never sent, because the engine refuses a key it
 // does not know.
 function forEngine(settings) {
-  const { price_by: _b, piece_price: _p, ...rest } = settings || {};
+  const { price_by: _b, piece_price: _p, rate_unit: _r, ...rest } = settings || {};
   return rest;
 }
 
@@ -175,7 +176,12 @@ export function engineSettings({ settings, material, programNo, size = null }) {
     gradePrice: material?.price,
     kgm: size ? kgPerMetre(size.od, size.id, material?.density) : 0,
   });
-  return { ...out, ...send };
+  // Setup: the program's own price per job, else R750 for every program,
+  // old ones included (Heinrich, 8 Oct 2026). Machine rate: the program's
+  // own, else none sent and the engine's R0.21/s.
+  const extraCost = { setup_price: Number(rest.setup_price) > 0 ? Number(rest.setup_price) : DEFAULT_SETUP_PRICE };
+  if (!(Number(rest.rate_per_s) > 0)) delete out.rate_per_s;
+  return { ...out, ...send, ...extraCost };
 }
 
 // One engine run priced for the bar it is cut from. The bar is often only
