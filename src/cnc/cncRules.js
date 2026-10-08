@@ -278,7 +278,12 @@ export function pipeLabel(pipe) {
 // R750 when a program has none) and the machine rate (rate_per_s, Rand per
 // second, the engine's R0.21 when none), typed as R/s or R/h (rate_unit,
 // how the box shows it; not sent).
-export const COSTING_KEYS = ["qty", "parts_per_bar", "bar_length", "price_by", "piece_price", "setup_price", "rate_per_s", "rate_unit"];
+//
+// And the stock bar a bar-puller job is cut from (stock_length, 6000 by
+// the engine when none) and whether every bar bought is charged to the job
+// (charge_all_material, unticked by default): Heinrich, 8 Oct 2026, the B&W
+// bolt bought as 2 x 6 m and cut into 998 mm puller bars.
+export const COSTING_KEYS = ["qty", "parts_per_bar", "bar_length", "price_by", "piece_price", "setup_price", "rate_per_s", "rate_unit", "stock_length", "charge_all_material"];
 
 export function costingPart(settings) {
   const out = {};

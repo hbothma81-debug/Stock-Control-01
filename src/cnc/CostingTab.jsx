@@ -49,6 +49,24 @@ export default function CostingTab({ program, current, shown, materials, barPric
   const fallback = Number(material?.price) > 0 ? bothUnits(material.price, "R/kg", kgm) : null;
   const mayPrice = canEdit && canSeeValue && !busy;
   const rateUnit = s.rate_unit === "R/h" ? "R/h" : "R/s";
+  // A bar-puller job buys stock bars and cuts them into puller bars: two
+  // sections (Heinrich, 8 Oct 2026). Known from the engine's answer
+  // (costing.stock) or the program's own holding.
+  const stock = costing?.stock || null;
+  const puller = !!stock || s.holding === "bar puller";
+  const sectionBox = { border: `1px solid ${C.border}`, borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 6 };
+  const num = (v, dp = 0) => (v == null ? "–" : Number(v).toLocaleString(undefined, { maximumFractionDigits: dp }));
+  const chargeAllTick = (
+    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, cursor: canEdit ? "pointer" : "default" }}>
+      <input
+        type="checkbox"
+        checked={!!s.charge_all_material}
+        disabled={!canEdit || busy}
+        onChange={(e) => price({ charge_all_material: e.target.checked })}
+      />
+      Charge all material to this job
+    </label>
+  );
 
   async function price(changes) {
     setError("");
@@ -63,9 +81,11 @@ export default function CostingTab({ program, current, shown, materials, barPric
         setup_price: s.setup_price,
         rate_per_s: s.rate_per_s,
         rate_unit: s.rate_unit,
+        stock_length: s.stock_length,
+        charge_all_material: s.charge_all_material,
         ...changes,
       };
-      for (const k of Object.keys(costingSettings)) if (costingSettings[k] == null || costingSettings[k] === 0 || costingSettings[k] === "") delete costingSettings[k];
+      for (const k of Object.keys(costingSettings)) if (costingSettings[k] == null || costingSettings[k] === 0 || costingSettings[k] === "" || costingSettings[k] === false) delete costingSettings[k];
       onProgramSaved(await recost({ program, current, material, costingSettings }));
     } catch (err) {
       setError(err.message || String(err));
@@ -254,24 +274,91 @@ export default function CostingTab({ program, current, shown, materials, barPric
         </div>
       )}
 
-      <div style={S.formGrid}>
-        <div>
-          <label style={S.label}>Bar length (mm)</label>
-          {canEdit ? (
-            <NumberBox style={S.input} value={s.bar_length} placeholder="Engine's choice" onCommit={(n) => price({ bar_length: n })} />
-          ) : (
-            <div style={{ fontSize: 15 }}>{s.bar_length || "Engine's choice"}</div>
-          )}
+      {puller ? (
+        <>
+          <div style={sectionBox}>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>Stock bar (as bought)</div>
+            <div style={S.formGrid}>
+              <div>
+                <label style={S.label}>Stock length (mm)</label>
+                {canEdit ? (
+                  <NumberBox style={S.input} value={s.stock_length} placeholder="6000 (default)" onCommit={(n) => price({ stock_length: n })} />
+                ) : (
+                  <div style={{ fontSize: 15 }}>{s.stock_length || 6000}</div>
+                )}
+              </div>
+              <div style={{ alignSelf: "end" }}>{chargeAllTick}</div>
+            </div>
+            {stock && (
+              <div style={{ fontSize: 13.5, display: "flex", flexDirection: "column", gap: 2 }}>
+                <div>
+                  {num(stock.stock_bars_needed)} stock bar{Number(stock.stock_bars_needed) === 1 ? "" : "s"} of {num(stock.stock_length_mm)} mm, each cut into {num(stock.puller_bars_per_stock_bar)} puller bars ({num(stock.saw_kerf_mm, 1)} mm saw cut)
+                </div>
+                <div>
+                  {num(stock.puller_bars_left)} puller bar{Number(stock.puller_bars_left) === 1 ? "" : "s"} left, {num(stock.unused_mm)} mm unused
+                  {canSeeValue && stock.unused_cost != null ? ` (${rand(stock.unused_cost)})` : ""}:{" "}
+                  {stock.charge_all_material ? <b>charged to this job</b> : "back to stock, not charged"}
+                </div>
+                {canSeeValue && (
+                  <div style={{ color: C.muted }}>
+                    A stock bar costs {rand(stock.stock_bar_cost)}; this job is charged {rand(stock.charged_cost)} of material.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <div style={sectionBox}>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>Puller bar (cut from the stock bar)</div>
+            <div style={S.formGrid}>
+              <div>
+                <label style={S.label}>Puller bar length (mm)</label>
+                {canEdit ? (
+                  <NumberBox style={S.input} value={s.bar_length} placeholder="Engine's choice (998)" onCommit={(n) => price({ bar_length: n })} />
+                ) : (
+                  <div style={{ fontSize: 15 }}>{s.bar_length || "Engine's choice"}</div>
+                )}
+              </div>
+              <div>
+                <label style={S.label}>Parts per puller bar</label>
+                <div style={{ fontSize: 15, paddingTop: 6 }}>{num(costing?.parts_per_bar)}</div>
+              </div>
+            </div>
+            {costing?.offcut && (
+              <div style={{ fontSize: 13.5, display: "flex", flexDirection: "column", gap: 2 }}>
+                <div>
+                  {num(stock?.puller_bars_needed ?? costing.offcut.bars_needed)} puller bars of {num(stock?.puller_bar_mm ?? costing.offcut.bar_length_mm)} mm, {num(costing.offcut.offcut_mm, 1)} mm offcut on each
+                  {costing.offcut.puller_waste_mm ? ` (incl. ${num(costing.offcut.puller_waste_mm)} mm puller waste)` : ""}
+                </div>
+                {costing.offcut.batch_offcut_mm != null && (
+                  <div>
+                    Offcut for the order {num(costing.offcut.batch_offcut_mm, 1)} mm{canSeeValue && costing.offcut.batch_cost != null ? `, charged ${rand(costing.offcut.batch_cost)}` : ""}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </>
+      ) : (
+        <div style={S.formGrid}>
+          <div>
+            <label style={S.label}>Bar length (mm)</label>
+            {canEdit ? (
+              <NumberBox style={S.input} value={s.bar_length} placeholder="Engine's choice" onCommit={(n) => price({ bar_length: n })} />
+            ) : (
+              <div style={{ fontSize: 15 }}>{s.bar_length || "Engine's choice"}</div>
+            )}
+          </div>
+          <div>
+            <label style={S.label}>Parts per bar</label>
+            {canEdit ? (
+              <NumberBox style={S.input} value={s.parts_per_bar} placeholder="Engine's choice" onCommit={(n) => price({ parts_per_bar: Math.round(n) })} />
+            ) : (
+              <div style={{ fontSize: 15 }}>{s.parts_per_bar || "Engine's choice"}</div>
+            )}
+          </div>
+          {priceBy !== "piece" && <div style={{ gridColumn: "1 / -1" }}>{chargeAllTick}</div>}
         </div>
-        <div>
-          <label style={S.label}>Parts per bar</label>
-          {canEdit ? (
-            <NumberBox style={S.input} value={s.parts_per_bar} placeholder="Engine's choice" onCommit={(n) => price({ parts_per_bar: Math.round(n) })} />
-          ) : (
-            <div style={{ fontSize: 15 }}>{s.parts_per_bar || "Engine's choice"}</div>
-          )}
-        </div>
-      </div>
+      )}
       {canEdit && (
         <button type="button" className="stk-btn" style={{ ...S.chip, alignSelf: "flex-start" }} disabled={busy || !current} onClick={() => price({})}>
           <RefreshCw size={13} /> {busy ? "Pricing…" : "Price again"}
