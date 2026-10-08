@@ -4,7 +4,10 @@
 // its batch size (costing.offcut, costing.wastage); no sums here except
 // the total line, which shows the four costs add up to the material per
 // part (wastageRows in cncRules.js). Rand only with "Can see Rand values".
-// The offcut is always charged (his answer).
+// The offcut is always charged (his answer), and whole bars are bought per
+// order and charged in full: the engine's offcut.batch_cost is all the bar
+// the order does not use, offcut_per_part_cost that over the batch, and a
+// 1-off pays one whole bar (one_off_material). Heinrich, 8 Oct 2026.
 
 import { C } from "../theme.js";
 import { rand, wastageRows } from "./cncRules.js";
@@ -63,10 +66,15 @@ function OffcutTab({ costing, canSeeValue }) {
     ["Bar puller waste", o.puller_waste_mm ? `${num(o.puller_waste_mm)} mm` : "none"],
     ["Offcut per bar", `${num(o.offcut_mm, 1)} mm · ${num(o.offcut_kg, 3)} kg`],
     ["Bars for the batch", num(o.bars_needed)],
-    ["Charged", o.charged ? "Yes, always" : "No"],
+    ...(o.batch_offcut_mm != null ? [["Offcut for the whole order", `${num(o.batch_offcut_mm, 1)} mm (every bar bought, less the parts)`]] : []),
+    ["Charged", o.charged ? "Yes, always: the whole bars bought for the order" : "No"],
   ];
   if (canSeeValue) {
-    rows.push(["Cost of a bar", rand(o.bar_cost)], ["Offcut cost per bar", rand(o.offcut_cost)], ["Offcut cost per part", rand(o.offcut_per_part_cost)]);
+    rows.push(["Cost of a bar", rand(o.bar_cost)]);
+    if (o.batch_cost != null) rows.push(["Offcut charged for the order", rand(o.batch_cost)]);
+    else rows.push(["Offcut cost per bar", rand(o.offcut_cost)]);
+    rows.push(["Offcut cost per part", rand(o.offcut_per_part_cost)]);
+    if (costing.one_off_material != null) rows.push(["Material for a 1-off (one whole bar)", rand(costing.one_off_material)]);
   }
   return <Grid rows={rows} />;
 }
