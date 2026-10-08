@@ -28,6 +28,11 @@ export const NAV_TABS = [
   { key: "production", label: "Production" },
   { key: "laser4kw", label: "Laser 4kw" },
   { key: "tubeLaser", label: "Tube Laser" },
+  // The CNC tab (src/cnc), shown with the CNC View tick. permissions.cnc
+  // also carries "delete" (Can delete CNC programs, src/UserManagement.jsx);
+  // the database asks the same three questions in cnc_may
+  // (setup-cnc-1-access.sql).
+  { key: "cnc", label: "CNC" },
   ...TABS,
   { key: "requisitions", label: "Requisitions" },
   { key: "purchaseOrders", label: "Purchase Orders" },
@@ -185,12 +190,6 @@ export const LASER_MACHINES = {
 export const EXTRA_SECTIONS = [
   { key: "notifications", label: "Notifications" },
   { key: "invoiceRequests", label: "Invoice Requests (in Invoicing)" },
-  // The CNC tick (8 Oct 2026), ahead of the CNC tab itself: the tick is
-  // set first so the database's rules have someone to let in. It moves to
-  // NAV_TABS when the tab is built. permissions.cnc also carries "delete"
-  // (Can delete CNC programs, src/UserManagement.jsx); the database asks
-  // the same three questions in cnc_may (setup-cnc-1-access.sql).
-  { key: "cnc", label: "CNC" },
 ];
 
 export const SECTIONS = ["plate", "structural", "cncBar", "custom", "stores", "fasteners", "assets", "drawings", "deliveryNotes", "invoiceRequests", "processSheets", "poReports", "jobs", "cnc"];

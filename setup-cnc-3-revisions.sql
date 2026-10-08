@@ -22,7 +22,7 @@ create table if not exists public.cnc_program_revisions (
   warnings      jsonb not null default '[]'::jsonb,
   problems      jsonb not null default '[]'::jsonb,
   cycle_s       numeric,
-  tool_s        numeric,
+  tool_s        jsonb,
   costing       jsonb,
   settings      jsonb,
   step_path     text,

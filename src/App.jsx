@@ -182,6 +182,7 @@ import { PurchasingPopups, RequestStockPopups } from "./purchasing/PurchasingPop
 import CustomerStock from "./stock/CustomerStock.jsx";
 import { useDrawingsState, useDrawings } from "./drawings/useDrawings.jsx";
 import { DrawingsTab, DrawingUploadPopup } from "./drawings/DrawingsScreens.jsx";
+import CncTab from "./cnc/CncTab.jsx";
 import { useAssetsState, useAssets } from "./assets/useAssets.jsx";
 import { AssetRemovePopup, AssetHistoryPopup, ServiceNowPopup, RepairListPopup } from "./assets/AssetPopups.jsx";
 
@@ -17826,6 +17827,24 @@ export default function StockControl() {
       ) : tab === "drawings" ? (
         <ErrorBoundary key="drawings" box what="the Drawings tab">
           <DrawingsTab ctx={drawingsCtx} />
+        </ErrorBoundary>
+      ) : tab === "cnc" ? (
+        // The CNC module (src/cnc): it reads and saves everything itself
+        // and is handed only the lists and ticks below. Materials are
+        // Stock Manager's CNC Bar Grades, priced as every screen prices
+        // them (findPrice), by Heinrich's choice of one list (8 Oct 2026).
+        <ErrorBoundary key="cnc" box what="the CNC tab">
+          <CncTab
+            customers={master.customers}
+            materials={(master.cncGrades || []).map((g) => ({
+              name: g.shortName || g.name,
+              price: findPrice("cncGrades", g.name),
+              density: g.factor,
+            }))}
+            canEdit={canEditQty("cnc")}
+            canDelete={isAdmin || !!profile?.permissions?.cnc?.delete}
+            userName={profile?.name || profile?.email || ""}
+          />
         </ErrorBoundary>
       ) : (
         <>

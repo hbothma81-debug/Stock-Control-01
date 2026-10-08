@@ -195,7 +195,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-cnc-4-numbers.sql', 'function take_cnc_program_number',
       exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'take_cnc_program_number')),
     ('setup-cnc-5-files.sql', 'file store cnc-files',
-      exists (select 1 from storage.buckets where id = 'cnc-files'))
+      exists (select 1 from storage.buckets where id = 'cnc-files')),
+    ('setup-cnc-6-tool-times.sql', 'column cnc_program_revisions.tool_s holds a time per tool',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_program_revisions' and column_name = 'tool_s' and data_type = 'jsonb'))
 )
 select
   setup_file,

@@ -1,0 +1,181 @@
+// Every call the CNC tab makes: the cnc_ tables, the cnc-files store and
+// the program engine. Kept in the module (not borrowed from App.jsx) so the
+// CNC tab can be lifted out whole and sold. The rules the database applies
+// are in setup-cnc-1..5.sql; what they mean on screen is in cncRules.js.
+
+import { supabase } from "../lib/supabaseClient.js";
+import { engineErrorText, faultText, stockText, MAX_STEP_BYTES } from "./cncRules.js";
+
+// The engine (ERS TURNING APP, its own repository and Vercel project). It
+// answers only a signed-in user of this app's databases, practice or live.
+export const ENGINE_URL = "https://turnpath.vercel.app/api/generate";
+
+const BUCKET = "cnc-files";
+
+// What a list line needs, and nothing heavier: the settings, program text
+// and STEP files are read only when a program is opened.
+const LIST_COLUMNS = "id, program_no, part_name, customer, material, stock, current_rev, status, fault, updated_at";
+
+// Every program, a page at a time (a plain select stops at 1000 rows with
+// no error), paged by id so no row is skipped or repeated where pages meet.
+export async function loadPrograms() {
+  const rows = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase.from("cnc_programs").select(LIST_COLUMNS).order("id").range(from, from + PAGE - 1);
+    if (error) throw error;
+    rows.push(...data);
+    if (data.length < PAGE) break;
+  }
+  return rows;
+}
+
+// One program, opened: its row and every revision, oldest first.
+export async function loadProgram(id) {
+  const [{ data: program, error: e1 }, { data: revisions, error: e2 }] = await Promise.all([
+    supabase.from("cnc_programs").select("*").eq("id", id).single(),
+    supabase.from("cnc_program_revisions").select("*").eq("program_id", id).order("created_at"),
+  ]);
+  if (e1) throw e1;
+  if (e2) throw e2;
+  return { program, revisions };
+}
+
+// The engine, with the signed-in person's token. Throws an Error whose
+// message is already in plain words.
+export async function runEngine({ name, stepText, settings }) {
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  if (!token) throw new Error(engineErrorText(401, null));
+  let res;
+  try {
+    res = await fetch(ENGINE_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ name, step: stepText, settings }),
+    });
+  } catch {
+    throw new Error(engineErrorText(0, null));
+  }
+  let body = null;
+  try {
+    body = await res.json();
+  } catch {
+    body = null;
+  }
+  if (!res.ok || !body) throw new Error(engineErrorText(res.status, body));
+  return body;
+}
+
+// The settings sent to the engine: the questionnaire plus the material,
+// its price and weight from Stock Manager's CNC Bar Grades (Heinrich,
+// 8 Oct 2026: one list). No price is sent for a grade without one, and the
+// engine then costs it at R30/kg.
+export function engineSettings({ settings, material, programNo }) {
+  const out = { ...settings, program_no: programNo };
+  if (material?.name) out.material = material.name;
+  if (Number(material?.price) > 0) {
+    out.material_price = Number(material.price);
+    out.price_unit = "R/kg";
+  }
+  if (Number(material?.density) > 0) out.density = Number(material.density);
+  return out;
+}
+
+// A revision row from the engine's answer. The letter is the database's
+// (setup-cnc-3-revisions.sql), which also makes it the program's current
+// revision in the same save.
+function revisionRow({ programId, result, settings, stepPath, stepName, userName }) {
+  return {
+    program_id: programId,
+    source: "generated",
+    programs: result.programs || [],
+    report: typeof result.report === "string" ? result.report : JSON.stringify(result.report ?? ""),
+    ready: !!result.ready,
+    fault: faultText(result),
+    fails: result.fails || [],
+    warnings: result.warnings || [],
+    problems: result.problems || [],
+    cycle_s: result.cycle_s ?? null,
+    tool_s: result.tool_s ?? null,
+    costing: result.costing ?? null,
+    settings,
+    step_path: stepPath,
+    step_name: stepName,
+    created_by: userName || "",
+  };
+}
+
+// New program: the next free number (or the one typed), the engine, the
+// STEP file, the program row, revision A. The number is taken first
+// because the engine writes it into the program; a number taken for an
+// engine run that then fails is simply skipped. A page closed between the
+// program row and its revision leaves a program with no revision, which
+// the program screen says and Update program mends.
+export async function createProgram({ partName, customer, material, settings, programNo, stepFile, userName }) {
+  if (stepFile.size > MAX_STEP_BYTES) {
+    throw new Error(`The STEP file is ${Math.round(stepFile.size / 1000)} kB; the engine takes up to ${MAX_STEP_BYTES / 1000} kB.`);
+  }
+  const stepText = await stepFile.text();
+  let number = programNo;
+  if (!number) {
+    const { data, error } = await supabase.rpc("take_cnc_program_number");
+    if (error) throw new Error(error.hint === "cnc_not_allowed" ? error.message : `No program number could be taken: ${error.message}`);
+    number = data;
+  }
+  const sent = engineSettings({ settings, material, programNo: number });
+  const result = await runEngine({ name: partName, stepText, settings: sent });
+
+  const id = crypto.randomUUID();
+  const stepPath = `${id}/A/${stepFile.name}`;
+  const up = await supabase.storage.from(BUCKET).upload(stepPath, stepFile, { contentType: "text/plain" });
+  if (up.error) throw new Error(`The STEP file could not be stored: ${up.error.message}. Nothing was saved.`);
+
+  const { error: e1 } = await supabase.from("cnc_programs").insert({
+    id,
+    program_no: number,
+    part_name: partName,
+    customer: customer || "",
+    material: material?.name || "",
+    stock: stockText(sent, result.costing),
+    settings: sent,
+    created_by: userName || "",
+  });
+  if (e1) {
+    await supabase.storage.from(BUCKET).remove([stepPath]);
+    throw new Error(e1.hint === "cnc_number_taken" ? e1.message : `The program could not be saved: ${e1.message}`);
+  }
+  const { error: e2 } = await supabase
+    .from("cnc_program_revisions")
+    .insert(revisionRow({ programId: id, result, settings: sent, stepPath, stepName: stepFile.name, userName }));
+  if (e2) throw new Error(`O${number} was saved but its revision was not: ${e2.message}. Open it and press Update program.`);
+  return id;
+}
+
+// Every file filed under a program (<id>/<rev>/<file>), including one left
+// by a save that stopped before its revision was written.
+async function programFiles(programId) {
+  const store = supabase.storage.from(BUCKET);
+  const { data: revs } = await store.list(programId);
+  const paths = [];
+  for (const r of revs || []) {
+    if (r.id) {
+      paths.push(`${programId}/${r.name}`);
+      continue;
+    }
+    const { data: files } = await store.list(`${programId}/${r.name}`);
+    for (const f of files || []) paths.push(`${programId}/${r.name}/${f.name}`);
+  }
+  return paths;
+}
+
+// Delete a program: the row (its revisions go with it), then its files.
+// Only admins and the delete tick may; the database refuses anyone else
+// and nothing is removed.
+export async function deleteProgram(program) {
+  const paths = await programFiles(program.id);
+  const { data, error } = await supabase.from("cnc_programs").delete().eq("id", program.id).select("id");
+  if (error) throw error;
+  if (!data?.length) throw new Error("The database did not delete it: only admins and people with the CNC delete tick may.");
+  if (paths.length) await supabase.storage.from(BUCKET).remove(paths);
+}
