@@ -348,3 +348,15 @@ export function wastageRows(w, materialPerPart) {
     stockKg: n(w.stock_kg),
   };
 }
+
+// What the job is charged for offcut and wastage (Heinrich, 8 Oct 2026:
+// shown on the Costing sheet, divided by the batch quantity): the engine's
+// batch figure when it sends one (wastage.batch_waste_cost), otherwise its
+// per-part waste cost times the batch. perPart = batch / qty.
+export function wasteCharged(costing) {
+  const w = costing?.wastage;
+  if (!w) return null;
+  const qty = Number(costing.qty) || 1;
+  const batch = w.batch_waste_cost != null ? Number(w.batch_waste_cost) : Number(w.waste_cost || 0) * qty;
+  return { qty, batch: Math.round(batch * 100) / 100, perPart: Math.round((batch / qty) * 100) / 100 };
+}

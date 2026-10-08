@@ -18,7 +18,7 @@ import { RefreshCw } from "lucide-react";
 import NumberBox from "../manager/NumberBox.jsx";
 import { C, S } from "../theme.js";
 import { recost, saveBarPrice } from "./cncData.js";
-import { DEFAULT_RATE_PER_S, DEFAULT_SETUP_PRICE, costingFigures, rand } from "./cncRules.js";
+import { DEFAULT_RATE_PER_S, DEFAULT_SETUP_PRICE, costingFigures, rand, wasteCharged } from "./cncRules.js";
 import { PRICED_BY, barSizeOf, bothUnits, findBarPrice, kgPerMetre, materialPricing, sizeLabel } from "./pricing.js";
 
 const minSec = (s) => (s == null ? "–" : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`);
@@ -40,6 +40,7 @@ export default function CostingTab({ program, current, shown, materials, barPric
   const priceBy = s.price_by || "kg";
   const costing = program.costing || current?.costing || null;
   const f = costingFigures(costing);
+  const charged = wasteCharged(costing);
   const size = barSizeOf(s, costing);
   const kgm = size ? kgPerMetre(size.od, size.id, material?.density) : 0;
   const sizeRow = findBarPrice(barPrices, program.material, size);
@@ -118,6 +119,12 @@ export default function CostingTab({ program, current, shown, materials, barPric
               Batch total {rand(f.batchTotal)} · material at{" "}
               {f.materialPrice != null ? (f.materialUnit === "billet" ? `R ${f.materialPrice} a piece` : `R ${f.materialPrice}${f.materialUnit ? f.materialUnit.replace(/^R/, "") : ""}`) : "–"}
               {f.barsNeeded != null ? ` · ${f.barsNeeded} bar${f.barsNeeded === 1 ? "" : "s"}` : ""}
+            </div>
+          )}
+          {canSeeValue && charged && (
+            <div style={{ fontSize: 14 }}>
+              Offcut and wastage charged: <b>{rand(charged.batch)}</b> for the batch of {charged.qty}, {rand(charged.perPart)} a part
+              <span style={{ color: C.muted }}> (chips, saw kerf and the offcut; see Offcut &amp; wastage)</span>
             </div>
           )}
           {f.notes.length > 0 && (
