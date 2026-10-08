@@ -269,7 +269,11 @@ export function pipeLabel(pipe) {
 // carried into every new revision, because the questionnaire does not show
 // them: the batch quantity (Heinrich, 8 Oct 2026: keep the batch size, a
 // change of quantity updates the price), the bar length and parts per bar.
-export const COSTING_KEYS = ["qty", "parts_per_bar", "bar_length"];
+//
+// Also how the material is priced (price_by: kg, m or piece) and the
+// price per piece, both per program (Heinrich, 8 Oct 2026); neither is an
+// engine setting, so runEngine leaves them out of what it sends.
+export const COSTING_KEYS = ["qty", "parts_per_bar", "bar_length", "price_by", "piece_price"];
 
 export function costingPart(settings) {
   const out = {};

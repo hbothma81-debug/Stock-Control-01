@@ -30,7 +30,7 @@ const CHIP_ON = { ...chipActiveRest, border: `1px solid ${C.accentFinished}` };
 
 const SOURCE = { generated: "Generated", machine_copy: "Machine copy" };
 
-export default function ProgramView({ id, canEdit, canDelete, customers, materials, pipes, shapes, canSeeValue, onSaveMaterialPrice, userName, onBack, onDeleted }) {
+export default function ProgramView({ id, canEdit, canDelete, customers, materials, pipes, shapes, canSeeValue, barPrices, onBarPrices, userName, onBack, onDeleted }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("program");
@@ -268,9 +268,12 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
           current={current}
           shown={shown}
           materials={materials}
+          barPrices={barPrices}
+          pipes={pipes}
           canEdit={canEdit}
           canSeeValue={canSeeValue}
-          onSaveMaterialPrice={onSaveMaterialPrice}
+          userName={userName}
+          onBarPrices={onBarPrices}
           onProgramSaved={(row) => setData((d) => ({ ...d, program: row }))}
         />
       )}

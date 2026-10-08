@@ -15,7 +15,7 @@ import { FileSpreadsheet, Plus, RefreshCw } from "lucide-react";
 import Section from "../Section.jsx";
 import ErrorBoundary from "../ErrorBoundary.jsx";
 import { C, F, S } from "../theme.js";
-import { exportPrograms, loadEngineList, loadPrograms } from "./cncData.js";
+import { exportPrograms, loadBarPrices, loadEngineList, loadPrograms } from "./cncData.js";
 import { oNumber, splitPrograms } from "./cncRules.js";
 import NewProgram from "./NewProgram.jsx";
 import ProgramView from "./ProgramView.jsx";
@@ -40,6 +40,9 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
   // The engine's lists: undefined while asked, null when the engine has none.
   const [shapes, setShapes] = useState(undefined);
   const [pipes, setPipes] = useState(undefined);
+  // Each bar size's price (cnc_bar_prices), read once when the tab opens
+  // and handed back by every save.
+  const [barPrices, setBarPrices] = useState([]);
 
   async function refresh() {
     setLoading(true);
@@ -57,6 +60,7 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
     if (programs === null) refresh();
     loadEngineList("shapes").then(setShapes);
     loadEngineList("pipes").then(setPipes);
+    loadBarPrices().then(setBarPrices);
   }, []);
 
   const subTabs = (
@@ -87,7 +91,17 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
       <div style={S.list}>
         {subTabs}
         <ErrorBoundary box what="the Materials list">
-          <MaterialsList materials={materials} canEdit={canEdit} canSeeValue={canSeeValue} onSavePrice={onSaveMaterialPrice} onAdd={onAddMaterial} />
+          <MaterialsList
+            materials={materials}
+            barPrices={barPrices}
+            pipes={pipes || null}
+            canEdit={canEdit}
+            canSeeValue={canSeeValue}
+            userName={userName}
+            onSavePrice={onSaveMaterialPrice}
+            onAdd={onAddMaterial}
+            onBarPrices={setBarPrices}
+          />
         </ErrorBoundary>
       </div>
     );
@@ -173,7 +187,8 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
           pipes={pipes || null}
           shapes={shapes || null}
           canSeeValue={canSeeValue}
-          onSaveMaterialPrice={onSaveMaterialPrice}
+          barPrices={barPrices}
+          onBarPrices={setBarPrices}
           userName={userName}
           onBack={() => {
             refresh();

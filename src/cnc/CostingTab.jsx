@@ -1,22 +1,25 @@
 // A program's Costing tab: machine time, material, the price per part at
 // its batch size and the 1-off price, every figure from the engine (its
-// costing block); this screen does no sums (Heinrich, 8 Oct 2026).
+// costing block); this screen does no sums of money (Heinrich, 8 Oct 2026).
 //
-// The batch quantity, bar length and parts per bar are kept with the
-// program; changing one prices it again and saves the new price, which is
-// what a quote reads. The material price is the grade's on Stock Manager ->
-// CNC Bar Grades (R30/kg when it has none), and a price typed here is
-// saved to that grade, for every program and the rest of the app.
+// Kept with the program: the batch quantity, bar length, parts per bar,
+// how the material is priced (Priced by: per kg, per metre, or per piece
+// from an outside supplier) and the price per piece. Changing one prices
+// the program again and saves the new price, which is what a quote reads.
+// Per kg and per metre use the bar size's own price (cnc_bar_prices, kept
+// as typed; the other unit worked out from the bar's weight, pricing.js),
+// else the grade's R/kg on CNC Bar Grades, else R30/kg.
 //
 // Money shows only with "Can see Rand values"; changing anything needs the
-// CNC Edit tick, and the material price needs Rand values too.
+// CNC Edit tick, and a price needs Rand values too.
 
 import { useState } from "react";
 import { RefreshCw } from "lucide-react";
 import NumberBox from "../manager/NumberBox.jsx";
 import { C, S } from "../theme.js";
-import { recost } from "./cncData.js";
+import { recost, saveBarPrice } from "./cncData.js";
 import { costingFigures, rand } from "./cncRules.js";
+import { PRICED_BY, barSizeOf, bothUnits, findBarPrice, kgPerMetre, materialPricing, sizeLabel } from "./pricing.js";
 
 const minSec = (s) => (s == null ? "–" : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`);
 
@@ -29,24 +32,36 @@ function Box({ label, value }) {
   );
 }
 
-export default function CostingTab({ program, current, shown, materials, canEdit, canSeeValue, onSaveMaterialPrice, onProgramSaved }) {
+export default function CostingTab({ program, current, shown, materials, barPrices, pipes, canEdit, canSeeValue, userName, onBarPrices, onProgramSaved }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const material = (materials || []).find((m) => m.name === program.material) || null;
   const s = program.settings || {};
+  const priceBy = s.price_by || "kg";
   const costing = program.costing || current?.costing || null;
   const f = costingFigures(costing);
-  const mayChange = canEdit && !busy && !!current;
-  const priceNow = Number(material?.price) > 0 ? Number(material.price) : null;
-  const priceChanged = f && priceNow != null && f.materialPrice != null && Math.abs(priceNow - f.materialPrice) > 0.005;
+  const size = barSizeOf(s, costing);
+  const kgm = size ? kgPerMetre(size.od, size.id, material?.density) : 0;
+  const sizeRow = findBarPrice(barPrices, program.material, size);
+  const pricing = materialPricing({ priceBy, piecePrice: s.piece_price, sizeRow, gradePrice: material?.price, kgm });
+  const units = sizeRow ? bothUnits(sizeRow.price, sizeRow.unit, kgm) : { perKg: null, perM: null };
+  const fallback = Number(material?.price) > 0 ? bothUnits(material.price, "R/kg", kgm) : null;
+  const mayPrice = canEdit && canSeeValue && !busy;
 
-  async function price(changes, materialNow = material) {
+  async function price(changes) {
     setError("");
     setBusy(true);
     try {
-      const costingSettings = { qty: s.qty ?? 1, parts_per_bar: s.parts_per_bar, bar_length: s.bar_length, ...changes };
-      for (const k of Object.keys(costingSettings)) if (costingSettings[k] == null || costingSettings[k] === 0) delete costingSettings[k];
-      onProgramSaved(await recost({ program, current, material: materialNow, costingSettings }));
+      const costingSettings = {
+        qty: s.qty ?? 1,
+        parts_per_bar: s.parts_per_bar,
+        bar_length: s.bar_length,
+        price_by: s.price_by,
+        piece_price: s.piece_price,
+        ...changes,
+      };
+      for (const k of Object.keys(costingSettings)) if (costingSettings[k] == null || costingSettings[k] === 0 || costingSettings[k] === "") delete costingSettings[k];
+      onProgramSaved(await recost({ program, current, material, costingSettings }));
     } catch (err) {
       setError(err.message || String(err));
     } finally {
@@ -54,12 +69,32 @@ export default function CostingTab({ program, current, shown, materials, canEdit
     }
   }
 
+  // A bar size's price typed in either unit is kept as typed, then the
+  // program is priced again with it.
+  async function setBarPrice(n, unit) {
+    setError("");
+    if (!size || !material) return;
+    try {
+      onBarPrices(await saveBarPrice({ grade: material.name, size, price: n, unit, userName }));
+      await price({});
+    } catch (err) {
+      setError(err.message || String(err));
+    }
+  }
+
+  const unitBox = (unit, value, ph) =>
+    mayPrice && size ? (
+      <NumberBox style={S.input} value={value ?? 0} placeholder={ph} title={`Saved as ${program.material} ${sizeLabel(size, pipes)}'s price, ${unit}`} onCommit={(n) => setBarPrice(n, unit)} />
+    ) : (
+      <div style={{ fontSize: 15 }}>{canSeeValue ? (value != null ? `R ${value}` : ph ? `R ${ph}` : "–") : "–"}</div>
+    );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {shown && current && shown.id !== current.id && (
         <div style={{ fontSize: 13, color: C.muted }}>The price is for the current revision, rev {current.rev}.</div>
       )}
-      {!f && <div style={{ color: C.muted, fontSize: 14 }}>No price yet: set the batch quantity below.</div>}
+      {!f && <div style={{ color: C.muted, fontSize: 14 }}>No price yet: press Price again below.</div>}
       {f && (
         <>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -76,7 +111,8 @@ export default function CostingTab({ program, current, shown, materials, canEdit
           </div>
           {canSeeValue && (
             <div style={{ fontSize: 14 }}>
-              Batch total {rand(f.batchTotal)} · material at {f.materialPrice != null ? `R ${f.materialPrice}${f.materialUnit ? f.materialUnit.replace(/^R/, "") : ""}` : "–"}
+              Batch total {rand(f.batchTotal)} · material at{" "}
+              {f.materialPrice != null ? (f.materialUnit === "billet" ? `R ${f.materialPrice} a piece` : `R ${f.materialPrice}${f.materialUnit ? f.materialUnit.replace(/^R/, "") : ""}`) : "–"}
               {f.barsNeeded != null ? ` · ${f.barsNeeded} bar${f.barsNeeded === 1 ? "" : "s"}` : ""}
             </div>
           )}
@@ -115,22 +151,58 @@ export default function CostingTab({ program, current, shown, materials, canEdit
           )}
         </div>
         <div>
-          <label style={S.label}>Material price R/kg ({program.material || "no grade"})</label>
-          {canEdit && canSeeValue && material ? (
-            <NumberBox
-              style={S.input}
-              value={material.ownPrice}
-              placeholder={priceNow != null ? String(priceNow) : "30 (not priced)"}
-              title="Saved to Stock Manager → CNC Bar Grades, for every program"
-              onCommit={(n) => {
-                onSaveMaterialPrice(material.fullName, n);
-                price({}, { ...material, price: n > 0 ? n : material.price });
-              }}
-            />
+          <label style={S.label}>Material priced by</label>
+          {canEdit && canSeeValue ? (
+            <select style={S.input} value={priceBy} disabled={busy} onChange={(e) => price({ price_by: e.target.value })}>
+              {PRICED_BY.map((p) => (
+                <option key={p.value} value={p.value}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
           ) : (
-            <div style={{ fontSize: 15 }}>{canSeeValue ? (priceNow != null ? `R ${priceNow}` : "R 30 (not priced)") : "–"}</div>
+            <div style={{ fontSize: 15 }}>{PRICED_BY.find((p) => p.value === priceBy)?.label}</div>
           )}
         </div>
+      </div>
+
+      {canSeeValue && (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+          {priceBy === "piece" ? (
+            <div style={S.formGrid}>
+              <div>
+                <label style={S.label}>Price per piece from the supplier (R)</label>
+                {mayPrice ? (
+                  <NumberBox style={S.input} value={s.piece_price} placeholder="Price a piece" onCommit={(n) => price({ piece_price: n })} />
+                ) : (
+                  <div style={{ fontSize: 15 }}>{s.piece_price ? `R ${s.piece_price}` : "–"}</div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>
+                {program.material || "No grade"} {size ? sizeLabel(size, pipes) : ""}
+                {size && kgm > 0 ? <span style={{ fontWeight: 400, color: C.muted }}> · {Math.round(kgm * 100) / 100} kg/m</span> : null}
+              </div>
+              {!size && <div style={{ fontSize: 13, color: C.muted }}>The bar size is known after the first price: press Price again.</div>}
+              <div style={S.formGrid}>
+                <div>
+                  <label style={S.label}>R/kg{priceBy === "kg" ? " (used)" : ""}</label>
+                  {unitBox("R/kg", units.perKg, fallback?.perKg != null ? String(fallback.perKg) : "30")}
+                </div>
+                <div>
+                  <label style={S.label}>R/m{priceBy === "m" ? " (used)" : ""}</label>
+                  {unitBox("R/m", units.perM, fallback?.perM != null ? String(fallback.perM) : "")}
+                </div>
+              </div>
+            </>
+          )}
+          <div style={{ fontSize: 13, color: C.muted }}>Priced from {pricing.from}.</div>
+        </div>
+      )}
+
+      <div style={S.formGrid}>
         <div>
           <label style={S.label}>Bar length (mm)</label>
           {canEdit ? (
@@ -148,13 +220,8 @@ export default function CostingTab({ program, current, shown, materials, canEdit
           )}
         </div>
       </div>
-      {priceChanged && canSeeValue && (
-        <div style={{ color: C.accentRaw, fontSize: 14 }}>
-          {program.material} is R {priceNow}/kg now; this price used R {f.materialPrice}.
-        </div>
-      )}
       {canEdit && (
-        <button type="button" className="stk-btn" style={{ ...S.chip, alignSelf: "flex-start" }} disabled={!mayChange} onClick={() => price({})}>
+        <button type="button" className="stk-btn" style={{ ...S.chip, alignSelf: "flex-start" }} disabled={busy || !current} onClick={() => price({})}>
           <RefreshCw size={13} /> {busy ? "Pricing…" : "Price again"}
         </button>
       )}

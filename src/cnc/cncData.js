@@ -4,6 +4,7 @@
 // are in setup-cnc-1..5.sql; what they mean on screen is in cncRules.js.
 
 import { supabase } from "../lib/supabaseClient.js";
+import { barSizeOf, findBarPrice, kgPerMetre, materialPricing, sameSize } from "./pricing.js";
 import { COSTING_KEYS, costingPart, dayInSA, engineErrorText, exportRows, faultText, stockText, MAX_STEP_BYTES } from "./cncRules.js";
 
 // The engine (ERS TURNING APP, its own repository and Vercel project). It
@@ -68,6 +69,14 @@ export async function loadProgram(id) {
   return { program, revisions };
 }
 
+// The program's own settings that are not the engine's (how it is priced):
+// kept with the program, never sent, because the engine refuses a key it
+// does not know.
+function forEngine(settings) {
+  const { price_by: _b, piece_price: _p, ...rest } = settings || {};
+  return rest;
+}
+
 // The engine, with the signed-in person's token. Throws an Error whose
 // message is already in plain words.
 export async function runEngine({ name, stepText, settings, extra = {} }) {
@@ -79,7 +88,7 @@ export async function runEngine({ name, stepText, settings, extra = {} }) {
     res = await fetch(ENGINE_URL, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ ...extra, name, step: stepText, settings }),
+      body: JSON.stringify({ ...extra, name, step: stepText, settings: forEngine(settings) }),
     });
   } catch {
     throw new Error(engineErrorText(0, null));
@@ -114,23 +123,78 @@ export function loadEngineList(kind) {
   return engineLists[kind];
 }
 
+// The price of each bar size of a grade (cnc_bar_prices,
+// setup-cnc-9-bar-prices.sql): read when the CNC tab opens and after a
+// price is saved, held here for every engine run. A database without the
+// table reads as no prices, and every bar then takes its grade's R/kg.
+let barPricesHeld = [];
+export function getBarPrices() {
+  return barPricesHeld;
+}
+export async function loadBarPrices() {
+  const { data, error } = await supabase.from("cnc_bar_prices").select("*").order("id").range(0, 4999);
+  if (error) {
+    console.warn("CNC bar prices could not be read:", error.message);
+    barPricesHeld = [];
+  } else barPricesHeld = data || [];
+  return barPricesHeld;
+}
+
+// A bar size's price, as typed: added, or changed when the size has one.
+export async function saveBarPrice({ grade, size, price, unit, userName }) {
+  const { error } = await supabase
+    .from("cnc_bar_prices")
+    .upsert({ grade, od: size.od, id_mm: size.id, price, unit, updated_by: userName || "" }, { onConflict: "grade,od,id_mm" })
+    .select("id");
+  if (error) throw new Error(`The bar price was not saved: ${error.message}`);
+  return loadBarPrices();
+}
+
+export async function removeBarPrice(id) {
+  const { data, error } = await supabase.from("cnc_bar_prices").delete().eq("id", id).select("id");
+  if (error || !data?.length) throw new Error(`The bar price was not removed: ${error?.message || "the database changed nothing"}`);
+  return loadBarPrices();
+}
+
 // The settings sent to the engine: the questionnaire plus the material,
-// its price and weight from Stock Manager's CNC Bar Grades (Heinrich,
-// 8 Oct 2026: one list). No price is sent for a grade without one, and the
-// engine then costs it at R30/kg.
-export function engineSettings({ settings, material, programNo }) {
-  // The price and weight are always the grade's of today: an old one kept
-  // in saved settings is dropped first, so a price taken off the grade
-  // goes back to the engine's R30/kg.
+// its weight (CNC Bar Grades) and its price by the way the program is
+// priced (pricing.js materialPricing): the bar size's own price, else the
+// grade's R/kg, else nothing and the engine's R30/kg. size is the bar the
+// program is cut from, when known.
+export function engineSettings({ settings, material, programNo, size = null }) {
+  // The price and weight are always today's: an old one kept in saved
+  // settings is dropped first.
   const { material_price: _p, price_unit: _u, density: _d, ...rest } = settings || {};
   const out = { ...rest, program_no: programNo };
   if (material?.name) out.material = material.name;
-  if (Number(material?.price) > 0) {
-    out.material_price = Number(material.price);
-    out.price_unit = "R/kg";
-  }
   if (Number(material?.density) > 0) out.density = Number(material.density);
-  return out;
+  const { send } = materialPricing({
+    priceBy: rest.price_by || "kg",
+    piecePrice: rest.piece_price,
+    sizeRow: findBarPrice(barPricesHeld, material?.name, size),
+    gradePrice: material?.price,
+    kgm: size ? kgPerMetre(size.od, size.id, material?.density) : 0,
+  });
+  return { ...out, ...send };
+}
+
+// One engine run priced for the bar it is cut from. The bar is often only
+// known from the engine's answer (it picks the smallest that fits), so
+// when that bar has a price of its own that differs from what was sent,
+// the engine is asked once more with it.
+async function runPriced({ name, stepText, settings, material, programNo, extra = {}, barHint = null }) {
+  const size = barSizeOf(settings, null) || barHint;
+  let sent = engineSettings({ settings, material, programNo, size });
+  let result = await runEngine({ name, stepText, settings: sent, extra });
+  const actual = barSizeOf(settings, result.costing);
+  if (actual && !sameSize(actual, size)) {
+    const again = engineSettings({ settings, material, programNo, size: actual });
+    if (again.material_price !== sent.material_price || again.price_unit !== sent.price_unit) {
+      result = await runEngine({ name, stepText, settings: again, extra });
+      sent = again;
+    }
+  }
+  return { result, sent };
 }
 
 // A revision row from the engine's answer. The letter is the database's
@@ -181,8 +245,7 @@ export async function createProgram({ partName, customer, material, settings, pr
     if (error) throw new Error(error.hint === "cnc_not_allowed" ? error.message : `No program number could be taken: ${error.message}`);
     number = data;
   }
-  const sent = engineSettings({ settings, material, programNo: number });
-  const result = await runEngine({ name: partName, stepText, settings: sent, extra: quick ? { quick } : {} });
+  const { result, sent } = await runPriced({ name: partName, stepText, settings, material, programNo: number, extra: quick ? { quick } : {} });
 
   const id = crypto.randomUUID();
   const stepPath = stepFile ? `${id}/A/${stepFile.name}` : null;
@@ -227,16 +290,14 @@ export async function recost({ program, current, material, costingSettings }) {
   // The Costing tab sends all three costing figures; one left out is cleared.
   const base = { ...(program.settings || {}) };
   for (const k of COSTING_KEYS) delete base[k];
-  const settings = engineSettings({
+  const { result, sent: settings } = await runPriced({
+    name: program.part_name,
+    stepText: step?.text,
     settings: { ...base, ...costingSettings },
     material,
     programNo: program.program_no,
-  });
-  const result = await runEngine({
-    name: program.part_name,
-    stepText: step?.text,
-    settings,
     extra: { action: "check", programs: current.programs || [], ...(quick ? { quick } : {}) },
+    barHint: barSizeOf({}, program.costing || current.costing),
   });
   if (!result.costing) throw new Error("The engine did not send a price back.");
   const { data, error } = await supabase
@@ -268,10 +329,13 @@ export async function storedStep(programId, rev) {
 export async function runUpdate({ program, partName, current, material, settings, stepFile, quick = null, step: stepRead = null }) {
   // The batch size and bar figures are set on the Costing tab, not in the
   // questionnaire: carried from the program so an update keeps them.
-  const sentNow = engineSettings({ settings: { ...costingPart(program.settings), ...settings }, material, programNo: program.program_no });
+  const base = { ...costingPart(program.settings), ...settings };
+  const barHint = barSizeOf({}, program.costing || current?.costing);
+  const priced = (stepText, extra) =>
+    runPriced({ name: partName || program.part_name, stepText, settings: base, material, programNo: program.program_no, extra, barHint });
   if (quick) {
-    const result = await runEngine({ name: partName || program.part_name, settings: sentNow, extra: { quick } });
-    return { result, sent: sentNow, step: null, quick };
+    const { result, sent } = await priced(undefined, { quick });
+    return { result, sent, step: null, quick };
   }
   let step;
   if (stepFile) {
@@ -285,8 +349,8 @@ export async function runUpdate({ program, partName, current, material, settings
     step = await storedStep(program.id, current);
     if (!step) throw new Error("No STEP file is stored for this program: choose one.");
   }
-  const result = await runEngine({ name: partName || program.part_name, stepText: step.text, settings: sentNow });
-  return { result, sent: sentNow, step, quick: null };
+  const { result, sent } = await priced(step.text, {});
+  return { result, sent, step, quick: null };
 }
 
 // Update program, second half: the new revision (the database gives its

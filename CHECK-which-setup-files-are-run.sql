@@ -201,7 +201,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-cnc-7-shapes.sql', 'column cnc_programs.quick (programs made from a shape)',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_programs' and column_name = 'quick')),
     ('setup-cnc-8-costing.sql', 'column cnc_programs.costing (the price at the batch size)',
-      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_programs' and column_name = 'costing'))
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_programs' and column_name = 'costing')),
+    ('setup-cnc-9-bar-prices.sql', 'table cnc_bar_prices (a price per bar size)',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_bar_prices'))
 )
 select
   setup_file,
