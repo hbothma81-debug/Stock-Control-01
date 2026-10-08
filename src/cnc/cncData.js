@@ -310,6 +310,23 @@ export async function recost({ program, current, material, costingSettings }) {
   return data;
 }
 
+// The Toolpath tab: the engine's check on a revision's own program text
+// (a machine copy is drawn as the operator edited it), for its moves, the
+// material left after each side and the setup. Nothing is saved; the
+// moves are not kept in the database (agreed with the engine, 8 Oct 2026).
+export async function loadToolpath({ program, rev }) {
+  if (!rev) throw new Error("This program has no revision to draw: press Update program first.");
+  const quick = rev.quick || program.quick || null;
+  const step = quick ? null : await storedStep(program.id, rev);
+  if (!step && !quick) throw new Error("No STEP file is stored for this program, so the toolpath cannot be drawn.");
+  return runEngine({
+    name: program.part_name,
+    stepText: step?.text,
+    settings: rev.settings || program.settings || {},
+    extra: { action: "check", programs: rev.programs || [], ...(quick ? { quick } : {}) },
+  });
+}
+
 // The STEP model a program was last made from: the shown revision's file,
 // or for a program whose revision was never saved, the file filed under it.
 export async function storedStep(programId, rev) {

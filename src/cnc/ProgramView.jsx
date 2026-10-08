@@ -16,9 +16,11 @@ import UpdateProgram from "./UpdateProgram.jsx";
 import ImportMachineCopy from "./ImportMachineCopy.jsx";
 import CostingTab from "./CostingTab.jsx";
 import TurnAround from "./TurnAround.jsx";
+import ToolpathTab from "./ToolpathTab.jsx";
 
 const TABS = [
   { key: "program", label: "Program" },
+  { key: "toolpath", label: "Toolpath" },
   { key: "settings", label: "Settings" },
   { key: "costing", label: "Costing" },
 ];
@@ -39,6 +41,8 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
   const [updating, setUpdating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [turning, setTurning] = useState(false);
+  // The engine's toolpath answers, per revision, while the program is open.
+  const [toolpaths, setToolpaths] = useState({});
   // What the last Copy to USB or Download did, in words.
   const [outNote, setOutNote] = useState(null);
   // Bumped after a save, so the program and its revisions are read again.
@@ -262,6 +266,7 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
       </div>
 
       {tab === "program" && shown && <ProgramText rev={shown} />}
+      {tab === "toolpath" && <ToolpathTab program={p} rev={shown} answers={toolpaths} setAnswers={setToolpaths} />}
       {tab === "costing" && (
         <CostingTab
           program={p}
