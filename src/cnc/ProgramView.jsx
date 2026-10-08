@@ -14,10 +14,12 @@ import { oNumber, pipeLabel, programFiles, settingText } from "./cncRules.js";
 import { canWriteToFolder, copyToFolder, downloadFiles } from "./programOut.js";
 import UpdateProgram from "./UpdateProgram.jsx";
 import ImportMachineCopy from "./ImportMachineCopy.jsx";
+import CostingTab from "./CostingTab.jsx";
 
 const TABS = [
   { key: "program", label: "Program" },
   { key: "settings", label: "Settings" },
+  { key: "costing", label: "Costing" },
 ];
 
 // S.chipActive sets borderColor, which React will not mix with S.chip's
@@ -27,7 +29,7 @@ const CHIP_ON = { ...chipActiveRest, border: `1px solid ${C.accentFinished}` };
 
 const SOURCE = { generated: "Generated", machine_copy: "Machine copy" };
 
-export default function ProgramView({ id, canEdit, canDelete, customers, materials, pipes, shapes, userName, onBack, onDeleted }) {
+export default function ProgramView({ id, canEdit, canDelete, customers, materials, pipes, shapes, canSeeValue, onSaveMaterialPrice, userName, onBack, onDeleted }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("program");
@@ -233,6 +235,18 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
       </div>
 
       {tab === "program" && shown && <ProgramText rev={shown} />}
+      {tab === "costing" && (
+        <CostingTab
+          program={p}
+          current={current}
+          shown={shown}
+          materials={materials}
+          canEdit={canEdit}
+          canSeeValue={canSeeValue}
+          onSaveMaterialPrice={onSaveMaterialPrice}
+          onProgramSaved={(row) => setData((d) => ({ ...d, program: row }))}
+        />
+      )}
       {tab === "settings" && <SettingsList program={p} rev={shown} pipes={pipes} shapes={shapes} />}
     </div>
   );

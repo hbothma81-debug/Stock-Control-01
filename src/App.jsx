@@ -17838,9 +17838,14 @@ export default function StockControl() {
             customers={master.customers}
             materials={(master.cncGrades || []).map((g) => ({
               name: g.shortName || g.name,
+              fullName: g.name,
               price: findPrice("cncGrades", g.name),
+              ownPrice: g.price,
               density: g.factor,
             }))}
+            canSeeValue={canSeeValue}
+            onSaveMaterialPrice={(name, price) => setMaterialPrice("cncGrades", name, price)}
+            onAddMaterial={(name, density, price) => setMaterialPrice("cncGrades", name, price, { factor: density })}
             canEdit={canEditQty("cnc")}
             canDelete={isAdmin || !!profile?.permissions?.cnc?.delete}
             userName={profile?.name || profile?.email || ""}

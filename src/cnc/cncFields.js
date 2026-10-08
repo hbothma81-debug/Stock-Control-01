@@ -8,6 +8,10 @@
 // Mirrors job.py: a field added to the engine is added here; a key the
 // live engine does not know is refused by it (400 "unknown settings"),
 // which is why only filled-in fields are ever sent (cleanSettings).
+//
+// The batch quantity, bar length and parts per bar are set on the Costing
+// tab, not here (COSTING_KEYS in cncRules.js), and carried into every new
+// revision from the program.
 
 export const STOCK_TYPES = [
   { value: "bar", label: "Solid bar" },
@@ -78,5 +82,4 @@ export const CNC_FIELDS = [
     ],
     blank: "engine decides",
   },
-  { key: "qty", label: "Quantity (for costing)", kind: "number", whole: true, blank: "1" },
 ];

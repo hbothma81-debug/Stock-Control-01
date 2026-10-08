@@ -20,13 +20,14 @@ import { oNumber, splitPrograms } from "./cncRules.js";
 import NewProgram from "./NewProgram.jsx";
 import ProgramView from "./ProgramView.jsx";
 import ShapeIcon from "./ShapeIcon.jsx";
+import MaterialsList from "./MaterialsList.jsx";
 
 // S.chipActive sets borderColor, which React will not mix with S.chip's
 // border shorthand once a chip switches on; the whole border is given.
 const { borderColor: _unused, ...chipActiveRest } = S.chipActive;
 const CHIP_ON = { ...chipActiveRest, border: `1px solid ${C.accentFinished}` };
 
-export default function CncTab({ customers, materials, canEdit, canDelete, userName }) {
+export default function CncTab({ customers, materials, canEdit, canDelete, canSeeValue, onSaveMaterialPrice, onAddMaterial, userName }) {
   const [programs, setPrograms] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -63,6 +64,7 @@ export default function CncTab({ customers, materials, canEdit, canDelete, userN
       {[
         ["list", "Programs"],
         ["shapes", "Shapes"],
+        ["materials", "Materials"],
       ].map(([key, label]) => (
         <button
           key={key}
@@ -79,6 +81,17 @@ export default function CncTab({ customers, materials, canEdit, canDelete, userN
       ))}
     </div>
   );
+
+  if (screen === "materials") {
+    return (
+      <div style={S.list}>
+        {subTabs}
+        <ErrorBoundary box what="the Materials list">
+          <MaterialsList materials={materials} canEdit={canEdit} canSeeValue={canSeeValue} onSavePrice={onSaveMaterialPrice} onAdd={onAddMaterial} />
+        </ErrorBoundary>
+      </div>
+    );
+  }
 
   if (screen === "shapes") {
     return (
@@ -159,6 +172,8 @@ export default function CncTab({ customers, materials, canEdit, canDelete, userN
           materials={materials}
           pipes={pipes || null}
           shapes={shapes || null}
+          canSeeValue={canSeeValue}
+          onSaveMaterialPrice={onSaveMaterialPrice}
           userName={userName}
           onBack={() => {
             refresh();

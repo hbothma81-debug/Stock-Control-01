@@ -264,3 +264,41 @@ export function cleanSizes(shape, form) {
 export function pipeLabel(pipe) {
   return pipe?.nb ? `${pipe.nb}NB (${pipe.nps}")` : `${pipe?.nps}"`;
 }
+
+// What the Costing tab sets, kept with the program (its settings) and
+// carried into every new revision, because the questionnaire does not show
+// them: the batch quantity (Heinrich, 8 Oct 2026: keep the batch size, a
+// change of quantity updates the price), the bar length and parts per bar.
+export const COSTING_KEYS = ["qty", "parts_per_bar", "bar_length"];
+
+export function costingPart(settings) {
+  const out = {};
+  for (const k of COSTING_KEYS) if (settings?.[k] != null && settings[k] !== "") out[k] = settings[k];
+  return out;
+}
+
+// The money and time a reviewer reads off the engine's costing block (plain
+// numbers, ERS TURNING APP quote.py). Rand to the cent, time in seconds.
+export function costingFigures(costing) {
+  if (!costing) return null;
+  const n = (v) => (v == null || v === "" || Number.isNaN(Number(v)) ? null : Number(v));
+  return {
+    qty: n(costing.qty),
+    machineS: n(costing.machine_s ?? costing.part_s ?? costing.cycle_s),
+    cycleS: n(costing.cycle_s),
+    kgPerPart: n(costing.kg_per_part),
+    materialPerPart: n(costing.material_per_part),
+    pricePerPart: n(costing.price_per_part),
+    batchTotal: n(costing.batch_total),
+    oneOff: n(costing.one_off_price),
+    materialPrice: n(costing.material_price),
+    materialUnit: costing.material_unit || "",
+    barsNeeded: n(costing.bars_needed),
+    notes: Array.isArray(costing.notes) ? costing.notes.map(String) : [],
+  };
+}
+
+export function rand(v) {
+  if (v == null) return "–";
+  return "R " + Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}

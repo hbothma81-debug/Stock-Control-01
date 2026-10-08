@@ -199,7 +199,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-cnc-6-tool-times.sql', 'column cnc_program_revisions.tool_s holds a time per tool',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_program_revisions' and column_name = 'tool_s' and data_type = 'jsonb')),
     ('setup-cnc-7-shapes.sql', 'column cnc_programs.quick (programs made from a shape)',
-      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_programs' and column_name = 'quick'))
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_programs' and column_name = 'quick')),
+    ('setup-cnc-8-costing.sql', 'column cnc_programs.costing (the price at the batch size)',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_programs' and column_name = 'costing'))
 )
 select
   setup_file,

@@ -4,7 +4,7 @@
 // are in setup-cnc-1..5.sql; what they mean on screen is in cncRules.js.
 
 import { supabase } from "../lib/supabaseClient.js";
-import { dayInSA, engineErrorText, exportRows, faultText, stockText, MAX_STEP_BYTES } from "./cncRules.js";
+import { COSTING_KEYS, costingPart, dayInSA, engineErrorText, exportRows, faultText, stockText, MAX_STEP_BYTES } from "./cncRules.js";
 
 // The engine (ERS TURNING APP, its own repository and Vercel project). It
 // answers only a signed-in user of this app's databases, practice or live.
@@ -119,7 +119,11 @@ export function loadEngineList(kind) {
 // 8 Oct 2026: one list). No price is sent for a grade without one, and the
 // engine then costs it at R30/kg.
 export function engineSettings({ settings, material, programNo }) {
-  const out = { ...settings, program_no: programNo };
+  // The price and weight are always the grade's of today: an old one kept
+  // in saved settings is dropped first, so a price taken off the grade
+  // goes back to the engine's R30/kg.
+  const { material_price: _p, price_unit: _u, density: _d, ...rest } = settings || {};
+  const out = { ...rest, program_no: programNo };
   if (material?.name) out.material = material.name;
   if (Number(material?.price) > 0) {
     out.material_price = Number(material.price);
@@ -196,6 +200,7 @@ export async function createProgram({ partName, customer, material, settings, pr
     material: material?.name || "",
     stock: stockText(sent, result.costing, await loadEngineList("pipes")),
     settings: sent,
+    costing: result.costing ?? null,
     created_by: userName || "",
   });
   if (e1) {
@@ -207,6 +212,41 @@ export async function createProgram({ partName, customer, material, settings, pr
     .insert(revisionRow({ programId: id, result, settings: sent, stepPath, stepName: stepFile?.name || null, userName, quick }));
   if (e2) throw new Error(`O${number} was saved but its revision was not: ${e2.message}. Open it and press Update program.`);
   return id;
+}
+
+// The Costing tab: the program's current revision priced at a batch size,
+// bar length and material price (the engine's check on the revision's own
+// program text, so a machine copy is priced by what runs). Then saved with
+// the program: the batch size in its settings and the price in costing
+// (setup-cnc-8-costing.sql), which is what a quote reads.
+export async function recost({ program, current, material, costingSettings }) {
+  if (!current) throw new Error("This program has no revision to price: press Update program first.");
+  const quick = current.quick || program.quick || null;
+  const step = quick ? null : await storedStep(program.id, current);
+  if (!step && !quick) throw new Error("No STEP file is stored for this program, so it cannot be priced.");
+  // The Costing tab sends all three costing figures; one left out is cleared.
+  const base = { ...(program.settings || {}) };
+  for (const k of COSTING_KEYS) delete base[k];
+  const settings = engineSettings({
+    settings: { ...base, ...costingSettings },
+    material,
+    programNo: program.program_no,
+  });
+  const result = await runEngine({
+    name: program.part_name,
+    stepText: step?.text,
+    settings,
+    extra: { action: "check", programs: current.programs || [], ...(quick ? { quick } : {}) },
+  });
+  if (!result.costing) throw new Error("The engine did not send a price back.");
+  const { data, error } = await supabase
+    .from("cnc_programs")
+    .update({ settings, costing: result.costing })
+    .eq("id", program.id)
+    .select("*")
+    .single();
+  if (error) throw new Error(`The price was worked out but not saved: ${error.message}`);
+  return data;
 }
 
 // The STEP model a program was last made from: the shown revision's file,
@@ -224,7 +264,9 @@ export async function storedStep(programId, rev) {
 // the new STEP, when one is chosen) with the program's own number. Nothing
 // is saved: the screen shows what changed, and saveUpdate saves it.
 export async function runUpdate({ program, partName, current, material, settings, stepFile, quick = null }) {
-  const sentNow = engineSettings({ settings, material, programNo: program.program_no });
+  // The batch size and bar figures are set on the Costing tab, not in the
+  // questionnaire: carried from the program so an update keeps them.
+  const sentNow = engineSettings({ settings: { ...costingPart(program.settings), ...settings }, material, programNo: program.program_no });
   if (quick) {
     const result = await runEngine({ name: partName || program.part_name, settings: sentNow, extra: { quick } });
     return { result, sent: sentNow, step: null, quick };
@@ -269,6 +311,7 @@ export async function saveUpdate({ program, run, letter, partName, customer, mat
       customer: customer || "",
       material: material?.name || "",
       stock: stockText(sent, result.costing, await loadEngineList("pipes")),
+      costing: result.costing ?? null,
     })
     .eq("id", program.id)
     .select("id");
@@ -332,6 +375,10 @@ export async function saveMachineCopy({ program, current, programs, check, fileN
   };
   const { data, error } = await supabase.from("cnc_program_revisions").insert(row).select("rev").single();
   if (error) throw new Error(`The machine copy could not be saved: ${error.message}`);
+  if (r?.costing) {
+    const { data: rows, error: e2 } = await supabase.from("cnc_programs").update({ costing: r.costing }).eq("id", program.id).select("id");
+    if (e2 || !rows?.length) throw new Error(`Rev ${data.rev} was saved, but its price was not: ${e2?.message || "the database changed nothing"}.`);
+  }
   return data.rev;
 }
 

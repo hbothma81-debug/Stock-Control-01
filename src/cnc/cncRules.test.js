@@ -19,10 +19,10 @@ test("a typed number reads a comma as the decimal point and refuses words", () =
 
 test("only filled-in questions are sent to the engine, in its own types", () => {
   const { settings, errors } = cleanSettings({
-    stock_type: "tube", bar_dia: "71", bar_id: "50", grip1: "", pulls: "63, 33", nose_comp: true, qty: "20", side1: "",
+    stock_type: "tube", bar_dia: "71", bar_id: "50", grip1: "", pulls: "63, 33", nose_comp: true, side1: "",
   });
   assert.deepEqual(errors, []);
-  assert.deepEqual(settings, { stock_type: "tube", bar_dia: 71, bar_id: 50, pulls: [63, 33], nose_comp: true, qty: 20 });
+  assert.deepEqual(settings, { stock_type: "tube", bar_dia: 71, bar_id: 50, pulls: [63, 33], nose_comp: true });
 });
 
 test("pulls may be typed with spaces or semicolons, and a comma with no space is a decimal", () => {
@@ -31,9 +31,9 @@ test("pulls may be typed with spaces or semicolons, and a comma with no space is
 });
 
 test("a nonsense answer is named, not sent", () => {
-  const { settings, errors } = cleanSettings({ bar_dia: "fifty", qty: "2.5", pulls: "63, x" });
+  const { settings, errors } = cleanSettings({ bar_dia: "fifty", pulls: "63, x" });
   assert.deepEqual(settings, {});
-  assert.deepEqual(errors, ["Bar / tube OD (mm)", "Pulls (mm each, e.g. 63, 33)", "Quantity (for costing)"]);
+  assert.deepEqual(errors, ["Bar / tube OD (mm)", "Pulls (mm each, e.g. 63, 33)"]);
 });
 
 test("saved settings come back into the form as typed", () => {
@@ -201,4 +201,25 @@ test("shape sizes: a size with no default must be typed, one with a default may 
 test("pipe sizes in shop words", () => {
   assert.equal(pipeLabel({ nps: "4", nb: 100 }), '100NB (4")');
   assert.equal(pipeLabel({ nps: "1-1/4" }), '1-1/4"');
+});
+
+import { costingPart, costingFigures, rand } from "./cncRules.js";
+
+test("the batch size and bar figures are carried; nothing else", () => {
+  assert.deepEqual(costingPart({ qty: 20, bar_length: 3000, material: "EN8", parts_per_bar: "" }), { qty: 20, bar_length: 3000 });
+  assert.deepEqual(costingPart(null), {});
+});
+
+test("the costing figures read off the engine's block", () => {
+  const f = costingFigures({ qty: 20, machine_s: 252.4, cycle_s: 219.5, kg_per_part: 1.23, material_per_part: 36.9, price_per_part: 245.1, batch_total: 4902, one_off_price: 1012.5, material_price: 30, material_unit: "R/kg", notes: ["no material price sent - default R30/kg"] });
+  assert.equal(f.pricePerPart, 245.1);
+  assert.equal(f.oneOff, 1012.5);
+  assert.equal(f.machineS, 252.4);
+  assert.deepEqual(f.notes, ["no material price sent - default R30/kg"]);
+  assert.equal(costingFigures(null), null);
+});
+
+test("Rand to the cent", () => {
+  assert.match(rand(1012.5), /^R 1.012,50$|^R 1 012,50$|^R 1,012.50$/);
+  assert.equal(rand(null), "–");
 });
