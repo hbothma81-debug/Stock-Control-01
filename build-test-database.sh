@@ -117,6 +117,7 @@ ORDER=(
   setup-cnc-4-numbers.sql
   setup-cnc-5-files.sql
   setup-cnc-6-tool-times.sql
+  setup-cnc-7-shapes.sql
 )
 
 OUT=setup-ALL.sql

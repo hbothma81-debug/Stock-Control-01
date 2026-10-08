@@ -9,7 +9,7 @@ import TypeToFind from "../TypeToFind.jsx";
 import { C, S } from "../theme.js";
 import SettingsBoxes from "./SettingsBoxes.jsx";
 
-export default function ProgramFields({ fields, setFields, customers, materials, settingsOpen = false, moreAbove = null }) {
+export default function ProgramFields({ fields, setFields, customers, materials, pipes = null, settingsOpen = false, moreAbove = null }) {
   const set = (key) => (v) => setFields((f) => ({ ...f, [key]: v ?? "" }));
   return (
     <>
@@ -39,7 +39,7 @@ export default function ProgramFields({ fields, setFields, customers, materials,
       </div>
       <Section title="More settings" defaultOpen={settingsOpen} quiet>
         {moreAbove}
-        <SettingsBoxes form={fields.form} setForm={(fn) => setFields((f) => ({ ...f, form: typeof fn === "function" ? fn(f.form) : fn }))} />
+        <SettingsBoxes pipes={pipes} form={fields.form} setForm={(fn) => setFields((f) => ({ ...f, form: typeof fn === "function" ? fn(f.form) : fn }))} />
       </Section>
     </>
   );

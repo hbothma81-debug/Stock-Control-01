@@ -197,7 +197,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-cnc-5-files.sql', 'file store cnc-files',
       exists (select 1 from storage.buckets where id = 'cnc-files')),
     ('setup-cnc-6-tool-times.sql', 'column cnc_program_revisions.tool_s holds a time per tool',
-      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_program_revisions' and column_name = 'tool_s' and data_type = 'jsonb'))
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_program_revisions' and column_name = 'tool_s' and data_type = 'jsonb')),
+    ('setup-cnc-7-shapes.sql', 'column cnc_programs.quick (programs made from a shape)',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_programs' and column_name = 'quick'))
 )
 select
   setup_file,

@@ -19,7 +19,7 @@ export const CNC_FIELDS = [
   { key: "stock_type", label: "Stock", kind: "choice", choices: STOCK_TYPES, blank: "Solid bar" },
   { key: "bar_dia", label: "Bar / tube OD (mm)", kind: "number", blank: "smallest standard bar that fits" },
   { key: "bar_id", label: "Tube ID (mm)", kind: "number", blank: "solid" },
-  { key: "nps", label: "Pipe size (NPS)", kind: "text", blank: "engine picks" },
+  { key: "nps", label: "Pipe size", kind: "text", blank: "engine picks" },
   { key: "schedule", label: "Pipe schedule", kind: "text", blank: "engine picks" },
   {
     key: "holding",

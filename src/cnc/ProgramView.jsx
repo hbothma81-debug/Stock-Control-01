@@ -10,7 +10,7 @@ import { ArrowLeft, Download, FileInput, RefreshCw, Trash2, Usb } from "lucide-r
 import { C, F, S } from "../theme.js";
 import { deleteProgram, loadProgram } from "./cncData.js";
 import { CNC_FIELDS } from "./cncFields.js";
-import { oNumber, programFiles, settingText } from "./cncRules.js";
+import { oNumber, pipeLabel, programFiles, settingText } from "./cncRules.js";
 import { canWriteToFolder, copyToFolder, downloadFiles } from "./programOut.js";
 import UpdateProgram from "./UpdateProgram.jsx";
 import ImportMachineCopy from "./ImportMachineCopy.jsx";
@@ -27,7 +27,7 @@ const CHIP_ON = { ...chipActiveRest, border: `1px solid ${C.accentFinished}` };
 
 const SOURCE = { generated: "Generated", machine_copy: "Machine copy" };
 
-export default function ProgramView({ id, canEdit, canDelete, customers, materials, userName, onBack, onDeleted }) {
+export default function ProgramView({ id, canEdit, canDelete, customers, materials, pipes, shapes, userName, onBack, onDeleted }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("program");
@@ -83,6 +83,8 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
   if (updating) {
     return (
       <UpdateProgram
+        pipes={pipes}
+        shapes={shapes}
         program={p}
         revisions={revisions}
         current={current}
@@ -231,7 +233,7 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
       </div>
 
       {tab === "program" && shown && <ProgramText rev={shown} />}
-      {tab === "settings" && <SettingsList program={p} rev={shown} />}
+      {tab === "settings" && <SettingsList program={p} rev={shown} pipes={pipes} shapes={shapes} />}
     </div>
   );
 }
@@ -296,13 +298,29 @@ function listBlock(title, items, colour) {
 
 // The answers that made the shown revision (or the program's own, for a
 // program with no revision), each blank one saying what the engine did.
-function SettingsList({ program, rev }) {
+//
+// A program made from a shape lists its shape and sizes first; a pipe size
+// reads in the shop's words where the engine's pipe list is to hand.
+function SettingsList({ program, rev, pipes, shapes }) {
   const s = rev?.settings || program.settings || {};
+  const quick = rev?.quick || program.quick || null;
+  const shape = quick ? (shapes || []).find((x) => x.key === quick.shape) : null;
+  const sizeRows = quick
+    ? [
+        ["Shape", shape ? shape.name : quick.shape],
+        ...Object.entries(quick.sizes || {}).map(([k, v]) => {
+          const f = shape?.fields.find((x) => x.key === k);
+          return [f ? `${f.label}${f.unit ? ` (${f.unit})` : ""}` : k, String(v)];
+        }),
+      ]
+    : [["STEP model", rev?.step_name || "none"]];
+  const pipe = s.nps ? (pipes || []).find((x) => String(x.nps) === String(s.nps)) : null;
   const rows = [
+    ...sizeRows,
     ["Customer", program.customer || "none"],
     ["Material", program.material || "Engine's choice: EN8"],
     ["Program number", oNumber(s.program_no ?? program.program_no)],
-    ...CNC_FIELDS.map((f) => [f.label, settingText(f, s[f.key])]),
+    ...CNC_FIELDS.map((f) => [f.label, f.key === "nps" && pipe ? pipeLabel(pipe) : settingText(f, s[f.key])]),
   ];
   return (
     <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 14px", fontSize: 14 }}>

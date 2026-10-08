@@ -237,3 +237,27 @@ export function exportRows(programs, cycleBy = {}) {
       };
     });
 }
+
+// A shape's typed sizes (the engine's own list, GET ?shapes=1: each field
+// has a key, a label, a unit and maybe a default). A field with no default
+// must be typed; an empty one with a default is left for the engine.
+export function cleanSizes(shape, form) {
+  const sizes = {};
+  const missing = [];
+  const bad = [];
+  for (const f of shape?.fields || []) {
+    const n = readNumber(form?.[f.key]);
+    if (n === null) {
+      if (f.default === undefined || f.default === null) missing.push(f.label);
+      continue;
+    }
+    if (Number.isNaN(n) || n < 0) bad.push(f.label);
+    else sizes[f.key] = n;
+  }
+  return { sizes, missing, bad };
+}
+
+// A pipe size as the shop says it: "100NB (4")".
+export function pipeLabel(pipe) {
+  return pipe?.nb ? `${pipe.nb}NB (${pipe.nps}")` : `${pipe?.nps}"`;
+}

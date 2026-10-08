@@ -94,6 +94,26 @@ export async function runEngine({ name, stepText, settings, extra = {} }) {
   return body;
 }
 
+// The engine's own lists (no sign-in, no data of ours): the Shapes
+// (GET ?shapes=1) and the pipe sizes with their schedules (GET ?pipes=1).
+// Read once per page load. An engine that does not have a list yet answers
+// its health check instead, and that reads as null: the Shapes screen says
+// so, and Pipe size and Schedule stay typed boxes.
+const engineLists = {};
+export function loadEngineList(kind) {
+  if (!engineLists[kind]) {
+    engineLists[kind] = fetch(`${ENGINE_URL}?${kind}=1`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body) => (Array.isArray(body?.[kind]) ? body[kind] : null))
+      .catch(() => null)
+      .then((list) => {
+        if (!list) delete engineLists[kind];
+        return list;
+      });
+  }
+  return engineLists[kind];
+}
+
 // The settings sent to the engine: the questionnaire plus the material,
 // its price and weight from Stock Manager's CNC Bar Grades (Heinrich,
 // 8 Oct 2026: one list). No price is sent for a grade without one, and the
@@ -112,8 +132,12 @@ export function engineSettings({ settings, material, programNo }) {
 // A revision row from the engine's answer. The letter is the database's
 // (setup-cnc-3-revisions.sql), which also makes it the program's current
 // revision in the same save.
-function revisionRow({ programId, result, settings, stepPath, stepName, userName }) {
+// A shape program's revision also keeps its shape and sizes (quick); the
+// key is left off a STEP program's row, so saving one never needs the
+// column (setup-cnc-7-shapes.sql).
+function revisionRow({ programId, result, settings, stepPath, stepName, userName, quick = null }) {
   return {
+    ...(quick ? { quick } : {}),
     program_id: programId,
     source: "generated",
     programs: result.programs || [],
@@ -139,11 +163,14 @@ function revisionRow({ programId, result, settings, stepPath, stepName, userName
 // engine run that then fails is simply skipped. A page closed between the
 // program row and its revision leaves a program with no revision, which
 // the program screen says and Update program mends.
-export async function createProgram({ partName, customer, material, settings, programNo, stepFile, userName }) {
-  if (stepFile.size > MAX_STEP_BYTES) {
+//
+// A program made from a shape (quick = { shape, sizes }) has no STEP: the
+// engine is sent the shape and sizes instead.
+export async function createProgram({ partName, customer, material, settings, programNo, stepFile = null, quick = null, userName }) {
+  if (stepFile && stepFile.size > MAX_STEP_BYTES) {
     throw new Error(`The STEP file is ${Math.round(stepFile.size / 1000)} kB; the engine takes up to ${MAX_STEP_BYTES / 1000} kB.`);
   }
-  const stepText = await stepFile.text();
+  const stepText = stepFile ? await stepFile.text() : undefined;
   let number = programNo;
   if (!number) {
     const { data, error } = await supabase.rpc("take_cnc_program_number");
@@ -151,14 +178,17 @@ export async function createProgram({ partName, customer, material, settings, pr
     number = data;
   }
   const sent = engineSettings({ settings, material, programNo: number });
-  const result = await runEngine({ name: partName, stepText, settings: sent });
+  const result = await runEngine({ name: partName, stepText, settings: sent, extra: quick ? { quick } : {} });
 
   const id = crypto.randomUUID();
-  const stepPath = `${id}/A/${stepFile.name}`;
-  const up = await supabase.storage.from(BUCKET).upload(stepPath, stepFile, { contentType: "text/plain" });
-  if (up.error) throw new Error(`The STEP file could not be stored: ${up.error.message}. Nothing was saved.`);
+  const stepPath = stepFile ? `${id}/A/${stepFile.name}` : null;
+  if (stepFile) {
+    const up = await supabase.storage.from(BUCKET).upload(stepPath, stepFile, { contentType: "text/plain" });
+    if (up.error) throw new Error(`The STEP file could not be stored: ${up.error.message}. Nothing was saved.`);
+  }
 
   const { error: e1 } = await supabase.from("cnc_programs").insert({
+    ...(quick ? { quick } : {}),
     id,
     program_no: number,
     part_name: partName,
@@ -169,12 +199,12 @@ export async function createProgram({ partName, customer, material, settings, pr
     created_by: userName || "",
   });
   if (e1) {
-    await supabase.storage.from(BUCKET).remove([stepPath]);
+    if (stepPath) await supabase.storage.from(BUCKET).remove([stepPath]);
     throw new Error(e1.hint === "cnc_number_taken" ? e1.message : `The program could not be saved: ${e1.message}`);
   }
   const { error: e2 } = await supabase
     .from("cnc_program_revisions")
-    .insert(revisionRow({ programId: id, result, settings: sent, stepPath, stepName: stepFile.name, userName }));
+    .insert(revisionRow({ programId: id, result, settings: sent, stepPath, stepName: stepFile?.name || null, userName, quick }));
   if (e2) throw new Error(`O${number} was saved but its revision was not: ${e2.message}. Open it and press Update program.`);
   return id;
 }
@@ -193,7 +223,12 @@ export async function storedStep(programId, rev) {
 // Update program, first half: run the engine on the changed answers (and
 // the new STEP, when one is chosen) with the program's own number. Nothing
 // is saved: the screen shows what changed, and saveUpdate saves it.
-export async function runUpdate({ program, partName, current, material, settings, stepFile }) {
+export async function runUpdate({ program, partName, current, material, settings, stepFile, quick = null }) {
+  const sentNow = engineSettings({ settings, material, programNo: program.program_no });
+  if (quick) {
+    const result = await runEngine({ name: partName || program.part_name, settings: sentNow, extra: { quick } });
+    return { result, sent: sentNow, step: null, quick };
+  }
   let step;
   if (stepFile) {
     if (stepFile.size > MAX_STEP_BYTES) {
@@ -204,9 +239,8 @@ export async function runUpdate({ program, partName, current, material, settings
     step = await storedStep(program.id, current);
     if (!step) throw new Error("No STEP file is stored for this program: choose one.");
   }
-  const sent = engineSettings({ settings, material, programNo: program.program_no });
-  const result = await runEngine({ name: partName || program.part_name, stepText: step.text, settings: sent });
-  return { result, sent, step };
+  const result = await runEngine({ name: partName || program.part_name, stepText: step.text, settings: sentNow });
+  return { result, sent: sentNow, step, quick: null };
 }
 
 // Update program, second half: the new revision (the database gives its
@@ -214,22 +248,28 @@ export async function runUpdate({ program, partName, current, material, settings
 // the program's name, customer, material and bar. A STEP left as it was is
 // pointed at, not copied.
 export async function saveUpdate({ program, run, letter, partName, customer, material, userName }) {
-  const { result, sent, step } = run;
-  let stepPath = step.path;
-  if (step.file) {
+  const { result, sent, step, quick } = run;
+  let stepPath = step?.path || null;
+  if (step?.file) {
     stepPath = `${program.id}/${letter}/${step.name}`;
     const up = await supabase.storage.from(BUCKET).upload(stepPath, step.file, { contentType: "text/plain", upsert: true });
     if (up.error) throw new Error(`The STEP file could not be stored: ${up.error.message}. Nothing was saved.`);
   }
   const { data: rev, error: e1 } = await supabase
     .from("cnc_program_revisions")
-    .insert(revisionRow({ programId: program.id, result, settings: sent, stepPath, stepName: step.name, userName }))
+    .insert(revisionRow({ programId: program.id, result, settings: sent, stepPath, stepName: step?.name || null, userName, quick }))
     .select("rev")
     .single();
   if (e1) throw new Error(`The new revision could not be saved: ${e1.message}`);
   const { data: rows, error: e2 } = await supabase
     .from("cnc_programs")
-    .update({ part_name: partName, customer: customer || "", material: material?.name || "", stock: stockText(sent, result.costing) })
+    .update({
+      ...(quick ? { quick } : {}),
+      part_name: partName,
+      customer: customer || "",
+      material: material?.name || "",
+      stock: stockText(sent, result.costing),
+    })
     .eq("id", program.id)
     .select("id");
   if (e2 || !rows?.length) {
@@ -244,16 +284,17 @@ export async function saveUpdate({ program, run, letter, partName, customer, mat
 // the cycle time and costing, and where the program and the model differ.
 // Nothing is saved. A program with no STEP stored is not checked.
 export async function checkMachineCopy({ program, current, programs }) {
-  const step = await storedStep(program.id, current);
-  if (!step) return { result: null, reason: "No STEP file is stored for this program, so the engine could not check it." };
   const settings = current?.settings || program.settings || {};
+  const quick = current?.quick || program.quick || null;
+  const step = quick ? null : await storedStep(program.id, current);
+  if (!step && !quick) return { result: null, reason: "No STEP file is stored for this program, so the engine could not check it." };
   const result = await runEngine({
     name: program.part_name,
-    stepText: step.text,
+    stepText: step?.text,
     settings,
-    extra: { action: "check", programs, previous: current?.programs || [] },
+    extra: { action: "check", programs, previous: current?.programs || [], ...(quick ? { quick } : {}) },
   });
-  return { result, step, settings };
+  return { result, step, settings, quick };
 }
 
 // Import machine copy, second half: the made revision. Ready, by
@@ -270,6 +311,7 @@ export async function saveMachineCopy({ program, current, programs, check, fileN
     ...differences.map((d) => "- " + d),
   ].filter(Boolean).join("\n");
   const row = {
+    ...(check?.quick ? { quick: check.quick } : {}),
     program_id: program.id,
     source: "machine_copy",
     programs,

@@ -2,18 +2,20 @@
 // what changed, Save as the next revision. The old revision is kept.
 // Clicks: open the program, Update program, the change, Generate, Save.
 // Nothing is saved until Save; Back to the answers keeps what was typed.
+// A program made from a shape shows its size boxes instead of the STEP.
 
 import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { C, S } from "../theme.js";
 import { runUpdate, saveUpdate } from "./cncData.js";
-import { cleanSettings, faultText, oNumber, revisionLetter, settingsToForm } from "./cncRules.js";
+import { cleanSettings, cleanSizes, faultText, oNumber, revisionLetter, settingsToForm } from "./cncRules.js";
+import ShapeSizes from "./ShapeSizes.jsx";
 import ProgramFields from "./ProgramFields.jsx";
 import ProgramChanges from "./ProgramChanges.jsx";
 
 const minSec = (s) => (s == null ? "–" : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`);
 
-export default function UpdateProgram({ program, revisions, current, customers, materials, userName, onCancel, onSaved }) {
+export default function UpdateProgram({ program, revisions, current, customers, materials, pipes, shapes, userName, onCancel, onSaved }) {
   const [fields, setFields] = useState(() => ({
     partName: program.part_name || "",
     customer: program.customer || "",
@@ -21,13 +23,18 @@ export default function UpdateProgram({ program, revisions, current, customers, 
     form: settingsToForm(current?.settings || program.settings || {}),
   }));
   const [stepFile, setStepFile] = useState(null);
+  const quickNow = current?.quick || program.quick || null;
+  const shape = quickNow ? (shapes || []).find((s) => s.key === quickNow.shape) || null : null;
+  const [sizes, setSizes] = useState(() =>
+    Object.fromEntries(Object.entries(quickNow?.sizes || {}).map(([k, v]) => [k, String(v)]))
+  );
   const [run, setRun] = useState(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
 
   const letter = revisionLetter(revisions.length);
   const material = (materials || []).find((m) => m.name === fields.materialName) || null;
-  const canGenerate = !!fields.partName.trim() && !!material && !busy;
+  const canGenerate = !!fields.partName.trim() && !!material && !busy && (!quickNow || !!shape);
 
   async function generate() {
     setError("");
@@ -36,9 +43,18 @@ export default function UpdateProgram({ program, revisions, current, customers, 
       setError(`Check ${errors.join(", ")}: not a number the engine can use.`);
       return;
     }
+    let quick = null;
+    if (quickNow) {
+      const s = cleanSizes(shape, sizes);
+      if (s.missing.length || s.bad.length) {
+        setError([s.missing.length ? `Type ${s.missing.join(", ")}.` : "", s.bad.length ? `Check ${s.bad.join(", ")}: not a size.` : ""].filter(Boolean).join(" "));
+        return;
+      }
+      quick = { shape: shape.key, sizes: s.sizes };
+    }
     setBusy("Generating…");
     try {
-      setRun(await runUpdate({ program, partName: fields.partName.trim(), current, material, settings, stepFile }));
+      setRun(await runUpdate({ program, partName: fields.partName.trim(), current, material, settings, stepFile, quick }));
     } catch (err) {
       setError(err.message || String(err));
     } finally {
@@ -85,7 +101,7 @@ export default function UpdateProgram({ program, revisions, current, customers, 
             Cycle time {minSec(r.cycle_s)}
             {current?.cycle_s != null ? ` (was ${minSec(current.cycle_s)})` : ""}
           </div>
-          {run.step.file && <div>New STEP model: {run.step.name}</div>}
+          {run.step?.file && <div>New STEP model: {run.step.name}</div>}
           {(r.warnings || []).length > 0 && (
             <div style={{ color: C.accentRaw }}>{(r.warnings || []).length} warning(s): see the Program tab after saving.</div>
           )}
@@ -107,6 +123,16 @@ export default function UpdateProgram({ program, revisions, current, customers, 
   return (
     <div style={S.list}>
       {head}
+      {quickNow ? (
+        shape ? (
+          <ShapeSizes shape={shape} sizes={sizes} setSizes={setSizes} />
+        ) : (
+          <div style={{ color: C.danger, fontSize: 14 }}>
+            This program was made from the shape "{quickNow.shape}", which the engine's Shapes list does not offer right now, so it cannot be updated
+            here yet.
+          </div>
+        )
+      ) : (
       <div>
         <label style={S.label}>STEP model</label>
         <div style={{ fontSize: 13, color: C.muted, marginBottom: 4 }}>
@@ -114,7 +140,8 @@ export default function UpdateProgram({ program, revisions, current, customers, 
         </div>
         <input type="file" accept=".step,.stp,.STEP,.STP" style={S.input} onChange={(e) => setStepFile(e.target.files?.[0] || null)} />
       </div>
-      <ProgramFields fields={fields} setFields={setFields} customers={customers} materials={materials} settingsOpen />
+      )}
+      <ProgramFields fields={fields} setFields={setFields} customers={customers} materials={materials} pipes={pipes} settingsOpen />
       {error && <div style={{ color: C.danger, fontSize: 14 }}>{error}</div>}
       <button
         type="button"

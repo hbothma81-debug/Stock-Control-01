@@ -3,7 +3,10 @@
 // it only what it cannot read for itself: the customer list, the CNC Bar
 // Grades, the person's ticks and name. Everything else is in src/cnc.
 //
-// Screens: the Programs list, New program, one program. The list loads
+// Screens: the Programs list, the Shapes list (Heinrich, 8 Oct 2026: a
+// shape to type sizes, beside Programs), New program (from a STEP or a
+// shape), one program. The engine's shape and pipe lists are read once per
+// page load (cncData loadEngineList). The list loads
 // when the tab opens, after a save and on its own Refresh, never on a
 // timer; a program's settings, text and STEP file load when it is opened.
 
@@ -12,10 +15,16 @@ import { FileSpreadsheet, Plus, RefreshCw } from "lucide-react";
 import Section from "../Section.jsx";
 import ErrorBoundary from "../ErrorBoundary.jsx";
 import { C, F, S } from "../theme.js";
-import { exportPrograms, loadPrograms } from "./cncData.js";
+import { exportPrograms, loadEngineList, loadPrograms } from "./cncData.js";
 import { oNumber, splitPrograms } from "./cncRules.js";
 import NewProgram from "./NewProgram.jsx";
 import ProgramView from "./ProgramView.jsx";
+import ShapeIcon from "./ShapeIcon.jsx";
+
+// S.chipActive sets borderColor, which React will not mix with S.chip's
+// border shorthand once a chip switches on; the whole border is given.
+const { borderColor: _unused, ...chipActiveRest } = S.chipActive;
+const CHIP_ON = { ...chipActiveRest, border: `1px solid ${C.accentFinished}` };
 
 export default function CncTab({ customers, materials, canEdit, canDelete, userName }) {
   const [programs, setPrograms] = useState(null);
@@ -23,8 +32,13 @@ export default function CncTab({ customers, materials, canEdit, canDelete, userN
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [search, setSearch] = useState("");
-  // "list", "new", or a program's id
+  // "list", "shapes", "new", or a program's id
   const [screen, setScreen] = useState("list");
+  // The shape New program was opened with (from the Shapes list), or null.
+  const [newShape, setNewShape] = useState(null);
+  // The engine's lists: undefined while asked, null when the engine has none.
+  const [shapes, setShapes] = useState(undefined);
+  const [pipes, setPipes] = useState(undefined);
 
   async function refresh() {
     setLoading(true);
@@ -40,7 +54,76 @@ export default function CncTab({ customers, materials, canEdit, canDelete, userN
 
   useEffect(() => {
     if (programs === null) refresh();
+    loadEngineList("shapes").then(setShapes);
+    loadEngineList("pipes").then(setPipes);
   }, []);
+
+  const subTabs = (
+    <div style={{ display: "flex", gap: 6 }}>
+      {[
+        ["list", "Programs"],
+        ["shapes", "Shapes"],
+      ].map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          className="stk-btn"
+          style={{ ...S.chip, ...(screen === key ? CHIP_ON : {}) }}
+          onClick={() => {
+            if (key === "list") refresh();
+            setScreen(key);
+          }}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (screen === "shapes") {
+    return (
+      <div style={S.list}>
+        {subTabs}
+        {shapes === undefined && <div style={S.empty}>Asking the engine for its shapes…</div>}
+        {shapes === null && (
+          <div style={S.empty}>The engine does not offer shapes yet. They come with its next update; try again after that.</div>
+        )}
+        {shapes && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
+            {shapes.map((s) => (
+              <button
+                key={s.key}
+                type="button"
+                className="stk-btn"
+                disabled={!canEdit}
+                title={canEdit ? `New program from a ${s.name}` : "Making a program needs the CNC Edit tick"}
+                onClick={() => {
+                  setNewShape(s);
+                  setScreen("new");
+                }}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "12px 8px",
+                  background: C.surface,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 8,
+                  color: C.text,
+                  cursor: canEdit ? "pointer" : "default",
+                  fontSize: 14,
+                }}
+              >
+                <ShapeIcon picture={s.picture} size={72} />
+                <span style={{ fontWeight: 600, textAlign: "center" }}>{s.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   if (screen === "new") {
     return (
@@ -48,12 +131,14 @@ export default function CncTab({ customers, materials, canEdit, canDelete, userN
         <NewProgram
           customers={customers}
           materials={materials}
+          pipes={pipes || null}
+          shape={newShape}
           userName={userName}
           onCancel={() => {
             // A Generate that failed part way may have saved the program
             // without its revision; the list has to show it.
             refresh();
-            setScreen("list");
+            setScreen(newShape ? "shapes" : "list");
           }}
           onSaved={(id) => {
             refresh();
@@ -72,6 +157,8 @@ export default function CncTab({ customers, materials, canEdit, canDelete, userN
           canDelete={canDelete}
           customers={customers}
           materials={materials}
+          pipes={pipes || null}
+          shapes={shapes || null}
           userName={userName}
           onBack={() => {
             refresh();
@@ -103,6 +190,7 @@ export default function CncTab({ customers, materials, canEdit, canDelete, userN
   }
   return (
     <div style={S.list}>
+      {subTabs}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <input
           style={{ ...S.input, flex: 1 }}
@@ -111,7 +199,10 @@ export default function CncTab({ customers, materials, canEdit, canDelete, userN
           placeholder="Search part, customer, O number…"
         />
         {canEdit && (
-          <button type="button" className="stk-btn" style={S.addBtn} onClick={() => setScreen("new")}>
+          <button type="button" className="stk-btn" style={S.addBtn} onClick={() => {
+              setNewShape(null);
+              setScreen("new");
+            }}>
             <Plus size={15} strokeWidth={2.5} /> New program
           </button>
         )}

@@ -177,3 +177,27 @@ test("a South African day, not the UTC one", () => {
   assert.equal(dayInSA("2026-10-07T22:30:00Z"), "2026-10-08");
   assert.equal(dayInSA(null), "");
 });
+
+import { cleanSizes, pipeLabel } from "./cncRules.js";
+
+const FLANGED = {
+  key: "flanged_bush",
+  name: "Flanged bush",
+  fields: [
+    { key: "flange_od", label: "Flange OD", unit: "mm" },
+    { key: "body_od", label: "Body OD", unit: "mm" },
+    { key: "id", label: "ID (0 = solid)", unit: "mm", default: 0 },
+    { key: "chamfer_od", label: "Outside end chamfers", unit: "mm", default: 0.5 },
+  ],
+};
+
+test("shape sizes: a size with no default must be typed, one with a default may be left", () => {
+  assert.deepEqual(cleanSizes(FLANGED, { flange_od: "80", body_od: "50,5", id: "" }), { sizes: { flange_od: 80, body_od: 50.5 }, missing: [], bad: [] });
+  assert.deepEqual(cleanSizes(FLANGED, { flange_od: "80", chamfer_od: "x" }), { sizes: { flange_od: 80 }, missing: ["Body OD"], bad: ["Outside end chamfers"] });
+  assert.deepEqual(cleanSizes(FLANGED, { flange_od: "80", body_od: "50", id: "0" }).sizes.id, 0);
+});
+
+test("pipe sizes in shop words", () => {
+  assert.equal(pipeLabel({ nps: "4", nb: 100 }), '100NB (4")');
+  assert.equal(pipeLabel({ nps: "1-1/4" }), '1-1/4"');
+});
