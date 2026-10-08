@@ -15,11 +15,14 @@ import { cleanSettings, cleanSizes, partNameFromFile, readNumber } from "./cncRu
 import ProgramFields from "./ProgramFields.jsx";
 import ShapeSizes from "./ShapeSizes.jsx";
 
-export default function NewProgram({ customers, materials, pipes, shape = null, userName, onCancel, onSaved }) {
+export default function NewProgram({ customers, materials, pipes, shape = null, hasRefs = false, userName, onCancel, onSaved }) {
   const [stepFile, setStepFile] = useState(null);
   const [sizes, setSizes] = useState({});
   const [fields, setFields] = useState({ partName: shape ? shape.name : "", customer: "", materialName: "", form: {} });
   const [programNo, setProgramNo] = useState("");
+  // Quote reference and project name, for finding the program later
+  // (setup-cnc-12-program-refs.sql; the boxes show where it has been run).
+  const [refs, setRefs] = useState({ quoteRef: "", projectName: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -62,6 +65,7 @@ export default function NewProgram({ customers, materials, pipes, shape = null, 
         programNo: typedNo,
         stepFile: shape ? null : stepFile,
         quick,
+        ...(hasRefs ? refs : {}),
         userName,
       });
       onSaved(id);
@@ -95,6 +99,18 @@ export default function NewProgram({ customers, materials, pipes, shape = null, 
               if (f) setFields((x) => (x.partName.trim() ? x : { ...x, partName: partNameFromFile(f.name) }));
             }}
           />
+        </div>
+      )}
+      {hasRefs && (
+        <div style={S.formGrid}>
+          <div>
+            <label style={S.label}>Quote reference</label>
+            <input style={S.input} value={refs.quoteRef} maxLength={100} onChange={(e) => setRefs((r) => ({ ...r, quoteRef: e.target.value }))} placeholder="Optional" />
+          </div>
+          <div>
+            <label style={S.label}>Project name</label>
+            <input style={S.input} value={refs.projectName} maxLength={200} onChange={(e) => setRefs((r) => ({ ...r, projectName: e.target.value }))} placeholder="Optional" />
+          </div>
         </div>
       )}
       <ProgramFields

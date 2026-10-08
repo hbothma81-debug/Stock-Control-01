@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  oNumber, readNumber, cleanSettings, settingsToForm, settingText, programMatches, splitPrograms,
+  oNumber, readNumber, cleanSettings, settingsToForm, settingText, programMatches, listPrograms, filterChoices,
   stockText, faultText, partNameFromFile, programFileName, engineErrorText,
 } from "./cncRules.js";
 import { CNC_FIELDS } from "./cncFields.js";
@@ -68,11 +68,36 @@ test("the search finds a program by part, customer, material, fault or O number 
   assert.deepEqual(found(""), [2001, 1013, 1027]);
 });
 
-test("Not for machine and Ready, each in program number order", () => {
-  const { notForMachine, ready } = splitPrograms(P);
-  assert.deepEqual(notForMachine.map((p) => p.program_no), [1013, 2001]);
-  assert.deepEqual(ready.map((p) => p.program_no), [1027]);
-  assert.equal(splitPrograms(P, "hpe").notForMachine.length, 0);
+const Q = [
+  { ...P[0], created_by: "Pieter", quote_ref: "Q-2041", project_name: "BPW axles" },
+  { ...P[1], created_by: "anna", quote_ref: "", project_name: "" },
+  { ...P[2], created_by: "Anna", quote_ref: "Q-2100", project_name: "" },
+];
+
+test("one list, every program in program number order, ready or not", () => {
+  assert.deepEqual(listPrograms(P).map((p) => p.program_no), [1013, 1027, 2001]);
+  assert.deepEqual(listPrograms(null), []);
+});
+
+test("the search also finds the quote reference, the project name and the sales rep", () => {
+  const found = (search) => listPrograms(Q, { search }).map((p) => p.program_no);
+  assert.deepEqual(found("q-2041"), [2001]);
+  assert.deepEqual(found("axles"), [2001]);
+  assert.deepEqual(found("pieter"), [2001]);
+});
+
+test("the customer and sales rep filters, capitals ignored, with the search", () => {
+  assert.deepEqual(listPrograms(Q, { customer: "bpw" }).map((p) => p.program_no), [2001]);
+  assert.deepEqual(listPrograms(Q, { rep: "ANNA" }).map((p) => p.program_no), [1013, 1027]);
+  assert.deepEqual(listPrograms(Q, { rep: "Anna", search: "spacer" }).map((p) => p.program_no), [1027]);
+  assert.deepEqual(listPrograms(Q, { rep: "Anna", customer: "BPW" }), []);
+});
+
+test("the filters offer only names on the list, A to Z, once each", () => {
+  const c = filterChoices([...Q, { program_no: 3, customer: "", created_by: "" }]);
+  assert.deepEqual(c.customers, ["BPW", "HPE", "RSI"]);
+  assert.equal(c.reps.length, 2);
+  assert.equal(c.reps[1], "Pieter");
 });
 
 test("the bar in shop words", () => {

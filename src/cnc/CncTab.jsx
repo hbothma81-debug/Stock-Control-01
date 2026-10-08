@@ -11,12 +11,12 @@
 // timer; a program's settings, text and STEP file load when it is opened.
 
 import { useEffect, useState } from "react";
-import { FileSpreadsheet, Plus, RefreshCw } from "lucide-react";
-import Section from "../Section.jsx";
+import { FileSpreadsheet, Plus, RefreshCw, X } from "lucide-react";
 import ErrorBoundary from "../ErrorBoundary.jsx";
+import TypeToFind from "../TypeToFind.jsx";
 import { C, F, S } from "../theme.js";
 import { exportPrograms, loadBarPrices, loadEngineList, loadPrograms } from "./cncData.js";
-import { oNumber, splitPrograms } from "./cncRules.js";
+import { filterChoices, listPrograms, oNumber, salesRepOf } from "./cncRules.js";
 import NewProgram from "./NewProgram.jsx";
 import ProgramView from "./ProgramView.jsx";
 import ShapeIcon from "./ShapeIcon.jsx";
@@ -37,6 +37,12 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [search, setSearch] = useState("");
+  // The Customer and Sales rep filters ("" = every one).
+  const [customer, setCustomer] = useState("");
+  const [rep, setRep] = useState("");
+  // Whether the database keeps a quote reference and project name
+  // (setup-cnc-12-program-refs.sql).
+  const [hasRefs, setHasRefs] = useState(false);
   // "list", "shapes", "new", or a program's id
   const [screen, setScreen] = useState("list");
   // The shape New program was opened with (from the Shapes list), or null.
@@ -52,7 +58,9 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
     setLoading(true);
     setLoadError("");
     try {
-      setPrograms(await loadPrograms());
+      const { rows, hasRefs: refs } = await loadPrograms();
+      setPrograms(rows);
+      setHasRefs(refs);
     } catch (err) {
       setLoadError(`The programs could not be loaded: ${err.message || err}`);
     } finally {
@@ -202,6 +210,7 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
           materials={materials}
           pipes={pipes || null}
           shape={newShape}
+          hasRefs={hasRefs}
           userName={userName}
           onCancel={() => {
             // A Generate that failed part way may have saved the program
@@ -245,15 +254,16 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
     );
   }
 
-  const { notForMachine, ready } = splitPrograms(programs, search);
-  const searching = !!search.trim();
+  const shown = listPrograms(programs, { search, customer, rep });
+  const searching = !!search.trim() || !!customer || !!rep;
+  const choices = filterChoices(programs);
 
   // The programs the search shows (all of them with nothing typed).
   async function exportShown() {
     setExporting(true);
     setLoadError("");
     try {
-      await exportPrograms([...notForMachine, ...ready], searching ? "CNC-programs-search" : "CNC-programs");
+      await exportPrograms(shown, searching ? "CNC-programs-search" : "CNC-programs");
     } catch (err) {
       setLoadError(`The Excel file could not be made: ${err.message || err}`);
     } finally {
@@ -268,7 +278,7 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
           style={{ ...S.input, flex: 1 }}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search part, customer, O number…"
+          placeholder={hasRefs ? "Search part, customer, O number, quote ref, project…" : "Search part, customer, O number…"}
         />
         {canEdit && (
           <button type="button" className="stk-btn" style={S.addBtn} onClick={() => {
@@ -292,29 +302,58 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
           <RefreshCw size={13} />
         </button>
       </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+          <TypeToFind options={choices.customers} value={customer} onChange={(v) => setCustomer(v || "")} placeholder="Customer: all" />
+        </div>
+        <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+          <TypeToFind options={choices.reps} value={rep} onChange={(v) => setRep(v || "")} placeholder="Sales rep: all" />
+        </div>
+        {searching && (
+          <button
+            type="button"
+            className="stk-btn"
+            style={S.chip}
+            onClick={() => {
+              setSearch("");
+              setCustomer("");
+              setRep("");
+            }}
+          >
+            <X size={13} /> Clear
+          </button>
+        )}
+      </div>
       {loadError && <div style={{ color: C.danger, fontSize: 14 }}>{loadError}</div>}
       {programs === null && !loadError && <div style={S.empty}>Loading programs…</div>}
       {programs !== null && (
         <>
-          {/* A key change remounts the pills so a search opens both. */}
-          <Section key={`nfm-${searching}`} title="Not for machine" count={notForMachine.length} danger={notForMachine.length > 0} defaultOpen>
-            {notForMachine.map((p) => renderLine(p, () => setScreen(p.id)))}
-            {notForMachine.length === 0 && <div style={S.empty}>Nothing here.</div>}
-          </Section>
-          <Section key={`ready-${searching}`} title="Ready" count={ready.length} defaultOpen={searching}>
-            {ready.map((p) => renderLine(p, () => setScreen(p.id)))}
-            {ready.length === 0 && <div style={S.empty}>Nothing here.</div>}
-          </Section>
+          <div style={{ fontSize: 13, color: C.muted }}>
+            {searching ? `${shown.length} of ${programs.length} programs` : `${programs.length} program${programs.length === 1 ? "" : "s"}`}
+          </div>
+          <div>
+            {shown.map((p) => renderLine(p, () => setScreen(p.id)))}
+            {shown.length === 0 && <div style={S.empty}>{programs.length ? "No program matches." : "No programs yet."}</div>}
+          </div>
         </>
       )}
     </div>
   );
 }
 
-// One line per program: O number · part · customer · material and bar ·
-// rev, and on a program that is not for the machine, its fault in red.
+// One line per program: O number · part · customer · project · quote
+// reference · material and bar · rev · sales rep, and on a program that is
+// not for the machine, "Not for machine" and its fault in red.
 function renderLine(p, open) {
-  const bits = [p.part_name, p.customer, [p.material, p.stock].filter(Boolean).join(" "), p.current_rev ? `rev ${p.current_rev}` : "no revision"];
+  const bits = [
+    p.part_name,
+    p.customer,
+    p.project_name,
+    p.quote_ref && `quote ${p.quote_ref}`,
+    [p.material, p.stock].filter(Boolean).join(" "),
+    p.current_rev ? `rev ${p.current_rev}` : "no revision",
+    salesRepOf(p),
+  ];
   return (
     <button
       key={p.id}
@@ -337,7 +376,7 @@ function renderLine(p, open) {
       <span style={{ fontFamily: F.mono }}>{oNumber(p.program_no)}</span>
       {" · "}
       {bits.filter(Boolean).join(" · ")}
-      {p.status !== "ready" && p.fault && <span style={{ color: C.danger }}>{" · "}{p.fault}</span>}
+      {p.status !== "ready" && <span style={{ color: C.danger }}>{" · Not for machine"}{p.fault ? `: ${p.fault}` : ""}</span>}
     </button>
   );
 }

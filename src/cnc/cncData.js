@@ -16,20 +16,44 @@ const BUCKET = "cnc-files";
 
 // What a list line needs, and nothing heavier: the settings, program text
 // and STEP files are read only when a program is opened.
-const LIST_COLUMNS = "id, program_no, part_name, customer, material, stock, current_rev, status, fault, updated_at";
+const LIST_COLUMNS = "id, program_no, part_name, customer, material, stock, current_rev, status, fault, updated_at, created_by";
+// setup-cnc-12-program-refs.sql: asked for only where the database has them.
+const REF_COLUMNS = ", quote_ref, project_name";
 
 // Every program, a page at a time (a plain select stops at 1000 rows with
 // no error), paged by id so no row is skipped or repeated where pages meet.
+// hasRefs: whether the database keeps a quote reference and project name
+// (a database without file 12 answers 42703 to the longer list, and the
+// list is read without them).
 export async function loadPrograms() {
+  let columns = LIST_COLUMNS + REF_COLUMNS;
   const rows = [];
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase.from("cnc_programs").select(LIST_COLUMNS).order("id").range(from, from + PAGE - 1);
+    const { data, error } = await supabase.from("cnc_programs").select(columns).order("id").range(from, from + PAGE - 1);
+    if (error && error.code === "42703" && columns !== LIST_COLUMNS) {
+      columns = LIST_COLUMNS;
+      rows.length = 0;
+      from = -PAGE;
+      continue;
+    }
     if (error) throw error;
     rows.push(...data);
     if (data.length < PAGE) break;
   }
-  return rows;
+  return { rows, hasRefs: columns !== LIST_COLUMNS };
+}
+
+// A program's quote reference and project name, from its page (saved on
+// leaving the box). Hands back the whole row.
+export async function saveProgramRefs(id, changes) {
+  const row = {};
+  if (changes.quoteRef !== undefined) row.quote_ref = String(changes.quoteRef).trim().slice(0, 100);
+  if (changes.projectName !== undefined) row.project_name = String(changes.projectName).trim().slice(0, 200);
+  const { data, error } = await supabase.from("cnc_programs").update(row).eq("id", id).select("*");
+  if (error) throw new Error(`Not saved: ${error.message}`);
+  if (!data?.length) throw new Error("Not saved: the database changed nothing (the CNC Edit tick is needed).");
+  return data[0];
 }
 
 // Export to Excel (review only): the programs on screen, with each one's
@@ -249,7 +273,7 @@ function revisionRow({ programId, result, settings, stepPath, stepName, userName
 //
 // A program made from a shape (quick = { shape, sizes }) has no STEP: the
 // engine is sent the shape and sizes instead.
-export async function createProgram({ partName, customer, material, settings, programNo, stepFile = null, quick = null, userName }) {
+export async function createProgram({ partName, customer, material, settings, programNo, stepFile = null, quick = null, quoteRef = "", projectName = "", userName }) {
   if (stepFile && stepFile.size > MAX_STEP_BYTES) {
     throw new Error(`The STEP file is ${Math.round(stepFile.size / 1000)} kB; the engine takes up to ${MAX_STEP_BYTES / 1000} kB.`);
   }
@@ -271,6 +295,9 @@ export async function createProgram({ partName, customer, material, settings, pr
 
   const { error: e1 } = await supabase.from("cnc_programs").insert({
     ...(quick ? { quick } : {}),
+    // Sent only when typed, so a database without file 12 still saves.
+    ...(quoteRef.trim() ? { quote_ref: quoteRef.trim().slice(0, 100) } : {}),
+    ...(projectName.trim() ? { project_name: projectName.trim().slice(0, 200) } : {}),
     id,
     program_no: number,
     part_name: partName,

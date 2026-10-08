@@ -20,6 +20,7 @@ import ToolpathTab from "./ToolpathTab.jsx";
 import OffcutWastageTab from "./OffcutWastage.jsx";
 import SetupSheetTab from "./SetupSheetTab.jsx";
 import ToolCribTab from "./ToolCribTab.jsx";
+import ProgramRefs from "./ProgramRefs.jsx";
 
 const TABS = [
   { key: "program", label: "Program" },
@@ -198,6 +199,7 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
       <div style={{ fontSize: 14, color: C.muted }}>
         {[p.customer, [p.material, p.stock].filter(Boolean).join(" ")].filter(Boolean).join(" · ")}
       </div>
+      <ProgramRefs program={p} canEdit={canEdit} onSaved={(row) => setData((d) => ({ ...d, program: row }))} />
       {p.status === "ready" ? (
         <div style={{ color: C.accentFinished, fontWeight: 600 }}>Ready for the machine</div>
       ) : (

@@ -77,22 +77,43 @@ export function settingText(field, value) {
 }
 
 // What the search box finds a program by: the part, the customer, the
-// material and bar, the fault, and the O number typed any way at all
-// ("1027", "O1027", "O00001027").
+// material and bar, the fault, the quote reference, the project name, the
+// sales rep, and the O number typed any way at all ("1027", "O1027",
+// "O00001027").
 export function programMatches(p, query) {
   const q = String(query ?? "").trim().toLowerCase();
   if (!q) return true;
   const digits = q.replace(/^o/, "").replace(/^0+/, "");
   if (/^\d+$/.test(digits) && String(p.program_no).includes(digits)) return true;
-  return [p.part_name, p.customer, p.material, p.stock, p.fault].some((s) => String(s ?? "").toLowerCase().includes(q));
+  return [p.part_name, p.customer, p.material, p.stock, p.fault, p.quote_ref, p.project_name, p.created_by].some((s) =>
+    String(s ?? "").toLowerCase().includes(q)
+  );
 }
 
-// The two pills, each sorted by program number.
-export function splitPrograms(programs, query = "") {
-  const shown = (programs || []).filter((p) => programMatches(p, query)).sort((a, b) => a.program_no - b.program_no);
+// The sales rep of a program is whoever made it, from their login
+// (Heinrich, 8 Oct 2026).
+export const salesRepOf = (p) => String(p?.created_by ?? "").trim();
+
+// The Programs list (Heinrich, 8 Oct 2026: one list with every program, no
+// Not for machine / Ready pills; filters like the rest of the app): the
+// search box, a customer and a sales rep, in program number order.
+export function listPrograms(programs, { search = "", customer = "", rep = "" } = {}) {
+  const same = (a, b) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+  return (programs || [])
+    .filter((p) => programMatches(p, search) && (!customer || same(p.customer, customer)) && (!rep || same(salesRepOf(p), rep)))
+    .sort((a, b) => a.program_no - b.program_no);
+}
+
+// The names the Customer and Sales rep filters offer: only those on the
+// list, A to Z, each once.
+export function filterChoices(programs) {
+  const az = (list) =>
+    [...new Map(list.filter(Boolean).map((s) => [s.toLowerCase(), s])).values()].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base", numeric: true })
+    );
   return {
-    notForMachine: shown.filter((p) => p.status !== "ready"),
-    ready: shown.filter((p) => p.status === "ready"),
+    customers: az((programs || []).map((p) => String(p.customer ?? "").trim())),
+    reps: az((programs || []).map(salesRepOf)),
   };
 }
 
@@ -230,6 +251,9 @@ export function exportRows(programs, cycleBy = {}) {
         "O number": oNumber(p.program_no),
         Part: p.part_name || "",
         Customer: p.customer || "",
+        "Sales rep": salesRepOf(p),
+        "Quote reference": p.quote_ref || "",
+        "Project name": p.project_name || "",
         Material: p.material || "",
         Bar: p.stock || "",
         Revision: p.current_rev || "none",

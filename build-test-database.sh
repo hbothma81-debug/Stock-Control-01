@@ -122,6 +122,7 @@ ORDER=(
   setup-cnc-9-bar-prices.sql
   setup-cnc-10-machines-cutting-data.sql
   setup-cnc-11-tools.sql
+  setup-cnc-12-program-refs.sql
 )
 
 OUT=setup-ALL.sql
