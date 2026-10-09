@@ -139,11 +139,36 @@ export function stockText(settings = {}, costing = null, pipes = null) {
 }
 
 // The line the shut pill shows for a program the engine would not pass.
+// The engine's fails first; with none, its toolpath check's problems in
+// short words with the tool (Heinrich, 9 Oct 2026: O1027 rev C read a bare
+// "Not for machine", its reasons being problems, not fails).
 export function faultText(result) {
   if (!result || result.ready) return "";
   const fails = (result.fails || []).map((f) => (typeof f === "string" ? f : JSON.stringify(f))).filter(Boolean);
-  const text = fails.length ? fails.join("; ") : "Not for machine";
+  const problems = [...new Set((result.problems || []).map(problemWords).filter(Boolean))];
+  const text = fails.length ? fails.join("; ") : problems.length ? problems.join("; ") : "Not for machine";
   return text.length > 300 ? text.slice(0, 297) + "…" : text;
+}
+
+// The engine's problem kinds (its simulate.py), in the shop's words.
+const PROBLEM_WORDS = {
+  RAPID: "rapid through material",
+  JAWS: "too close to the jaws",
+  CLEARANCE: "tool clearance",
+  TRAVEL: "past the machine's travel",
+};
+
+// "RAPID: 3MM PARTING G54: G0 from …" -> "rapid through material (3MM PARTING)".
+// A problem may come as text or as [kind, text]; a kind not listed keeps
+// its own first words.
+export function problemWords(p) {
+  const raw = Array.isArray(p) ? `${p[0]}: ${p[1] ?? ""}` : String(p ?? "");
+  const m = raw.match(/^([A-Z]+):\s*(.*)$/s);
+  if (!m) return raw.trim().slice(0, 80);
+  const words = PROBLEM_WORDS[m[1]];
+  if (!words) return raw.trim().slice(0, 80);
+  const tool = m[2].match(/^(.+?)\s+G5\d\b/)?.[1];
+  return tool ? `${words} (${tool})` : words;
 }
 
 // The part name a STEP file suggests: its file name without the ending.

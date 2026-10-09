@@ -377,7 +377,7 @@ function renderLine(p, open) {
       <span style={{ fontFamily: F.mono }}>{oNumber(p.program_no)}</span>
       {" · "}
       {bits.filter(Boolean).join(" · ")}
-      {p.status !== "ready" && <span style={{ color: C.danger }}>{" · Not for machine"}{p.fault ? `: ${p.fault}` : ""}</span>}
+      {p.status !== "ready" && <span style={{ color: C.danger }}>{" · Not for machine"}{p.fault && p.fault !== "Not for machine" ? `: ${p.fault}` : ""}</span>}
     </button>
   );
 }

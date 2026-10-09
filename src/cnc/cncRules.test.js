@@ -114,6 +114,22 @@ test("the fault on a shut line", () => {
   assert.equal(faultText({ ready: false, fails: ["no M24x3 insert", "bore too deep"] }), "no M24x3 insert; bore too deep");
   assert.equal(faultText({ ready: false, fails: [] }), "Not for machine");
   assert.equal(faultText({ ready: false, fails: ["x".repeat(400)] }).length, 298);
+  // O1027 rev C on live (9 Oct 2026): no fails, the reasons are problems.
+  assert.equal(
+    faultText({
+      ready: false,
+      fails: [],
+      problems: [
+        "RAPID: 3MM PARTING G54: G0 from X12.800 Z0.900 to X12.800 Z-0.100 runs through material at X12.80 Z0.73",
+        "CLEARANCE: WNMG R0.8 G54: with the tip at X11.800 Z9.500 the insert behind it runs into material",
+        "JAWS: 3MM PARTING G54 comes 4.0 mm from the jaw face at Z-52.100 X6.800 (needs 20) - jaw clearance",
+        ["JAWS", "3MM PARTING G54 X6.8 Z-52.1 is inside the jaws"],
+        "TRAVEL: X160.0 is past the X travel (75 on radius)",
+      ],
+    }),
+    "rapid through material (3MM PARTING); tool clearance (WNMG R0.8); too close to the jaws (3MM PARTING); past the machine's travel"
+  );
+  assert.equal(faultText({ ready: false, fails: ["no M24x3 insert"], problems: ["RAPID: T G54: x"] }), "no M24x3 insert");
 });
 
 test("file names", () => {

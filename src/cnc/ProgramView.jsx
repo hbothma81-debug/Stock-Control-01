@@ -13,7 +13,7 @@ import { ArrowLeft, ArrowLeftRight, Download, FileInput, RefreshCw, Trash2, Usb 
 import { C, F, S } from "../theme.js";
 import { deleteProgram, loadProgram } from "./cncData.js";
 import { CNC_FIELDS } from "./cncFields.js";
-import { oNumber, pipeLabel, programFiles, settingText } from "./cncRules.js";
+import { faultText, oNumber, pipeLabel, programFiles, settingText } from "./cncRules.js";
 import { canWriteToFolder, copyToFolder, downloadFiles } from "./programOut.js";
 import UpdateProgram from "./UpdateProgram.jsx";
 import ImportMachineCopy from "./ImportMachineCopy.jsx";
@@ -82,6 +82,10 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
   const current = revisions.find((r) => r.rev === p.current_rev) || revisions[revisions.length - 1] || null;
   const shown = revisions.find((r) => r.id === revId) || current;
   const mayGoOut = !!shown?.ready || !!isAdmin;
+  // Why it is not for the machine, from the current revision's own fails
+  // and problems: a fault saved before 9 Oct 2026 may read only "Not for
+  // machine" (O1027 rev C on live).
+  const whyNot = current && !current.ready ? faultText(current) : p.fault;
 
   if (turning) {
     return (
@@ -210,7 +214,9 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
       {p.status === "ready" ? (
         <div style={{ color: C.accentFinished, fontWeight: 600 }}>Ready for the machine</div>
       ) : (
-        <div style={{ color: C.danger, fontWeight: 600 }}>Not for machine{p.fault ? `: ${p.fault}` : ""}</div>
+        <div style={{ color: C.danger, fontWeight: 600 }}>
+          Not for machine{whyNot && whyNot !== "Not for machine" ? `: ${whyNot}` : ""}
+        </div>
       )}
       {files.length > 0 && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
