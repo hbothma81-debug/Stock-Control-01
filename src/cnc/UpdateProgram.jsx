@@ -5,7 +5,9 @@
 // A program made from a shape shows its size boxes instead of the STEP.
 // A run that comes out the same as the current revision offers no new
 // revision (Heinrich, 9 Oct 2026): Close, or Save changes when only the
-// part name, customer or material boxes changed.
+// customer changed. A new part name is a new revision (his answer, the
+// same day): the engine writes it into the program's first line. A new
+// material is too: it is sent to the engine and moves the price.
 
 import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
