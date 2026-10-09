@@ -10,7 +10,7 @@
 // 2026: the report gets the material / offcut split and the selling price;
 // the chips are in the material, not shown as waste).
 
-import { oNumber, rand, wastageRows } from "./cncRules.js";
+import { oNumber, rand, sourceTag, wastageRows } from "./cncRules.js";
 import { sellingPrice } from "./markup.js";
 
 const L = 14;
@@ -61,7 +61,7 @@ export function costReportData({ program, rev, costing, when = new Date() }) {
   return {
     title: program?.part_name || "",
     numbers: oNumber(program?.program_no),
-    revision: rev ? `Rev ${rev.rev}${rev.source === "machine_copy" ? " (machine copy)" : ""}` : "",
+    revision: rev ? `Rev ${rev.rev}${sourceTag(rev.source)}` : "",
     customer: program?.customer || "-",
     material: [program?.material, c.material && c.material !== program?.material ? `(cut as ${c.material})` : ""].filter(Boolean).join(" ") || "-",
     stock: program?.stock || "-",

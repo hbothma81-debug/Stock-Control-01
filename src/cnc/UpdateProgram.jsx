@@ -13,7 +13,7 @@ import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { C, S } from "../theme.js";
 import { runUpdate, saveProgramDetails, saveUpdate, updateChanges } from "./cncData.js";
-import { cleanSettings, cleanSizes, detailChanges, faultText, oNumber, revisionLetter, settingsToForm } from "./cncRules.js";
+import { cleanSettings, cleanSizes, detailChanges, faultText, handEditsNote, oNumber, revisionLetter, settingsToForm } from "./cncRules.js";
 import ShapeSizes from "./ShapeSizes.jsx";
 import ProgramFields from "./ProgramFields.jsx";
 import ProgramChanges from "./ProgramChanges.jsx";
@@ -124,6 +124,7 @@ export default function UpdateProgram({ program, revisions, current, customers, 
             : `No change: rev ${current.rev} is already up to date with the engine and these settings.`}
         </div>
         {changed.length > 0 && <ProgramChanges before={current?.programs || []} after={r.programs || []} />}
+        {changed.length > 0 && handEditsNote(current) && <div style={{ color: C.danger, fontSize: 14, fontWeight: 600 }}>{handEditsNote(current)}</div>}
         {error && <div style={{ color: C.danger, fontSize: 14 }}>{error}</div>}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {changed.length > 0 || details.length > 0 ? (

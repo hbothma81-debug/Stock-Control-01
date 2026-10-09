@@ -15,7 +15,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { C, F, S } from "../theme.js";
 import { runUpdate, saveUpdate, updateChanges } from "./cncData.js";
-import { faultText, oNumber, rand, revisionLetter } from "./cncRules.js";
+import { faultText, handEditsNote, oNumber, rand, revisionLetter } from "./cncRules.js";
 
 const minSec = (s) => (s == null ? "–" : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`);
 const words = (x) => (typeof x === "string" ? x : x?.text || JSON.stringify(x));
@@ -84,6 +84,7 @@ export default function TurnAround({ program, revisions, current, materials, can
       </div>
       {!runs && !error && <div style={S.empty}>Making it both ways…</div>}
       {error && <div style={{ color: C.danger, fontSize: 14 }}>{error}</div>}
+      {runs && handEditsNote(current) && <div style={{ color: C.danger, fontSize: 14, fontWeight: 600 }}>{handEditsNote(current)}</div>}
       {runs && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
           {runs.map((run, i) => {

@@ -47,6 +47,7 @@ test("each change in words, old to new", () => {
   assert.equal(changeWords({ field: "status", from: "ready", to: "not_for_machine" }), "Status: Ready for the machine → Not for machine");
   assert.equal(changeWords({ field: "fault", from: "x", to: "" }), "Fault cleared");
   assert.equal(changeWords({ field: "source", to: "machine_copy" }), "Machine copy imported");
+  assert.equal(changeWords({ field: "source", to: "edited" }), "Program edited in the app");
   assert.equal(changeWords({ field: "cycle_s", to: 461 }), "Cycle time 7 min 41 s");
   assert.equal(changeWords({ field: "settings.turret", from: null, to: { 1: "WNMG" } }), "Tool crib set by hand");
   assert.equal(changeWords({ field: "settings.turret", from: { 1: "WNMG" }, to: null }), "Tool crib handed back to the automatic pick");

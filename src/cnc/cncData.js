@@ -562,6 +562,59 @@ export async function saveMachineCopy({ program, current, programs, check, fileN
   return data.rev;
 }
 
+// Edit on the Program tab (Heinrich, 9 Oct 2026): the program text typed
+// in the app, checked by the engine as a machine copy is (checkMachineCopy,
+// with the edited revision as 'current'), saved as the next revision marked
+// Edited. It has not run on the machine, so Ready or Not for machine is the
+// engine's check (his answer); a program the engine could not check (no
+// STEP stored) is Not for machine. The STEP and answers stay those of the
+// revision it was edited from. Needs setup-cnc-14-edited-revisions.sql.
+export async function saveEdit({ program, base, programs, check, userName }) {
+  const r = check?.result || null;
+  const notChecked = r ? "" : check?.reason || "The engine did not check it.";
+  const differences = (r?.differences || []).map(String);
+  const report = [
+    `Edited in the app${base ? ` from rev ${base.rev}` : ""}.`,
+    notChecked,
+    differences.length ? "Where the program and the model differ:" : "",
+    ...differences.map((d) => "- " + d),
+  ].filter(Boolean).join("\n");
+  const row = {
+    ...(check?.quick ? { quick: check.quick } : {}),
+    program_id: program.id,
+    source: "edited",
+    programs,
+    report,
+    ready: !!r?.ready,
+    fault: r ? faultText(r) : `Not checked: ${notChecked}`,
+    fails: r?.fails || [],
+    warnings: r?.warnings || [],
+    problems: r?.problems || [],
+    cycle_s: r?.cycle_s ?? null,
+    tool_s: r?.tool_s ?? null,
+    costing: r ? withSource(r) : null,
+    settings: check?.settings || base?.settings || program.settings || null,
+    step_path: base?.step_path || check?.step?.path || null,
+    step_name: base?.step_name || check?.step?.name || null,
+    note: base ? `Edited in the app from rev ${base.rev}` : "Edited in the app",
+    created_by: userName || "",
+  };
+  const { data, error } = await supabase.from("cnc_program_revisions").insert(row).select("rev").single();
+  if (error) {
+    const old = /source_check|violates check constraint/i.test(error.message || "");
+    throw new Error(
+      old
+        ? "This database does not take edited revisions yet: setup-cnc-14-edited-revisions.sql has to be run first. Nothing was saved."
+        : `The edit could not be saved: ${error.message}`
+    );
+  }
+  if (r?.costing) {
+    const { data: rows, error: e2 } = await supabase.from("cnc_programs").update({ costing: withSource(r) }).eq("id", program.id).select("id");
+    if (e2 || !rows?.length) throw new Error(`Rev ${data.rev} was saved, but its price was not: ${e2?.message || "the database changed nothing"}.`);
+  }
+  return data.rev;
+}
+
 // Every file filed under a program (<id>/<rev>/<file>), including one left
 // by a save that stopped before its revision was written.
 async function programFiles(programId) {

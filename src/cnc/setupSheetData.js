@@ -10,7 +10,7 @@
 // block it already sends. No PDF here: setupSheetPdf.js draws this.
 // Tested in setupSheetData.test.js.
 
-import { faultText, oNumber } from "./cncRules.js";
+import { faultText, oNumber, sourceTag } from "./cncRules.js";
 
 const min1 = (s) => (s == null ? "-" : `${Math.round((Number(s) / 60) * 10) / 10} min`);
 const fmt = (n) => (n == null || n === "" ? "-" : String(Math.round(Number(n) * 100) / 100));
@@ -126,7 +126,7 @@ export function setupSheetData({ program, rev, answer, when = new Date() }) {
   return {
     title: program?.part_name || part.name || "",
     numbers: programs.map(oNumber).join(" / "),
-    revision: rev ? `Rev ${rev.rev}${rev.source === "machine_copy" ? " (machine copy)" : ""}` : "",
+    revision: rev ? `Rev ${rev.rev}${sourceTag(rev.source)}` : "",
     when: when.toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
     ready,
     status: ready ? "MACHINE READY - all checks pass" : `NOT FOR MACHINE - ${faultText(answer) || "see the checks"}`,

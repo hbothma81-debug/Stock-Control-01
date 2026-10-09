@@ -266,6 +266,43 @@ export function matchMachineCopies(files, programNo, currentPrograms = []) {
   };
 }
 
+// The words after a revision's letter saying what made it, when it was not
+// the engine: "Rev C (machine copy)", "Rev D (edited)".
+export function sourceTag(source) {
+  if (source === "machine_copy") return " (machine copy)";
+  if (source === "edited") return " (edited)";
+  return "";
+}
+
+// Update program, the Tool crib and Turn around make the program again
+// from the model: hand edits in the current revision (edited in the app,
+// or a machine copy) are not carried over. Said above their Save, no
+// confirm box (Heinrich, 9 Oct 2026). Empty when there is nothing to lose.
+export function handEditsNote(current) {
+  if (!current || !["edited", "machine_copy"].includes(current.source)) return "";
+  const how = current.source === "edited" ? "was edited in the app" : "is a machine copy";
+  return `Rev ${current.rev} ${how}: saving a program made again from the model drops those hand edits.`;
+}
+
+// Edit on the Program tab: what stops the typed text being saved. Each
+// program must keep text and its own O number on its O line, because the
+// machine files a program by the number inside and Copy to USB names the
+// file by it.
+export function editProblems(programs) {
+  const out = [];
+  for (const p of programs || []) {
+    const text = String(p.text ?? "");
+    if (!text.trim()) {
+      out.push(`${oNumber(p.number)} has no text.`);
+      continue;
+    }
+    const m = text.match(/^\s*O0*(\d+)/m);
+    if (!m) out.push(`${oNumber(p.number)} has lost its O line: put "${oNumber(p.number)}" back at the top.`);
+    else if (Number(m[1]) !== p.number) out.push(`The O line reads ${oNumber(Number(m[1]))}: it must stay ${oNumber(p.number)}.`);
+  }
+  return out;
+}
+
 // The day a time falls on in South Africa, as 2026-10-08 (never the UTC
 // day, which is a day early before 02:00).
 export function dayInSA(iso) {

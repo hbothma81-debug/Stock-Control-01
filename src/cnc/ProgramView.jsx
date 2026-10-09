@@ -5,18 +5,19 @@
 // A revision that is Not for machine goes out only for an admin (Heinrich,
 // 9 Oct 2026, any reason); an older Ready revision goes out for anyone,
 // because the newest may be a trial (his answer).
-// Import machine copy opens in place of the tabs too. The Toolpath, Setup
-// sheet and Costing tabs come in the next pieces.
+// Import machine copy opens in place of the tabs too, and so does Edit (on
+// the Program tab, CNC Edit tick): the revision on screen as text boxes.
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, ArrowLeftRight, Download, FileInput, RefreshCw, Trash2, Usb } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, Download, FileInput, Pencil, RefreshCw, Trash2, Usb } from "lucide-react";
 import { C, F, S } from "../theme.js";
 import { deleteProgram, loadProgram } from "./cncData.js";
 import { CNC_FIELDS } from "./cncFields.js";
-import { faultText, oNumber, pipeLabel, programFiles, settingText } from "./cncRules.js";
+import { faultText, oNumber, pipeLabel, programFiles, settingText, sourceTag } from "./cncRules.js";
 import { canWriteToFolder, copyToFolder, downloadFiles } from "./programOut.js";
 import UpdateProgram from "./UpdateProgram.jsx";
 import ImportMachineCopy from "./ImportMachineCopy.jsx";
+import EditProgram from "./EditProgram.jsx";
 import CostingTab from "./CostingTab.jsx";
 import TurnAround from "./TurnAround.jsx";
 import ToolpathTab from "./ToolpathTab.jsx";
@@ -42,7 +43,7 @@ const TABS = [
 const { borderColor: _unused, ...chipActiveRest } = S.chipActive;
 const CHIP_ON = { ...chipActiveRest, border: `1px solid ${C.accentFinished}` };
 
-const SOURCE = { generated: "Generated", machine_copy: "Machine copy" };
+const SOURCE = { generated: "Generated", machine_copy: "Machine copy", edited: "Edited in the app" };
 
 export default function ProgramView({ id, canEdit, canDelete, customers, materials, pipes, shapes, canSeeValue, isAdmin, barPrices, onBarPrices, userName, onBack, onDeleted }) {
   const [data, setData] = useState(null);
@@ -52,6 +53,7 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
   const [deleting, setDeleting] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [turning, setTurning] = useState(false);
   // The engine's toolpath answers, per revision, while the program is open.
   const [toolpaths, setToolpaths] = useState({});
@@ -117,6 +119,25 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
         onCancel={() => setImporting(false)}
         onSaved={() => {
           setImporting(false);
+          setRevId(null);
+          setTab("program");
+          setReads((n) => n + 1);
+        }}
+      />
+    );
+  }
+
+  if (editing && shown) {
+    return (
+      <EditProgram
+        program={p}
+        revisions={revisions}
+        current={current}
+        base={shown}
+        userName={userName}
+        onCancel={() => setEditing(false)}
+        onSaved={() => {
+          setEditing(false);
           setRevId(null);
           setTab("program");
           setReads((n) => n + 1);
@@ -267,7 +288,7 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
               title={`${SOURCE[r.source] || r.source}, ${new Date(r.created_at).toLocaleString()}${r.created_by ? `, ${r.created_by}` : ""}`}
             >
               {r.rev}
-              {r.source === "machine_copy" ? " (machine copy)" : ""}
+              {sourceTag(r.source)}
             </button>
           ))}
         </div>
@@ -294,6 +315,13 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
         ))}
       </div>
 
+      {tab === "program" && shown && canEdit && (shown.programs || []).length > 0 && (
+        <div>
+          <button type="button" className="stk-btn" style={S.chip} onClick={() => setEditing(true)}>
+            <Pencil size={14} /> Edit{shown.id !== current?.id ? ` rev ${shown.rev}` : ""}
+          </button>
+        </div>
+      )}
       {tab === "program" && shown && <ProgramText rev={shown} />}
       {tab === "crib" && (
         <ToolCribTab

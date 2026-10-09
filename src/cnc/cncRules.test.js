@@ -206,6 +206,28 @@ test("a machine copy may bring the second program a part did not have, and short
   assert.deepEqual(r.imported, [{ number: 1028, fileName: "x.nc" }]);
 });
 
+import { sourceTag, handEditsNote, editProblems } from "./cncRules.js";
+
+test("a revision says when it was a machine copy or edited in the app", () => {
+  assert.equal(sourceTag("generated"), "");
+  assert.equal(sourceTag("machine_copy"), " (machine copy)");
+  assert.equal(sourceTag("edited"), " (edited)");
+});
+
+test("a remake from the model warns only when the current revision has hand edits", () => {
+  assert.equal(handEditsNote(null), "");
+  assert.equal(handEditsNote({ rev: "B", source: "generated" }), "");
+  assert.match(handEditsNote({ rev: "C", source: "edited" }), /^Rev C was edited in the app: .*drops those hand edits/);
+  assert.match(handEditsNote({ rev: "D", source: "machine_copy" }), /^Rev D is a machine copy: /);
+});
+
+test("an edit keeps text and its own O number on each program", () => {
+  assert.deepEqual(editProblems([{ number: 1027, text: "%\nO00001027(BUSH)\nG0X50.\n%" }, { number: 1028, text: "%\r\nO1028\r\n%" }]), []);
+  assert.deepEqual(editProblems([{ number: 1027, text: "  \n" }]), ["O00001027 has no text."]);
+  assert.deepEqual(editProblems([{ number: 1027, text: "%\nG0X50.\n%" }]), ['O00001027 has lost its O line: put "O00001027" back at the top.']);
+  assert.deepEqual(editProblems([{ number: 1027, text: "%\nO00001030(BUSH)\n%" }]), ["The O line reads O00001030: it must stay O00001027."]);
+});
+
 import { exportRows, dayInSA } from "./cncRules.js";
 
 test("the Excel rows: program number order, words a reviewer reads, minutes to one place", () => {

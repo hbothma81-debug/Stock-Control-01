@@ -10,7 +10,7 @@ import { Download, Printer } from "lucide-react";
 import PdfViewer from "../PdfViewer.jsx";
 import { C, S } from "../theme.js";
 import { loadToolpath } from "./cncData.js";
-import { oNumber } from "./cncRules.js";
+import { oNumber, sourceTag } from "./cncRules.js";
 import { setupSheetData } from "./setupSheetData.js";
 import { drawSetupSheet } from "./setupSheetPdf.js";
 import { toolList, toolpathFrames } from "./toolpathGeom.js";
@@ -82,7 +82,7 @@ export default function SetupSheetTab({ program, rev, answers, setAnswers }) {
         </button>
         <span style={{ fontSize: 13, color: C.muted, alignSelf: "center" }}>
           Rev {rev.rev}
-          {rev.source === "machine_copy" ? " (machine copy)" : ""}, batch of {program.settings?.qty ?? 1}
+          {sourceTag(rev.source)}, batch of {program.settings?.qty ?? 1}
         </span>
       </div>
       <PdfViewer url={pdf.url} title={pdf.name} />

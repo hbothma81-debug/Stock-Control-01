@@ -27,7 +27,7 @@ import { C, S } from "../theme.js";
 import { loadToolpath, runUpdate, saveUpdate, updateChanges } from "./cncData.js";
 import { loadMachines, loadTools } from "./cncTables.js";
 import { A_HOLDER, cribWarnings, holderForKind, holdersFrom, HOLDER_NAME, layoutFrom, modelPitchOf, moveStation, moveToHolder, pitchChoices, putTool, removeTool, sameLayout, samePitches, setThreadPitch, stationsWith, STATIONS, toolFits, toTurret } from "./cribRules.js";
-import { oNumber, revisionLetter } from "./cncRules.js";
+import { handEditsNote, oNumber, revisionLetter } from "./cncRules.js";
 import { toolLine } from "./toolKinds.js";
 import ProgramChanges from "./ProgramChanges.jsx";
 
@@ -140,6 +140,7 @@ export default function ToolCribTab({ program, revisions, current, materials, ca
           {changes.length > 0 ? `Changed: ${changes.join(", ")}.` : `No change: rev ${current.rev} already comes out like this.`}
         </div>
         {changes.length > 0 && <ProgramChanges before={current.programs || []} after={r.programs || []} />}
+        {changes.length > 0 && handEditsNote(current) && <div style={{ color: C.danger, fontWeight: 600 }}>{handEditsNote(current)}</div>}
         {error && <div style={{ color: C.danger }}>{error}</div>}
         <div style={{ display: "flex", gap: 8 }}>
           {changes.length > 0 && (

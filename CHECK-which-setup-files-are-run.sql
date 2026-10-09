@@ -212,7 +212,10 @@ with checks (setup_file, looks_for, found) as (
     ('setup-cnc-12-program-refs.sql', 'columns cnc_programs.quote_ref and project_name',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_programs' and column_name = 'project_name')),
     ('setup-cnc-13-program-history.sql', 'table cnc_program_history (who changed what on each program)',
-      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_program_history'))
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_program_history')),
+    ('setup-cnc-14-edited-revisions.sql', 'a revision may be edited in the app (source edited)',
+      exists (select 1 from pg_constraint where conrelid = 'public.cnc_program_revisions'::regclass
+               and conname = 'cnc_program_revisions_source_check' and pg_get_constraintdef(oid) like '%edited%'))
 )
 select
   setup_file,

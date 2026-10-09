@@ -144,7 +144,7 @@ export default function ToolpathTab({ program, rev, answers, setAnswers }) {
       </div>
       <div style={{ fontSize: 12.5, color: C.muted }}>
         The shading is the material left once that side is finished. Drawn from rev {rev.rev}
-        {rev.source === "machine_copy" ? " (the machine copy, as the operator edited it)" : ""}.
+        {rev.source === "machine_copy" ? " (the machine copy, as the operator edited it)" : rev.source === "edited" ? " (as edited in the app)" : ""}.
       </div>
     </div>
   );
