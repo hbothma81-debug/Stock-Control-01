@@ -238,6 +238,7 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
           pipes={pipes || null}
           shapes={shapes || null}
           canSeeValue={canSeeValue}
+          isAdmin={isAdmin}
           barPrices={barPrices}
           onBarPrices={setBarPrices}
           userName={userName}

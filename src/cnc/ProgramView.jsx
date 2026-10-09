@@ -2,6 +2,9 @@
 // tabs. Read when opened (the program text and settings are not in the
 // list). Update program opens in place of the tabs. Copy to USB and
 // Download send out the revision on screen (anyone with the View tick).
+// A revision that is Not for machine goes out only for an admin (Heinrich,
+// 9 Oct 2026, any reason); an older Ready revision goes out for anyone,
+// because the newest may be a trial (his answer).
 // Import machine copy opens in place of the tabs too. The Toolpath, Setup
 // sheet and Costing tabs come in the next pieces.
 
@@ -41,7 +44,7 @@ const CHIP_ON = { ...chipActiveRest, border: `1px solid ${C.accentFinished}` };
 
 const SOURCE = { generated: "Generated", machine_copy: "Machine copy" };
 
-export default function ProgramView({ id, canEdit, canDelete, customers, materials, pipes, shapes, canSeeValue, barPrices, onBarPrices, userName, onBack, onDeleted }) {
+export default function ProgramView({ id, canEdit, canDelete, customers, materials, pipes, shapes, canSeeValue, isAdmin, barPrices, onBarPrices, userName, onBack, onDeleted }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("program");
@@ -78,6 +81,7 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
   const { program: p, revisions } = data;
   const current = revisions.find((r) => r.rev === p.current_rev) || revisions[revisions.length - 1] || null;
   const shown = revisions.find((r) => r.id === revId) || current;
+  const mayGoOut = !!shown?.ready || !!isAdmin;
 
   if (turning) {
     return (
@@ -143,6 +147,7 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
   const fileWords = files.map((f) => f.name).join(" and ");
 
   async function copyOut(pickNew) {
+    if (!mayGoOut) return;
     setOutNote(null);
     if (!canWriteToFolder()) {
       downloadFiles(files);
@@ -209,13 +214,14 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
       )}
       {files.length > 0 && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <button type="button" className="stk-btn" style={S.chip} onClick={() => copyOut(false)}>
+          <button type="button" className="stk-btn" style={S.chip} onClick={() => copyOut(false)} disabled={!mayGoOut}>
             <Usb size={14} /> Copy to USB{shown.id !== current?.id ? ` (rev ${shown.rev})` : ""}
           </button>
           <button
             type="button"
             className="stk-btn"
             style={S.chip}
+            disabled={!mayGoOut}
             onClick={() => {
               downloadFiles(files);
               setOutNote({ ok: true, text: `Downloaded ${fileWords}.` });
@@ -228,6 +234,13 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
               Another stick or folder
             </button>
           )}
+        </div>
+      )}
+      {files.length > 0 && !shown.ready && (
+        <div style={{ fontSize: 13.5, color: C.danger }}>
+          {isAdmin
+            ? `Rev ${shown.rev} is Not for machine: sending it out as admin.`
+            : `Rev ${shown.rev} is Not for machine: only an admin can download it or copy it to USB.`}
         </div>
       )}
       {outNote && <div style={{ fontSize: 13.5, color: outNote.ok ? C.accentFinished : C.danger }}>{outNote.text}</div>}
