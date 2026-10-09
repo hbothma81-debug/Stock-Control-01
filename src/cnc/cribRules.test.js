@@ -82,3 +82,10 @@ test("holders: changing one takes off a default tool that no longer fits", async
   const k = changeHolder(data, 6, "bore", () => ({ data: { kind: "bar" } }));
   assert.equal(k.removed, null);
 });
+
+test("Duplicate: the next free key and the number on the name", async () => {
+  const { copyOfTool } = await import("./toolKinds.js");
+  const t = { tool_key: "THREAD", data: { name: "THREAD" } };
+  assert.deepEqual(copyOfTool(t, [t]), { toolKey: "THREAD2", name: "THREAD 2" });
+  assert.deepEqual(copyOfTool(t, [t, { tool_key: "THREAD2" }]), { toolKey: "THREAD3", name: "THREAD 3" });
+});

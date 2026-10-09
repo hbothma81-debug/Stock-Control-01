@@ -100,3 +100,14 @@ export function formFromTool(t) {
 export function suggestKey(name) {
   return String(name ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, "").slice(0, 24);
 }
+
+// Duplicate on the Tools screen (Heinrich, 9 Oct 2026: a second SER 2525
+// M16 holder): the same tool under the next free key, the number added to
+// its name too ("THREAD" -> "THREAD2", "THREAD 2").
+export function copyOfTool(tool, tools) {
+  const key = tool?.tool_key || "";
+  const taken = new Set((tools || []).map((t) => t.tool_key));
+  let n = 2;
+  while (taken.has(`${key}${n}`)) n++;
+  return { toolKey: `${key}${n}`, name: `${tool?.data?.name || key} ${n}` };
+}

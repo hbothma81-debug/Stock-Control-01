@@ -9,16 +9,19 @@
 // seldom; Heinrich, 9 Oct 2026), and a station offers only the tools that
 // fit its holder. A default tool that no longer fits comes off and the
 // screen says so (cribRules.js changeHolder).
+// Duplicate on each tool (admins, same day): the New tool form filled in
+// with the same tool under the next free key, " 2" on its name; nothing
+// is saved until Add tool.
 
 import { Fragment, useEffect, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Copy, Plus, Trash2 } from "lucide-react";
 import Section from "../Section.jsx";
 import TypeToFind from "../TypeToFind.jsx";
 import { C, S } from "../theme.js";
 import { readIsoCode } from "./cncData.js";
 import { addTool, loadTools, removeTool, saveMachine, saveTool } from "./cncTables.js";
 import { A_HOLDER, changeHolder, holderForKind, holdersFrom, toolFits } from "./cribRules.js";
-import { formFromTool, kindOf, suggestKey, TOOL_KINDS, toolFromForm, toolLine } from "./toolKinds.js";
+import { copyOfTool, formFromTool, kindOf, suggestKey, TOOL_KINDS, toolFromForm, toolLine } from "./toolKinds.js";
 import EngineSource, { NEEDS } from "./EngineSource.jsx";
 
 export default function ToolsScreen({ machine, isAdmin, userName, onMachine }) {
@@ -150,16 +153,36 @@ export default function ToolsScreen({ machine, isAdmin, userName, onMachine }) {
           <Section key={`${k.kind}-${!!q}`} title={k.label} count={mine.length} defaultOpen={!!q || k.kind !== "hss"}>
             {mine.map((t) => (
               <div key={t.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-                <button
-                  type="button"
-                  className="stk-btn"
-                  onClick={() => setOpen((o) => (o === t.id ? null : t.id))}
-                  style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", color: C.text, padding: "8px 4px", cursor: "pointer", fontSize: 14 }}
-                >
-                  <b>{t.data?.name || t.tool_key}</b>
-                  <span style={{ color: C.muted }}> · {toolLine(t)}</span>
-                  {!t.owned && <span style={{ color: C.accentRaw, fontWeight: 600 }}> · Not owned</span>}
-                </button>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <button
+                    type="button"
+                    className="stk-btn"
+                    onClick={() => setOpen((o) => (o === t.id ? null : t.id))}
+                    style={{ display: "block", flex: 1, minWidth: 0, textAlign: "left", background: "transparent", border: "none", color: C.text, padding: "8px 4px", cursor: "pointer", fontSize: 14 }}
+                  >
+                    <b>{t.data?.name || t.tool_key}</b>
+                    <span style={{ color: C.muted }}> · {toolLine(t)}</span>
+                    {!t.owned && <span style={{ color: C.accentRaw, fontWeight: 600 }}> · Not owned</span>}
+                  </button>
+                  {isAdmin && (
+                    <button type="button" className="stk-btn" style={{ ...S.chip, padding: "4px 8px", fontSize: 12.5 }} onClick={() => setOpen(`copy:${t.id}`)} title="A second one of this tool">
+                      <Copy size={13} /> Duplicate
+                    </button>
+                  )}
+                </div>
+                {open === `copy:${t.id}` && (
+                  <ToolForm
+                    key={`copy:${t.id}`}
+                    machine={machine}
+                    tools={tools}
+                    copyOf={t}
+                    userName={userName}
+                    onDone={(saved) => {
+                      setOpen(null);
+                      if (saved) setTools((list) => [...list, saved]);
+                    }}
+                  />
+                )}
                 {open === t.id &&
                   (isAdmin ? (
                     <ToolForm
@@ -200,11 +223,12 @@ function ToolDetails({ tool }) {
 }
 
 // New tool, or a tool opened to change it.
-function ToolForm({ machine, tools, tool = null, userName, onDone }) {
-  const [kind, setKind] = useState(tool?.data?.kind || "");
-  const [form, setForm] = useState(() => (tool ? formFromTool(tool) : { name: "", extra: {} }));
-  const [toolKey, setToolKey] = useState(tool?.tool_key || "");
-  const [owned, setOwned] = useState(tool ? !!tool.owned : true);
+function ToolForm({ machine, tools, tool = null, copyOf = null, userName, onDone }) {
+  const copy = copyOf ? copyOfTool(copyOf, tools) : null;
+  const [kind, setKind] = useState(tool?.data?.kind || copyOf?.data?.kind || "");
+  const [form, setForm] = useState(() => (tool ? formFromTool(tool) : copyOf ? { ...formFromTool(copyOf), name: copy.name } : { name: "", extra: {} }));
+  const [toolKey, setToolKey] = useState(tool?.tool_key || copy?.toolKey || "");
+  const [owned, setOwned] = useState(tool ? !!tool.owned : copyOf ? !!copyOf.owned : true);
   const [codes, setCodes] = useState({ insert: "", holder: "" });
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -255,7 +279,7 @@ function ToolForm({ machine, tools, tool = null, userName, onDone }) {
     }
     setBusy("Saving…");
     try {
-      const saved = tool ? await saveTool({ id: tool.id, owned, data, userName }) : await addTool({ machineId: machine.id, toolKey: key, owned, data, userName });
+      const saved = tool ? await saveTool({ id: tool.id, owned, data, userName }) : await addTool({ machineId: machine.id, toolKey: key, owned, data, sort: copyOf?.sort, userName });
       onDone(saved, false);
     } catch (err) {
       setError(err.message || String(err));
@@ -277,8 +301,8 @@ function ToolForm({ machine, tools, tool = null, userName, onDone }) {
 
   return (
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 10, margin: "4px 0 10px", display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ fontWeight: 700, fontSize: 14 }}>{tool ? `Change ${tool.data?.name || tool.tool_key}` : "New tool"}</div>
-      {!tool && (
+      <div style={{ fontWeight: 700, fontSize: 14 }}>{tool ? `Change ${tool.data?.name || tool.tool_key}` : copyOf ? `Duplicate of ${copyOf.data?.name || copyOf.tool_key}` : "New tool"}</div>
+      {!tool && !copyOf && (
         <div style={S.formGrid}>
           <div>
             <label style={S.label}>Insert ISO code</label>
