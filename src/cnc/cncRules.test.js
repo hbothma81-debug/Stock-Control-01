@@ -136,6 +136,18 @@ test("the fault on a shut line", () => {
   );
   assert.equal(faultText({ ready: false, problems: ["DECIMAL: WNMG R0.8 G54: no decimal point in G0X29Z5.0M8"] }), "no decimal point (WNMG R0.8)");
   assert.equal(faultText({ ready: false, problems: ["DECIMAL: O1031: no decimal point in G0X150Z80.0"] }), "no decimal point");
+  assert.equal(
+    faultText({
+      ready: false,
+      problems: [
+        "SPEED: WNMG R0.8 G54: spindle speed over 3500 in G50S4000",
+        "TOOLCALL: WNMG R0.8 G54: tool call not T + station + the same offset (T0101, T1 to T8) in T0102",
+        "GCODE: WNMG R0.8 G54: G28 / G41 / G42 not allowed in G41",
+        "FEED: WNMG R0.8 G54: G98 feed per minute outside the puller (G99 missing) in G54",
+      ],
+    }),
+    "spindle speed over 3500 (WNMG R0.8); wrong tool call (WNMG R0.8); G28 / G41 / G42 not allowed (WNMG R0.8); G98 left on after the puller (WNMG R0.8)"
+  );
 });
 
 test("file names", () => {

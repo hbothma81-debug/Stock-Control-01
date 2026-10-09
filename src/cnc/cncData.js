@@ -507,7 +507,8 @@ export async function saveProgramDetails({ program, partName, customer, material
 // the cycle time and costing, and where the program and the model differ.
 // Nothing is saved. A program with no STEP stored is not checked.
 // edited: the text was typed on the Program tab (Edit): the engine then
-// calls a number with no decimal point a problem, not a warning.
+// calls what crashes on the machine a problem, not a warning (no decimal
+// point, S over 3500, T0102, G28/G41/G42, G98 left on after the puller).
 export async function checkMachineCopy({ program, current, programs, edited = false }) {
   const settings = current?.settings || program.settings || {};
   const quick = current?.quick || program.quick || null;

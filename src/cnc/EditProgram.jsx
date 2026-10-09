@@ -3,8 +3,9 @@
 // opens as text boxes, one per program; the changed lines show underneath
 // as they are typed. Save has the engine check the text as it checks a
 // machine copy (rapids, jaws, spindle, clearance, travel, cycle time,
-// price) and, for an edit only, a number with no decimal point (it crashes
-// the machine), and keeps it as the next revision, marked Edited. Ready or Not
+// price) and, for an edit only, what crashes on the machine (no decimal
+// point, S over 3500, a tool call like T0102, G28/G41/G42, G98 left on after
+// the puller), and keeps it as the next revision, marked Edited. Ready or Not
 // for machine is the engine's check (his answer). An engine that cannot be
 // reached saves nothing: the text stays in the boxes for another Save.
 // CNC Edit tick only (ProgramView shows the button).

@@ -158,9 +158,13 @@ const PROBLEM_WORDS = {
   TRAVEL: "past the machine's travel",
   // Any cut with the spindle stopped (the engine's check from 9 Oct 2026).
   SPINDLE: "spindle not running",
-  // A number with no decimal point in a program edited in the app (the
-  // engine, edited: true; Heinrich, 9 Oct 2026: it crashes the machine).
+  // In a program edited in the app only (the engine, edited: true;
+  // Heinrich, 9 Oct 2026: these crash or misbehave on the machine).
   DECIMAL: "no decimal point",
+  SPEED: "spindle speed over 3500",
+  TOOLCALL: "wrong tool call",
+  GCODE: "G28 / G41 / G42 not allowed",
+  FEED: "G98 left on after the puller",
 };
 
 // "RAPID: 3MM PARTING G54: G0 from …" -> "rapid through material (3MM PARTING)".
