@@ -20,16 +20,20 @@ const F = {
   pitches_owned: { key: "pitches_owned", label: "Pitches owned (mm, e.g. 1, 1.25, 1.5)", type: "list" },
   pitch_range: { key: "pitch_range", label: "Pitch range the holder takes (mm, e.g. 0.5, 3)", type: "list" },
   puller: { key: "puller", label: "Puller type", type: "choice", choices: ["bar", "magnet"] },
+  // Read by the engine when a tool has them (9 Oct 2026); left blank, the
+  // engine's own figure is used and nothing is saved.
+  side_reach: { key: "side_reach_mm", label: "Side reach past the tip (mm, blank = 3)", type: "number", optional: true },
+  ap_min: { key: "ap_min_mm", label: "Minimum depth of cut (mm, blank = 0.5)", type: "number", optional: true },
 };
 
 export const TOOL_KINDS = [
-  { kind: "od", label: "Turning (OD)", long: false, fields: [F.holder, F.insert, F.nose, F.key] },
-  { kind: "bar", label: "Boring bars", long: true, fields: [F.holder, F.insert, F.dia, F.nose, F.key, F.home_z] },
+  { kind: "od", label: "Turning (OD)", long: false, fields: [F.holder, F.insert, F.nose, F.key, F.ap_min] },
+  { kind: "bar", label: "Boring bars", long: true, fields: [F.holder, F.insert, F.dia, F.nose, F.key, F.home_z, F.ap_min] },
   { kind: "udrill", label: "U-drills", long: true, fields: [F.dia, F.key, F.home_z, F.holder, F.insert] },
   { kind: "hss", label: "HSS drills", long: true, fields: [F.dia] },
   { kind: "groove", label: "Grooving", long: false, fields: [F.holder, F.insert, F.width, F.cdx, F.op] },
   { kind: "part", label: "Parting", long: false, fields: [F.holder, F.insert, F.width, F.max_dia, F.op] },
-  { kind: "thread", label: "Threading", long: false, fields: [F.holder, F.insert, F.pitches_owned, F.pitch_range] },
+  { kind: "thread", label: "Threading", long: false, fields: [F.holder, F.insert, F.pitches_owned, F.pitch_range, F.side_reach] },
   { kind: "puller", label: "Bar puller", long: false, fields: [F.puller] },
 ];
 
@@ -66,6 +70,7 @@ export function toolFromForm(kind, form) {
   for (const f of k.fields) {
     const raw = form[f.key];
     if (raw === undefined || raw === null || String(raw).trim() === "") {
+      if (f.optional) continue;
       errors.push(f.label);
       continue;
     }
