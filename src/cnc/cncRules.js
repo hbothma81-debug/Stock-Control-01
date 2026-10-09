@@ -180,9 +180,17 @@ export function partNameFromFile(fileName) {
 
 // A program file's name, as the hand programs are filed:
 // "O00001027 BUSH.txt". Characters a file name may not hold are dropped.
+// The LEO 1600 will not select a longer name than MAX_FILE_NAME (found at
+// the lathe, 9 Oct 2026: "O00001027 Reducing Bolt M16-M12.txt", 35, would
+// not load; 26 did). A title too long loses whole words from its front,
+// so the size at its end stays (his answer: "O00001027 M16-M12.txt"); the
+// O number always stays. Raise MAX_FILE_NAME once a longer name is proven.
+export const MAX_FILE_NAME = 26;
 export function programFileName(number, partName) {
-  const part = String(partName ?? "").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
-  return `${oNumber(number)}${part ? " " + part : ""}.txt`;
+  const words = String(partName ?? "").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  const name = (w) => `${oNumber(number)}${w.length ? " " + w.join(" ") : ""}.txt`;
+  while (words.length && name(words).length > MAX_FILE_NAME) words.shift();
+  return name(words);
 }
 
 // What to tell the person when the engine says no.

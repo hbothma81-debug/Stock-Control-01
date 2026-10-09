@@ -141,6 +141,11 @@ test("file names", () => {
   assert.equal(partNameFromFile("bush.stp"), "bush");
   assert.equal(programFileName(1027, "BUSH 50/30"), "O00001027 BUSH 50 30.txt");
   assert.equal(programFileName(2001, ""), "O00002001.txt");
+  // The LEO 1600 refuses names over 26 (9 Oct 2026): words go from the front.
+  assert.equal(programFileName(1027, "Reducing Bolt M16-M12"), "O00001027 Bolt M16-M12.txt");
+  assert.equal(programFileName(1027, "Bolt M16-M12").length, 26);
+  assert.equal(programFileName(1027, "Long Reducing Bolt M16X1.5-M12"), "O00001027 M16X1.5-M12.txt");
+  assert.equal(programFileName(1027, "SUPERLONGPARTNAMEWITHNOSPACES"), "O00001027.txt");
 });
 
 test("the engine's refusals in plain words", () => {
@@ -167,7 +172,8 @@ test("each program goes out under its O number and its own title", () => {
     ],
     "BPW 10t BUSH"
   );
-  assert.deepEqual(files.map((f) => f.name), ["O00001027 BPW 10t BUSH SIDE 1.txt", "O00001028 BPW 10t BUSH SIDE 2.txt", "O00001030 BPW 10t BUSH.txt"]);
+  // Over 26 characters the title loses words from its front (the LEO 1600's limit).
+  assert.deepEqual(files.map((f) => f.name), ["O00001027 BUSH SIDE 1.txt", "O00001028 BUSH SIDE 2.txt", "O00001030 BPW 10t BUSH.txt"]);
   assert.equal(files[0].text, "%\nO00001027(BPW 10t BUSH SIDE 1)\nG21\n%");
 });
 
