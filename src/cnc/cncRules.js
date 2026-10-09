@@ -311,6 +311,10 @@ export function pipeLabel(pipe) {
 // And the program's own turret from its Tool crib (turret: station -> tool
 // key), kept until changed or handed back to the automatic pick (Heinrich,
 // 8 Oct 2026: "can change tool crib later and recalculate").
+// The ones the Tool crib sets, not the Costing tab: a re-price on the
+// Costing tab keeps them (until 9 Oct 2026 it dropped the program's own
+// layout, which fell back to the automatic pick).
+export const CRIB_KEYS = ["turret"];
 export const COSTING_KEYS = ["qty", "parts_per_bar", "bar_length", "price_by", "piece_price", "setup_price", "rate_per_s", "rate_unit", "stock_length", "charge_all_material", "turret", "markup_material", "markup_offcut"];
 
 export function costingPart(settings) {

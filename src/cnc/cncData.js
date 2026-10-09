@@ -6,7 +6,7 @@
 import { supabase } from "../lib/supabaseClient.js";
 import { barSizeOf, findBarPrice, kgPerMetre, materialPricing, sameSize } from "./pricing.js";
 import { DEFAULT_SETUP_PRICE } from "./cncRules.js";
-import { COSTING_KEYS, costingPart, dayInSA, engineErrorText, exportRows, faultText, revisionChanges, stockText, MAX_STEP_BYTES } from "./cncRules.js";
+import { COSTING_KEYS, CRIB_KEYS, costingPart, dayInSA, engineErrorText, exportRows, faultText, revisionChanges, stockText, MAX_STEP_BYTES } from "./cncRules.js";
 
 // The engine (ERS TURNING APP, its own repository and Vercel project). It
 // answers only a signed-in user of this app's databases, practice or live.
@@ -358,8 +358,9 @@ export async function recost({ program, current, material, costingSettings }) {
   const step = quick ? null : await storedStep(program.id, current);
   if (!step && !quick) throw new Error("No STEP file is stored for this program, so it cannot be priced.");
   // The Costing tab sends all three costing figures; one left out is cleared.
+  // What the Tool crib set (CRIB_KEYS) is not the Costing tab's, and stays.
   const base = { ...(program.settings || {}) };
-  for (const k of COSTING_KEYS) delete base[k];
+  for (const k of COSTING_KEYS) if (!CRIB_KEYS.includes(k)) delete base[k];
   const { result, sent: settings } = await runPriced({
     name: program.part_name,
     stepText: step?.text,
