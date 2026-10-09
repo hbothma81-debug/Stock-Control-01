@@ -8,11 +8,13 @@
 // program, and the end stays set on later updates (side1, his answer).
 // Nothing is saved unless Keep is pressed.
 // Clicks: open the program, Turn around, Keep.
+// The other end that comes out the same as the current revision (a part
+// the same both ways) offers no Keep (Heinrich, 9 Oct 2026).
 
 import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { C, F, S } from "../theme.js";
-import { runUpdate, saveUpdate } from "./cncData.js";
+import { runUpdate, saveUpdate, updateChanges } from "./cncData.js";
 import { faultText, oNumber, rand, revisionLetter } from "./cncRules.js";
 
 const minSec = (s) => (s == null ? "–" : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`);
@@ -123,6 +125,8 @@ export default function TurnAround({ program, revisions, current, materials, can
                 </details>
                 {i === asNow ? (
                   <div style={{ color: C.muted, fontSize: 13 }}>This is how it is made now.</div>
+                ) : updateChanges(current, run, ["side1"]).length === 0 ? (
+                  <div style={{ color: C.muted, fontSize: 13 }}>Comes out the same as rev {current?.rev}: nothing to keep.</div>
                 ) : (
                   <button type="button" className="stk-btn" style={{ ...S.submitBtn, marginTop: 4 }} disabled={saving != null} onClick={() => keep(i)}>
                     {saving === i ? "Saving…" : `Keep this one (rev ${letter})`}

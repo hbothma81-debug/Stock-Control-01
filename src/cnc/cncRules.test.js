@@ -286,6 +286,10 @@ test("Update program: a run that comes out the same as the current revision chan
   );
   assert.deepEqual(revisionChanges(current, { ...next, settings: { ...next.settings, bar_dia: 75 } }), ["settings"]);
   assert.deepEqual(revisionChanges(current, { ...next, warnings: [] }), ["warnings"]);
+  // Turn around: the other end that comes out the same is nothing to keep.
+  const turned = { ...next, settings: { ...next.settings, side1: "L" } };
+  assert.deepEqual(revisionChanges(current, turned), ["settings"]);
+  assert.deepEqual(revisionChanges(current, turned, false, ["side1"]), []);
 });
 
 test("Update program: the part name, customer and material are the program's own", () => {

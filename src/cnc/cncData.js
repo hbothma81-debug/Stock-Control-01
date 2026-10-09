@@ -480,10 +480,11 @@ export async function saveUpdate({ program, run, letter, partName, customer, mat
 
 // What saving this run as a new revision would change, in words (empty:
 // nothing, and Update program offers no new revision). The row compared is
-// the one saveUpdate inserts.
-export function updateChanges(current, run) {
+// the one saveUpdate inserts. Update program, the Tool crib and Turn around
+// all ask it before offering Save (Heinrich, 9 Oct 2026).
+export function updateChanges(current, run, ignore = []) {
   const next = revisionRow({ programId: null, result: run.result, settings: run.sent, stepPath: null, stepName: null, quick: run.quick });
-  return revisionChanges(current, next, !!run.step?.file);
+  return revisionChanges(current, next, !!run.step?.file, ignore);
 }
 
 // Update program when the run came out the same as the current revision:

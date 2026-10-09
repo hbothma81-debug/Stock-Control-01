@@ -7,13 +7,14 @@
 // until it is changed again or handed back to the automatic pick.
 // Tools not owned are marked, and the engine's warnings about the crib
 // (a tool it had to place, a rule broken, a tool not owned) are listed.
-// Changing needs the CNC Edit tick.
+// Changing needs the CNC Edit tick. A layout that comes out exactly as the
+// current revision offers no Save (Heinrich, 9 Oct 2026).
 
 import { useEffect, useState } from "react";
 import { ArrowDown, ArrowUp, X } from "lucide-react";
 import TypeToFind from "../TypeToFind.jsx";
 import { C, S } from "../theme.js";
-import { loadToolpath, runUpdate, saveUpdate } from "./cncData.js";
+import { loadToolpath, runUpdate, saveUpdate, updateChanges } from "./cncData.js";
 import { loadMachines, loadTools } from "./cncTables.js";
 import { cribWarnings, layoutFrom, moveStation, putTool, removeTool, sameLayout, STATIONS, toTurret } from "./cribRules.js";
 import { oNumber, revisionLetter } from "./cncRules.js";
@@ -97,6 +98,7 @@ export default function ToolCribTab({ program, revisions, current, materials, ca
 
   if (run) {
     const r = run.result;
+    const changes = updateChanges(current, run);
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 14 }}>
         <div style={{ color: r.ready ? C.accentFinished : C.danger, fontWeight: 600 }}>{r.ready ? "Ready for the machine" : `Not for machine: ${(r.fails || []).join("; ")}`}</div>
@@ -110,12 +112,17 @@ export default function ToolCribTab({ program, revisions, current, materials, ca
             ))}
           </ul>
         )}
-        <ProgramChanges before={current.programs || []} after={r.programs || []} />
+        <div style={{ fontWeight: 600 }}>
+          {changes.length > 0 ? `Changed: ${changes.join(", ")}.` : `No change: rev ${current.rev} already comes out like this.`}
+        </div>
+        {changes.length > 0 && <ProgramChanges before={current.programs || []} after={r.programs || []} />}
         {error && <div style={{ color: C.danger }}>{error}</div>}
         <div style={{ display: "flex", gap: 8 }}>
-          <button type="button" className="stk-btn" style={{ ...S.submitBtn, marginTop: 0 }} onClick={save} disabled={!!busy}>
-            {busy || `Save as rev ${revisionLetter(revisions.length)}`}
-          </button>
+          {changes.length > 0 && (
+            <button type="button" className="stk-btn" style={{ ...S.submitBtn, marginTop: 0 }} onClick={save} disabled={!!busy}>
+              {busy || `Save as rev ${revisionLetter(revisions.length)}`}
+            </button>
+          )}
           <button type="button" className="stk-btn" style={S.chip} onClick={() => setRun(null)} disabled={!!busy}>
             Back to the crib
           </button>

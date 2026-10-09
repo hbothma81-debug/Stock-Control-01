@@ -389,8 +389,10 @@ export function wastageRows(w, materialPerPart) {
 // alone is a change (his answer). Where the costing's cutting data came
 // from (data_source) is left out: a new table version that moves no figure
 // is no change. next is the row saveUpdate would insert; newStep is true
-// when another STEP file was chosen.
-export function revisionChanges(current, next, newStep = false) {
+// when another STEP file was chosen. ignore names settings left out of the
+// comparison: Turn around's side1, because the other end that comes out
+// the same as now is nothing to keep.
+export function revisionChanges(current, next, newStep = false, ignore = []) {
   if (!current) return ["first revision"];
   const same = (a, b) => sameJson(a ?? null, b ?? null);
   const priced = (c) => {
@@ -408,7 +410,8 @@ export function revisionChanges(current, next, newStep = false) {
   if (!same(current.fails || [], next.fails) || !same(current.problems || [], next.problems) || !same(current.warnings || [], next.warnings)) {
     out.push("warnings");
   }
-  if (!same(current.settings || {}, next.settings || {})) out.push("settings");
+  const kept = (s) => Object.fromEntries(Object.entries(s || {}).filter(([k]) => !ignore.includes(k)));
+  if (!same(kept(current.settings), kept(next.settings))) out.push("settings");
   if (!same(current.report || "", next.report || "")) out.push("report");
   return out;
 }
