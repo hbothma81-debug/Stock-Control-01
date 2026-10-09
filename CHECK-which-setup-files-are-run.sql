@@ -210,7 +210,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-cnc-11-tools.sql', 'table cnc_tools (the tools of each machine)',
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_tools')),
     ('setup-cnc-12-program-refs.sql', 'columns cnc_programs.quote_ref and project_name',
-      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_programs' and column_name = 'project_name'))
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_programs' and column_name = 'project_name')),
+    ('setup-cnc-13-program-history.sql', 'table cnc_program_history (who changed what on each program)',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_program_history'))
 )
 select
   setup_file,

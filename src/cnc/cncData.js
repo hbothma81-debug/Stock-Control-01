@@ -44,6 +44,21 @@ export async function loadPrograms() {
   return { rows, hasRefs: columns !== LIST_COLUMNS };
 }
 
+// A program's history (setup-cnc-13-program-history.sql), newest first,
+// read when its History tab opens. null on a database without the table.
+export async function loadHistory(programId) {
+  const { data, error } = await supabase
+    .from("cnc_program_history")
+    .select("id, seq, kind, rev, changes, changed_by, created_at")
+    .eq("program_id", programId)
+    .order("created_at", { ascending: false })
+    .order("seq", { ascending: false })
+    .limit(500);
+  if (error && (error.code === "42P01" || error.code === "PGRST205")) return null;
+  if (error) throw new Error(`The history could not be loaded: ${error.message}`);
+  return data;
+}
+
 // A program's quote reference and project name, from its page (saved on
 // leaving the box). Hands back the whole row.
 export async function saveProgramRefs(id, changes) {
