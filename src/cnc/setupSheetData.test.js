@@ -76,7 +76,10 @@ test("the engine's own sheet wording is printed as sent", () => {
   const d = setupSheetData({ program: PROGRAM, rev: { ...REV, source: "machine_copy" }, answer: a });
   assert.deepEqual(d.right, [["Machine", "LEO 1600 · Doosan Fanuc i Plus"]]);
   assert.match(d.left[1][1], /^Schedule tube 4in Sch120/);
-  assert.deepEqual(d.left.find((r) => r[0] === "Batch quantity"), ["Batch quantity", "50"]);
+  // The program's own quantity (Costing tab, 20) wins over the revision's 50.
+  assert.deepEqual(d.left.find((r) => r[0] === "Batch quantity"), ["Batch quantity", "20"]);
+  const noQty = setupSheetData({ program: { ...PROGRAM, settings: {} }, rev: REV, answer: a });
+  assert.deepEqual(noQty.left.find((r) => r[0] === "Batch quantity"), ["Batch quantity", "50"]);
   assert.deepEqual(d.sides[0].facts[0], ["Clamp on", "D114.3 raw stock"]);
   assert.deepEqual(d.sides[0].blocks[0], { n: "N1", t: "T1", tool: "WNMG R0.8", speed: "Vc 140; Vc 160 finish", feed: "0.176, 0.15", time: "5.6 min" });
   assert.equal(d.checks[1].pass, false);

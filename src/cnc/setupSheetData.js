@@ -33,7 +33,11 @@ export function setupSheetData({ program, rev, answer, when = new Date() }) {
   const sides = setup.sides || [];
   const tools = setup.tools || [];
   const programs = setup.programs || (rev?.programs || []).map((p) => p.number);
-  const qty = setup.batch_qty ?? program?.settings?.qty ?? 1;
+  // The batch quantity is the program's own, set on its Costing tab (as the
+  // tab's heading says); the engine's batch_qty is what the saved revision
+  // was made with and is behind once the quantity changes (O1031: Costing
+  // 70, sheet 1, 9 Oct 2026). The engine's only where the program has none.
+  const qty = program?.settings?.qty ?? setup.batch_qty ?? 1;
   const nPrograms = programs.length || (rev?.programs || []).length || 1;
 
   const partText = part.max_dia
