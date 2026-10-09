@@ -3,7 +3,8 @@
 // opens as text boxes, one per program; the changed lines show underneath
 // as they are typed. Save has the engine check the text as it checks a
 // machine copy (rapids, jaws, spindle, clearance, travel, cycle time,
-// price) and keeps it as the next revision, marked Edited. Ready or Not
+// price) and, for an edit only, a number with no decimal point (it crashes
+// the machine), and keeps it as the next revision, marked Edited. Ready or Not
 // for machine is the engine's check (his answer). An engine that cannot be
 // reached saves nothing: the text stays in the boxes for another Save.
 // CNC Edit tick only (ProgramView shows the button).
@@ -44,7 +45,7 @@ export default function EditProgram({ program, revisions, current, base, userNam
     let check;
     try {
       setBusy("Checking with the engine…");
-      check = await checkMachineCopy({ program, current: base, programs: sent });
+      check = await checkMachineCopy({ program, current: base, programs: sent, edited: true });
     } catch (err) {
       setError(`The engine could not check it, so nothing was saved: ${err.message || err} Press Save to try again.`);
       setBusy("");

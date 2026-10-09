@@ -506,7 +506,9 @@ export async function saveProgramDetails({ program, partName, customer, material
 // engine since 8 Oct 2026): rapids into the stock, the jaws, the travel,
 // the cycle time and costing, and where the program and the model differ.
 // Nothing is saved. A program with no STEP stored is not checked.
-export async function checkMachineCopy({ program, current, programs }) {
+// edited: the text was typed on the Program tab (Edit): the engine then
+// calls a number with no decimal point a problem, not a warning.
+export async function checkMachineCopy({ program, current, programs, edited = false }) {
   const settings = current?.settings || program.settings || {};
   const quick = current?.quick || program.quick || null;
   const step = quick ? null : await storedStep(program.id, current);
@@ -515,7 +517,7 @@ export async function checkMachineCopy({ program, current, programs }) {
     name: program.part_name,
     stepText: step?.text,
     settings,
-    extra: { action: "check", programs, previous: current?.programs || [], ...(quick ? { quick } : {}) },
+    extra: { action: "check", programs, previous: current?.programs || [], ...(quick ? { quick } : {}), ...(edited ? { edited: true } : {}) },
   });
   return { result, step, settings, quick };
 }

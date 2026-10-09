@@ -134,6 +134,8 @@ test("the fault on a shut line", () => {
     faultText({ ready: false, problems: [["SPINDLE", "WNMG R0.8 G54: cuts with the spindle stopped (no M3 in this tool block) from X11.800 Z9.500"]] }),
     "spindle not running (WNMG R0.8)"
   );
+  assert.equal(faultText({ ready: false, problems: ["DECIMAL: WNMG R0.8 G54: no decimal point in G0X29Z5.0M8"] }), "no decimal point (WNMG R0.8)");
+  assert.equal(faultText({ ready: false, problems: ["DECIMAL: O1031: no decimal point in G0X150Z80.0"] }), "no decimal point");
 });
 
 test("file names", () => {
