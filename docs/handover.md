@@ -5676,3 +5676,21 @@ nothing in the app. **Waiting on Heinrich:** nothing.
 **Next session picks up:** nothing from here. When a new working-style
 rule is learned in any conversation, add it to the template too, in
 project-free words (memory: portable-preferences-template).
+
+## 9 Oct 2026 — CNC cost report PUSHED alone (`bf7cc8f..6e2c98e`, live App-DEZo8Jgc.js)
+
+His "push from here" in the CNC conversation. The queue held only
+6e2c98e (CNC cost report: markup and selling price, material and offcut
+in place of the wastage table), so it went straight from the shared
+branch, no cherry-pick. Clean clone of 6e2c98e: build clean, 494 tests,
+names check clean. `git log origin/main..HEAD` read as its own step,
+exactly the one commit; pushed; live went App-BDurjaYw.js ->
+App-DEZo8Jgc.js with "Batch selling" and "Material and offcut (per
+part)" in it. Live page loads with no console errors (signed out; the
+report itself not pressed on live). Afab990 and bf7cc8f (Programs list,
+setup-cnc-12; Costing tab markup) had gone live in the 8 Oct 17:15 push.
+
+**Still local in the CNC conversation, not committed:** the History tab
+(setup-cnc-13-program-history.sql, waiting on his paste on practice).
+**On hold by his word (9 Oct):** the Materials tab (price update, R/m),
+until he has tested more.
