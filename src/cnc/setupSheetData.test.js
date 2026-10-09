@@ -84,6 +84,25 @@ test("the engine's own sheet wording is printed as sent", () => {
   assert.equal(d.revision, "Rev D (machine copy)");
 });
 
+test("WS and Set pull for the setter, where the engine sends them", () => {
+  const puller = JSON.parse(JSON.stringify(ANSWER));
+  puller.setup.sides = [{ ...puller.setup.sides[0], holding: "bar puller", ws_mm: 56.1, set_pull_mm: 20 }];
+  const d = setupSheetData({ program: PROGRAM, rev: REV, answer: puller });
+  assert.deepEqual(d.left.find((r) => r[0] === "WS / Set pull"), ["WS / Set pull", "WS 56.1 mm · Set pull 20 mm"]);
+  assert.deepEqual(d.sides[0].facts.slice(-2), [["WS (Z0 from jaws)", "56.1 mm"], ["Set pull", "20 mm"]]);
+
+  const two = JSON.parse(JSON.stringify(ANSWER));
+  two.setup.sides[0].ws_mm = 39;
+  two.setup.sides[1].ws_mm = 35;
+  two.setup.sides[0].set_pull_mm = null;
+  const d2 = setupSheetData({ program: PROGRAM, rev: REV, answer: two });
+  assert.deepEqual(d2.left.find((r) => r[0] === "WS / Set pull"), ["WS / Set pull", "WS G54 39 mm · WS G55 35 mm"]);
+  assert.ok(!d2.sides[0].facts.some((f) => f[0] === "Set pull"));
+
+  // A program made before 9 Oct: no row at all.
+  assert.ok(!setupSheetData({ program: PROGRAM, rev: REV, answer: ANSWER }).left.some((r) => r[0] === "WS / Set pull"));
+});
+
 test("not for machine says why", () => {
   const d = setupSheetData({ program: PROGRAM, rev: REV, answer: { ...ANSWER, ready: false, fails: ["Rapid into stock at N40"] } });
   assert.equal(d.status, "NOT FOR MACHINE - Rapid into stock at N40");

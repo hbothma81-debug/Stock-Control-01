@@ -42,10 +42,21 @@ export function setupSheetData({ program, rev, answer, when = new Date() }) {
   const materialText = [program?.material, setup.material?.cutting_name && setup.material.cutting_name !== program?.material ? `(cut as ${setup.material.cutting_name})` : ""]
     .filter(Boolean)
     .join(" ");
+  // WS (Z0 from the jaw face) and the bar puller's Set pull, for the setter
+  // (Heinrich, 9 Oct 2026; the engine's setup.sides[].ws_mm and
+  // sides[0].set_pull_mm, the same as its "(WS ... SET PULL ...)" line).
+  // Left out where the engine sends none (programs made before 9 Oct).
+  const wsSides = sides.filter((sd) => sd.ws_mm != null);
+  const setPull = sides[0]?.set_pull_mm;
+  const wsText = [
+    wsSides.length === 1 ? `WS ${fmt(wsSides[0].ws_mm)} mm` : wsSides.map((sd) => `WS ${sd.offset || `side ${sd.side}`} ${fmt(sd.ws_mm)} mm`).join(" · "),
+    setPull != null ? `Set pull ${fmt(setPull)} mm` : "",
+  ].filter(Boolean).join(" · ");
   const left = [
     ["Material", materialText || "-"],
     ["Stock", setup.stock_text || program?.stock || "-"],
     ["Holding", sides[0]?.holding || "-"],
+    ...(wsText ? [["WS / Set pull", wsText]] : []),
     ["Part", partText],
     ["Cycle time (est.)", `${min1(answer?.cycle_s ?? setup.times?.cycle_s)} per part (${nPrograms} program${nPrograms === 1 ? "" : "s"})`],
     ["Batch quantity", String(qty)],
@@ -96,6 +107,8 @@ export function setupSheetData({ program, rev, answer, when = new Date() }) {
         ["Face stock", `${fmt(sd.face_stock_mm)} mm${sd.face_stock_note ? ` (${sd.face_stock_note})` : ""}`],
         ["Side time (est.)", min1(perSide.find((p) => Number(p.side) === sideNo)?.s)],
         ["Soft jaws", sd.soft_jaws ? "yes" : "no"],
+        ...(sd.ws_mm != null ? [["WS (Z0 from jaws)", `${fmt(sd.ws_mm)} mm`]] : []),
+        ...(i === 0 && sd.set_pull_mm != null ? [["Set pull", `${fmt(sd.set_pull_mm)} mm`]] : []),
       ],
       blocks,
     };
