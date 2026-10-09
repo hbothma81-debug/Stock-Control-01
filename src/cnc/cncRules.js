@@ -382,3 +382,59 @@ export function wastageRows(w, materialPerPart) {
   };
 }
 
+
+// Update program (Heinrich, 9 Oct 2026: "if there is no changes it should
+// not ask to save a new rev"): what the revision about to be saved changes
+// against the current one, in words, empty when nothing. A change of price
+// alone is a change (his answer). Where the costing's cutting data came
+// from (data_source) is left out: a new table version that moves no figure
+// is no change. next is the row saveUpdate would insert; newStep is true
+// when another STEP file was chosen.
+export function revisionChanges(current, next, newStep = false) {
+  if (!current) return ["first revision"];
+  const same = (a, b) => sameJson(a ?? null, b ?? null);
+  const priced = (c) => {
+    if (!c) return null;
+    const { data_source: _s, ...rest } = c;
+    return rest;
+  };
+  const out = [];
+  if (newStep) out.push("STEP model");
+  if (!same(current.quick, next.quick)) out.push("sizes");
+  if (!same(current.programs || [], next.programs || [])) out.push("program lines");
+  if (!same(current.cycle_s, next.cycle_s) || !same(current.tool_s, next.tool_s)) out.push("cycle time");
+  if (!same(priced(current.costing), priced(next.costing))) out.push("price");
+  if (!same(current.ready, next.ready) || !same(current.fault || "", next.fault || "")) out.push("ready for the machine");
+  if (!same(current.fails || [], next.fails) || !same(current.problems || [], next.problems) || !same(current.warnings || [], next.warnings)) {
+    out.push("warnings");
+  }
+  if (!same(current.settings || {}, next.settings || {})) out.push("settings");
+  if (!same(current.report || "", next.report || "")) out.push("report");
+  return out;
+}
+
+// The boxes Update program saves on the program itself, not on a revision.
+export function detailChanges(program, { partName, customer, materialName }) {
+  const out = [];
+  if ((program?.part_name || "") !== (partName || "")) out.push("part name");
+  if ((program?.customer || "") !== (customer || "")) out.push("customer");
+  if ((program?.material || "") !== (materialName || "")) out.push("material");
+  return out;
+}
+
+// Equal as the database keeps them: jsonb does not keep key order, and a
+// key holding undefined is not saved at all.
+function sameJson(a, b) {
+  return stableJson(a) === stableJson(b);
+}
+function stableJson(v) {
+  if (Array.isArray(v)) return `[${v.map((x) => (x === undefined ? "null" : stableJson(x))).join(",")}]`;
+  if (v && typeof v === "object") {
+    return `{${Object.keys(v)
+      .filter((k) => v[k] !== undefined)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${stableJson(v[k])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(v);
+}

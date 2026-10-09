@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   oNumber, readNumber, cleanSettings, settingsToForm, settingText, programMatches, listPrograms, filterChoices,
-  stockText, faultText, partNameFromFile, programFileName, engineErrorText,
+  stockText, faultText, partNameFromFile, programFileName, engineErrorText, revisionChanges, detailChanges,
 } from "./cncRules.js";
 import { CNC_FIELDS } from "./cncFields.js";
 
@@ -260,4 +260,36 @@ test("the wastage rows add up to the material per part", () => {
   assert.equal(wastageRows(w, 99).ok, false);
   assert.equal(wastageRows(null, 1), null);
   assert.equal(DEFAULT_SETUP_PRICE, 750);
+});
+
+test("Update program: a run that comes out the same as the current revision changes nothing", () => {
+  const current = {
+    programs: [{ number: 1027, text: "O1027\nG0 X0\nM30" }],
+    cycle_s: 95.5, tool_s: 12, ready: true, fault: "", fails: [], problems: [], warnings: ["Layout: T0101"],
+    costing: { unit_total: 412.5, qty: 10, data_source: "test cnc_ tables, version 12" },
+    settings: { program_no: 1027, material: "EN8", bar_dia: 71 },
+    report: "plan", step_path: "x/A/part.step", step_name: "part.step",
+  };
+  // As the database hands it back: keys in another order.
+  const next = {
+    ...current,
+    costing: { data_source: "test cnc_ tables, version 13", qty: 10, unit_total: 412.5 },
+    settings: { bar_dia: 71, material: "EN8", program_no: 1027, nothing: undefined },
+  };
+  assert.deepEqual(revisionChanges(current, next), []);
+  assert.deepEqual(revisionChanges(current, next, true), ["STEP model"]);
+  assert.deepEqual(revisionChanges(null, next), ["first revision"]);
+  assert.deepEqual(revisionChanges(current, { ...next, costing: { ...next.costing, unit_total: 420 } }), ["price"]);
+  assert.deepEqual(
+    revisionChanges(current, { ...next, programs: [{ number: 1027, text: "O1027\nG0 X1\nM30" }], cycle_s: 96 }),
+    ["program lines", "cycle time"]
+  );
+  assert.deepEqual(revisionChanges(current, { ...next, settings: { ...next.settings, bar_dia: 75 } }), ["settings"]);
+  assert.deepEqual(revisionChanges(current, { ...next, warnings: [] }), ["warnings"]);
+});
+
+test("Update program: the part name, customer and material are the program's own", () => {
+  const program = { part_name: "Bush", customer: "B&W", material: "EN8" };
+  assert.deepEqual(detailChanges(program, { partName: "Bush", customer: "B&W", materialName: "EN8" }), []);
+  assert.deepEqual(detailChanges(program, { partName: "Bush 2", customer: "", materialName: "EN8" }), ["part name", "customer"]);
 });

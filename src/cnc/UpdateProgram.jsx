@@ -3,12 +3,15 @@
 // Clicks: open the program, Update program, the change, Generate, Save.
 // Nothing is saved until Save; Back to the answers keeps what was typed.
 // A program made from a shape shows its size boxes instead of the STEP.
+// A run that comes out the same as the current revision offers no new
+// revision (Heinrich, 9 Oct 2026): Close, or Save changes when only the
+// part name, customer or material boxes changed.
 
 import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { C, S } from "../theme.js";
-import { runUpdate, saveUpdate } from "./cncData.js";
-import { cleanSettings, cleanSizes, faultText, oNumber, revisionLetter, settingsToForm } from "./cncRules.js";
+import { runUpdate, saveProgramDetails, saveUpdate, updateChanges } from "./cncData.js";
+import { cleanSettings, cleanSizes, detailChanges, faultText, oNumber, revisionLetter, settingsToForm } from "./cncRules.js";
 import ShapeSizes from "./ShapeSizes.jsx";
 import ProgramFields from "./ProgramFields.jsx";
 import ProgramChanges from "./ProgramChanges.jsx";
@@ -62,11 +65,12 @@ export default function UpdateProgram({ program, revisions, current, customers, 
     }
   }
 
-  async function save() {
+  async function save(newRevision) {
     setError("");
     setBusy("Saving…");
     try {
-      await saveUpdate({ program, run, letter, partName: fields.partName.trim(), customer: fields.customer, material, userName });
+      if (newRevision) await saveUpdate({ program, run, letter, partName: fields.partName.trim(), customer: fields.customer, material, userName });
+      else await saveProgramDetails({ program, partName: fields.partName.trim(), customer: fields.customer, material });
       onSaved();
     } catch (err) {
       setError(err.message || String(err));
@@ -89,6 +93,8 @@ export default function UpdateProgram({ program, revisions, current, customers, 
     const r = run.result;
     const nowReady = !!r.ready;
     const wasReady = program.status === "ready";
+    const changed = updateChanges(current, run);
+    const details = detailChanges(program, { partName: fields.partName.trim(), customer: fields.customer, materialName: fields.materialName });
     return (
       <div style={S.list}>
         {head}
@@ -106,12 +112,27 @@ export default function UpdateProgram({ program, revisions, current, customers, 
             <div style={{ color: C.accentRaw }}>{(r.warnings || []).length} warning(s): see the Program tab after saving.</div>
           )}
         </div>
-        <ProgramChanges before={current?.programs || []} after={r.programs || []} />
+        <div style={{ fontSize: 14, fontWeight: 600 }}>
+          {changed.length > 0
+            ? current
+              ? `Changed: ${changed.join(", ")}.`
+              : ""
+            : details.length > 0
+            ? `The program came out the same as rev ${current.rev}: only the ${details.join(" and ")} change${details.length === 1 ? "s" : ""}, and no new revision is made.`
+            : `No change: rev ${current.rev} is already up to date with the engine and these settings.`}
+        </div>
+        {changed.length > 0 && <ProgramChanges before={current?.programs || []} after={r.programs || []} />}
         {error && <div style={{ color: C.danger, fontSize: 14 }}>{error}</div>}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" className="stk-btn" style={{ ...S.submitBtn, marginTop: 0, flex: 1 }} onClick={save} disabled={!!busy}>
-            {busy || `Save as rev ${letter}`}
-          </button>
+          {changed.length > 0 || details.length > 0 ? (
+            <button type="button" className="stk-btn" style={{ ...S.submitBtn, marginTop: 0, flex: 1 }} onClick={() => save(changed.length > 0)} disabled={!!busy}>
+              {busy || (changed.length > 0 ? `Save as rev ${letter}` : "Save changes")}
+            </button>
+          ) : (
+            <button type="button" className="stk-btn" style={{ ...S.submitBtn, marginTop: 0, flex: 1 }} onClick={onCancel}>
+              Close
+            </button>
+          )}
           <button type="button" className="stk-btn" style={S.chip} onClick={() => setRun(null)} disabled={!!busy}>
             Back to the answers
           </button>

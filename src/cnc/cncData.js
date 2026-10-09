@@ -6,7 +6,7 @@
 import { supabase } from "../lib/supabaseClient.js";
 import { barSizeOf, findBarPrice, kgPerMetre, materialPricing, sameSize } from "./pricing.js";
 import { DEFAULT_SETUP_PRICE } from "./cncRules.js";
-import { COSTING_KEYS, costingPart, dayInSA, engineErrorText, exportRows, faultText, stockText, MAX_STEP_BYTES } from "./cncRules.js";
+import { COSTING_KEYS, costingPart, dayInSA, engineErrorText, exportRows, faultText, revisionChanges, stockText, MAX_STEP_BYTES } from "./cncRules.js";
 
 // The engine (ERS TURNING APP, its own repository and Vercel project). It
 // answers only a signed-in user of this app's databases, practice or live.
@@ -476,6 +476,25 @@ export async function saveUpdate({ program, run, letter, partName, customer, mat
     throw new Error(`Rev ${rev.rev} was saved, but the part name, customer and material were not: ${e2?.message || "the database changed nothing"}.`);
   }
   return rev.rev;
+}
+
+// What saving this run as a new revision would change, in words (empty:
+// nothing, and Update program offers no new revision). The row compared is
+// the one saveUpdate inserts.
+export function updateChanges(current, run) {
+  const next = revisionRow({ programId: null, result: run.result, settings: run.sent, stepPath: null, stepName: null, quick: run.quick });
+  return revisionChanges(current, next, !!run.step?.file);
+}
+
+// Update program when the run came out the same as the current revision:
+// only the program's own boxes are saved, and no revision is made.
+export async function saveProgramDetails({ program, partName, customer, material }) {
+  const { data, error } = await supabase
+    .from("cnc_programs")
+    .update({ part_name: partName, customer: customer || "", material: material?.name || "" })
+    .eq("id", program.id)
+    .select("id");
+  if (error || !data?.length) throw new Error(`Not saved: ${error?.message || "the database changed nothing (the CNC Edit tick is needed)."}`);
 }
 
 // Import machine copy, first half: the engine's check of the hand program
