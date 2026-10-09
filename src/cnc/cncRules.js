@@ -156,6 +156,8 @@ const PROBLEM_WORDS = {
   JAWS: "too close to the jaws",
   CLEARANCE: "tool clearance",
   TRAVEL: "past the machine's travel",
+  // Any cut with the spindle stopped (the engine's check from 9 Oct 2026).
+  SPINDLE: "spindle not running",
 };
 
 // "RAPID: 3MM PARTING G54: G0 from …" -> "rapid through material (3MM PARTING)".

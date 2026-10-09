@@ -130,6 +130,10 @@ test("the fault on a shut line", () => {
     "rapid through material (3MM PARTING); tool clearance (WNMG R0.8); too close to the jaws (3MM PARTING); past the machine's travel"
   );
   assert.equal(faultText({ ready: false, fails: ["no M24x3 insert"], problems: ["RAPID: T G54: x"] }), "no M24x3 insert");
+  assert.equal(
+    faultText({ ready: false, problems: [["SPINDLE", "WNMG R0.8 G54: cuts with the spindle stopped (no M3 in this tool block) from X11.800 Z9.500"]] }),
+    "spindle not running (WNMG R0.8)"
+  );
 });
 
 test("file names", () => {
