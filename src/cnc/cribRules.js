@@ -113,3 +113,38 @@ export function changeHolder(data, station, holder, toolOf) {
   const asSaved = Object.fromEntries(STATIONS.map((st) => [String(st), holders[st]]));
   return { data: { ...data, turret: { ...(data?.turret || {}), holders: asSaved }, turret_default: turretDefault }, removed };
 }
+
+// Thread pitch per thread (Heinrich, 9 Oct 2026; the engine's setting
+// thread_pitch = { end: pitch }, end being the model end the thread opens
+// at, "0" or "L"). One T number cuts one pitch; the pitch set here is cut
+// in place of the one read from the model. A pitch set back to the
+// model's is taken off the setting, so the setting holds only real
+// changes; none left is null.
+export function setThreadPitch(saved, end, pitch, modelPitch) {
+  const next = { ...(saved || {}) };
+  if (modelPitch != null && Number(pitch) === Number(modelPitch)) delete next[end];
+  else next[end] = Number(pitch);
+  return Object.keys(next).length ? next : null;
+}
+
+export function samePitches(a, b) {
+  const x = a || {};
+  const y = b || {};
+  const keys = new Set([...Object.keys(x), ...Object.keys(y)]);
+  return [...keys].every((k) => Number(x[k]) === Number(y[k]));
+}
+
+// The pitches offered for a thread: the tool's pitches owned, the pitch
+// cut now and the model's, smallest first.
+export function pitchChoices(tool, thread) {
+  const owned = Array.isArray(tool?.data?.pitches_owned) ? tool.data.pitches_owned : [];
+  const all = [...owned, thread?.pitch, thread?.model_pitch].map(Number).filter((n) => Number.isFinite(n) && n > 0);
+  return [...new Set(all)].sort((p, q) => p - q);
+}
+
+// The pitch read from the model: the engine says (model_pitch, turnpath
+// 36d3785); an older answer only does when no pitch was set for that end.
+export function modelPitchOf(thread, saved) {
+  if (thread?.model_pitch != null) return Number(thread.model_pitch);
+  return saved && saved[thread?.end] != null ? null : Number(thread?.pitch);
+}

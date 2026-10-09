@@ -83,6 +83,21 @@ test("holders: changing one takes off a default tool that no longer fits", async
   assert.equal(k.removed, null);
 });
 
+test("thread pitch: only real changes are kept, back to the model's clears it", async () => {
+  const { setThreadPitch, samePitches, pitchChoices, modelPitchOf } = await import("./cribRules.js");
+  assert.deepEqual(setThreadPitch(null, "L", 1.5, 2), { L: 1.5 });
+  assert.equal(setThreadPitch({ L: 1.5 }, "L", "2", 2), null);
+  assert.deepEqual(setThreadPitch({ L: 1.5 }, "0", 1.25, 1.75), { L: 1.5, 0: 1.25 });
+  assert.equal(samePitches(null, {}), true);
+  assert.equal(samePitches({ L: 1.5 }, { L: "1.5" }), true);
+  assert.equal(samePitches({ L: 1.5 }, null), false);
+  const tool = { data: { kind: "thread", pitches_owned: [2, 1, 1.5] } };
+  assert.deepEqual(pitchChoices(tool, { pitch: 1.5, model_pitch: 2.5 }), [1, 1.5, 2, 2.5]);
+  assert.equal(modelPitchOf({ end: "L", pitch: 1.5, model_pitch: 2 }, { L: 1.5 }), 2);
+  assert.equal(modelPitchOf({ end: "L", pitch: 2 }, null), 2);
+  assert.equal(modelPitchOf({ end: "L", pitch: 1.5 }, { L: 1.5 }), null);
+});
+
 test("Duplicate: the next free key and the number on the name", async () => {
   const { copyOfTool } = await import("./toolKinds.js");
   const t = { tool_key: "THREAD", data: { name: "THREAD" } };

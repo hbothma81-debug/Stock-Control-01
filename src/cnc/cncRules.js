@@ -314,8 +314,9 @@ export function pipeLabel(pipe) {
 // The ones the Tool crib sets, not the Costing tab: a re-price on the
 // Costing tab keeps them (until 9 Oct 2026 it dropped the program's own
 // layout, which fell back to the automatic pick).
-export const CRIB_KEYS = ["turret"];
-export const COSTING_KEYS = ["qty", "parts_per_bar", "bar_length", "price_by", "piece_price", "setup_price", "rate_per_s", "rate_unit", "stock_length", "charge_all_material", "turret", "markup_material", "markup_offcut"];
+// thread_pitch too (the pitch set per thread, Heinrich 9 Oct 2026).
+export const CRIB_KEYS = ["turret", "thread_pitch"];
+export const COSTING_KEYS = ["qty", "parts_per_bar", "bar_length", "price_by", "piece_price", "setup_price", "rate_per_s", "rate_unit", "stock_length", "charge_all_material", "turret", "thread_pitch", "markup_material", "markup_offcut"];
 
 export function costingPart(settings) {
   const out = {};

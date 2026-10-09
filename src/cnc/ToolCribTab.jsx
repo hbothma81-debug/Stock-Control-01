@@ -14,6 +14,11 @@
 // tool fits. The holders are the engine's own (its answer's setup.holders,
 // read from the machine row), so until the engine hands them out the tab
 // works as before.
+// Thread pitch (same day): under a threading tool, one line per thread it
+// cuts with a short list of the tool's pitches; a pitch changed is a crib
+// change like the layout (Make program, Save), kept as the setting
+// thread_pitch, and a pitch that is not the drawing's reads red "Drawing
+// says 2". Automatic hands back the layout only: a pitch set stays.
 
 import { useEffect, useState } from "react";
 import { ArrowDown, ArrowUp, X } from "lucide-react";
@@ -21,7 +26,7 @@ import TypeToFind from "../TypeToFind.jsx";
 import { C, S } from "../theme.js";
 import { loadToolpath, runUpdate, saveUpdate, updateChanges } from "./cncData.js";
 import { loadMachines, loadTools } from "./cncTables.js";
-import { A_HOLDER, cribWarnings, holderForKind, holdersFrom, HOLDER_NAME, layoutFrom, moveStation, moveToHolder, putTool, removeTool, sameLayout, stationsWith, STATIONS, toolFits, toTurret } from "./cribRules.js";
+import { A_HOLDER, cribWarnings, holderForKind, holdersFrom, HOLDER_NAME, layoutFrom, modelPitchOf, moveStation, moveToHolder, pitchChoices, putTool, removeTool, sameLayout, samePitches, setThreadPitch, stationsWith, STATIONS, toolFits, toTurret } from "./cribRules.js";
 import { oNumber, revisionLetter } from "./cncRules.js";
 import { toolLine } from "./toolKinds.js";
 import ProgramChanges from "./ProgramChanges.jsx";
@@ -35,6 +40,8 @@ export default function ToolCribTab({ program, revisions, current, materials, ca
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [run, setRun] = useState(null);
+  // The pitch set per thread, { end: pitch } or null: this screen's copy.
+  const [pitch, setPitch] = useState(null);
 
   useEffect(() => {
     loadMachines()
@@ -55,8 +62,12 @@ export default function ToolCribTab({ program, revisions, current, materials, ca
   }, [current?.id]);
 
   const saved = layoutFrom(program.settings?.turret, answer?.setup?.turret);
+  const savedPitch = program.settings?.thread_pitch || null;
   useEffect(() => {
-    if (answer && layout === null) setLayout(saved);
+    if (answer && layout === null) {
+      setLayout(saved);
+      setPitch(savedPitch);
+    }
   }, [answer]);
 
   if (!current) return <div style={{ color: C.muted }}>No revision yet: press Update program first.</div>;
@@ -75,7 +86,9 @@ export default function ToolCribTab({ program, revisions, current, materials, ca
       .filter((t) => !holder || toolFits(t, holder))
       .map((t) => ({ value: t.tool_key, label: t.data?.name || t.tool_key, hint: `${toolLine(t)}${t.owned ? "" : " · not owned"}` }));
   const move = (i, dir) => (holders ? moveToHolder(layout, i, dir, holders, toolOf) : moveStation(layout, i, dir));
-  const changed = !sameLayout(layout, saved);
+  const layoutChanged = !sameLayout(layout, saved);
+  const changed = layoutChanged || !samePitches(pitch, savedPitch);
+  const threadsOf = (key) => (answer.setup.threads || []).filter((th) => th.tool === key);
   const own = !!program.settings?.turret;
   const material = (materials || []).find((m) => m.name === program.material) || null;
   const warnings = cribWarnings(run ? run.result : answer);
@@ -85,7 +98,7 @@ export default function ToolCribTab({ program, revisions, current, materials, ca
     setBusy("Making the program…");
     try {
       const quick = current.quick || program.quick || null;
-      setRun(await runUpdate({ program, partName: program.part_name, current, material, settings: { ...(current.settings || {}), turret }, stepFile: null, quick }));
+      setRun(await runUpdate({ program, partName: program.part_name, current, material, settings: { ...(current.settings || {}), turret, thread_pitch: pitch }, stepFile: null, quick }));
     } catch (err) {
       setError(err.message || String(err));
     } finally {
@@ -175,6 +188,30 @@ export default function ToolCribTab({ program, revisions, current, materials, ca
                       In {A_HOLDER[holder]}: it goes in {A_HOLDER[goesIn]} ({stationsWith(holders, goesIn)})
                     </div>
                   )}
+                  {threadsOf(key).map((th) => {
+                    const drawn = modelPitchOf(th, savedPitch);
+                    const value = pitch?.[th.end] ?? drawn ?? th.pitch;
+                    return (
+                      <div key={`${th.end}-${th.side}`} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: 13, marginTop: 4 }}>
+                        <span>
+                          M{th.nominal}, side {th.side} · pitch
+                        </span>
+                        {canEdit ? (
+                          <select style={{ ...S.input, width: "auto", padding: "2px 6px" }} value={String(value)} onChange={(e) => setPitch((p) => setThreadPitch(p, th.end, e.target.value, drawn))}>
+                            {pitchChoices(t, th).map((p) => (
+                              <option key={p} value={String(p)}>
+                                {p}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <b>{value}</b>
+                        )}
+                        <span>mm</span>
+                        {drawn != null && Number(value) !== drawn && <span style={{ color: C.danger, fontWeight: 600 }}>Drawing says {drawn}</span>}
+                      </div>
+                    );
+                  })}
                 </>
               ) : (
                 <span style={{ color: C.muted }}>empty</span>
@@ -211,11 +248,19 @@ export default function ToolCribTab({ program, revisions, current, materials, ca
       {error && <div style={{ color: C.danger, fontSize: 14 }}>{error}</div>}
       {canEdit && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" className="stk-btn" style={{ ...S.submitBtn, marginTop: 0 }} disabled={!!busy || !changed} onClick={() => make(toTurret(layout))}>
+          <button type="button" className="stk-btn" style={{ ...S.submitBtn, marginTop: 0 }} disabled={!!busy || !changed} onClick={() => make(layoutChanged || own ? toTurret(layout) : null)}>
             {busy || "Make program with this crib"}
           </button>
           {changed && (
-            <button type="button" className="stk-btn" style={S.chip} onClick={() => setLayout(saved)}>
+            <button
+              type="button"
+              className="stk-btn"
+              style={S.chip}
+              onClick={() => {
+                setLayout(saved);
+                setPitch(savedPitch);
+              }}
+            >
               Undo changes
             </button>
           )}

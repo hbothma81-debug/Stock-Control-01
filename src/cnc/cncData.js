@@ -420,6 +420,8 @@ export async function runUpdate({ program, partName, current, material, settings
   const base = { ...costingPart(program.settings), ...settings };
   // turret: null hands the layout back to the engine's automatic pick.
   if (base.turret == null) delete base.turret;
+  // thread_pitch: null hands every thread back to the model's pitch.
+  if (base.thread_pitch == null) delete base.thread_pitch;
   const barHint = barSizeOf({}, program.costing || current?.costing);
   const priced = (stepText, extra) =>
     runPriced({ name: partName || program.part_name, stepText, settings: base, material, programNo: program.program_no, extra, barHint });
