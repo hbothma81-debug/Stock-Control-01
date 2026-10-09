@@ -5694,3 +5694,40 @@ setup-cnc-12; Costing tab markup) had gone live in the 8 Oct 17:15 push.
 (setup-cnc-13-program-history.sql, waiting on his paste on practice).
 **On hold by his word (9 Oct):** the Materials tab (price update, R/m),
 until he has tested more.
+
+## 9 Oct 2026 — CNC conversation: state of play at wrap-up
+
+**Live (all pushed, tip 175d998):** Programs page is one list with
+search, Customer and Sales rep filters (sales rep = whoever made the
+program), quote reference and project name per program
+(`setup-cnc-12-program-refs.sql`, both databases). Costing tab Markup:
+material and offcut, 60% default, per program, machine time and setup at
+cost (`src/cnc/markup.js`); "Offcut charged" replaces offcut and
+wastage; Offcut tab (no chips table). Cost report PDF with cost and
+selling price and a material / offcut table. History tab per program
+(`setup-cnc-13-program-history.sql`, both databases): lines written by
+the database only, nobody edits or deletes them. Setup sheet: WS and Set
+pull from the engine (`setup.sides[].ws_mm`, `set_pull_mm`), and the
+batch quantity from the Costing tab (it printed the revision's).
+Live cutting data imported 8 Oct (690 rows, 10 sheets); the live engine
+reads cutting data and tools from the cnc_ tables.
+
+**Live data changed on his word:** O1027 "Reducing Bolt M16-M12" rev B
+(9 Oct, engine's 20 mm puller rule): Ready, 202 s, "(WS 56.1 SET PULL
+20)", read back.
+
+**Pushes:** since 9 Oct only the release-gate conversation ("Current
+working folder") pushes; the CNC conversation commits and stops.
+
+**On hold by his word (9 Oct):** the Materials tab ("price updated
+incorrectly", "R/m"). Code read, no fault found; likely causes told him
+(a bar size's own price beats the grade's R/kg; cheapest supplier price
+is used; programs keep their price until Price again). R/m exists per
+bar size, hidden under each grade's arrow. Waiting for his example after
+his testing.
+
+**Next:** step 4 of the plan, the Quoting module's CNC line (price at the
+quote's quantity from `markup.js`, "program changed, new price"
+on the quote), with the Quoting conversation. Practice test data: O1029
+at 55% material markup, quote ref Q-HIST-TEST; O1031 quote ref
+Q-TEST-0815, project "Practice trial project".
