@@ -36,3 +36,49 @@ test("only the engine's warnings about the crib", () => {
   const w = cribWarnings({ warnings: ["Side 1 32MM BORING BAR over its 4xD", "12MM BORING BAR is not on the tool crib - put in the empty T4", "Tool crib: a long tool in T2"], fails: ["CXMU IC807 is not owned - suggest ordering"] });
   assert.deepEqual(w, ["12MM BORING BAR is not on the tool crib - put in the empty T4", "Tool crib: a long tool in T2", "CXMU IC807 is not owned - suggest ordering"]);
 });
+
+test("holders: the machine row's, else the LEO 1600's own; kinds go in their holder", async () => {
+  const { holdersFrom, holderForKind, toolFits, stationsWith } = await import("./cribRules.js");
+  const h = holdersFrom(null);
+  assert.equal(h[6], "od");
+  assert.equal(stationsWith(h, "bore"), "T3/T4/T5/T7");
+  assert.equal(holdersFrom({ 6: "bore", 2: "nonsense" })[6], "bore");
+  assert.equal(holdersFrom({ 6: "bore", 2: "nonsense" })[2], "od");
+  for (const k of ["bar", "udrill", "hss", "puller"]) assert.equal(holderForKind(k), "bore");
+  for (const k of ["od", "groove", "part", "thread"]) assert.equal(holderForKind(k), "od");
+  assert.equal(toolFits({ data: { kind: "bar" } }, "od"), false);
+  assert.equal(toolFits(null, "od"), true);
+});
+
+test("holders: arrows jump to the next station the tool fits", async () => {
+  const { holdersFrom, moveToHolder } = await import("./cribRules.js");
+  const h = holdersFrom(null);
+  const kinds = { WNMG: "od", BAR: "bar", PART: "part" };
+  const toolOf = (k) => ({ data: { kind: kinds[k] } });
+  const l = ["WNMG", null, "BAR", null, null, null, null, "PART"];
+  // T1 down: T2 is the next OD station.
+  assert.deepEqual(moveToHolder(l, 0, 1, h, toolOf).slice(0, 2), [null, "WNMG"]);
+  // T2 (empty, OD) down skips T3-T5 to T6.
+  const m = moveToHolder(["WNMG", null, "BAR", null, null, "X", null, "PART"], 1, 1, h, (k) => (k === "X" ? { data: { kind: "od" } } : toolOf(k)));
+  assert.equal(m[1], "X");
+  assert.equal(m[5], null);
+  // A boring bar in T6 (wrong holder) moves up to T5.
+  const w = moveToHolder([null, null, null, null, null, "BAR", null, null], 5, -1, h, toolOf);
+  assert.equal(w[4], "BAR");
+  // No fitting station further on: nothing moves.
+  assert.deepEqual(moveToHolder(l, 7, 1, h, toolOf), l);
+});
+
+test("holders: changing one takes off a default tool that no longer fits", async () => {
+  const { changeHolder } = await import("./cribRules.js");
+  const toolOf = (k) => ({ data: { kind: k === "BAR" ? "bar" : "od" } });
+  const data = { name: "LEO", turret: { stations: 8 }, turret_default: { 6: "WNMG", 7: "BAR" } };
+  const r = changeHolder(data, 6, "bore", toolOf);
+  assert.equal(r.removed, "WNMG");
+  assert.equal(r.data.turret_default["6"], null);
+  assert.equal(r.data.turret.holders["6"], "bore");
+  assert.equal(r.data.turret.stations, 8);
+  assert.equal(r.data.turret.holders["1"], "od");
+  const k = changeHolder(data, 6, "bore", () => ({ data: { kind: "bar" } }));
+  assert.equal(k.removed, null);
+});

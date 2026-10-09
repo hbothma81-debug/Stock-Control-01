@@ -5,6 +5,10 @@
 // automatic pick starts; each program's own layout is on its Tool crib.
 // + New tool: the insert and holder ISO codes read by the engine, then the
 // fields the engine needs for the kind (toolKinds.js).
+// Each station's holder, OD or Boring, is set beside it (admins, changed
+// seldom; Heinrich, 9 Oct 2026), and a station offers only the tools that
+// fit its holder. A default tool that no longer fits comes off and the
+// screen says so (cribRules.js changeHolder).
 
 import { Fragment, useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
@@ -13,6 +17,7 @@ import TypeToFind from "../TypeToFind.jsx";
 import { C, S } from "../theme.js";
 import { readIsoCode } from "./cncData.js";
 import { addTool, loadTools, removeTool, saveMachine, saveTool } from "./cncTables.js";
+import { A_HOLDER, changeHolder, holderForKind, holdersFrom, toolFits } from "./cribRules.js";
 import { formFromTool, kindOf, suggestKey, TOOL_KINDS, toolFromForm, toolLine } from "./toolKinds.js";
 import EngineSource, { NEEDS } from "./EngineSource.jsx";
 
@@ -21,6 +26,7 @@ export default function ToolsScreen({ machine, isAdmin, userName, onMachine }) {
   const [error, setError] = useState("");
   const [open, setOpen] = useState(null); // a tool's id, or "new"
   const [search, setSearch] = useState("");
+  const [note, setNote] = useState("");
 
   async function reload() {
     try {
@@ -38,12 +44,33 @@ export default function ToolsScreen({ machine, isAdmin, userName, onMachine }) {
   if (!tools) return <div style={S.empty}>Loading tools…</div>;
 
   const turret = machine.data?.turret_default || {};
-  const options = [{ value: "", label: "empty" }, ...tools.map((t) => ({ value: t.tool_key, label: t.data?.name || t.tool_key, hint: `${t.tool_key}${t.owned ? "" : " · not owned"}` }))];
+  const holders = holdersFrom(machine.data?.turret?.holders);
+  const toolOf = (key) => tools.find((t) => t.tool_key === key) || null;
+  const optionsFor = (holder) => [
+    { value: "", label: "empty" },
+    ...tools.filter((t) => toolFits(t, holder)).map((t) => ({ value: t.tool_key, label: t.data?.name || t.tool_key, hint: `${t.tool_key}${t.owned ? "" : " · not owned"}` })),
+  ];
   const q = search.trim().toLowerCase();
   const shown = tools.filter((t) => !q || [t.tool_key, t.data?.name, t.data?.holder, t.data?.insert].some((x) => String(x ?? "").toLowerCase().includes(q)));
 
+  async function setHolder(station, holder) {
+    setError("");
+    setNote("");
+    try {
+      const { data, removed } = changeHolder(machine.data, station, holder, toolOf);
+      const saved = await saveMachine({ id: machine.id, data, userName });
+      const back = holdersFrom(saved.data?.turret?.holders)[station];
+      if (back !== holder) throw new Error(`Not saved: T${station} still reads ${A_HOLDER[back]} in the database.`);
+      onMachine(saved);
+      if (removed) setNote(`T${station} now has ${A_HOLDER[holder]}: ${toolOf(removed)?.data?.name || removed} came off it. Pick a tool for it below.`);
+    } catch (err) {
+      setError(err.message || String(err));
+    }
+  }
+
   async function setStation(station, toolKey) {
     setError("");
+    setNote("");
     try {
       const saved = await saveMachine({ id: machine.id, data: { ...machine.data, turret_default: { ...turret, [station]: toolKey || null } }, userName });
       onMachine(saved);
@@ -60,18 +87,35 @@ export default function ToolsScreen({ machine, isAdmin, userName, onMachine }) {
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 10 }}>
         <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Default turret · {machine.name}</div>
         <div style={{ fontSize: 13, color: C.muted, marginBottom: 6 }}>Where the automatic pick starts. Each program's own layout is on its Tool crib tab.</div>
-        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "6px 10px", alignItems: "center" }}>
+        {note && <div style={{ fontSize: 13.5, color: C.accentRaw, marginBottom: 6 }}>{note}</div>}
+        <div style={{ display: "grid", gridTemplateColumns: "auto auto 1fr", gap: "6px 10px", alignItems: "center" }}>
           {[1, 2, 3, 4, 5, 6, 7, 8].map((st) => {
             const key = turret[String(st)] ?? null;
             const tool = tools.find((t) => t.tool_key === key);
+            const wrong = tool && !toolFits(tool, holders[st]);
             return (
               <Fragment key={st}>
                 <div style={{ fontWeight: 700 }}>T{st}</div>
                 {isAdmin ? (
-                  <TypeToFind options={options} value={key || ""} onChange={(v) => setStation(String(st), v)} placeholder="empty" />
+                  <select style={{ ...S.input, width: "auto" }} value={holders[st]} onChange={(e) => setHolder(st, e.target.value)}>
+                    <option value="od">OD</option>
+                    <option value="bore">Boring</option>
+                  </select>
                 ) : (
-                  <div style={{ fontSize: 14 }}>{tool ? tool.data?.name : key || "empty"}</div>
+                  <div style={{ fontSize: 13, color: C.muted }}>{holders[st] === "bore" ? "Boring" : "OD"}</div>
                 )}
+                <div>
+                  {isAdmin ? (
+                    <TypeToFind options={optionsFor(holders[st])} value={key || ""} onChange={(v) => setStation(String(st), v)} placeholder="empty" />
+                  ) : (
+                    <div style={{ fontSize: 14 }}>{tool ? tool.data?.name : key || "empty"}</div>
+                  )}
+                  {wrong && (
+                    <div style={{ fontSize: 12.5, color: C.danger }}>
+                      Does not fit {A_HOLDER[holders[st]]}: it goes in {A_HOLDER[holderForKind(tool.data?.kind)]}.
+                    </div>
+                  )}
+                </div>
               </Fragment>
             );
           })}

@@ -51,3 +51,65 @@ export function cribWarnings(answer) {
   const all = [...(answer?.warnings || []), ...(answer?.fails || [])].map((w) => (typeof w === "string" ? w : JSON.stringify(w)));
   return all.filter((w) => /tool crib|not owned|not on the/i.test(w));
 }
+
+// Holders (Heinrich, 9 Oct 2026; the engine's settings.station_holders):
+// each station holds an OD holder or a boring holder. Boring bars, drills
+// and the bar puller go in a boring holder, every other kind in an OD
+// holder; a tool in the wrong one is Not for machine. The machine row keeps
+// them as data.turret.holders; a station it does not name takes the LEO
+// 1600's own layout below. Mirrors the engine: change both.
+export const DEFAULT_HOLDERS = { 1: "od", 2: "od", 3: "bore", 4: "bore", 5: "bore", 6: "od", 7: "bore", 8: "od" };
+const BORE_KINDS = ["bar", "udrill", "hss", "puller"];
+export const HOLDER_NAME = { od: "OD holder", bore: "Boring holder" };
+export const A_HOLDER = { od: "an OD holder", bore: "a boring holder" };
+
+// Station -> "od" / "bore", from the machine row's turret.holders or the
+// engine's answer (setup.holders), whichever is handed in.
+export function holdersFrom(saved) {
+  const hs = saved && typeof saved === "object" ? saved : {};
+  return Object.fromEntries(STATIONS.map((st) => [st, hs[String(st)] === "od" || hs[String(st)] === "bore" ? hs[String(st)] : DEFAULT_HOLDERS[st]]));
+}
+
+export const holderForKind = (kind) => (BORE_KINDS.includes(kind) ? "bore" : "od");
+
+// Whether a tool (a cnc_tools row) fits a holder. A key not on the tool
+// list is not judged here: the engine says so in its own words.
+export function toolFits(tool, holder) {
+  return !tool || holderForKind(tool.data?.kind) === holder;
+}
+
+// The stations with a holder, as the shop writes them: "T3/T4/T5/T7".
+export function stationsWith(holders, holder) {
+  return STATIONS.filter((st) => holders[st] === holder).map((st) => `T${st}`).join("/");
+}
+
+// ↑ / ↓ with holders: swap with the next station up or down whose holder
+// fits the tool in this station (a tool in the wrong holder so moves
+// towards the stations it goes in); an empty station keeps to its own
+// holder. No such station: nothing moves.
+export function moveToHolder(layout, i, dir, holders, toolOf) {
+  const tool = layout[i] ? toolOf(layout[i]) : null;
+  const want = tool ? holderForKind(tool.data?.kind) : holders[STATIONS[i]];
+  for (let j = i + dir; j >= 0 && j < layout.length; j += dir) {
+    if (holders[STATIONS[j]] === want) {
+      const next = [...layout];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    }
+  }
+  return layout;
+}
+
+// Tools screen: a station's holder changed. A default-turret tool that no
+// longer fits comes off the station (his answer, 9 Oct 2026); removed names
+// it, so the screen can say so.
+export function changeHolder(data, station, holder, toolOf) {
+  const holders = { ...holdersFrom(data?.turret?.holders), [station]: holder };
+  const turretDefault = { ...(data?.turret_default || {}) };
+  const key = turretDefault[String(station)] ?? null;
+  const tool = key ? toolOf(key) : null;
+  const removed = tool && !toolFits(tool, holder) ? key : null;
+  if (removed) turretDefault[String(station)] = null;
+  const asSaved = Object.fromEntries(STATIONS.map((st) => [String(st), holders[st]]));
+  return { data: { ...data, turret: { ...(data?.turret || {}), holders: asSaved }, turret_default: turretDefault }, removed };
+}

@@ -9,6 +9,11 @@
 // (a tool it had to place, a rule broken, a tool not owned) are listed.
 // Changing needs the CNC Edit tick. A layout that comes out exactly as the
 // current revision offers no Save (Heinrich, 9 Oct 2026).
+// Holders (same day): each row says OD or Boring holder, Change/Add offers
+// only the tools that fit it, and the arrows jump to the next station the
+// tool fits. The holders are the engine's own (its answer's setup.holders,
+// read from the machine row), so until the engine hands them out the tab
+// works as before.
 
 import { useEffect, useState } from "react";
 import { ArrowDown, ArrowUp, X } from "lucide-react";
@@ -16,7 +21,7 @@ import TypeToFind from "../TypeToFind.jsx";
 import { C, S } from "../theme.js";
 import { loadToolpath, runUpdate, saveUpdate, updateChanges } from "./cncData.js";
 import { loadMachines, loadTools } from "./cncTables.js";
-import { cribWarnings, layoutFrom, moveStation, putTool, removeTool, sameLayout, STATIONS, toTurret } from "./cribRules.js";
+import { A_HOLDER, cribWarnings, holderForKind, holdersFrom, HOLDER_NAME, layoutFrom, moveStation, moveToHolder, putTool, removeTool, sameLayout, stationsWith, STATIONS, toolFits, toTurret } from "./cribRules.js";
 import { oNumber, revisionLetter } from "./cncRules.js";
 import { toolLine } from "./toolKinds.js";
 import ProgramChanges from "./ProgramChanges.jsx";
@@ -63,7 +68,13 @@ export default function ToolCribTab({ program, revisions, current, materials, ca
 
   const byKey = Object.fromEntries(tools.map((t) => [t.tool_key, t]));
   const useOf = (key) => (answer.setup.tools || []).find((t) => t.tool_key === key);
-  const options = tools.map((t) => ({ value: t.tool_key, label: t.data?.name || t.tool_key, hint: `${toolLine(t)}${t.owned ? "" : " · not owned"}` }));
+  const holders = answer.setup.holders ? holdersFrom(answer.setup.holders) : null;
+  const toolOf = (key) => byKey[key] || null;
+  const optionsFor = (holder) =>
+    tools
+      .filter((t) => !holder || toolFits(t, holder))
+      .map((t) => ({ value: t.tool_key, label: t.data?.name || t.tool_key, hint: `${toolLine(t)}${t.owned ? "" : " · not owned"}` }));
+  const move = (i, dir) => (holders ? moveToHolder(layout, i, dir, holders, toolOf) : moveStation(layout, i, dir));
   const changed = !sameLayout(layout, saved);
   const own = !!program.settings?.turret;
   const material = (materials || []).find((m) => m.name === program.material) || null;
@@ -140,9 +151,16 @@ export default function ToolCribTab({ program, revisions, current, materials, ca
         const key = layout[i];
         const t = key ? byKey[key] : null;
         const use = key ? useOf(key) : null;
+        const holder = holders ? holders[st] : null;
+        const goesIn = t && holder && !toolFits(t, holder) ? holderForKind(t.data?.kind) : null;
+        const up = move(i, -1);
+        const down = move(i, 1);
         return (
           <div key={st} style={{ display: "flex", gap: 8, alignItems: "center", borderBottom: `1px solid ${C.border}`, padding: "6px 0", flexWrap: "wrap" }}>
-            <div style={{ fontWeight: 700, width: 26 }}>T{st}</div>
+            <div style={{ width: holder ? 64 : 26 }}>
+              <div style={{ fontWeight: 700 }}>T{st}</div>
+              {holder && <div style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.2 }}>{HOLDER_NAME[holder]}</div>}
+            </div>
             <div style={{ flex: "1 1 220px", minWidth: 0, fontSize: 14 }}>
               {key ? (
                 <>
@@ -152,6 +170,11 @@ export default function ToolCribTab({ program, revisions, current, materials, ca
                     {t ? toolLine(t) : "not on this machine's tool list"}
                     {use?.used ? ` · ${(use.ops || []).join(", ")}${use.sides?.length ? ` · side ${use.sides.join(", ")}` : ""}` : use ? " · not used by this program" : ""}
                   </div>
+                  {goesIn && (
+                    <div style={{ fontSize: 12.5, color: C.danger, fontWeight: 600 }}>
+                      In {A_HOLDER[holder]}: it goes in {A_HOLDER[goesIn]} ({stationsWith(holders, goesIn)})
+                    </div>
+                  )}
                 </>
               ) : (
                 <span style={{ color: C.muted }}>empty</span>
@@ -159,14 +182,14 @@ export default function ToolCribTab({ program, revisions, current, materials, ca
             </div>
             {canEdit && (
               <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                <button type="button" className="stk-btn" style={{ ...S.chip, padding: "4px 8px" }} title="Move up a station" disabled={i === 0} onClick={() => setLayout(moveStation(layout, i, -1))}>
+                <button type="button" className="stk-btn" style={{ ...S.chip, padding: "4px 8px" }} title="Move up a station" disabled={up === layout} onClick={() => setLayout(up)}>
                   <ArrowUp size={13} />
                 </button>
-                <button type="button" className="stk-btn" style={{ ...S.chip, padding: "4px 8px" }} title="Move down a station" disabled={i === 7} onClick={() => setLayout(moveStation(layout, i, 1))}>
+                <button type="button" className="stk-btn" style={{ ...S.chip, padding: "4px 8px" }} title="Move down a station" disabled={down === layout} onClick={() => setLayout(down)}>
                   <ArrowDown size={13} />
                 </button>
                 <div style={{ width: 180 }}>
-                  <TypeToFind options={options} value={key || ""} onChange={(v) => setLayout(putTool(layout, i, v || null))} placeholder={key ? "Change…" : "Add…"} />
+                  <TypeToFind options={optionsFor(holder)} value={key || ""} onChange={(v) => setLayout(putTool(layout, i, v || null))} placeholder={key ? "Change…" : "Add…"} />
                 </div>
                 {key && (
                   <button type="button" className="stk-btn" style={{ ...S.chip, padding: "4px 8px", color: C.danger }} title="Take it off the turret" onClick={() => setLayout(removeTool(layout, i))}>
