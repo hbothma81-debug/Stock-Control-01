@@ -18,7 +18,7 @@ import { createProgram } from "./cncData.js";
 import { cleanSettings, cleanSizes, partNameFromFile, readNumber } from "./cncRules.js";
 import { keepShown, stockAndProcessPicked } from "./settingsBatches.js";
 import ProgramFields from "./ProgramFields.jsx";
-import ShapeSizes from "./ShapeSizes.jsx";
+import ShapeSizes, { ShapeChamfers } from "./ShapeSizes.jsx";
 
 export default function NewProgram({ customers, materials, pipes, shape = null, hasRefs = false, userName, onCancel, onSaved }) {
   const [stepFile, setStepFile] = useState(null);
@@ -126,12 +126,15 @@ export default function NewProgram({ customers, materials, pipes, shape = null, 
         materials={materials}
         pipes={pipes}
         moreAbove={
-          <div style={S.formGrid}>
-            <div>
-              <label style={S.label}>Program number</label>
-              <input style={S.input} value={programNo} onChange={(e) => setProgramNo(e.target.value)} placeholder="Empty: the next free number" inputMode="numeric" />
+          <>
+            <div style={S.formGrid}>
+              <div>
+                <label style={S.label}>Program number</label>
+                <input style={S.input} value={programNo} onChange={(e) => setProgramNo(e.target.value)} placeholder="Empty: the next free number" inputMode="numeric" />
+              </div>
             </div>
-          </div>
+            {shape && <ShapeChamfers shape={shape} sizes={sizes} setSizes={setSizes} />}
+          </>
         }
       />
 

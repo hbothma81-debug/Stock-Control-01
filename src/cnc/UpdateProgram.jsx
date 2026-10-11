@@ -17,7 +17,7 @@ import { C, S } from "../theme.js";
 import { runUpdate, saveProgramDetails, saveUpdate, updateChanges } from "./cncData.js";
 import { cleanSettings, cleanSizes, detailChanges, faultText, handEditsNote, oNumber, revisionLetter, settingsToForm } from "./cncRules.js";
 import { keepShown, stockAndProcessPicked } from "./settingsBatches.js";
-import ShapeSizes from "./ShapeSizes.jsx";
+import ShapeSizes, { ShapeChamfers } from "./ShapeSizes.jsx";
 import ProgramFields from "./ProgramFields.jsx";
 import ProgramChanges from "./ProgramChanges.jsx";
 
@@ -169,7 +169,15 @@ export default function UpdateProgram({ program, revisions, current, customers, 
         <input type="file" accept=".step,.stp,.STEP,.STP" style={S.input} onChange={(e) => setStepFile(e.target.files?.[0] || null)} />
       </div>
       )}
-      <ProgramFields fields={fields} setFields={setFields} customers={customers} materials={materials} pipes={pipes} settingsOpen />
+      <ProgramFields
+        fields={fields}
+        setFields={setFields}
+        customers={customers}
+        materials={materials}
+        pipes={pipes}
+        settingsOpen
+        moreAbove={shape ? <ShapeChamfers shape={shape} sizes={sizes} setSizes={setSizes} /> : null}
+      />
       {error && <div style={{ color: C.danger, fontSize: 14 }}>{error}</div>}
       {!picked && <div style={{ color: C.muted, fontSize: 13 }}>Pick the Stock and the Process to generate.</div>}
       <button
