@@ -24,17 +24,17 @@ export const F = {
 // inside the component and re-render on every theme change.
 export const THEMES = {
   dark: {
-    bg: "#1B1D1F", surface: "#232629", surfaceHover: "#282C2F", border: "#33383C",
+    bg: "#1B1D1F", surface: "#232629", surfaceHover: "#282C2F", border: "#6A7076",
     text: "#ECEAE4", muted: "#8B9096", accentRaw: "#F2A900", accentTint: "#3A2E10",
     accentFinished: "#4A9B8E", danger: "#D6543B", dangerTint: "#3A1E17",
   },
   medium: {
-    bg: "#4A4A4A", surface: "#565656", surfaceHover: "#616161", border: "#6E6E6E",
+    bg: "#4A4A4A", surface: "#565656", surfaceHover: "#616161", border: "#A8A8A8",
     text: "#F5F5F5", muted: "#B8B8B8", accentRaw: "#F2A900", accentTint: "#5C4A1E",
     accentFinished: "#4A9B8E", danger: "#D6543B", dangerTint: "#5C3A30",
   },
   light: {
-    bg: "#F7F7F5", surface: "#FFFFFF", surfaceHover: "#F0F0EE", border: "#DCDCD8",
+    bg: "#F7F7F5", surface: "#FFFFFF", surfaceHover: "#F0F0EE", border: "#8E8E89",
     text: "#1B1D1F", muted: "#6B6F73", accentRaw: "#C98600", accentTint: "#FBEDD1",
     accentFinished: "#2F7A6E", danger: "#C23D26", dangerTint: "#FBE0DA",
   },
