@@ -41,7 +41,7 @@ test("side reach and minimum depth of cut are optional: blank saves nothing, a n
   assert.deepEqual(blank.errors, []);
   assert.equal("ap_min_mm" in blank.data, false);
   assert.equal(toolFromForm("od", { ...base, ap_min_mm: "0,4" }).data.ap_min_mm, 0.4);
-  assert.deepEqual(toolFromForm("od", { ...base, ap_min_mm: "x" }).errors, ["Minimum depth of cut (mm, blank = 0.5)"]);
+  assert.deepEqual(toolFromForm("od", { ...base, ap_min_mm: "x" }).errors, ["Minimum depth of cut (mm, blank = 2/3 nose radius, min 0.3 in stainless)"]);
   const thread = { name: "THREAD", holder: "SER 2525 M16", insert: "16ER ISO IC908", pitches_owned: "1.5, 2", pitch_range: "0.5, 3" };
   assert.equal(toolFromForm("thread", { ...thread, side_reach_mm: "2.5" }).data.side_reach_mm, 2.5);
   assert.equal(formFromTool({ data: { kind: "thread", name: "T", side_reach_mm: 2.5 } }).side_reach_mm, "2.5");

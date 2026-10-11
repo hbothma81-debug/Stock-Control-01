@@ -23,7 +23,7 @@ const F = {
   // Read by the engine when a tool has them (9 Oct 2026); left blank, the
   // engine's own figure is used and nothing is saved.
   side_reach: { key: "side_reach_mm", label: "Side reach past the tip (mm, blank = 3)", type: "number", optional: true },
-  ap_min: { key: "ap_min_mm", label: "Minimum depth of cut (mm, blank = 0.5)", type: "number", optional: true },
+  ap_min: { key: "ap_min_mm", label: "Minimum depth of cut (mm, blank = 2/3 nose radius, min 0.3 in stainless)", type: "number", optional: true },
 };
 
 export const TOOL_KINDS = [
