@@ -311,6 +311,21 @@ test("Rand to the cent", () => {
   assert.equal(rand(null), "–");
 });
 
+import { batchTimeText } from "./cncRules.js";
+
+test("the batch run time in words, from the engine's batch_s (machine planning)", () => {
+  // 500 off: 2,590 min = 43 h 10 min, with 7 puller bars loaded
+  assert.equal(
+    batchTimeText({ batch_s: 155400, qty: 500, first_off_s: 2700, bar_changes: 7, time_factor: 1.15 }),
+    "43 h 10 min for 500 off (incl. 45 min first-off, 7 bar changes, x1.15 allowance)"
+  );
+  assert.equal(batchTimeText({ batch_s: 3300, qty: 1, first_off_s: 2700, bar_changes: 1, time_factor: 1.15 }), "55 min for 1 off (incl. 45 min first-off, 1 bar change, x1.15 allowance)");
+  assert.equal(batchTimeText({ batch_s: 7200, qty: 10, first_off_s: 2700, bar_changes: 0 }), "2 h 0 min for 10 off (incl. 45 min first-off)");
+  // a costing priced before the engine sent it
+  assert.equal(batchTimeText({ qty: 70 }), null);
+  assert.equal(batchTimeText(null), null);
+});
+
 import { wastageRows, DEFAULT_SETUP_PRICE } from "./cncRules.js";
 
 test("the wastage rows add up to the material per part", () => {

@@ -10,7 +10,7 @@
 // 2026: the report gets the material / offcut split and the selling price;
 // the chips are in the material, not shown as waste).
 
-import { oNumber, rand, sourceTag, wastageRows } from "./cncRules.js";
+import { batchTimeText, oNumber, rand, sourceTag, wastageRows } from "./cncRules.js";
 import { sellingPrice } from "./markup.js";
 
 const L = 14;
@@ -119,6 +119,7 @@ export function drawCostReport({ doc, autoTable, data }) {
   // ---- time
   y = heading(doc, y, "Machine time");
   y = pairs(doc, autoTable, y, [
+    ["Batch run time (est.)", batchTimeText(c) || "press Price again on the Costing tab"],
     ["Cycle time", minSec(c.cycle_s)],
     ["Time factor", c.time_factor != null ? `x ${c.time_factor}` : "-"],
     ["Machine time per part", minSec(c.machine_s ?? c.part_s)],

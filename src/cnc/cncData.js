@@ -390,10 +390,13 @@ export async function loadToolpath({ program, rev }) {
   const quick = rev.quick || program.quick || null;
   const step = quick ? null : await storedStep(program.id, rev);
   if (!step && !quick) throw new Error("No STEP file is stored for this program, so the toolpath cannot be drawn.");
+  // The batch quantity is the program's own (its Costing tab), so the
+  // setup sheet's batch run time is for the quantity it prints (11 Oct 2026).
+  const qty = program.settings?.qty;
   return runEngine({
     name: program.part_name,
     stepText: step?.text,
-    settings: rev.settings || program.settings || {},
+    settings: { ...(rev.settings || program.settings || {}), ...(qty != null ? { qty } : {}) },
     extra: { action: "check", programs: rev.programs || [], ...(quick ? { quick } : {}) },
   });
 }

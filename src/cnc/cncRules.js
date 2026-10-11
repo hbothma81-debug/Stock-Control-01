@@ -429,6 +429,26 @@ export function rand(v) {
   return "R " + Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// The batch run time for machine planning (Heinrich, 11 Oct 2026: "a time
+// estimation on how long the whole batch will run to do machine planning",
+// on the setup sheet and the cost report). The engine does the sum
+// (costing.batch_s = part time x qty + first-off + puller bar changes,
+// quote.py); this only puts it in words. Null when the costing has none.
+export function batchTimeText(costing) {
+  const c = costing || {};
+  if (c.batch_s == null) return null;
+  const mins = Math.round(Number(c.batch_s) / 60);
+  const h = Math.floor(mins / 60);
+  const time = h ? `${h} h ${mins % 60} min` : `${mins} min`;
+  const bars = Number(c.bar_changes) || 0;
+  const incl = [
+    c.first_off_s != null ? `${Math.round(Number(c.first_off_s) / 60)} min first-off` : "",
+    bars ? `${bars} bar change${bars === 1 ? "" : "s"}` : "",
+    c.time_factor != null ? `x${c.time_factor} allowance` : "",
+  ].filter(Boolean);
+  return `${time} for ${c.qty ?? 1} off${incl.length ? ` (incl. ${incl.join(", ")})` : ""}`;
+}
+
 // A new program's setup price, Rand per job (Heinrich, 8 Oct 2026: "Default
 // of 750 on all new programs but can change"). Sent to the engine as
 // setup_price, which then stands in for the 45 min first-off.

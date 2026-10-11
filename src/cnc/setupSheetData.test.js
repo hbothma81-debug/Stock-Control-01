@@ -55,6 +55,17 @@ test("page 1: heading, status, facts with the batch quantity, the turret T1 to T
   assert.equal(d.turret[4].tool, "32MM BORING BAR");
 });
 
+test("the batch run time for machine planning comes from the engine's costing in the same answer", () => {
+  const none = setupSheetData({ program: PROGRAM, rev: REV, answer: ANSWER });
+  assert.deepEqual(none.left.find((r) => r[0] === "Batch run time (est.)"), ["Batch run time (est.)", "-"]);
+  const answer = { ...ANSWER, costing: { qty: 20, batch_s: 23040, first_off_s: 2700, bar_changes: 0, time_factor: 1.15 } };
+  const d = setupSheetData({ program: PROGRAM, rev: REV, answer });
+  assert.deepEqual(d.left.find((r) => r[0] === "Batch run time (est.)"), ["Batch run time (est.)", "6 h 24 min for 20 off (incl. 45 min first-off, x1.15 allowance)"]);
+  // it sits right under the batch quantity
+  const at = d.left.findIndex((r) => r[0] === "Batch quantity");
+  assert.equal(d.left[at + 1][0], "Batch run time (est.)");
+});
+
 test("each side: clamp, stick-out, time, and its tools until the engine sends the lines", () => {
   const d = setupSheetData({ program: PROGRAM, rev: REV, answer: ANSWER });
   assert.equal(d.sides.length, 2);

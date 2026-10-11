@@ -10,7 +10,7 @@
 // block it already sends. No PDF here: setupSheetPdf.js draws this.
 // Tested in setupSheetData.test.js.
 
-import { faultText, oNumber, sourceTag } from "./cncRules.js";
+import { batchTimeText, faultText, oNumber, sourceTag } from "./cncRules.js";
 
 const min1 = (s) => (s == null ? "-" : `${Math.round((Number(s) / 60) * 10) / 10} min`);
 const fmt = (n) => (n == null || n === "" ? "-" : String(Math.round(Number(n) * 100) / 100));
@@ -64,6 +64,9 @@ export function setupSheetData({ program, rev, answer, when = new Date() }) {
     ["Part", partText],
     ["Cycle time (est.)", `${min1(answer?.cycle_s ?? setup.times?.cycle_s)} per part (${nPrograms} program${nPrograms === 1 ? "" : "s"})`],
     ["Batch quantity", String(qty)],
+    // For machine planning (Heinrich, 11 Oct 2026), from the engine's
+    // costing in the same answer; loadToolpath sends it the program's qty.
+    ["Batch run time (est.)", batchTimeText(answer?.costing) || "-"],
   ];
   const st = setup.settings || {};
   const right = Array.isArray(setup.machine_lines) && setup.machine_lines.length

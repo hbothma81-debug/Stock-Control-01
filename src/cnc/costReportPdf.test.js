@@ -54,6 +54,13 @@ test("the markups and selling price, as the Costing tab shows them", () => {
   assert.deepEqual([sell.perPart.material, sell.perPart.materialSell, sell.perPart.offcut, sell.perPart.offcutSell, sell.perPart.atCost], [2.12, 3.39, 0.58, 0.93, 25.5]);
 });
 
+test("the batch run time for machine planning: printed when the engine sends it, else press Price again", () => {
+  assert.ok(draw(COSTING).all.includes("Batch run time (est.) | press Price again on the Costing tab"));
+  // 70 off: 70 x 70.4 s + 45 min first-off + 3 puller bars x 2 min = 8,048 s = 2 h 14 min
+  const { all } = draw({ ...COSTING, batch_s: 8048, first_off_s: 2700, bar_changes: 3, bar_change_s: 360 });
+  assert.ok(all.includes("Batch run time (est.) | 2 h 14 min for 70 off (incl. 45 min first-off, 3 bar changes, x1.15 allowance)"), all);
+});
+
 test("until the engine sends them, the order and impacts say so; once sent they print", () => {
   assert.ok(draw(COSTING).all.includes("Material to order comes with the engine's next update."));
   const withOrder = {
