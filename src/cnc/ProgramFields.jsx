@@ -1,16 +1,21 @@
 // The boxes New program and Update program share: part name, customer,
-// material, and the questionnaire under "More settings". The STEP box and
-// the program number stay with each form, because they differ: a new
-// program must have a STEP and may take a typed number; an update keeps
-// its STEP unless another is chosen, and keeps its number.
+// material, Stock and Process with only the boxes their picks open, and
+// the rest of the questionnaire under a shut "More settings" (batches:
+// settingsBatches.js, Heinrich 11 Oct 2026). The STEP box and the program
+// number stay with each form, because they differ: a new program must have
+// a STEP and may take a typed number; an update keeps its STEP unless
+// another is chosen, and keeps its number.
 
 import Section from "../Section.jsx";
 import TypeToFind from "../TypeToFind.jsx";
 import { C, S } from "../theme.js";
 import SettingsBoxes from "./SettingsBoxes.jsx";
+import StockProcess from "./StockProcess.jsx";
+import { FINISH_BOXES } from "./settingsBatches.js";
 
 export default function ProgramFields({ fields, setFields, customers, materials, pipes = null, settingsOpen = false, moreAbove = null }) {
   const set = (key) => (v) => setFields((f) => ({ ...f, [key]: v ?? "" }));
+  const setForm = (fn) => setFields((f) => ({ ...f, form: typeof fn === "function" ? fn(f.form) : fn }));
   return (
     <>
       <div style={S.formGrid}>
@@ -37,9 +42,10 @@ export default function ProgramFields({ fields, setFields, customers, materials,
           )}
         </div>
       </div>
+      <StockProcess form={fields.form} setForm={setForm} pipes={pipes} />
       <Section title="More settings" defaultOpen={settingsOpen} quiet>
         {moreAbove}
-        <SettingsBoxes pipes={pipes} form={fields.form} setForm={(fn) => setFields((f) => ({ ...f, form: typeof fn === "function" ? fn(f.form) : fn }))} />
+        <SettingsBoxes keys={FINISH_BOXES} pipes={pipes} form={fields.form} setForm={setForm} />
       </Section>
     </>
   );

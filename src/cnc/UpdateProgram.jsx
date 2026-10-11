@@ -8,12 +8,15 @@
 // customer changed. A new part name is a new revision (his answer, the
 // same day): the engine writes it into the program's first line. A new
 // material is too: it is sent to the engine and moves the price.
+// Stock and Process must be picked, as on New program (Heinrich, 11 Oct
+// 2026); a program that left them to the engine has them picked here.
 
 import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { C, S } from "../theme.js";
 import { runUpdate, saveProgramDetails, saveUpdate, updateChanges } from "./cncData.js";
 import { cleanSettings, cleanSizes, detailChanges, faultText, handEditsNote, oNumber, revisionLetter, settingsToForm } from "./cncRules.js";
+import { keepShown, stockAndProcessPicked } from "./settingsBatches.js";
 import ShapeSizes from "./ShapeSizes.jsx";
 import ProgramFields from "./ProgramFields.jsx";
 import ProgramChanges from "./ProgramChanges.jsx";
@@ -39,11 +42,12 @@ export default function UpdateProgram({ program, revisions, current, customers, 
 
   const letter = revisionLetter(revisions.length);
   const material = (materials || []).find((m) => m.name === fields.materialName) || null;
-  const canGenerate = !!fields.partName.trim() && !!material && !busy && (!quickNow || !!shape);
+  const picked = stockAndProcessPicked(fields.form);
+  const canGenerate = !!fields.partName.trim() && !!material && picked && !busy && (!quickNow || !!shape);
 
   async function generate() {
     setError("");
-    const { settings, errors } = cleanSettings(fields.form);
+    const { settings, errors } = cleanSettings(keepShown(fields.form));
     if (errors.length) {
       setError(`Check ${errors.join(", ")}: not a number the engine can use.`);
       return;
@@ -167,6 +171,7 @@ export default function UpdateProgram({ program, revisions, current, customers, 
       )}
       <ProgramFields fields={fields} setFields={setFields} customers={customers} materials={materials} pipes={pipes} settingsOpen />
       {error && <div style={{ color: C.danger, fontSize: 14 }}>{error}</div>}
+      {!picked && <div style={{ color: C.muted, fontSize: 13 }}>Pick the Stock and the Process to generate.</div>}
       <button
         type="button"
         className="stk-btn"

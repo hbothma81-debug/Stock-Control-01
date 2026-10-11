@@ -1,17 +1,22 @@
-// New program: pick the STEP file, the customer and the material, press
-// Generate. Everything else sits under a shut "More settings" on the same
-// form (Heinrich, 8 Oct 2026); empty means the engine decides.
-// Clicks: CNC, New program, pick STEP, customer, material, Generate.
+// New program: pick the STEP file, the customer, the material, the Stock
+// and the Process, press Generate. Stock and Process must be picked
+// (Heinrich, 11 Oct 2026); everything else sits under a shut "More
+// settings" on the same form (Heinrich, 8 Oct 2026); empty means the
+// engine decides.
+// Clicks: CNC, New program, pick STEP, customer, material, Stock, Process,
+// Generate.
 //
 // Opened from the Shapes list it takes the shape's sizes instead of a STEP
 // and is saved the same way, as an ordinary program (Heinrich, 8 Oct 2026).
-// Clicks: CNC, Shapes, the shape, the sizes, customer, material, Generate.
+// Clicks: CNC, Shapes, the shape, the sizes, customer, material, Stock,
+// Process, Generate.
 
 import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { C, S } from "../theme.js";
 import { createProgram } from "./cncData.js";
 import { cleanSettings, cleanSizes, partNameFromFile, readNumber } from "./cncRules.js";
+import { keepShown, stockAndProcessPicked } from "./settingsBatches.js";
 import ProgramFields from "./ProgramFields.jsx";
 import ShapeSizes from "./ShapeSizes.jsx";
 
@@ -27,11 +32,12 @@ export default function NewProgram({ customers, materials, pipes, shape = null, 
   const [error, setError] = useState("");
 
   const material = (materials || []).find((m) => m.name === fields.materialName) || null;
-  const ready = (shape || !!stepFile) && !!fields.partName.trim() && !!material && !busy;
+  const picked = stockAndProcessPicked(fields.form);
+  const ready = (shape || !!stepFile) && !!fields.partName.trim() && !!material && picked && !busy;
 
   async function generate() {
     setError("");
-    const { settings, errors } = cleanSettings(fields.form);
+    const { settings, errors } = cleanSettings(keepShown(fields.form));
     if (errors.length) {
       setError(`Check ${errors.join(", ")}: not a number the engine can use.`);
       return;
@@ -130,6 +136,7 @@ export default function NewProgram({ customers, materials, pipes, shape = null, 
       />
 
       {error && <div style={{ color: C.danger, fontSize: 14 }}>{error}</div>}
+      {!picked && <div style={{ color: C.muted, fontSize: 13 }}>Pick the Stock and the Process to generate.</div>}
       <button
         type="button"
         className="stk-btn"

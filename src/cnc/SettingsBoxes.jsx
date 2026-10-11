@@ -7,12 +7,16 @@
 // (GET ?pipes=1), in the shop's words ("100NB (4")", then only that size's
 // schedules with their bore), so a size the engine does not know cannot be
 // typed. While the engine has no list they stay typed boxes.
+//
+// `keys` draws only those fields, in that order (one batch, see
+// settingsBatches.js); `labels` gives a field another label there.
 
 import { S } from "../theme.js";
 import { CNC_FIELDS } from "./cncFields.js";
 import { pipeLabel } from "./cncRules.js";
 
-export default function SettingsBoxes({ form, setForm, pipes = null }) {
+export default function SettingsBoxes({ form, setForm, pipes = null, keys = null, labels = {} }) {
+  const fields = keys ? keys.map((k) => CNC_FIELDS.find((f) => f.key === k)).filter(Boolean) : CNC_FIELDS;
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
   const pipe = pipes ? pipes.find((p) => String(p.nps) === String(form.nps ?? "")) : null;
 
@@ -57,9 +61,9 @@ export default function SettingsBoxes({ form, setForm, pipes = null }) {
 
   return (
     <div style={S.formGrid}>
-      {CNC_FIELDS.map((f) => (
+      {fields.map((f) => (
         <div key={f.key}>
-          <label style={S.label}>{f.label}</label>
+          <label style={S.label}>{labels[f.key] || f.label}</label>
           {pipes && (f.key === "nps" || f.key === "schedule") ? (
             pipeBox(f)
           ) : f.choices ? (
