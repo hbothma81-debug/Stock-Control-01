@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { DRAWINGS, isChamfer, sizesOffDrawing } from "./shapeDrawings.js";
 
 // The engine's shapes as its ?shapes=1 sends them on 11 Oct 2026 (turnpath
-// data/shapes.json), keys and pictures only.
+// data/shapes.json), keys and pictures only, and the two asked for since.
 const SHAPES = {
   pin: ["pin", "od length chamfer"],
   bush: ["bush", "od id length chamfer_od chamfer_id"],
@@ -13,6 +13,9 @@ const SHAPES = {
   stepped_shaft: ["stepped_shaft", "od1 length1 od2 length2 od3 length3 od4 length4 chamfer"],
   stepped_bore: ["stepped_bore", "od length counterbore counterbore_depth id chamfer_od chamfer_id"],
   thread_stud: ["thread_stud", "thread pitch length thread_length_1 thread_length_2 chamfer"],
+  // Asked of the engine 12 Oct 2026 (Heinrich: meat hooks), not offered yet.
+  sharpened_bar: ["sharpened", "od length point_length_1 tip_dia_1 point_length_2 tip_dia_2"],
+  radius_end: ["radius_end", "od length radius_1 radius_2"],
 };
 const shape = (key) => ({ key, picture: SHAPES[key][0], fields: SHAPES[key][1].split(" ").map((k) => ({ key: k, label: k })) });
 

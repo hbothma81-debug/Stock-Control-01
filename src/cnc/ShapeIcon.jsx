@@ -36,6 +36,8 @@ const DRAW = {
       <path d="M8 12 l3 16 M14 12 l3 16 M20 12 l3 16 M26 12 l3 16 M44 12 l3 16 M50 12 l3 16" />
     </>
   ),
+  sharpened: <path d="M5 19 L16 12 H48 L59 19 V21 L48 28 H16 L5 21 Z" />,
+  radius_end: <rect x="6" y="12" width="52" height="16" rx="7" />,
 };
 
 export default function ShapeIcon({ picture, size = 56 }) {

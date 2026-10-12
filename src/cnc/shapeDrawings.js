@@ -108,6 +108,37 @@ export const DRAWINGS = {
       { key: "length", ext: "M90 147 V223 M350 147 V223", line: "M90 215 H350", box: [220, 215], ph: "Length" },
     ],
   },
+  // A bar sharpened at one end or both, the point given in Z (its length)
+  // and X (the tip diameter, 0 = sharp): Heinrich, 12 Oct 2026, for SS304
+  // meat hooks. End 1 is the z=0 end, on the left.
+  sharpened: {
+    h: 240,
+    axis: 120,
+    outline: "M110 116 L170 90 H250 L310 116 V124 L250 150 H170 L110 124 Z",
+    ext: "M110 126 V223 M310 126 V223 M170 152 V188 M250 152 V188",
+    dims: [
+      { key: "od", lead: "M210 57 V90", line: "M210 90 V150", box: [210, 40], prefix: "Ø", ph: "OD" },
+      { key: "tip_dia_1", pointer: "M82 120 H108", box: [45, 120], prefix: "Ø", ph: "sharp" },
+      { key: "point_length_1", line: "M110 180 H170", lead: "M110 180 H99", box: [62, 180], ph: "Point" },
+      { key: "tip_dia_2", pointer: "M321 120 H312", box: [358, 120], prefix: "Ø", ph: "sharp" },
+      { key: "point_length_2", line: "M250 180 H310", lead: "M310 180 H321", box: [358, 180], ph: "none" },
+      { key: "length", line: "M110 215 H310", box: [210, 215], ph: "Length" },
+    ],
+  },
+  // A radius on the end corner, one end or both; half the bar is a full
+  // round end (Heinrich, 12 Oct 2026).
+  radius_end: {
+    h: 235,
+    axis: 120,
+    outline: "M130 80 H290 A20 20 0 0 1 310 100 V140 A20 20 0 0 1 290 160 H130 A20 20 0 0 1 110 140 V100 A20 20 0 0 1 130 80 Z",
+    ext: "M110 142 V213 M310 142 V213",
+    dims: [
+      { key: "od", ext: "M128 80 H47 M128 160 H47", line: "M55 80 V160", box: [55, 120], prefix: "Ø", ph: "OD" },
+      { key: "radius_1", pointer: "M100 58 L114 84", box: [75, 42], prefix: "R", ph: "end 1" },
+      { key: "radius_2", pointer: "M320 58 L306 84", box: [345, 42], prefix: "R", ph: "none" },
+      { key: "length", line: "M110 205 H310", box: [210, 205], ph: "Length" },
+    ],
+  },
 };
 
 // A chamfer size goes under More settings, not on the drawing.
