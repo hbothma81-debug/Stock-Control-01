@@ -373,6 +373,8 @@ function ProgramText({ rev }) {
       {rev.cycle_s != null && (
         <div style={{ fontSize: 14 }}>
           Cycle time {Math.floor(rev.cycle_s / 60)} min {Math.round(rev.cycle_s % 60)} s
+          {/* Several parts per pull (engine 22cd96a costing.parts_per_run, Heinrich 11 Oct 2026): the time is per part. */}
+          {rev.costing?.parts_per_run > 1 && <b> per part · {rev.costing.parts_per_run} per pull</b>}
           {rev.costing?.data_source && <span style={{ color: C.muted }}> · made from {rev.costing.data_source}</span>}
         </div>
       )}
