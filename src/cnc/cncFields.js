@@ -41,6 +41,9 @@ export const CNC_FIELDS = [
   { key: "stock_extra", label: "Stock longer than the part (mm)", kind: "number", blank: "5" },
   { key: "pulls", label: "Pulls (mm each, e.g. 63, 33)", kind: "list", blank: "engine works them out" },
   { key: "pull_max_ld", label: "Max stick-out per pull (× bar dia)", kind: "number", blank: "4" },
+  // Several short parts per pull, one sub-program made once per part
+  // (Heinrich, 11 Oct 2026: washers 3 to 5 at a time; engine 61f24ab).
+  { key: "parts_per_pull", label: "Parts per pull", kind: "number", whole: true, blank: "1" },
   {
     key: "back_op",
     label: "Back end (bar work)",

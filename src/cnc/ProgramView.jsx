@@ -13,7 +13,7 @@ import { ArrowLeft, ArrowLeftRight, Download, FileInput, Pencil, RefreshCw, Tras
 import { C, F, S } from "../theme.js";
 import { deleteProgram, loadProgram } from "./cncData.js";
 import { CNC_FIELDS } from "./cncFields.js";
-import { faultText, oNumber, pipeLabel, programFiles, settingText, sourceTag } from "./cncRules.js";
+import { faultText, oNumber, pipeLabel, programFiles, programLabels, settingText, sourceTag } from "./cncRules.js";
 import { canWriteToFolder, copyToFolder, downloadFiles } from "./programOut.js";
 import UpdateProgram from "./UpdateProgram.jsx";
 import ImportMachineCopy from "./ImportMachineCopy.jsx";
@@ -378,7 +378,7 @@ function ProgramText({ rev }) {
       )}
       {progs.map((pr, i) => (
         <div key={i}>
-          {progs.length > 1 && <div style={{ fontWeight: 700, margin: "6px 0" }}>Side {i + 1}: {oNumber(pr.number)}</div>}
+          {progs.length > 1 && <div style={{ fontWeight: 700, margin: "6px 0" }}>{programLabels(progs)[i]}</div>}
           <pre
             style={{
               fontFamily: F.mono,

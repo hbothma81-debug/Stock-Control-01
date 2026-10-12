@@ -15,7 +15,7 @@ import { useDeferredValue, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { C, F, S } from "../theme.js";
 import { checkMachineCopy, saveEdit } from "./cncData.js";
-import { editProblems, oNumber, revisionLetter } from "./cncRules.js";
+import { editProblems, oNumber, programLabels, revisionLetter } from "./cncRules.js";
 import ProgramChanges from "./ProgramChanges.jsx";
 
 // A program's lines as lineDiff reads them: line endings (CR LF off the
@@ -80,9 +80,7 @@ export default function EditProgram({ program, revisions, current, base, userNam
       {programs.map((p, i) => (
         <div key={p.number}>
           {programs.length > 1 && (
-            <div style={{ fontWeight: 700, margin: "6px 0" }}>
-              Side {i + 1}: {oNumber(p.number)}
-            </div>
+            <div style={{ fontWeight: 700, margin: "6px 0" }}>{programLabels(base.programs)[i]}</div>
           )}
           <textarea
             value={texts[i]}

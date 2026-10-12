@@ -5,7 +5,7 @@
 import { C, S } from "../theme.js";
 import { STOCK_TYPES } from "./cncFields.js";
 import SettingsBoxes from "./SettingsBoxes.jsx";
-import { HOLDING_OF, PROCESSES, PROCESS_BOXES, PULLERS, STOCK_BOXES, processOf } from "./settingsBatches.js";
+import { HOLDING_OF, PROCESSES, PROCESS_BOXES, PULLERS, STOCK_BOXES, morePerPull, processOf } from "./settingsBatches.js";
 
 // S.chipActive sets borderColor, which React will not mix with S.chip's
 // border shorthand once a chip switches on; the whole border is given.
@@ -57,6 +57,13 @@ export default function StockProcess({ form, setForm, pipes = null }) {
           </div>
         )}
         {process && <SettingsBoxes keys={PROCESS_BOXES[process]} pipes={pipes} form={form} setForm={setForm} />}
+        {process === "puller" && morePerPull(form) && (
+          <div style={{ fontSize: 12.5, color: C.muted, marginTop: 6 }}>
+            {form.back_op === "part only"
+              ? "Each part is parted off, so the back end is Part only; one sub-program makes each part."
+              : "Part and turn makes one part per pull: set the back end to Part only for more."}
+          </div>
+        )}
       </div>
     </div>
   );

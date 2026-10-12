@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   oNumber, readNumber, cleanSettings, settingsToForm, settingText, programMatches, listPrograms, filterChoices,
-  stockText, faultText, partNameFromFile, programFileName, engineErrorText, revisionChanges, detailChanges,
+  stockText, faultText, partNameFromFile, programFileName, engineErrorText, revisionChanges, detailChanges, programLabels,
 } from "./cncRules.js";
 import { CNC_FIELDS } from "./cncFields.js";
 
@@ -373,4 +373,13 @@ test("Update program: the part name, customer and material are the program's own
   const program = { part_name: "Bush", customer: "B&W", material: "EN8" };
   assert.deepEqual(detailChanges(program, { partName: "Bush", customer: "B&W", materialName: "EN8" }), []);
   assert.deepEqual(detailChanges(program, { partName: "Bush 2", customer: "", materialName: "EN8" }), ["part name", "customer"]);
+});
+
+test("a sub-program is labelled as one, with the program that calls it, not as Side 2", () => {
+  const main = { number: 1040, text: "%\nO00001040(WASHER)\nG65P1041Z-3.5(1ST)\nM30\n%" };
+  assert.deepEqual(programLabels([{ number: 1027, text: "O00001027\nM30" }, { number: 1028, text: "O00001028\nM30" }]), ["Side 1: O00001027", "Side 2: O00001028"]);
+  assert.deepEqual(programLabels([main, { number: 1041, sub: true, called_by: 1040, text: "M99" }]), ["Side 1: O00001040", "Sub-program: O00001041, called by O00001040"]);
+  // After a hand edit only the text is kept: the M99 and the call still say it.
+  assert.deepEqual(programLabels([main, { number: 1041, text: "O00001041(SUB)\nM99\n%" }]), ["Side 1: O00001040", "Sub-program: O00001041, called by O00001040"]);
+  assert.deepEqual(programLabels([{ number: 3005, text: "M98P3006\nM98P3007\nM30" }, { number: 3006, text: "M99" }, { number: 3007, text: "M99" }])[2], "Sub-program: O00003007, called by O00003005");
 });

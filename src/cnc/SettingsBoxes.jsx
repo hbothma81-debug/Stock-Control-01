@@ -14,10 +14,11 @@
 import { S } from "../theme.js";
 import { CNC_FIELDS } from "./cncFields.js";
 import { pipeLabel } from "./cncRules.js";
+import { withAnswer } from "./settingsBatches.js";
 
 export default function SettingsBoxes({ form, setForm, pipes = null, keys = null, labels = {} }) {
   const fields = keys ? keys.map((k) => CNC_FIELDS.find((f) => f.key === k)).filter(Boolean) : CNC_FIELDS;
-  const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+  const set = (key, value) => setForm((f) => withAnswer(f, key, value));
   const pipe = pipes ? pipes.find((p) => String(p.nps) === String(form.nps ?? "")) : null;
 
   function pipeBox(f) {

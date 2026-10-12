@@ -30,10 +30,23 @@ export const HOLDING_OF = { cut: "double-chucked", puller: "bar puller" };
 // gripped too.
 export const PROCESS_BOXES = {
   cut: ["stock_extra", "grip1", "grip2"],
-  puller: ["pulls", "pull_max_ld", "back_op", "grip2"],
+  puller: ["pulls", "pull_max_ld", "parts_per_pull", "back_op", "grip2"],
 };
 
 export const FINISH_BOXES = ["edge_break", "finish_mode", "nose_comp", "side1"];
+
+// One answer typed. More than one part per pull needs the back end Part
+// only (each part is parted off; with Part and turn the engine makes one
+// per pull), so typing it sets that too: the same action sets up what it
+// needs.
+export function withAnswer(form, key, value) {
+  const next = { ...form, [key]: value };
+  if (key === "parts_per_pull" && morePerPull(next)) next.back_op = "part only";
+  return next;
+}
+
+// Whether the form asks for more than one part per pull.
+export const morePerPull = (form) => Number(String(form?.parts_per_pull ?? "").replace(",", ".")) > 1;
 
 // The Process an engine holding belongs to, "" when none is picked.
 export function processOf(holding) {

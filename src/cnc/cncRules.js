@@ -228,6 +228,22 @@ export function revisionLetter(count) {
   return v;
 }
 
+// What each of a revision's programs is called on screen: "Side 1",
+// "Side 2", or "Sub-program" with the program that calls it. A sub is
+// known by the engine's sub flag or, on a hand edit or a machine copy that
+// carries only the text, by its M99; its caller by an M98 / G65 P call.
+export function programLabels(programs) {
+  const list = programs || [];
+  const isSub = (p) => !!p.sub || /\bM99\b/.test(String(p.text ?? ""));
+  let side = 0;
+  return list.map((p) => {
+    if (!isSub(p)) return `Side ${++side}: ${oNumber(p.number)}`;
+    const call = new RegExp(`(M98|G65)\\s*P0*${Number(p.number)}(?!\\d)`);
+    const caller = p.called_by ?? list.find((q) => !isSub(q) && call.test(String(q.text ?? "")))?.number;
+    return `Sub-program: ${oNumber(p.number)}${caller ? `, called by ${oNumber(caller)}` : ""}`;
+  });
+}
+
 // The file name each program goes out under: its O number and the title it
 // carries on its O line ("O00001027(BPW 10t BUSH SIDE 1)" ->
 // "O00001027 BPW 10t BUSH SIDE 1.txt"), as the hand programs are filed.
