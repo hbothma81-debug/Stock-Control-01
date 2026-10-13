@@ -5731,3 +5731,63 @@ quote's quantity from `markup.js`, "program changed, new price"
 on the quote), with the Quoting conversation. Practice test data: O1029
 at 55% material markup, quote ref Q-HIST-TEST; O1031 quote ref
 Q-TEST-0815, project "Practice trial project".
+
+---
+
+## 13 Oct 2026 — Requisitions (Customer Stock filters): a page per customer
+
+He asked for "more filters and search functions, customer selector plus
+type to find" on Customer Stock, then: "I dont like pils, close the
+other customers, dont want to see them when a customer is selected",
+and finally "each customer has his own page/folder, when I select the
+customer it opens that customer parts in a new page where I can search
+and filter".
+
+Built and **LIVE 13 Oct 2026** (cc964d9, pushed alone on his word; live
+bundle App-CLW7Ni2d.js before, App-BUAKajsd.js after, both new phrases
+found by CHECK-what-is-live.cjs). `src/stock/CustomerStock.jsx` only; no
+database change, no SQL, nothing else touched.
+
+Two levels in place of one pill per customer:
+
+- **Level 1** every customer A to Z, one card each with how many parts
+  and how many have stock, plus a type-to-find box (part counts as
+  hints) to go straight to one: two taps to a customer's parts. The
+  Stock tab's search box narrows the cards to customers holding a
+  matching part and tags each with "n matching".
+- **Level 2** that customer's page: All customers back, the customer's
+  name as the heading, the customer box kept at the top (switching
+  customer is one tap, not a trip back and in again), a Has stock only
+  tick, Sort (stock code A-Z, description A-Z, most on hand), and the
+  search box narrowing that customer's parts.
+
+The tick and the sort are remembered per device in `localStorage`
+(`customerStockView`); the open customer is not, so the tab always opens
+on the customer list. `Section` is no longer used by this screen.
+
+Two faults found while driving practice signed in, both fixed before the
+commit:
+
+- The search reads the whole row and the row carries the customer name,
+  so on HPE's page a letter of "HPE" matched all 1,677 parts and the box
+  looked dead. Level 2 searches the row with the customer blanked
+  (`matchesHere`); level 1 still counts the name, so a customer can be
+  found by typing it.
+- All 1,677 rows were drawn at once: about 200 ms of frozen screen per
+  keystroke. Level 2 draws the first `PAGE` (200) with "Show them all
+  (n more)" under it; the window resets on a new customer, search, tick
+  or sort. Keystroke measured down to about 95 ms.
+
+Proven on practice: 1,677 parts for HPE, "h" gives 745 (was all 1,677),
+"handle 0100" gives 10, all three sorts order right, the tick survives a
+reload (`customerStockView` read back). Clean clone built, 526 tests
+pass, CHECK-undefined-names clean.
+
+**Noticed, not touched:** every HPE part on practice is in there twice
+(1,677 rows is two copies of about 838 parts), which looks like the
+sheet imported twice with Replace off. Live not checked.
+
+**Open:** on 13 Oct, after the push, he said "the customer stock is
+still not what I asked for" and has not yet said which part is wrong
+(he may have been looking at the old live build, which is what prompted
+the push). Ask before rebuilding anything.
