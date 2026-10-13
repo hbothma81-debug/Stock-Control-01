@@ -17876,15 +17876,17 @@ export default function StockControl() {
       )}
 
       <div style={S.controls}>
-        <div style={S.searchWrap}>
-          <Search size={16} color={C.muted} />
-          <input
-            style={S.searchInput}
-            placeholder={`Search ${TABS.find((t) => t.key === tab).label.toLowerCase()}…`}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
+        {tab !== "custom" && (
+          <div style={S.searchWrap}>
+            <Search size={16} color={C.muted} />
+            <input
+              style={S.searchInput}
+              placeholder={`Search ${TABS.find((t) => t.key === tab).label.toLowerCase()}…`}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+        )}
         {tab !== "custom" && tab !== "stores" && (
           <button
             className="stk-btn"
@@ -18317,7 +18319,7 @@ export default function StockControl() {
               ctx={{
                 allocationsForItem, canDelete, canEditItems, canEditQty, canRequisition, canSeeValue, canView, drawingLookup,
                 isLowStock, items, master, openDrawingPreviewByPartNumber, openDuplicate, openEdit, openPreview, openRequest,
-                openUsageModal, query, removeItem, updateCustomerStockField,
+                openUsageModal, query, removeItem, setQuery, updateCustomerStockField,
               }}
             />
           </ErrorBoundary>

@@ -33,7 +33,7 @@
 // Remove, Request stock, and updateCustomerStockField for the boxes.
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, ChevronLeft, ClipboardList, Copy, FileText, ImageIcon, Pencil, Trash2 } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ClipboardList, Copy, FileText, ImageIcon, Pencil, Search, Trash2 } from "lucide-react";
 import TypeToFind from "../TypeToFind.jsx";
 import { C, S } from "../theme.js";
 import { stockSearchText, searchWords, matchesWords } from "../lib/stockSearch.js";
@@ -99,7 +99,7 @@ function SaveOnLeave({ value, onSave, style, placeholder, title, type = "text" }
 export default function CustomerStock({ ctx }) {
   const { allocationsForItem, canDelete, canEditItems, canEditQty, canRequisition, canSeeValue, canView, drawingLookup,
     isLowStock, items, master, openDrawingPreviewByPartNumber, openDuplicate, openEdit, openPreview, openRequest,
-    openUsageModal, query, removeItem, updateCustomerStockField } = ctx;
+    openUsageModal, query, removeItem, setQuery, updateCustomerStockField } = ctx;
   const saved = readStore();
   const [hasStockOnly, setHasStockOnly] = useState(!!saved.hasStockOnly);
   const [sort, setSort] = useState(SORTS[saved.sort] ? saved.sort : "code");
@@ -149,6 +149,17 @@ export default function CustomerStock({ ctx }) {
   // fifth of a second on each letter typed, so the search box felt stuck.
   // The page draws a window and offers the rest on a button.
   const drawn = showAll ? shown : shown.slice(0, PAGE);
+
+  // The Stock tab's own search box, drawn down here instead of at the top
+  // of the page (Heinrich, 13 Oct 2026: up there it "reads difficult").
+  // Still one search box on the screen: App.jsx leaves its own out for
+  // this division.
+  const searchBox = (what) => (
+    <div style={{ ...S.searchWrap, maxWidth: 320 }}>
+      <Search size={16} color={C.muted} />
+      <input style={S.searchInput} placeholder={`Search ${what}…`} value={query} onChange={(e) => setQuery(e.target.value)} />
+    </div>
+  );
 
   const customerBox = (
     <TypeToFind
@@ -328,6 +339,7 @@ export default function CustomerStock({ ctx }) {
       <div style={S.list}>
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
           {customerBox}
+          {searchBox("every customer's parts")}
           <span style={S.roleHint}>
             {all.length} part{all.length === 1 ? "" : "s"} for {customers.length} customer{customers.length === 1 ? "" : "s"},{" "}
             {all.filter((it) => Number(it.qty) > 0).length} with stock on hand.
@@ -384,7 +396,7 @@ export default function CustomerStock({ ctx }) {
       </button>
       <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>{customer}</div>
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
-        {customerBox}
+        {searchBox(`${customer}'s parts`)}
         <label style={S.checkRow}>
           <input type="checkbox" checked={hasStockOnly} onChange={(e) => setHasStockOnly(e.target.checked)} />
           Has stock only
