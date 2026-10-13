@@ -5791,3 +5791,60 @@ sheet imported twice with Replace off. Live not checked.
 still not what I asked for" and has not yet said which part is wrong
 (he may have been looking at the old live build, which is what prompted
 the push). Ask before rebuilding anything.
+
+---
+
+## 13 Oct 2026 — The app reloads itself when a newer build is live (committed, NOT pushed)
+
+JOB-0078's Invoicing was ticked on 1 Oct from a floor tablet still running
+a build from before 27 Sep, where a plain tick sent no invoice request.
+The tablets keep the app open for weeks and never pick up a new build.
+Heinrich's decision (13 Oct 2026, through the release-gate conversation):
+the app reloads itself, no banner, checked every five minutes.
+
+Built in `src/lib/buildWatch.js` (rules tested in `buildWatch.test.js`,
+12 tests) and one call in App.jsx just under the idle-pause effect:
+`useBuildWatch(tab, busy)`.
+
+- **How it knows.** Vite names the entry file after its contents
+  (`/assets/index-XXXX.js` in the served page). The page compares the
+  name it loaded with the one the server's page names now, the same
+  comparison `newVersionIsOut` makes for the Refresh button (left as it
+  was). Asked every 5 minutes (`CHECK_MS`) while the page is visible, and
+  on a return to Jobs or Production (at most once in 30 s). No signal, a
+  page with no built name (the dev server), anything odd: nothing
+  happens, nothing shows, asked again next time.
+- **When it reloads.** Only at a quiet moment, looked for every 30 s
+  (`RETRY_MS`) once a new build is known, without asking the server again:
+  no box has the focus (input, textarea, select), no pop-up (a layer
+  fixed over the page: `S.modalOverlay`, `S.managerFullPage`) holds a
+  text box with anything in it, and none of these is under way: the
+  stock autosave (`saveState === "saving"`), the master lists' save queue
+  (`busy()`), a stage tick being saved (`TICKING_STAGE_IDS`), the header
+  Refresh. Never in the first minute after load, so a wrong answer cannot
+  send a tablet round and round; a reload happens once per page.
+- **What is not covered, on purpose.** A per-line count typed on a
+  Production card and not yet logged, or a search box's text, is not in a
+  pop-up and not focused: a reload loses it. Stock items, requisitions,
+  purchase orders and the usage log save the old way with no in-flight
+  flag, so a save of theirs that is still on the wire is not waited for
+  (each is one small request). The sign-in screen is `LoginGate`'s own
+  and runs none of this: a tablet left signed out does not update itself.
+
+**Tried:** `npm test` 538 pass (526 before), `CHECK-undefined-names`
+clean, `vite build` clean (local entry `index-DX2L0vCV.js`; the dist
+folder held `index-AflmsRy5.js` and `index-D7dWRvwi.js` from earlier
+commits, which is the name changing between builds). On the dev server
+(5174, signed out, so the hook itself was not mounted) the module was
+driven in the page with the real document: the dev page answers "same
+build" (no built name, never a reload); a faked served page naming
+`index-FAKE1234.js` answered "not quiet" while the Email box had the
+focus and "reloaded" once after blur, then nothing more; in the first
+minute nothing is fetched; a dead port answers "no answer"; a layer with
+`style.position = "fixed"` set the way React sets it serialises as
+`position: fixed;`, so the pop-up rule finds its text box. **Not tried:**
+the hook running in the signed-in app (the 5-minute timer, the return to
+Jobs or Production, the busy flags), and a real push watched from a
+tablet. The first push after this one is the real test: every open
+tablet should be on the new build within about five minutes of it,
+without anybody touching it.

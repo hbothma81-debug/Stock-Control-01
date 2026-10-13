@@ -172,6 +172,7 @@ import { extractPdfTextItems, parseSigmaNestQuote, browserInflate } from "./lib/
 import { rowsForIds } from "./lib/rowsForIds.js";
 import { makeLoadOrder } from "./lib/loadOrder.js";
 import { makeSaveQueue } from "./lib/saveQueue.js";
+import { useBuildWatch } from "./lib/buildWatch.js";
 // The tube nesting report's reader, shared with the tube laser tab: the
 // job's Items tab reads the parts off the same file, without the
 // programs.
@@ -2803,6 +2804,13 @@ export default function StockControl() {
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
+
+  // The app reloads itself when a newer build is live (src/lib/buildWatch.js;
+  // Heinrich, 13 Oct 2026, after a floor tablet ticked JOB-0078's Invoicing
+  // on a build from before 27 Sep). Every five minutes and on a return to
+  // Jobs or Production, at a quiet moment: nobody typing, no pop-up holding
+  // text, and none of these saves under way.
+  useBuildWatch(tab, () => saveState === "saving" || isRefreshing || TICKING_STAGE_IDS.size > 0 || !!masterSaveQueueRef.current?.busy());
 
   // Real sign-in via Supabase Auth, replacing the old shared-PIN system.
   useEffect(() => {
