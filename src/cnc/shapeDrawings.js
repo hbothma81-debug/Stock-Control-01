@@ -3,7 +3,8 @@
 // sizes"), one per engine 'picture' key (GET ?shapes=1). Pure data, drawn
 // by ShapeDrawing.jsx.
 //
-// Side view, axis left to right, on a 400-wide grid of height h. A bore is
+// Side view on a 400-wide grid of height h, laid out with end 1 (z=0) on
+// the left; ShapeDrawing mirrors it so end 1 shows on the right. A bore is
 // hidden (dashed); a thread's minor diameter is a thin line (ISO 6410).
 // Each dimension is keyed by the engine's size key and placed only when
 // the shape has that size, so the bush drawing serves the spacer too:
@@ -110,7 +111,7 @@ export const DRAWINGS = {
   },
   // A bar sharpened at one end or both, the point given in Z (its length)
   // and X (the tip diameter, 0 = sharp): Heinrich, 12 Oct 2026, for SS304
-  // meat hooks. End 1 is the z=0 end, on the left.
+  // meat hooks. End 1 is the z=0 end.
   sharpened: {
     h: 240,
     axis: 120,

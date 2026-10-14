@@ -23,7 +23,9 @@ import ShapeSizes, { ShapeChamfers } from "./ShapeSizes.jsx";
 export default function NewProgram({ customers, materials, pipes, shape = null, hasRefs = false, userName, onCancel, onSaved }) {
   const [stepFile, setStepFile] = useState(null);
   const [sizes, setSizes] = useState({});
-  const [fields, setFields] = useState({ partName: shape ? shape.name : "", customer: "", materialName: "", form: {} });
+  // A shape starts with end 1 machined first (its tick on the drawing).
+  const [fields, setFields] = useState({ partName: shape ? shape.name : "", customer: "", materialName: "", form: shape ? { side1: "0" } : {} });
+  const setSide1 = (v) => setFields((f) => ({ ...f, form: { ...f.form, side1: v } }));
   const [programNo, setProgramNo] = useState("");
   // Quote reference and project name, for finding the program later
   // (setup-cnc-12-program-refs.sql; the boxes show where it has been run).
@@ -91,7 +93,7 @@ export default function NewProgram({ customers, materials, pipes, shape = null, 
       </div>
 
       {shape ? (
-        <ShapeSizes shape={shape} sizes={sizes} setSizes={setSizes} />
+        <ShapeSizes shape={shape} sizes={sizes} setSizes={setSizes} side1={fields.form.side1 ?? ""} setSide1={setSide1} />
       ) : (
         <div>
           <label style={S.label}>STEP model</label>
@@ -125,6 +127,7 @@ export default function NewProgram({ customers, materials, pipes, shape = null, 
         customers={customers}
         materials={materials}
         pipes={pipes}
+        shape={!!shape}
         moreAbove={
           <>
             <div style={S.formGrid}>

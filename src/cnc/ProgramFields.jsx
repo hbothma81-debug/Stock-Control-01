@@ -13,7 +13,9 @@ import SettingsBoxes from "./SettingsBoxes.jsx";
 import StockProcess from "./StockProcess.jsx";
 import { FINISH_BOXES } from "./settingsBatches.js";
 
-export default function ProgramFields({ fields, setFields, customers, materials, pipes = null, settingsOpen = false, moreAbove = null }) {
+// `shape`: a shape program sets which end is machined first on its
+// drawing, so More settings leaves out "Side 1 is the model's".
+export default function ProgramFields({ fields, setFields, customers, materials, pipes = null, settingsOpen = false, moreAbove = null, shape = false }) {
   const set = (key) => (v) => setFields((f) => ({ ...f, [key]: v ?? "" }));
   const setForm = (fn) => setFields((f) => ({ ...f, form: typeof fn === "function" ? fn(f.form) : fn }));
   return (
@@ -45,7 +47,7 @@ export default function ProgramFields({ fields, setFields, customers, materials,
       <StockProcess form={fields.form} setForm={setForm} pipes={pipes} />
       <Section title="More settings" defaultOpen={settingsOpen} quiet>
         {moreAbove}
-        <SettingsBoxes keys={FINISH_BOXES} pipes={pipes} form={fields.form} setForm={setForm} />
+        <SettingsBoxes keys={shape ? FINISH_BOXES.filter((k) => k !== "side1") : FINISH_BOXES} pipes={pipes} form={fields.form} setForm={setForm} />
       </Section>
     </>
   );

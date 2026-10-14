@@ -37,11 +37,11 @@ function SizeBoxes({ fields, sizes, setSizes }) {
   );
 }
 
-export default function ShapeSizes({ shape, sizes, setSizes }) {
+export default function ShapeSizes({ shape, sizes, setSizes, side1 = "", setSide1 = null }) {
   const rest = sizesOffDrawing(shape);
   return (
     <div>
-      <ShapeDrawing shape={shape} sizes={sizes} setSizes={setSizes} />
+      <ShapeDrawing shape={shape} sizes={sizes} setSizes={setSizes} side1={side1} setSide1={setSide1} />
       {rest.length > 0 && <SizeBoxes fields={rest} sizes={sizes} setSizes={setSizes} />}
     </div>
   );

@@ -2,13 +2,18 @@
 // dimension lines (layouts in shapeDrawings.js). The boxes scale with the
 // drawing across the page; a size the engine needs stays amber-edged until
 // it is typed. The full engine label shows on hover.
+//
+// Drawn as the part sits in the machine: chuck on the left, end 1 (the
+// model's z=0 end) on the right where the first op is (Heinrich, 14 Oct
+// 2026), so the layouts are mirrored here. Under the drawing a "Machine
+// this side first" tick at each end sets side1 ('0' = end 1, 'L' = end 2).
 
 import { C } from "../theme.js";
 import { DRAWINGS } from "./shapeDrawings.js";
 
 const W = 400;
 
-export default function ShapeDrawing({ shape, sizes, setSizes }) {
+export default function ShapeDrawing({ shape, sizes, setSizes, side1 = "", setSide1 = null }) {
   const d = DRAWINGS[shape.picture];
   if (!d) return null;
   const fields = Object.fromEntries(shape.fields.map((f) => [f.key, f]));
@@ -22,6 +27,7 @@ export default function ShapeDrawing({ shape, sizes, setSizes }) {
             <path d="M0 1.5 L10 5 L0 8.5 Z" style={{ fill: C.muted }} />
           </marker>
         </defs>
+        <g transform={`matrix(-1 0 0 1 ${W} 0)`}>
         <line x1="12" y1={d.axis} x2={W - 12} y2={d.axis} stroke="currentColor" strokeWidth="0.7" strokeDasharray="14 3 2 3" opacity="0.5" />
         <path d={d.outline} stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
         {d.hidden && <path d={d.hidden} stroke="currentColor" strokeWidth="1.2" strokeDasharray="5 3" />}
@@ -35,6 +41,7 @@ export default function ShapeDrawing({ shape, sizes, setSizes }) {
             {x.pointer && <path d={x.pointer} markerEnd="url(#shape-dim-arrow)" />}
           </g>
         ))}
+        </g>
       </svg>
       {dims.map((x) => {
         const f = fields[x.key];
@@ -47,7 +54,7 @@ export default function ShapeDrawing({ shape, sizes, setSizes }) {
             title={label}
             style={{
               position: "absolute",
-              left: `${(x.box[0] / W) * 100}%`,
+              left: `${((W - x.box[0]) / W) * 100}%`,
               top: `${(x.box[1] / d.h) * 100}%`,
               transform: "translate(-50%, -50%)",
               width: x.wide ? "max(22%, 84px)" : "max(16%, 62px)",
@@ -77,6 +84,19 @@ export default function ShapeDrawing({ shape, sizes, setSizes }) {
           </label>
         );
       })}
+      {setSide1 && (
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 4 }}>
+          {[
+            ["L", "end 2"],
+            ["0", "end 1"],
+          ].map(([v, end]) => (
+            <label key={v} title={`Machine ${end} first (side 1)`} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+              <input type="checkbox" checked={side1 === v} onChange={() => setSide1(side1 === v ? "" : v)} />
+              Machine this side first
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

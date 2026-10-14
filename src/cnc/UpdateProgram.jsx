@@ -153,7 +153,13 @@ export default function UpdateProgram({ program, revisions, current, customers, 
       {head}
       {quickNow ? (
         shape ? (
-          <ShapeSizes shape={shape} sizes={sizes} setSizes={setSizes} />
+          <ShapeSizes
+            shape={shape}
+            sizes={sizes}
+            setSizes={setSizes}
+            side1={fields.form.side1 ?? ""}
+            setSide1={(v) => setFields((f) => ({ ...f, form: { ...f.form, side1: v } }))}
+          />
         ) : (
           <div style={{ color: C.danger, fontSize: 14 }}>
             This program was made from the shape "{quickNow.shape}", which the engine's Shapes list does not offer right now, so it cannot be updated
@@ -176,6 +182,7 @@ export default function UpdateProgram({ program, revisions, current, customers, 
         materials={materials}
         pipes={pipes}
         settingsOpen
+        shape={!!shape}
         moreAbove={shape ? <ShapeChamfers shape={shape} sizes={sizes} setSizes={setSizes} /> : null}
       />
       {error && <div style={{ color: C.danger, fontSize: 14 }}>{error}</div>}
