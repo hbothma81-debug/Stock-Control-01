@@ -20,11 +20,23 @@
 import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { C, S } from "../theme.js";
-import { createProgram } from "./cncData.js";
+import { createProgram, previewProgram } from "./cncData.js";
 import { cleanSettings, cleanSizes, newNumberProblem, oNumber, partNameFromFile, readNumber } from "./cncRules.js";
 import { keepShown, stockAndProcessPicked } from "./settingsBatches.js";
 import ProgramFields from "./ProgramFields.jsx";
 import ShapeSizes, { ShapeChamfers } from "./ShapeSizes.jsx";
+import NewProgramReview from "./NewProgramReview.jsx";
+
+// Review before saving: a toggle on New program, on unless switched off,
+// remembered on this computer (Heinrich, 14 Oct 2026).
+const REVIEW_KEY = "cnc.reviewNewProgram";
+function reviewWanted() {
+  try {
+    return localStorage.getItem(REVIEW_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
 
 export default function NewProgram({ customers, materials, pipes, shape = null, subOf = null, hasRefs = false, userName, onCancel, onSaved }) {
   const [stepFile, setStepFile] = useState(null);
@@ -43,6 +55,9 @@ export default function NewProgram({ customers, materials, pipes, shape = null, 
   const [refs, setRefs] = useState({ quoteRef: "", projectName: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [reviewOn, setReviewOn] = useState(reviewWanted);
+  // The Review's engine answer and what Accept saves, or null.
+  const [review, setReview] = useState(null);
 
   const material = (materials || []).find((m) => m.name === fields.materialName) || null;
   const picked = stockAndProcessPicked(fields.form);
@@ -75,25 +90,58 @@ export default function NewProgram({ customers, materials, pipes, shape = null, 
         return;
       }
     }
+    const args = {
+      partName: fields.partName.trim(),
+      customer: fields.customer,
+      material,
+      settings,
+      programNo: typedNo,
+      subOf,
+      stepFile: shape ? null : stepFile,
+      quick,
+      ...(hasRefs ? refs : {}),
+      userName,
+    };
     setBusy(true);
     try {
-      const id = await createProgram({
-        partName: fields.partName.trim(),
-        customer: fields.customer,
-        material,
-        settings,
-        programNo: typedNo,
-        subOf,
-        stepFile: shape ? null : stepFile,
-        quick,
-        ...(hasRefs ? refs : {}),
-        userName,
-      });
-      onSaved(id);
+      if (reviewOn) {
+        const answer = await previewProgram({ ...args, programNo: typedNo || (subOf ? subOf.program_no + 1 : null) });
+        setReview({ answer, args });
+        setBusy(false);
+        return;
+      }
+      onSaved(await createProgram(args));
     } catch (err) {
       setError(err.message || String(err));
       setBusy(false);
     }
+  }
+
+  async function accept() {
+    setError("");
+    setBusy(true);
+    try {
+      onSaved(await createProgram(review.args));
+    } catch (err) {
+      setError(err.message || String(err));
+      setBusy(false);
+    }
+  }
+
+  if (review) {
+    return (
+      <NewProgramReview
+        answer={review.answer}
+        partName={review.args.partName}
+        busy={busy}
+        error={error}
+        onAccept={accept}
+        onBack={() => {
+          setReview(null);
+          setError("");
+        }}
+      />
+    );
   }
 
   return (
@@ -162,6 +210,22 @@ export default function NewProgram({ customers, materials, pipes, shape = null, 
 
       {error && <div style={{ color: C.danger, fontSize: 14 }}>{error}</div>}
       {!picked && <div style={{ color: C.muted, fontSize: 13 }}>Pick the Stock and the Process to generate.</div>}
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, marginTop: 6, cursor: "pointer" }}>
+        <input
+          type="checkbox"
+          checked={reviewOn}
+          onChange={(e) => {
+            const on = e.target.checked;
+            setReviewOn(on);
+            try {
+              localStorage.setItem(REVIEW_KEY, on ? "on" : "off");
+            } catch {
+              // Not remembered on this computer; the tick still works now.
+            }
+          }}
+        />
+        Review before saving (turret, step by step, toolpath)
+      </label>
       <button
         type="button"
         className="stk-btn"

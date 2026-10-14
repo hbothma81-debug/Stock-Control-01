@@ -314,6 +314,21 @@ async function checkBlock(ownNo, programs, exceptId = null) {
   if (clashes.length) throw new Error(`Not saved: ${clashes.join("; ")}.`);
 }
 
+// New program's Review (Heinrich, 14 Oct 2026: a check sheet before it is
+// accepted): the engine's answer for what would be made, with its turret,
+// steps and toolpath. Nothing is saved and no number is taken: the program
+// text carries a stand-in number, and Accept (createProgram) makes it again
+// with the real one.
+export const PREVIEW_NO = 99990;
+export async function previewProgram({ partName, material, settings, programNo = null, stepFile = null, quick = null }) {
+  if (stepFile && stepFile.size > MAX_STEP_BYTES) {
+    throw new Error(`The STEP file is ${Math.round(stepFile.size / 1000)} kB; the engine takes up to ${MAX_STEP_BYTES / 1000} kB.`);
+  }
+  const stepText = stepFile ? await stepFile.text() : undefined;
+  const { result } = await runPriced({ name: partName, stepText, settings, material, programNo: programNo || PREVIEW_NO, extra: quick ? { quick } : {} });
+  return result;
+}
+
 // subOf: the main program (number ending in 0) a "+ Sub / 2nd op" belongs
 // to; the database gives the lowest free number in its block.
 export async function createProgram({ partName, customer, material, settings, programNo, subOf = null, stepFile = null, quick = null, quoteRef = "", projectName = "", userName }) {

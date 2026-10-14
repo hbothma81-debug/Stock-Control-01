@@ -143,7 +143,8 @@ export default function ToolpathTab({ program, rev, answers, setAnswers }) {
         </div>
       </div>
       <div style={{ fontSize: 12.5, color: C.muted }}>
-        The shading is the material left once that side is finished. Drawn from rev {rev.rev}
+        The shading is the material left once that side is finished.{" "}
+        {rev.rev ? `Drawn from rev ${rev.rev}` : "Drawn from what the engine would make; nothing is saved yet"}
         {rev.source === "machine_copy" ? " (the machine copy, as the operator edited it)" : rev.source === "edited" ? " (as edited in the app)" : ""}.
       </div>
     </div>
@@ -159,7 +160,8 @@ function SideDrawing({ frame, tools, shownCount, currentN, onlyTool }) {
   return (
     <div>
       <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 2 }}>
-        Side {frame.side} · <span style={{ fontFamily: F.mono }}>{oNumber(frame.programNo)}</span>
+        Side {frame.side}
+        {frame.programNo ? <> · <span style={{ fontFamily: F.mono }}>{oNumber(frame.programNo)}</span></> : null}
         <span style={{ fontWeight: 400, color: C.muted }}> · {frame.note}</span>
       </div>
       <svg viewBox={`${view.zMin} ${-view.rMax} ${w} ${h}`} preserveAspectRatio="xMidYMid meet" style={{ width: "100%", height: 300, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, display: "block" }}>
