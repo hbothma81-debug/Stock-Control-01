@@ -21,6 +21,7 @@ import EditProgram from "./EditProgram.jsx";
 import CostingTab from "./CostingTab.jsx";
 import TurnAround from "./TurnAround.jsx";
 import ToolpathTab from "./ToolpathTab.jsx";
+import StepsTab from "./StepsTab.jsx";
 import OffcutWastageTab from "./OffcutWastage.jsx";
 import SetupSheetTab from "./SetupSheetTab.jsx";
 import ToolCribTab from "./ToolCribTab.jsx";
@@ -30,6 +31,7 @@ import HistoryTab from "./HistoryTab.jsx";
 const TABS = [
   { key: "program", label: "Program" },
   { key: "toolpath", label: "Toolpath" },
+  { key: "steps", label: "Steps" },
   { key: "sheet", label: "Setup sheet" },
   { key: "crib", label: "Tool crib" },
   { key: "settings", label: "Settings" },
@@ -366,6 +368,7 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
       )}
       {tab === "sheet" && <SetupSheetTab program={p} rev={shown} answers={toolpaths} setAnswers={setToolpaths} />}
       {tab === "toolpath" && <ToolpathTab program={p} rev={shown} answers={toolpaths} setAnswers={setToolpaths} />}
+      {tab === "steps" && <StepsTab program={p} rev={shown} answers={toolpaths} setAnswers={setToolpaths} />}
       {tab === "history" && <HistoryTab program={p} canSeeValue={canSeeValue} />}
       {tab === "waste" && <OffcutWastageTab costing={p.costing || current?.costing || null} canSeeValue={canSeeValue} />}
       {tab === "costing" && (
