@@ -65,7 +65,12 @@ export default function SettingsBoxes({ form, setForm, pipes = null, keys = null
       {fields.map((f) => (
         <div key={f.key}>
           <label style={S.label}>{labels[f.key] || f.label}</label>
-          {pipes && (f.key === "nps" || f.key === "schedule") ? (
+          {f.kind === "tick" ? (
+            <label style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 36, fontSize: 14 }}>
+              <input type="checkbox" checked={form[f.key] === true} onChange={(e) => set(f.key, e.target.checked)} />
+              {form[f.key] === true ? "Yes" : "No"}
+            </label>
+          ) : pipes && (f.key === "nps" || f.key === "schedule") ? (
             pipeBox(f)
           ) : f.choices ? (
             <select

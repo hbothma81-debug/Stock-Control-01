@@ -86,6 +86,8 @@ export function cleanSettings(form, fields = CNC_FIELDS) {
       else settings[f.key] = nums;
     } else if (f.kind === "yesno") {
       settings[f.key] = v === true || v === "true";
+    } else if (f.kind === "tick") {
+      if (v === true || v === "true") settings[f.key] = true;
     } else {
       settings[f.key] = String(v).trim();
     }
@@ -100,7 +102,7 @@ export function settingsToForm(settings, fields = CNC_FIELDS) {
     const v = settings?.[f.key];
     if (v === undefined || v === null) continue;
     if (f.kind === "list") form[f.key] = (Array.isArray(v) ? v : [v]).join(", ");
-    else if (f.kind === "yesno") form[f.key] = v === true;
+    else if (f.kind === "yesno" || f.kind === "tick") form[f.key] = v === true;
     else form[f.key] = String(v);
   }
   return form;
@@ -108,7 +110,8 @@ export function settingsToForm(settings, fields = CNC_FIELDS) {
 
 // One saved setting as the Settings tab shows it.
 export function settingText(field, value) {
-  if (value === undefined || value === null || value === "") return `Engine's choice: ${field.blank}`;
+  if (value === undefined || value === null || value === "" || (field.kind === "tick" && value !== true)) return `Engine's choice: ${field.blank}`;
+  if (field.kind === "tick") return "Yes";
   if (field.choices) {
     const c = field.choices.find((x) => String(x.value) === String(value));
     if (c) return c.label;

@@ -29,8 +29,8 @@ export const HOLDING_OF = { cut: "double-chucked", puller: "bar puller" };
 // Jaw grip side 2 is in both: the part-and-turn back end of bar work is
 // gripped too.
 export const PROCESS_BOXES = {
-  cut: ["stock_extra", "grip1", "grip2"],
-  puller: ["pulls", "pull_max_ld", "parts_per_pull", "back_op", "grip2"],
+  cut: ["stock_extra", "grip1", "grip2", "side2_own_program"],
+  puller: ["pulls", "pull_max_ld", "parts_per_pull", "back_op", "grip2", "side2_own_program"],
 };
 
 export const FINISH_BOXES = ["edge_break", "finish_mode", "nose_comp", "side1"];

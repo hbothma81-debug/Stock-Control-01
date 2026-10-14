@@ -44,6 +44,15 @@ export const CNC_FIELDS = [
   // Several short parts per pull, one sub-program made once per part
   // (Heinrich, 11 Oct 2026: washers 3 to 5 at a time; engine 61f24ab).
   { key: "parts_per_pull", label: "Parts per pull", kind: "number", whole: true, blank: "1" },
+  // Side 2 / the second op in its own program, …1 of the block (Heinrich,
+  // 14 Oct 2026; engine e101f70). Sent only when ticked, so a live engine
+  // without the key is never asked.
+  {
+    key: "side2_own_program",
+    label: "Side 2 / 2nd op on its own program number (…1)",
+    kind: "tick",
+    blank: "No: one program unless the jaws are reset",
+  },
   {
     key: "back_op",
     label: "Back end (bar work)",

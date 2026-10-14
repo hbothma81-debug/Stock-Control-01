@@ -29,6 +29,11 @@ test("an engine run may only write numbers inside its own block that nobody else
   assert.deepEqual(blockClashes(1027, [1027, 1028, 1029], used), []);
 });
 
+test("the side 2 tick box is sent only when ticked (the live engine refuses a key it does not know)", () => {
+  assert.deepEqual(cleanSettings({ side2_own_program: false }).settings, {});
+  assert.deepEqual(cleanSettings({ side2_own_program: true }).settings, { side2_own_program: true });
+});
+
 test("a typed number reads a comma as the decimal point and refuses words", () => {
   assert.equal(readNumber(""), null);
   assert.equal(readNumber(" 12,5 "), 12.5);
