@@ -70,11 +70,18 @@ export function toolpathFrames(answer) {
     // Jaws: the grip length on the clamped diameter, at the chuck end.
     const grip = Number(sd.grip_mm) || 0;
     const clampR = (Number(sd.clamp_dia_mm) || barR * 2) / 2;
-    const jaws = grip > 0 ? { z0: raw.z0, z1: raw.z0 + grip, r0: clampR, r1: clampR + 18 } : null;
+    // A long part pushed through the chuck (engine stick_out_mm, 12 Oct
+    // 2026) is gripped stick-out behind Z0, not at the bar's far end.
+    const stick = Number(sd.stick_out_mm) || 0;
+    const jawZ1 = stick > 0 ? -stick : raw.z0 + grip;
+    const jaws = grip > 0 ? { z0: jawZ1 - grip, z1: jawZ1, r0: clampR, r1: clampR + 18 } : null;
 
-    const span = Math.max(raw.z1 - raw.z0, L, 1);
+    // The view runs from just behind the jaws (the bar beyond them is
+    // cut off) to the face, so a long bar does not shrink the work to nothing.
+    const behind = jaws ? Math.max(raw.z0, jaws.z0 - Math.max(8, 0.3 * grip)) : raw.z0;
+    const span = Math.max(raw.z1 - behind, 1);
     const view = {
-      zMin: raw.z0 - Math.max(8, 0.08 * span),
+      zMin: behind - Math.max(8, 0.08 * span),
       zMax: Math.max(raw.z1, 0) + Math.max(10, 0.08 * span),
       rMax: barR + Math.max(22, 0.15 * barR * 2),
     };
