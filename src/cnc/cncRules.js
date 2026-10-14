@@ -272,6 +272,18 @@ export function revisionLetter(count) {
   return v;
 }
 
+// The letter a save goes to (setup-cnc-16, Heinrich 14 Oct 2026: "changes
+// stay in the same revision until it is posted"): the current revision while
+// it is not posted (Copy to USB or Download), else the next letter. A
+// posted_at that is undefined means the database has no posted mark yet:
+// the next letter, as before.
+export function saveLetter(revisions, current) {
+  return current && current.posted_at === null ? current.rev : revisionLetter((revisions || []).length);
+}
+
+// Whether a revision is still open (saved over until it is posted).
+export const notPosted = (rev) => !!rev && rev.posted_at === null;
+
 // What each of a revision's programs is called on screen: "Side 1",
 // "Side 2", or "Sub-program" with the program that calls it. A sub is
 // known by the engine's sub flag or, on a hand edit or a machine copy that

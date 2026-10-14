@@ -27,7 +27,7 @@ import { C, S } from "../theme.js";
 import { loadToolpath, runUpdate, saveUpdate, updateChanges } from "./cncData.js";
 import { loadMachines, loadTools } from "./cncTables.js";
 import { A_HOLDER, cribWarnings, holderForKind, holdersFrom, HOLDER_NAME, layoutFrom, modelPitchOf, moveStation, moveToHolder, pitchChoices, putTool, removeTool, sameLayout, samePitches, setThreadPitch, stationsWith, STATIONS, toolFits, toTurret } from "./cribRules.js";
-import { handEditsNote, oNumber, revisionLetter } from "./cncRules.js";
+import { handEditsNote, oNumber, saveLetter } from "./cncRules.js";
 import { toolLine } from "./toolKinds.js";
 import ProgramChanges from "./ProgramChanges.jsx";
 
@@ -109,7 +109,7 @@ export default function ToolCribTab({ program, revisions, current, materials, ca
   async function save() {
     setBusy("Saving…");
     try {
-      await saveUpdate({ program, run, letter: revisionLetter(revisions.length), partName: program.part_name, customer: program.customer, material, userName });
+      await saveUpdate({ program, run, letter: saveLetter(revisions, current), partName: program.part_name, customer: program.customer, material, userName });
       setRun(null);
       setLayout(null);
       setBusy("");
@@ -145,7 +145,7 @@ export default function ToolCribTab({ program, revisions, current, materials, ca
         <div style={{ display: "flex", gap: 8 }}>
           {changes.length > 0 && (
             <button type="button" className="stk-btn" style={{ ...S.submitBtn, marginTop: 0 }} onClick={save} disabled={!!busy}>
-              {busy || `Save as rev ${revisionLetter(revisions.length)}`}
+              {busy || `Save as rev ${saveLetter(revisions, current)}`}
             </button>
           )}
           <button type="button" className="stk-btn" style={S.chip} onClick={() => setRun(null)} disabled={!!busy}>

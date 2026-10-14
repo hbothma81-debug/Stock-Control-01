@@ -66,3 +66,10 @@ test("a questionnaire field uses the Settings tab's own label and words", () => 
   assert.equal(changeWords({ field: "settings.stock_type", from: "bar", to: "tube" }), "Stock: Solid bar → Tube");
   assert.equal(fieldWords("settings.something_new"), "something new");
 });
+
+test("History says a save went over a revision not posted yet, and when it was posted", () => {
+  assert.equal(changeWords({ field: "overwritten", to: true }), "Saved over the same revision (not posted yet)");
+  assert.equal(changeWords({ field: "posted", to: "Heinrich" }), "Posted (Copy to USB or Download) by Heinrich");
+  const [e] = historyEntries([{ kind: "revision", rev: "B", created_at: "2026-10-14T08:00:00Z", changed_by: "H", changes: [{ field: "source", to: "generated" }, { field: "overwritten", to: true }] }]);
+  assert.equal(entryHeadline(e), "Rev B saved over");
+});

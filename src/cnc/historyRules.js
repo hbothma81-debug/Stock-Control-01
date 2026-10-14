@@ -69,6 +69,9 @@ export function changeWords(c, { canSeeValue = true } = {}) {
   const field = String(c?.field ?? "");
   if (field === "source") return c.to === "machine_copy" ? "Machine copy imported" : c.to === "edited" ? "Program edited in the app" : "Made by the engine";
   if (field === "cycle_s") return blank(c.to) ? "" : `Cycle time ${minSec(c.to)}`;
+  // setup-cnc-16: a save over a revision not posted yet, and its posting.
+  if (field === "overwritten") return "Saved over the same revision (not posted yet)";
+  if (field === "posted") return `Posted (Copy to USB or Download)${blank(c.to) ? "" : ` by ${c.to}`}`;
   if (field === "settings.turret") {
     if (blank(c.to)) return "Tool crib handed back to the automatic pick";
     return blank(c.from) ? "Tool crib set by hand" : "Tool crib changed";
@@ -110,8 +113,9 @@ export function historyEntries(rows, { withinS = 120 } = {}) {
 export function entryHeadline(e, { canSeeValue = true } = {}) {
   const bits = [];
   if (e.made) bits.push("Program made");
-  if (e.revs.length) bits.push(`Rev ${e.revs.join(", ")} saved`);
-  const named = [...new Set(e.changes.filter((c) => !["source", "cycle_s", "status", "fault"].includes(c.field)).map((c) => fieldWords(c.field)))];
+  if (e.revs.length) bits.push(`Rev ${e.revs.join(", ")} ${e.changes.some((c) => c.field === "overwritten") ? "saved over" : "saved"}`);
+  if (e.changes.some((c) => c.field === "posted")) bits.push("posted");
+  const named = [...new Set(e.changes.filter((c) => !["source", "cycle_s", "status", "fault", "overwritten", "posted"].includes(c.field)).map((c) => fieldWords(c.field)))];
   const price = e.changes.find((c) => c.field === "price_per_part");
   if (price && canSeeValue && !blank(price.to)) bits.push(`cost per part ${rand(price.to)}`);
   const rest = named.filter((n) => n !== PROGRAM_WORDS.price_per_part);

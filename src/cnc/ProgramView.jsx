@@ -11,7 +11,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowLeftRight, Download, FileInput, Pencil, Plus, RefreshCw, Trash2, Usb } from "lucide-react";
 import { C, F, S } from "../theme.js";
-import { deleteProgram, loadProgram } from "./cncData.js";
+import { deleteProgram, loadProgram, markPosted } from "./cncData.js";
 import { CNC_FIELDS } from "./cncFields.js";
 import { faultText, inBlocks, oNumber, pipeLabel, programFiles, programLabels, settingText, sourceTag } from "./cncRules.js";
 import { canWriteToFolder, copyToFolder, downloadFiles } from "./programOut.js";
@@ -171,17 +171,31 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
   const files = shown ? programFiles(shown.programs, p.part_name) : [];
   const fileWords = files.map((f) => f.name).join(" and ");
 
+  // Copy to USB or Download posts the revision (setup-cnc-16): the next
+  // change is a new letter. A mark that fails is said, the files are out.
+  async function posted() {
+    try {
+      if (await markPosted(shown, userName)) setReads((n) => n + 1);
+    } catch (err) {
+      setOutNote({ ok: false, text: `The files are out, but ${err.message || err}` });
+    }
+  }
+
   async function copyOut(pickNew) {
     if (!mayGoOut) return;
     setOutNote(null);
     if (!canWriteToFolder()) {
       downloadFiles(files);
       setOutNote({ ok: true, text: `This browser cannot write to a USB stick, so ${fileWords} went to Downloads: copy from there.` });
+      await posted();
       return;
     }
     try {
       const where = await copyToFolder(files, { pickNew });
-      if (where) setOutNote({ ok: true, text: `Copied ${fileWords} to ${where}.`, again: true });
+      if (where) {
+        setOutNote({ ok: true, text: `Copied ${fileWords} to ${where}.`, again: true });
+        await posted();
+      }
     } catch (err) {
       setOutNote({ ok: false, text: `Not copied: ${err.message || err}` });
     }
@@ -259,6 +273,7 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
             onClick={() => {
               downloadFiles(files);
               setOutNote({ ok: true, text: `Downloaded ${fileWords}.` });
+              posted();
             }}
           >
             <Download size={14} /> Download
@@ -305,6 +320,9 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
           Rev {shown.rev}: {SOURCE[shown.source] || shown.source}, {new Date(shown.created_at).toLocaleString()}
           {shown.created_by ? `, by ${shown.created_by}` : ""}
           {shown.id !== current?.id ? " (an older revision)" : ""}
+          {/* setup-cnc-16: changes go over this revision until it is posted. */}
+          {shown.posted_at === null && <b style={{ color: C.accentRaw }}> · not posted yet: changes save over rev {shown.rev}</b>}
+          {shown.posted_at && shown.posted_by && shown.posted_by !== "before posting was kept" && ` · posted ${new Date(shown.posted_at).toLocaleString()} by ${shown.posted_by}`}
         </div>
       )}
 

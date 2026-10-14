@@ -470,6 +470,50 @@ export async function runUpdate({ program, partName, current, material, settings
   return { result, sent, step, quick: null };
 }
 
+// The program's current revision while it is not posted yet (setup-cnc-16,
+// Heinrich 14 Oct 2026): a save goes over it instead of adding a letter.
+// null when it is posted, or when the database has no posted mark yet.
+async function openRevision(program) {
+  if (!program?.current_rev) return null;
+  const { data, error } = await supabase
+    .from("cnc_program_revisions")
+    .select("*")
+    .eq("program_id", program.id)
+    .eq("rev", program.current_rev)
+    .maybeSingle();
+  if (error || !data || data.posted_at !== null) return null;
+  return data;
+}
+
+// A revision row saved: over the open revision when there is one, else as
+// the next letter. The database refuses to change a posted revision, so a
+// revision posted a moment ago gets the next letter instead.
+async function putRevision(program, row) {
+  const open = await openRevision(program);
+  if (open) {
+    const { program_id: _p, ...rest } = row;
+    const { data, error } = await supabase.from("cnc_program_revisions").update(rest).eq("id", open.id).is("posted_at", null).select("rev");
+    if (error) return { data: null, error };
+    if (data?.length) return { data: data[0], error: null };
+  }
+  return supabase.from("cnc_program_revisions").insert(row).select("rev").single();
+}
+
+// Copy to USB or Download: the revision is posted, and the next change is
+// a new letter (setup-cnc-16). Nothing to do when it already is, or when the
+// database has no posted mark yet.
+export async function markPosted(rev, userName) {
+  if (!rev || rev.posted_at !== null) return false;
+  const { data, error } = await supabase
+    .from("cnc_program_revisions")
+    .update({ posted_at: new Date().toISOString(), posted_by: userName || "" })
+    .eq("id", rev.id)
+    .is("posted_at", null)
+    .select("id");
+  if (error) throw new Error(`Rev ${rev.rev} could not be marked as posted: ${error.message}`);
+  return !!data?.length;
+}
+
 // Update program, second half: the new revision (the database gives its
 // letter and makes it current), a new STEP filed under that letter, then
 // the program's name, customer, material and bar. A STEP left as it was is
@@ -479,15 +523,15 @@ export async function saveUpdate({ program, run, letter, partName, customer, mat
   await checkBlock(program.program_no, result.programs, program.id);
   let stepPath = step?.path || null;
   if (step?.file) {
-    stepPath = `${program.id}/${letter}/${step.name}`;
+    // The open revision's own folder when it is saved over.
+    stepPath = `${program.id}/${(await openRevision(program))?.rev || letter}/${step.name}`;
     const up = await supabase.storage.from(BUCKET).upload(stepPath, step.file, { contentType: "text/plain", upsert: true });
     if (up.error) throw new Error(`The STEP file could not be stored: ${up.error.message}. Nothing was saved.`);
   }
-  const { data: rev, error: e1 } = await supabase
-    .from("cnc_program_revisions")
-    .insert(revisionRow({ programId: program.id, result, settings: sent, stepPath, stepName: step?.name || null, userName, quick }))
-    .select("rev")
-    .single();
+  const { data: rev, error: e1 } = await putRevision(
+    program,
+    revisionRow({ programId: program.id, result, settings: sent, stepPath, stepName: step?.name || null, userName, quick })
+  );
   if (e1) throw new Error(`The new revision could not be saved: ${e1.message}`);
   const { data: rows, error: e2 } = await supabase
     .from("cnc_programs")
@@ -628,7 +672,7 @@ export async function saveEdit({ program, base, programs, check, userName }) {
     note: base ? `Edited in the app from rev ${base.rev}` : "Edited in the app",
     created_by: userName || "",
   };
-  const { data, error } = await supabase.from("cnc_program_revisions").insert(row).select("rev").single();
+  const { data, error } = await putRevision(program, row);
   if (error) {
     const old = /source_check|violates check constraint/i.test(error.message || "");
     throw new Error(

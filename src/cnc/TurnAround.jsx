@@ -15,7 +15,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { C, F, S } from "../theme.js";
 import { runUpdate, saveUpdate, updateChanges } from "./cncData.js";
-import { faultText, handEditsNote, oNumber, rand, revisionLetter } from "./cncRules.js";
+import { faultText, handEditsNote, oNumber, rand, saveLetter } from "./cncRules.js";
 
 const minSec = (s) => (s == null ? "–" : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`);
 const words = (x) => (typeof x === "string" ? x : x?.text || JSON.stringify(x));
@@ -31,7 +31,7 @@ export default function TurnAround({ program, revisions, current, materials, can
   const [runs, setRuns] = useState(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(null);
-  const letter = revisionLetter(revisions.length);
+  const letter = saveLetter(revisions, current);
   const material = (materials || []).find((m) => m.name === program.material) || null;
   const base = current?.settings || program.settings || {};
 

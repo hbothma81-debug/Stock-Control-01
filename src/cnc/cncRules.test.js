@@ -406,3 +406,12 @@ test("a sub-program is labelled as one, with the program that calls it, not as S
   assert.deepEqual(programLabels([main, { number: 1041, text: "O00001041(SUB)\nM99\n%" }]), ["Side 1: O00001040", "Sub-program: O00001041, called by O00001040"]);
   assert.deepEqual(programLabels([{ number: 3005, text: "M98P3006\nM98P3007\nM30" }, { number: 3006, text: "M99" }, { number: 3007, text: "M99" }])[2], "Sub-program: O00003007, called by O00003005");
 });
+
+test("a save goes over the current revision until it is posted, then to the next letter", async () => {
+  const { saveLetter } = await import("./cncRules.js");
+  const revs = [{ rev: "A" }, { rev: "B" }];
+  assert.equal(saveLetter(revs, { rev: "B", posted_at: null }), "B");
+  assert.equal(saveLetter(revs, { rev: "B", posted_at: "2026-10-14T08:00:00Z" }), "C");
+  // A database without the posted mark: the next letter, as before.
+  assert.equal(saveLetter(revs, { rev: "B" }), "C");
+});

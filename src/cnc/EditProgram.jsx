@@ -15,7 +15,7 @@ import { useDeferredValue, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { C, F, S } from "../theme.js";
 import { checkMachineCopy, saveEdit } from "./cncData.js";
-import { editProblems, oNumber, programLabels, revisionLetter } from "./cncRules.js";
+import { editProblems, oNumber, programLabels, saveLetter } from "./cncRules.js";
 import ProgramChanges from "./ProgramChanges.jsx";
 
 // A program's lines as lineDiff reads them: line endings (CR LF off the
@@ -29,7 +29,7 @@ export default function EditProgram({ program, revisions, current, base, userNam
   const [texts, setTexts] = useState(() => (base.programs || []).map((p) => String(p.text ?? "")));
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const letter = revisionLetter(revisions.length);
+  const letter = saveLetter(revisions, current);
   const programs = (base.programs || []).map((p, i) => ({ ...p, text: texts[i] }));
   // The change list follows the typing a beat behind, so a long program
   // never makes the boxes lag.

@@ -15,7 +15,7 @@ import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { C, S } from "../theme.js";
 import { runUpdate, saveProgramDetails, saveUpdate, updateChanges } from "./cncData.js";
-import { cleanSettings, cleanSizes, detailChanges, faultText, handEditsNote, oNumber, revisionLetter, settingsToForm } from "./cncRules.js";
+import { cleanSettings, cleanSizes, detailChanges, faultText, handEditsNote, oNumber, saveLetter, settingsToForm } from "./cncRules.js";
 import { keepShown, stockAndProcessPicked } from "./settingsBatches.js";
 import ShapeSizes, { ShapeChamfers } from "./ShapeSizes.jsx";
 import ProgramFields from "./ProgramFields.jsx";
@@ -40,7 +40,7 @@ export default function UpdateProgram({ program, revisions, current, customers, 
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
 
-  const letter = revisionLetter(revisions.length);
+  const letter = saveLetter(revisions, current);
   const material = (materials || []).find((m) => m.name === fields.materialName) || null;
   const picked = stockAndProcessPicked(fields.form);
   const canGenerate = !!fields.partName.trim() && !!material && picked && !busy && (!quickNow || !!shape);
