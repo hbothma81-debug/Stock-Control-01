@@ -91,3 +91,12 @@ test("a long bar pushed through the chuck: jaws at the stick-out, the view on th
   assert.deepEqual([f.jaws.z0, f.jaws.z1], [-53, -23]);
   assert.ok(f.view.zMin > -100, `view starts at ${f.view.zMin}`);
 });
+
+test("a one-side program draws its moves even when the engine names the other end on them", () => {
+  const answer = {
+    setup: { part: { length: 310, max_dia: 12 }, bar: { dia: 12 }, sides: [{ side: 1, z0_end: 0, offset: "G54", grip_mm: 30, stick_out_mm: 20 }] },
+    moves: [{ side: "L", pts: [[0, 12], [-13, 12]] }],
+    stock: { G54: [[0, [[0, 6]]]] },
+  };
+  assert.equal(toolpathFrames(answer)[0].moves.length, 1);
+});

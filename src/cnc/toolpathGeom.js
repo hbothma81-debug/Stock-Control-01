@@ -25,7 +25,10 @@ export function toolpathFrames(answer) {
   return sides.map((sd) => {
     const end = Number(sd.z0_end) > 0 && Math.abs(Number(sd.z0_end) - L) < 0.01 ? "L" : "0";
     const tz = end === "L" ? (z) => z - L : (z) => -z;
-    const mine = moves.filter((m) => String(m.side) === end).map((m) => ({ ...m, sideNo: Number(sd.side) || 1 }));
+    // A one-side program draws all its moves: the engine's check has been
+    // seen calling them 'L' while its setup said Z0 is the 0 end (O10030,
+    // a sharpened bar, 14 Oct 2026), which drew nothing.
+    const mine = (sides.length === 1 ? moves : moves.filter((m) => String(m.side) === end)).map((m) => ({ ...m, sideNo: Number(sd.side) || 1 }));
 
     // Material left after this side, as rectangles (one per 0.1 mm slice
     // and run), merged where neighbouring slices carry the same run.
