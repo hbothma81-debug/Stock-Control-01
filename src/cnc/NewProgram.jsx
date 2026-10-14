@@ -10,21 +10,32 @@
 // and is saved the same way, as an ordinary program (Heinrich, 8 Oct 2026).
 // Clicks: CNC, Shapes, the shape, the sizes, customer, material, Stock,
 // Process, Generate.
+//
+// Opened from a program's "+ Sub / 2nd op" (subOf = that program) it makes
+// a program in the same block of ten: the database gives the lowest free
+// number after the main (setup-cnc-15-program-blocks.sql; Heinrich, 14 Oct
+// 2026). Customer and material come from the main. Clicks: the program,
+// + Sub / 2nd op, pick STEP, Stock, Process, Generate.
 
 import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { C, S } from "../theme.js";
 import { createProgram } from "./cncData.js";
-import { cleanSettings, cleanSizes, partNameFromFile, readNumber } from "./cncRules.js";
+import { cleanSettings, cleanSizes, newNumberProblem, oNumber, partNameFromFile, readNumber } from "./cncRules.js";
 import { keepShown, stockAndProcessPicked } from "./settingsBatches.js";
 import ProgramFields from "./ProgramFields.jsx";
 import ShapeSizes, { ShapeChamfers } from "./ShapeSizes.jsx";
 
-export default function NewProgram({ customers, materials, pipes, shape = null, hasRefs = false, userName, onCancel, onSaved }) {
+export default function NewProgram({ customers, materials, pipes, shape = null, subOf = null, hasRefs = false, userName, onCancel, onSaved }) {
   const [stepFile, setStepFile] = useState(null);
   const [sizes, setSizes] = useState({});
   // A shape starts with end 1 machined first (its tick on the drawing).
-  const [fields, setFields] = useState({ partName: shape ? shape.name : "", customer: "", materialName: "", form: shape ? { side1: "0" } : {} });
+  const [fields, setFields] = useState({
+    partName: shape ? shape.name : subOf ? `${subOf.part_name} 2ND OP` : "",
+    customer: subOf?.customer || "",
+    materialName: subOf?.material || "",
+    form: shape ? { side1: "0" } : {},
+  });
   const setSide1 = (v) => setFields((f) => ({ ...f, form: { ...f.form, side1: v } }));
   const [programNo, setProgramNo] = useState("");
   // Quote reference and project name, for finding the program later
@@ -56,10 +67,11 @@ export default function NewProgram({ customers, materials, pipes, shape = null, 
       quick = { shape: shape.key, sizes: s.sizes };
     }
     let typedNo = null;
-    if (programNo.trim()) {
+    if (!subOf && programNo.trim()) {
       typedNo = readNumber(programNo);
-      if (!Number.isInteger(typedNo) || typedNo <= 0) {
-        setError("The program number must be a whole number, or left empty for the next free one.");
+      const problem = newNumberProblem(typedNo);
+      if (problem) {
+        setError(problem);
         return;
       }
     }
@@ -71,6 +83,7 @@ export default function NewProgram({ customers, materials, pipes, shape = null, 
         material,
         settings,
         programNo: typedNo,
+        subOf,
         stepFile: shape ? null : stepFile,
         quick,
         ...(hasRefs ? refs : {}),
@@ -87,9 +100,11 @@ export default function NewProgram({ customers, materials, pipes, shape = null, 
     <div style={S.list}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <button type="button" className="stk-btn" style={S.chip} onClick={onCancel} disabled={busy}>
-          <ArrowLeft size={14} /> {shape ? "Shapes" : "Programs"}
+          <ArrowLeft size={14} /> {shape ? "Shapes" : subOf ? oNumber(subOf.program_no) : "Programs"}
         </button>
-        <div style={{ fontSize: 17, fontWeight: 700 }}>{shape ? `New program: ${shape.name}` : "New program"}</div>
+        <div style={{ fontSize: 17, fontWeight: 700 }}>
+          {shape ? `New program: ${shape.name}` : subOf ? `Sub / 2nd op of ${oNumber(subOf.program_no)} ${subOf.part_name}` : "New program"}
+        </div>
       </div>
 
       {shape ? (
@@ -133,7 +148,11 @@ export default function NewProgram({ customers, materials, pipes, shape = null, 
             <div style={S.formGrid}>
               <div>
                 <label style={S.label}>Program number</label>
-                <input style={S.input} value={programNo} onChange={(e) => setProgramNo(e.target.value)} placeholder="Empty: the next free number" inputMode="numeric" />
+                {subOf ? (
+                  <div style={{ fontSize: 14, padding: "6px 0" }}>The next free number after {oNumber(subOf.program_no)}</div>
+                ) : (
+                  <input style={S.input} value={programNo} onChange={(e) => setProgramNo(e.target.value)} placeholder="Empty: the next free number (ends in 0)" inputMode="numeric" />
+                )}
               </div>
             </div>
             {shape && <ShapeChamfers shape={shape} sizes={sizes} setSizes={setSizes} />}

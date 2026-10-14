@@ -3,12 +3,30 @@ import assert from "node:assert/strict";
 import {
   oNumber, readNumber, cleanSettings, settingsToForm, settingText, programMatches, listPrograms, filterChoices,
   stockText, faultText, partNameFromFile, programFileName, engineErrorText, revisionChanges, detailChanges, programLabels,
+  newNumberProblem, blockClashes, blockStart,
 } from "./cncRules.js";
 import { CNC_FIELDS } from "./cncFields.js";
 
 test("O numbers are eight digits, as the machine writes them", () => {
   assert.equal(oNumber(1027), "O00001027");
   assert.equal(oNumber(2001), "O00002001");
+});
+
+test("a new program number ends in 0, from O00010010 (blocks of ten)", () => {
+  assert.equal(newNumberProblem(10010), "");
+  assert.equal(newNumberProblem(10320), "");
+  assert.match(newNumberProblem(10013), /ends in 0 .*O00010010/);
+  assert.match(newNumberProblem(1040), /start at O00010010/);
+  assert.match(newNumberProblem(12.5), /whole number/);
+  assert.equal(blockStart(10017), 10010);
+});
+
+test("an engine run may only write numbers inside its own block that nobody else uses", () => {
+  const used = [{ number: 10012, owner_no: 10012 }];
+  assert.deepEqual(blockClashes(10010, [10010, 10011], used), []);
+  assert.deepEqual(blockClashes(10010, [10010, 10012], used), ["O00010012 is already used by O00010012"]);
+  assert.match(blockClashes(10010, [10020], [])[0], /outside O00010010's block/);
+  assert.deepEqual(blockClashes(1027, [1027, 1028, 1029], used), []);
 });
 
 test("a typed number reads a comma as the decimal point and refuses words", () => {

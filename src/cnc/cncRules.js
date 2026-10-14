@@ -11,6 +11,47 @@ export function oNumber(n) {
   return "O" + String(n ?? "").padStart(8, "0");
 }
 
+// Program numbers in blocks of ten (Heinrich, 11 and 14 Oct 2026;
+// setup-cnc-15-program-blocks.sql): a new part takes a number ending in 0,
+// first O00010010; the nine after it are its side 2 / second op (G55) and
+// sub programs, …1 first. Older programs keep their numbers.
+export const FIRST_BLOCK = 10010;
+
+export function blockStart(n) {
+  return n - (n % 10);
+}
+
+export function inBlocks(n) {
+  return Number.isInteger(n) && n >= FIRST_BLOCK;
+}
+
+// Why a number typed on New program cannot be used, or "" when it can.
+export function newNumberProblem(n) {
+  if (!Number.isInteger(n) || n <= 0) return "The program number must be a whole number, or left empty for the next free one.";
+  if (n < FIRST_BLOCK) return `New programs start at ${oNumber(FIRST_BLOCK)}: leave the number empty for the next free one.`;
+  if (n % 10 !== 0) {
+    return `A new program number ends in 0 (${oNumber(blockStart(n))}, ${oNumber(blockStart(n) + 10)} …): the nine after it are kept for its side 2 and sub programs. Use + Sub / 2nd op on ${oNumber(blockStart(n))} for those.`;
+  }
+  return "";
+}
+
+// The numbers a program's engine run writes that clash with its block:
+// outside the block, or already used by another program in it (used =
+// [{ number, owner_no }] from cnc_block_numbers). Empty for an old program.
+export function blockClashes(ownNo, numbers, used) {
+  if (!inBlocks(ownNo)) return [];
+  const lo = blockStart(ownNo);
+  const out = [];
+  for (const n of numbers) {
+    if (n < lo || n > lo + 9) out.push(`${oNumber(n)} is outside ${oNumber(lo)}'s block (${oNumber(lo)} to ${oNumber(lo + 9)})`);
+    else {
+      const u = used.find((x) => x.number === n);
+      if (u) out.push(`${oNumber(n)} is already used by ${oNumber(u.owner_no)}`);
+    }
+  }
+  return out;
+}
+
 // A typed number: blank is null, a comma reads as the decimal point, and
 // anything else that is not a number is NaN so the form can refuse it.
 export function readNumber(text) {

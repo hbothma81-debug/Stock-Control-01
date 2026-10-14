@@ -9,11 +9,11 @@
 // the Program tab, CNC Edit tick): the revision on screen as text boxes.
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, ArrowLeftRight, Download, FileInput, Pencil, RefreshCw, Trash2, Usb } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, Download, FileInput, Pencil, Plus, RefreshCw, Trash2, Usb } from "lucide-react";
 import { C, F, S } from "../theme.js";
 import { deleteProgram, loadProgram } from "./cncData.js";
 import { CNC_FIELDS } from "./cncFields.js";
-import { faultText, oNumber, pipeLabel, programFiles, programLabels, settingText, sourceTag } from "./cncRules.js";
+import { faultText, inBlocks, oNumber, pipeLabel, programFiles, programLabels, settingText, sourceTag } from "./cncRules.js";
 import { canWriteToFolder, copyToFolder, downloadFiles } from "./programOut.js";
 import UpdateProgram from "./UpdateProgram.jsx";
 import ImportMachineCopy from "./ImportMachineCopy.jsx";
@@ -45,7 +45,7 @@ const CHIP_ON = { ...chipActiveRest, border: `1px solid ${C.accentFinished}` };
 
 const SOURCE = { generated: "Generated", machine_copy: "Machine copy", edited: "Edited in the app" };
 
-export default function ProgramView({ id, canEdit, canDelete, customers, materials, pipes, shapes, canSeeValue, isAdmin, barPrices, onBarPrices, userName, onBack, onDeleted }) {
+export default function ProgramView({ id, canEdit, canDelete, customers, materials, pipes, shapes, canSeeValue, isAdmin, barPrices, onBarPrices, userName, onBack, onDeleted, onNewSub }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("program");
@@ -220,6 +220,13 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
         {canEdit && current && (
           <button type="button" className="stk-btn" style={S.chip} onClick={() => setTurning(true)}>
             <ArrowLeftRight size={14} /> Turn around
+          </button>
+        )}
+        {/* Blocks of ten (Heinrich, 14 Oct 2026): a sub program or the G55
+            second op of a turned part, on the next free number after a main. */}
+        {canEdit && onNewSub && inBlocks(p.program_no) && p.program_no % 10 === 0 && (
+          <button type="button" className="stk-btn" style={S.chip} onClick={() => onNewSub(p)}>
+            <Plus size={14} /> Sub / 2nd op
           </button>
         )}
         {canDelete && (

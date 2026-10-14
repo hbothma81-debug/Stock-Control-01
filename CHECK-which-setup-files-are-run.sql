@@ -215,7 +215,9 @@ with checks (setup_file, looks_for, found) as (
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_program_history')),
     ('setup-cnc-14-edited-revisions.sql', 'a revision may be edited in the app (source edited)',
       exists (select 1 from pg_constraint where conrelid = 'public.cnc_program_revisions'::regclass
-               and conname = 'cnc_program_revisions_source_check' and pg_get_constraintdef(oid) like '%edited%'))
+               and conname = 'cnc_program_revisions_source_check' and pg_get_constraintdef(oid) like '%edited%')),
+    ('setup-cnc-15-program-blocks.sql', 'function take_cnc_sub_number (program numbers in blocks of ten)',
+      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'take_cnc_sub_number'))
 )
 select
   setup_file,

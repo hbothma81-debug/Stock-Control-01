@@ -47,6 +47,8 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
   const [screen, setScreen] = useState("list");
   // The shape New program was opened with (from the Shapes list), or null.
   const [newShape, setNewShape] = useState(null);
+  // The main program a "+ Sub / 2nd op" belongs to, while New program is open for it.
+  const [subOf, setSubOf] = useState(null);
   // The engine's lists: undefined while asked, null when the engine has none.
   const [shapes, setShapes] = useState(undefined);
   const [pipes, setPipes] = useState(undefined);
@@ -210,16 +212,19 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
           materials={materials}
           pipes={pipes || null}
           shape={newShape}
+          subOf={subOf}
           hasRefs={hasRefs}
           userName={userName}
           onCancel={() => {
             // A Generate that failed part way may have saved the program
             // without its revision; the list has to show it.
             refresh();
-            setScreen(newShape ? "shapes" : "list");
+            setScreen(newShape ? "shapes" : subOf ? subOf.id : "list");
+            setSubOf(null);
           }}
           onSaved={(id) => {
             refresh();
+            setSubOf(null);
             setScreen(id);
           }}
         />
@@ -249,6 +254,11 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
           onDeleted={() => {
             refresh();
             setScreen("list");
+          }}
+          onNewSub={(main) => {
+            setNewShape(null);
+            setSubOf(main);
+            setScreen("new");
           }}
         />
       </ErrorBoundary>

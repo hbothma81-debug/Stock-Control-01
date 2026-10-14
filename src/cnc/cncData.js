@@ -5,7 +5,7 @@
 
 import { supabase } from "../lib/supabaseClient.js";
 import { barSizeOf, findBarPrice, kgPerMetre, materialPricing, sameSize } from "./pricing.js";
-import { DEFAULT_SETUP_PRICE } from "./cncRules.js";
+import { DEFAULT_SETUP_PRICE, blockClashes, inBlocks } from "./cncRules.js";
 import { COSTING_KEYS, CRIB_KEYS, costingPart, dayInSA, engineErrorText, exportRows, faultText, revisionChanges, stockText, MAX_STEP_BYTES } from "./cncRules.js";
 
 // The engine (ERS TURNING APP, its own repository and Vercel project). It
@@ -301,18 +301,40 @@ function revisionRow({ programId, result, settings, stepPath, stepName, userName
 //
 // A program made from a shape (quick = { shape, sizes }) has no STEP: the
 // engine is sent the shape and sizes instead.
-export async function createProgram({ partName, customer, material, settings, programNo, stepFile = null, quick = null, quoteRef = "", projectName = "", userName }) {
+// A program in a block of ten (setup-cnc-15-program-blocks.sql) may only
+// write numbers inside its block that no other program there uses: the
+// engine's side 2 and sub programs count on main + 1, + 2 …
+async function checkBlock(ownNo, programs, exceptId = null) {
+  if (!inBlocks(ownNo)) return;
+  const { data, error } = await supabase.rpc("cnc_block_numbers", { p_no: ownNo, p_except: exceptId });
+  // A database without file 15 has no blocks to guard yet.
+  if (error?.code === "PGRST202") return;
+  if (error) throw new Error(`The block's numbers could not be checked: ${error.message}. Nothing was saved.`);
+  const clashes = blockClashes(ownNo, (programs || []).map((p) => Number(p.number)).filter(Number.isInteger), data || []);
+  if (clashes.length) throw new Error(`Not saved: ${clashes.join("; ")}.`);
+}
+
+// subOf: the main program (number ending in 0) a "+ Sub / 2nd op" belongs
+// to; the database gives the lowest free number in its block.
+export async function createProgram({ partName, customer, material, settings, programNo, subOf = null, stepFile = null, quick = null, quoteRef = "", projectName = "", userName }) {
   if (stepFile && stepFile.size > MAX_STEP_BYTES) {
     throw new Error(`The STEP file is ${Math.round(stepFile.size / 1000)} kB; the engine takes up to ${MAX_STEP_BYTES / 1000} kB.`);
   }
   const stepText = stepFile ? await stepFile.text() : undefined;
   let number = programNo;
+  if (!number && subOf) {
+    const { data, error } = await supabase.rpc("take_cnc_sub_number", { p_main: subOf.program_no });
+    if (error) throw new Error(error.hint ? error.message : `No sub number could be taken: ${error.message}`);
+    number = data;
+  }
   if (!number) {
     const { data, error } = await supabase.rpc("take_cnc_program_number");
     if (error) throw new Error(error.hint === "cnc_not_allowed" ? error.message : `No program number could be taken: ${error.message}`);
     number = data;
   }
   const { result, sent } = await runPriced({ name: partName, stepText, settings, material, programNo: number, extra: quick ? { quick } : {} });
+
+  await checkBlock(number, result.programs);
 
   const id = crypto.randomUUID();
   const stepPath = stepFile ? `${id}/A/${stepFile.name}` : null;
@@ -454,6 +476,7 @@ export async function runUpdate({ program, partName, current, material, settings
 // pointed at, not copied.
 export async function saveUpdate({ program, run, letter, partName, customer, material, userName }) {
   const { result, sent, step, quick } = run;
+  await checkBlock(program.program_no, result.programs, program.id);
   let stepPath = step?.path || null;
   if (step?.file) {
     stepPath = `${program.id}/${letter}/${step.name}`;
