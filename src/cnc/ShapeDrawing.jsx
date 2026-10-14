@@ -7,9 +7,13 @@
 // model's z=0 end) on the right where the first op is (Heinrich, 14 Oct
 // 2026), so the layouts are mirrored here. Under the drawing a "Machine
 // this side first" tick at each end sets side1 ('0' = end 1, 'L' = end 2).
+// With only one end formed (sharpened bar, radius end) that end is the one
+// hold whatever is ticked (engine, 14 Oct 2026), so the tick follows it and
+// the other end's tick is shut.
 
+import { useEffect } from "react";
 import { C } from "../theme.js";
-import { DRAWINGS } from "./shapeDrawings.js";
+import { DRAWINGS, onlyFormedEnd } from "./shapeDrawings.js";
 
 const W = 400;
 
@@ -19,6 +23,10 @@ export default function ShapeDrawing({ shape, sizes, setSizes, side1 = "", setSi
   const fields = Object.fromEntries(shape.fields.map((f) => [f.key, f]));
   const dims = d.dims.filter((x) => fields[x.key]);
   const dimLine = { stroke: C.muted, strokeWidth: 0.9 };
+  const oneEnd = onlyFormedEnd(shape.picture, sizes);
+  useEffect(() => {
+    if (oneEnd && setSide1 && side1 !== oneEnd) setSide1(oneEnd);
+  }, [oneEnd, side1, setSide1]);
   return (
     <div style={{ position: "relative", width: "100%", maxWidth: 620, color: C.text }}>
       <svg viewBox={`0 0 ${W} ${d.h}`} width="100%" style={{ display: "block" }} fill="none" aria-hidden="true">
@@ -90,9 +98,13 @@ export default function ShapeDrawing({ shape, sizes, setSizes, side1 = "", setSi
             ["L", "end 2"],
             ["0", "end 1"],
           ].map(([v, end]) => (
-            <label key={v} title={`Machine ${end} first (side 1)`} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-              <input type="checkbox" checked={side1 === v} onChange={() => setSide1(side1 === v ? "" : v)} />
-              Machine this side first
+            <label
+              key={v}
+              title={oneEnd ? "Only this end is formed: the bar is held once, on it" : `Machine ${end} first (side 1)`}
+              style={{ display: "flex", alignItems: "center", gap: 6, cursor: oneEnd ? "default" : "pointer", opacity: oneEnd && oneEnd !== v ? 0.45 : 1 }}
+            >
+              <input type="checkbox" checked={(oneEnd || side1) === v} disabled={!!oneEnd} onChange={() => setSide1(side1 === v ? "" : v)} />
+              {oneEnd === v ? "Only this side machined" : "Machine this side first"}
             </label>
           ))}
         </div>

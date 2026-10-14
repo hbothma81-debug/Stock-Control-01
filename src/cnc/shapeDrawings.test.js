@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DRAWINGS, isChamfer, sizesOffDrawing } from "./shapeDrawings.js";
+import { DRAWINGS, isChamfer, onlyFormedEnd, sizesOffDrawing } from "./shapeDrawings.js";
 
 // The engine's shapes as its ?shapes=1 sends them on 11 Oct 2026 (turnpath
 // data/shapes.json), keys and pictures only, and the two asked for since.
@@ -46,4 +46,12 @@ test("no two boxes on a drawing overlap, on a phone (73 wide, 34 high) as on a P
         assert.ok(apart, `${name}: ${d.dims[i].key} and ${d.dims[j].key} overlap`);
       }
   }
+});
+
+test("with one end formed, that end is the one machined, whichever it is", () => {
+  assert.equal(onlyFormedEnd("sharpened", { point_length_1: "13" }), "0");
+  assert.equal(onlyFormedEnd("sharpened", { point_length_2: "13", point_length_1: "" }), "L");
+  assert.equal(onlyFormedEnd("sharpened", { point_length_1: "13", point_length_2: "13" }), "");
+  assert.equal(onlyFormedEnd("radius_end", { radius_2: "6" }), "L");
+  assert.equal(onlyFormedEnd("bush", { od: "30" }), "");
 });

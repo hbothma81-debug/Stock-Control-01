@@ -16,6 +16,8 @@
 //   prefix  "Ø" on a diameter, "M" on a thread, "P" on a pitch
 //   ph      what an empty box says
 //   wide    a wider box, for a long word
+// `formed` (sharpened bar, radius end): the size that makes each end; with
+// only one end formed the engine holds the bar once, on that end.
 // A box is 64 wide on this grid (73 on a phone, where it is also about 34
 // high), so boxes keep that clear of each other and of the outline.
 // Chamfer sizes are not drawn: they sit under More settings (Heinrich,
@@ -114,6 +116,7 @@ export const DRAWINGS = {
   // meat hooks. End 1 is the z=0 end.
   sharpened: {
     h: 240,
+    formed: { 0: "point_length_1", L: "point_length_2" },
     axis: 120,
     outline: "M110 116 L170 90 H250 L310 116 V124 L250 150 H170 L110 124 Z",
     ext: "M110 126 V223 M310 126 V223 M170 152 V188 M250 152 V188",
@@ -130,6 +133,7 @@ export const DRAWINGS = {
   // round end (Heinrich, 12 Oct 2026).
   radius_end: {
     h: 235,
+    formed: { 0: "radius_1", L: "radius_2" },
     axis: 120,
     outline: "M130 80 H290 A20 20 0 0 1 310 100 V140 A20 20 0 0 1 290 160 H130 A20 20 0 0 1 110 140 V100 A20 20 0 0 1 130 80 Z",
     ext: "M110 142 V213 M310 142 V213",
@@ -143,6 +147,14 @@ export const DRAWINGS = {
 };
 
 // A chamfer size goes under More settings, not on the drawing.
+// The one formed end ('0' = end 1, 'L' = end 2) when only one is, else "".
+export function onlyFormedEnd(picture, sizes) {
+  const formed = DRAWINGS[picture]?.formed;
+  if (!formed) return "";
+  const on = Object.entries(formed).filter(([, key]) => Number(String(sizes?.[key] ?? "").replace(",", ".")) > 0).map(([end]) => end);
+  return on.length === 1 ? on[0] : "";
+}
+
 export const isChamfer = (field) => /chamfer/i.test(field.key);
 
 // The sizes that are neither on the shape's drawing nor chamfers: boxes
