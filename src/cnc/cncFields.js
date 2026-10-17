@@ -53,6 +53,17 @@ export const CNC_FIELDS = [
     kind: "tick",
     blank: "No: one program unless the jaws are reset",
   },
+  // Inside only: the outside and front face are made already (soft jaws
+  // bored in place, a part already turned outside); the engine bores, drills
+  // and grooves the inside only, Z0 the face as it is, from the hole typed
+  // as Tube ID (Heinrich, 17 Oct 2026; engine d2e92f9, job id_only). Sent
+  // only when ticked.
+  {
+    key: "id_only",
+    label: "Inside only (outside and face already made, e.g. soft jaws)",
+    kind: "tick",
+    blank: "No: the whole part",
+  },
   {
     key: "back_op",
     label: "Back end (bar work)",

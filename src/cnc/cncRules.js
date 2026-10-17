@@ -249,6 +249,9 @@ export function engineErrorText(status, body) {
   const said = body && typeof body === "object" && body.error ? String(body.error) : "";
   if (status === 401) return "The program engine says you are not signed in. Sign out and in again, then try once more.";
   if (status === 413) return said ? `The STEP file is too big for the engine: ${said}.` : "The STEP file is too big for the engine.";
+  // A setting the live engine has not got yet (the app went live first).
+  const unknown = said.match(/^unknown settings:\s*(.+)$/);
+  if (status === 400 && unknown) return `The engine doesn't know "${unknown[1]}" yet: it comes with the next engine update. Untick it, or wait for that update.`;
   if (status === 400) return `The engine could not make a program from this: ${said || "it did not say why"}.`;
   if (status === 0) return "The program engine could not be reached. Check the internet connection and try again.";
   return `The program engine failed${said ? `: ${said}` : ` (${status})`}. Nothing was saved.`;

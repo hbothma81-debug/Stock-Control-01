@@ -190,6 +190,11 @@ test("the engine's refusals in plain words", () => {
   assert.match(engineErrorText(401, {}), /not signed in/);
   assert.match(engineErrorText(0, null), /could not be reached/);
   assert.match(engineErrorText(500, { error: "engine: StopIteration" }), /StopIteration/);
+  // a setting the live engine hasn't got yet (Inside only before engine d2e92f9)
+  assert.equal(
+    engineErrorText(400, { error: "unknown settings: id_only" }),
+    'The engine doesn\'t know "id_only" yet: it comes with the next engine update. Untick it, or wait for that update.',
+  );
 });
 
 import { revisionLetter } from "./cncRules.js";
