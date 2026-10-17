@@ -48,6 +48,11 @@ test("holders: the machine row's, else the LEO 1600's own; kinds go in their hol
   for (const k of ["od", "groove", "part", "thread"]) assert.equal(holderForKind(k), "od");
   assert.equal(toolFits({ data: { kind: "bar" } }, "od"), false);
   assert.equal(toolFits(null, "od"), true);
+  // the inside tools go in a boring holder; insert packs fit no station at all
+  for (const k of ["idgroove", "thread_id", "tap"]) assert.equal(holderForKind(k), "bore");
+  assert.equal(toolFits({ data: { kind: "idgroove" } }, "bore"), true);
+  assert.equal(toolFits({ data: { kind: "thread_insert" } }, "od"), false);
+  assert.equal(toolFits({ data: { kind: "thread_insert" } }, "bore"), false);
 });
 
 test("holders: arrows jump to the next station the tool fits", async () => {

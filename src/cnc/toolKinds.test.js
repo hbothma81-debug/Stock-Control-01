@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { TOOL_KINDS, toolFromForm, formFromTool, toolLine, suggestKey, kindOf } from "./toolKinds.js";
 
 test("every kind the engine picks by has its fields", () => {
-  assert.deepEqual(TOOL_KINDS.map((k) => k.kind), ["od", "bar", "udrill", "hss", "groove", "part", "thread", "puller"]);
+  assert.deepEqual(TOOL_KINDS.map((k) => k.kind), ["od", "bar", "udrill", "hss", "groove", "idgroove", "part", "thread", "thread_id", "tap", "thread_insert", "puller"]);
   assert.deepEqual(kindOf("bar").fields.map((f) => f.key), ["holder", "insert", "dia", "nose", "key", "home_z", "ap_min_mm"]);
   assert.equal(kindOf("udrill").long, true);
   assert.equal(kindOf("od").long, false);
@@ -46,4 +46,39 @@ test("side reach and minimum depth of cut are optional: blank saves nothing, a n
   assert.equal(toolFromForm("thread", { ...thread, side_reach_mm: "2.5" }).data.side_reach_mm, 2.5);
   assert.equal(formFromTool({ data: { kind: "thread", name: "T", side_reach_mm: 2.5 } }).side_reach_mm, "2.5");
   assert.equal(kindOf("bar").fields.some((f) => f.key === "ap_min_mm"), true);
+});
+
+test("the inside tools of 17 Oct are boring-holder tools, read as the engine's built-in ones", () => {
+  assert.equal(kindOf("idgroove").long, true);
+  assert.equal(kindOf("thread_id").long, true);
+  assert.equal(kindOf("tap").long, true);
+  // GEPI2 exactly as the engine's data/tools_seed.json holds it
+  const gepi = { name: "ID GROOVE 2MM GEPI", kind: "idgroove", long: true, dia: 16, nose: 0.1, holder: "GEHIR 16-14-2-T2.6", insert: "GEPI 2.00-0.10 IC908", width: 2, cdx: 2.6, min_bore: 16, op: "ID groove 2 mm", home_z: 80 };
+  const { data, errors } = toolFromForm("idgroove", formFromTool({ data: gepi }));
+  assert.deepEqual(errors, []);
+  assert.deepEqual(data, gepi);
+  // internal threading: metric pitches or inch TPI, either may be left empty
+  const bspt = { name: "INT THREAD 11IR BSPT", kind: "thread_id", long: true, dia: 10, holder: "SIR 0010 K11", insert: "11IR BSPT IC908", tpi_owned: [14, 19], min_bore: 13, reach: 30, home_z: 80 };
+  const back = toolFromForm("thread_id", formFromTool({ data: bspt }));
+  assert.deepEqual(back.errors, []);
+  assert.deepEqual(back.data, bspt);
+});
+
+test("thread insert packs: form, outside / inside as true / false, never on the turret", async () => {
+  const { onTurret, choiceValue, choiceLabel } = await import("./toolKinds.js");
+  const un = { name: "INSERTS 16ER UN (60 DEG)", kind: "thread_insert", long: false, form: "UN", ext: true, holder: "SER 2525 M16", insert: "16ER n UN IC908", tpi_range: [28, 24, 20], tpi_owned: [] };
+  const form = formFromTool({ data: un });
+  assert.equal(form.ext, "true");
+  const { data, errors } = toolFromForm("thread_insert", form);
+  assert.deepEqual(errors, []);
+  // an empty list of TPI bought saves nothing: the engine reads that as none
+  const { tpi_owned: _none, ...rest } = un;
+  assert.deepEqual(data, rest);
+  assert.equal(toolFromForm("thread_insert", { ...form, ext: "false", tpi_owned: "14, 11" }).data.ext, false);
+  assert.deepEqual(toolFromForm("thread_insert", { ...form, tpi_owned: "14, 11" }).data.tpi_owned, [14, 11]);
+  assert.deepEqual(toolFromForm("thread_insert", { ...form, ext: "" }).errors, ["Outside or inside"]);
+  assert.equal(onTurret("thread_insert"), false);
+  assert.equal(onTurret("idgroove"), true);
+  assert.equal(choiceValue({ value: "W", label: "W: BSW / BSPP (55°)" }), "W");
+  assert.equal(choiceLabel("bar"), "bar");
 });

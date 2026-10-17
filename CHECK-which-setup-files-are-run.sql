@@ -221,7 +221,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-cnc-16-posted-revisions.sql', 'column cnc_program_revisions.posted_at (a revision stays open until posted)',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_program_revisions' and column_name = 'posted_at')),
     ('setup-cnc-17-grade-cutting-data.sql', 'column master_factor_items.cutting_material (each CNC Bar Grade linked to its cutting data)',
-      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'master_factor_items' and column_name = 'cutting_material'))
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'master_factor_items' and column_name = 'cutting_material')),
+    ('setup-cnc-18-inside-tools.sql', 'cnc_tools row GEPI2 (the inside tools and thread insert packs on the Tools list)',
+      exists (select 1 from public.cnc_tools where tool_key = 'GEPI2'))
 )
 select
   setup_file,

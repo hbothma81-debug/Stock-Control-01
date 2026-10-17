@@ -128,6 +128,7 @@ ORDER=(
   setup-cnc-15-program-blocks.sql
   setup-cnc-16-posted-revisions.sql
   setup-cnc-17-grade-cutting-data.sql
+  setup-cnc-18-inside-tools.sql
 )
 
 OUT=setup-ALL.sql

@@ -59,7 +59,14 @@ export function cribWarnings(answer) {
 // them as data.turret.holders; a station it does not name takes the LEO
 // 1600's own layout below. Mirrors the engine: change both.
 export const DEFAULT_HOLDERS = { 1: "od", 2: "od", 3: "bore", 4: "bore", 5: "bore", 6: "od", 7: "bore", 8: "od" };
-const BORE_KINDS = ["bar", "udrill", "hss", "puller"];
+// The inside tools of 17 Oct 2026 (internal grooving, internal threading,
+// tap holder) are long, so the engine puts them in a boring holder too.
+// Mirrors toolKinds.js (long) and the engine's plan.py _is_long.
+const BORE_KINDS = ["bar", "udrill", "hss", "puller", "idgroove", "thread_id", "tap"];
+// Kinds with no station of their own (insert packs for the threading
+// holders): never offered on the crib. Mirrors toolKinds.js turret: false.
+const OFF_TURRET = ["thread_insert"];
+export const onTurret = (tool) => !OFF_TURRET.includes(tool?.data?.kind);
 export const HOLDER_NAME = { od: "OD holder", bore: "Boring holder" };
 export const A_HOLDER = { od: "an OD holder", bore: "a boring holder" };
 
@@ -75,7 +82,7 @@ export const holderForKind = (kind) => (BORE_KINDS.includes(kind) ? "bore" : "od
 // Whether a tool (a cnc_tools row) fits a holder. A key not on the tool
 // list is not judged here: the engine says so in its own words.
 export function toolFits(tool, holder) {
-  return !tool || holderForKind(tool.data?.kind) === holder;
+  return !tool || (onTurret(tool) && holderForKind(tool.data?.kind) === holder);
 }
 
 // The stations with a holder, as the shop writes them: "T3/T4/T5/T7".

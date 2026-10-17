@@ -24,18 +24,46 @@ const F = {
   // engine's own figure is used and nothing is saved.
   side_reach: { key: "side_reach_mm", label: "Side reach past the tip (mm, blank = 3)", type: "number", optional: true },
   ap_min: { key: "ap_min_mm", label: "Minimum depth of cut (mm, blank = 2/3 nose radius, min 0.3 in stainless)", type: "number", optional: true },
+  // The inside tools (engine 17 Oct 2026: internal grooving d2e92f9, internal
+  // threads 5dfdb27, BSPT 2a05fe0, tapping aa74364). Until the Tools screen
+  // knew them the engine used its built-in ones (data/tools_seed.json).
+  min_bore: { key: "min_bore", label: "Smallest bore it goes into (mm)", type: "number" },
+  cut_depth: { key: "cdx", label: "Max cut depth per side (mm)", type: "number" },
+  reach: { key: "reach", label: "Reach: deepest from the face (mm)", type: "number" },
+  pitches_metric: { key: "pitches_owned", label: "Pitches owned (mm, e.g. 1, 1.5): metric inserts", type: "list", optional: true },
+  tpi_owned: { key: "tpi_owned", label: "Threads per inch owned (e.g. 14, 19): inch and pipe inserts", type: "list", optional: true },
+  // Thread insert packs (engine 6941026, inch_thread.owned reads owned and
+  // tpi_owned): inserts for the threading holders on the turret, so they
+  // have no station of their own.
+  form: { key: "form", label: "Thread form", type: "choice", choices: [{ value: "UN", label: "UN (60°)" }, { value: "W", label: "W: BSW / BSPP (55°)" }] },
+  ext: { key: "ext", label: "Outside or inside", type: "bool", choices: [{ value: "true", label: "Outside (ER)" }, { value: "false", label: "Inside (IR)" }] },
+  tpi_range: { key: "tpi_range", label: "Threads per inch the insert comes in (e.g. 28, 20, 14)", type: "list" },
 };
 
+// All the inside tools go in a boring holder (long), as the engine places
+// them; cribRules.js BORE_KINDS lists them too. turret: false = never in a
+// station (insert packs); cribRules.js OFF_TURRET lists them too.
 export const TOOL_KINDS = [
   { kind: "od", label: "Turning (OD)", long: false, fields: [F.holder, F.insert, F.nose, F.key, F.ap_min] },
   { kind: "bar", label: "Boring bars", long: true, fields: [F.holder, F.insert, F.dia, F.nose, F.key, F.home_z, F.ap_min] },
   { kind: "udrill", label: "U-drills", long: true, fields: [F.dia, F.key, F.home_z, F.holder, F.insert] },
   { kind: "hss", label: "HSS drills", long: true, fields: [F.dia] },
   { kind: "groove", label: "Grooving", long: false, fields: [F.holder, F.insert, F.width, F.cdx, F.op] },
+  { kind: "idgroove", label: "Internal grooving", long: true, fields: [F.holder, F.insert, F.width, F.cut_depth, F.min_bore, F.nose, F.op, F.home_z] },
   { kind: "part", label: "Parting", long: false, fields: [F.holder, F.insert, F.width, F.max_dia, F.op] },
   { kind: "thread", label: "Threading", long: false, fields: [F.holder, F.insert, F.pitches_owned, F.pitch_range, F.side_reach] },
+  { kind: "thread_id", label: "Internal threading", long: true, fields: [F.holder, F.insert, F.dia, F.min_bore, F.reach, F.pitches_metric, F.tpi_owned, F.home_z] },
+  { kind: "tap", label: "Tapping (tap holder)", long: true, fields: [F.holder, F.home_z] },
+  { kind: "thread_insert", label: "Thread inserts (for the threading holders)", long: false, turret: false, fields: [F.form, F.ext, F.holder, F.insert, F.tpi_range, F.tpi_owned] },
   { kind: "puller", label: "Bar puller", long: false, fields: [F.puller] },
 ];
+
+// Whether a kind of tool sits in a turret station (insert packs don't).
+export const onTurret = (kind) => kindOf(kind)?.turret !== false;
+
+// A choice's value and label: plain strings, or { value, label } pairs.
+export const choiceValue = (c) => (typeof c === "object" ? c.value : c);
+export const choiceLabel = (c) => (typeof c === "object" ? c.label : c);
 
 // Fields the engine does not need but a tool may carry (filled by the ISO
 // reader): shown, never required.
@@ -82,6 +110,10 @@ export function toolFromForm(kind, form) {
       const nums = readList(raw);
       if (!nums.length || nums.some((n) => !Number.isFinite(n) || n <= 0)) errors.push(f.label);
       else data[f.key] = nums;
+    } else if (f.type === "bool") {
+      const s = String(raw).trim();
+      if (s !== "true" && s !== "false") errors.push(f.label);
+      else data[f.key] = s === "true";
     } else data[f.key] = String(raw).trim();
   }
   return { data, errors };

@@ -26,7 +26,7 @@ import TypeToFind from "../TypeToFind.jsx";
 import { C, S } from "../theme.js";
 import { loadToolpath, runUpdate, saveUpdate, updateChanges } from "./cncData.js";
 import { loadMachines, loadTools } from "./cncTables.js";
-import { A_HOLDER, cribWarnings, holderForKind, holdersFrom, HOLDER_NAME, layoutFrom, modelPitchOf, moveStation, moveToHolder, pitchChoices, putTool, removeTool, sameLayout, samePitches, setThreadPitch, stationsWith, STATIONS, toolFits, toTurret } from "./cribRules.js";
+import { A_HOLDER, cribWarnings, holderForKind, holdersFrom, HOLDER_NAME, layoutFrom, modelPitchOf, moveStation, moveToHolder, onTurret, pitchChoices, putTool, removeTool, sameLayout, samePitches, setThreadPitch, stationsWith, STATIONS, toolFits, toTurret } from "./cribRules.js";
 import { handEditsNote, oNumber, saveLetter } from "./cncRules.js";
 import { toolLine } from "./toolKinds.js";
 import ProgramChanges from "./ProgramChanges.jsx";
@@ -83,7 +83,7 @@ export default function ToolCribTab({ program, revisions, current, materials, ca
   const toolOf = (key) => byKey[key] || null;
   const optionsFor = (holder) =>
     tools
-      .filter((t) => !holder || toolFits(t, holder))
+      .filter((t) => onTurret(t) && (!holder || toolFits(t, holder)))
       .map((t) => ({ value: t.tool_key, label: t.data?.name || t.tool_key, hint: `${toolLine(t)}${t.owned ? "" : " · not owned"}` }));
   const move = (i, dir) => (holders ? moveToHolder(layout, i, dir, holders, toolOf) : moveStation(layout, i, dir));
   const layoutChanged = !sameLayout(layout, saved);

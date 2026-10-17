@@ -21,7 +21,7 @@ import { C, S } from "../theme.js";
 import { readIsoCode } from "./cncData.js";
 import { addTool, loadTools, removeTool, saveMachine, saveTool } from "./cncTables.js";
 import { A_HOLDER, changeHolder, holderForKind, holdersFrom, toolFits } from "./cribRules.js";
-import { copyOfTool, formFromTool, kindOf, suggestKey, TOOL_KINDS, toolFromForm, toolLine } from "./toolKinds.js";
+import { choiceLabel, choiceValue, copyOfTool, formFromTool, kindOf, suggestKey, TOOL_KINDS, toolFromForm, toolLine } from "./toolKinds.js";
 import EngineSource, { NEEDS } from "./EngineSource.jsx";
 
 export default function ToolsScreen({ machine, isAdmin, userName, onMachine }) {
@@ -345,12 +345,12 @@ function ToolForm({ machine, tools, tool = null, copyOf = null, userName, onDone
         {k?.fields.map((f) => (
           <div key={f.key}>
             <label style={S.label}>{f.label}</label>
-            {f.type === "choice" ? (
+            {f.choices ? (
               <select style={S.input} value={form[f.key] || ""} onChange={set(f.key)}>
                 <option value="">Pick…</option>
                 {f.choices.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
+                  <option key={choiceValue(c)} value={choiceValue(c)}>
+                    {choiceLabel(c)}
                   </option>
                 ))}
               </select>
