@@ -219,7 +219,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-cnc-15-program-blocks.sql', 'function take_cnc_sub_number (program numbers in blocks of ten)',
       exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'take_cnc_sub_number')),
     ('setup-cnc-16-posted-revisions.sql', 'column cnc_program_revisions.posted_at (a revision stays open until posted)',
-      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_program_revisions' and column_name = 'posted_at'))
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'cnc_program_revisions' and column_name = 'posted_at')),
+    ('setup-cnc-17-grade-cutting-data.sql', 'column master_factor_items.cutting_material (each CNC Bar Grade linked to its cutting data)',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'master_factor_items' and column_name = 'cutting_material'))
 )
 select
   setup_file,

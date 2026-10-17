@@ -12,22 +12,46 @@
 // Prices show only with "Can see Rand values"; changing or adding needs the
 // CNC Edit tick and Rand values. A grade's price and a new grade are saved
 // by App (the master list's save queue), handed in as onSavePrice / onAdd.
+//
+// Each grade's cutting data (Heinrich, 17 Oct 2026, gradeLink.js): picked
+// from the cutting data's own materials, on the grade's line (the CNC Edit
+// tick), saved by App as onLink. A grade can't be added without it, and one
+// without it reads red and can't be used for a program. Shown only once the
+// database keeps the link (setup-cnc-17-grade-cutting-data.sql).
 
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import NumberBox from "../manager/NumberBox.jsx";
+import TypeToFind from "../TypeToFind.jsx";
 import { C, S } from "../theme.js";
 import { readNumber } from "./cncRules.js";
 import { removeBarPrice, saveBarPrice } from "./cncData.js";
+import { loadCuttingMaterials, loadMachines } from "./cncTables.js";
+import { cuttingChoices, cuttingLabel, keepsLinks } from "./gradeLink.js";
 import { bothUnits, kgPerMetre, sizeLabel } from "./pricing.js";
 
-export default function MaterialsList({ materials, barPrices, pipes, canEdit, canSeeValue, userName, onSavePrice, onAdd, onBarPrices }) {
+export default function MaterialsList({ materials, barPrices, pipes, canEdit, canSeeValue, userName, onSavePrice, onAdd, onLink, onBarPrices }) {
   const [search, setSearch] = useState("");
-  const [adding, setAdding] = useState({ name: "", density: "", price: "" });
+  const [adding, setAdding] = useState({ name: "", density: "", price: "", cutting: "" });
   const [open, setOpen] = useState({});
   const [newSize, setNewSize] = useState({});
   const [error, setError] = useState("");
+  // The cutting data's materials: null while asked, [] when it has none.
+  const [choices, setChoices] = useState(null);
   const mayChange = canEdit && canSeeValue;
+  const links = keepsLinks(materials);
+
+  useEffect(() => {
+    if (!links) return undefined;
+    let gone = false;
+    loadMachines()
+      .then((ms) => (ms[0] ? loadCuttingMaterials(ms[0].id) : []))
+      .then((names) => !gone && setChoices(cuttingChoices(names)))
+      .catch((err) => !gone && (setChoices([]), setError(`The cutting data's materials could not be read: ${err.message || err}`)));
+    return () => {
+      gone = true;
+    };
+  }, [links]);
   const q = search.trim().toLowerCase();
   const shown = [...(materials || [])]
     .filter((m) => !q || m.name.toLowerCase().includes(q) || (m.fullName || "").toLowerCase().includes(q))
@@ -47,8 +71,12 @@ export default function MaterialsList({ materials, barPrices, pipes, canEdit, ca
       setError("The weight and the price must be numbers.");
       return;
     }
-    onAdd(name, density || 7.85, price || 0);
-    setAdding({ name: "", density: "", price: "" });
+    if (links && !adding.cutting) {
+      setError("Pick the grade's cutting data first: a grade without it can't be used for a program.");
+      return;
+    }
+    onAdd(name, density || 7.85, price || 0, links ? adding.cutting : null);
+    setAdding({ name: "", density: "", price: "", cutting: "" });
   }
 
   async function savePrice(grade, size, price, unit) {
@@ -109,6 +137,22 @@ export default function MaterialsList({ materials, barPrices, pipes, canEdit, ca
                 {m.name}
                 {m.fullName && m.fullName !== m.name ? <span style={{ color: C.muted }}> ({m.fullName})</span> : null}
                 <span style={{ color: C.muted, fontSize: 12.5 }}> · {sizes.length} bar size{sizes.length === 1 ? "" : "s"}</span>
+                {links && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap", fontSize: 13 }}>
+                    <span style={{ color: m.cuttingMaterial ? C.muted : C.danger }}>{m.cuttingMaterial ? "Cutting data" : "No cutting data: can't be used for a program"}</span>
+                    {canEdit && choices?.length ? (
+                      <TypeToFind
+                        options={choices}
+                        value={m.cuttingMaterial || ""}
+                        onChange={(v) => v && v !== m.cuttingMaterial && onLink(m.fullName, v)}
+                        placeholder="Pick its cutting data…"
+                        style={{ minWidth: 200 }}
+                      />
+                    ) : (
+                      m.cuttingMaterial && <span>{cuttingLabel(m.cuttingMaterial, choices)}</span>
+                    )}
+                  </div>
+                )}
               </div>
               <div>{m.density || "–"}</div>
               <div>
@@ -180,11 +224,17 @@ export default function MaterialsList({ materials, barPrices, pipes, canEdit, ca
       {mayChange && (
         <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
           <div style={{ fontWeight: 700, fontSize: 14 }}>Add a grade</div>
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: 8, alignItems: "end" }}>
+          <div style={{ display: "grid", gridTemplateColumns: links ? "2fr 2fr 1fr 1fr auto" : "2fr 1fr 1fr auto", gap: 8, alignItems: "end" }}>
             <div>
               <label style={S.label}>Name</label>
               <input style={S.input} value={adding.name} onChange={(e) => setAdding((a) => ({ ...a, name: e.target.value }))} placeholder="e.g. EN24T" />
             </div>
+            {links && (
+              <div>
+                <label style={S.label}>Cutting data</label>
+                <TypeToFind options={choices || []} value={adding.cutting} onChange={(v) => setAdding((a) => ({ ...a, cutting: v || "" }))} placeholder="Type to find…" />
+              </div>
+            )}
             <div>
               <label style={S.label}>kg/dm³</label>
               <input style={S.input} value={adding.density} inputMode="decimal" onChange={(e) => setAdding((a) => ({ ...a, density: e.target.value }))} placeholder="7.85" />
@@ -193,7 +243,7 @@ export default function MaterialsList({ materials, barPrices, pipes, canEdit, ca
               <label style={S.label}>R/kg</label>
               <input style={S.input} value={adding.price} inputMode="decimal" onChange={(e) => setAdding((a) => ({ ...a, price: e.target.value }))} placeholder="30" />
             </div>
-            <button type="button" className="stk-btn" style={S.addBtn} onClick={add} disabled={!adding.name.trim()}>
+            <button type="button" className="stk-btn" style={S.addBtn} onClick={add} disabled={!adding.name.trim() || (links && !adding.cutting)}>
               <Plus size={14} /> Add
             </button>
           </div>

@@ -15,6 +15,18 @@ export async function loadMachines() {
   return data || [];
 }
 
+// The material names of the cutting data's TURNING rows, for the CNC Bar
+// Grades' "Cutting data" picker (gradeLink.js): one column, one small read.
+export async function loadCuttingMaterials(machineId) {
+  const { data, error } = await supabase
+    .from("cnc_cutting_data")
+    .select("material:data->>Material")
+    .eq("machine_id", machineId)
+    .eq("sheet", "TURNING");
+  if (error) throw error;
+  return (data || []).map((r) => r.material);
+}
+
 export async function loadCuttingData(machineId) {
   const [{ data: sheets, error: e1 }, rows] = await Promise.all([
     supabase.from("cnc_cutting_sheets").select("*").eq("machine_id", machineId).order("position"),

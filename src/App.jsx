@@ -315,6 +315,10 @@ function dbRowToItem(row) {
   return item;
 }
 let stockHasPaidPrice = false;
+// A CNC Bar Grade's cutting data (setup-cnc-17-grade-cutting-data.sql,
+// src/cnc/gradeLink.js): read and written only once a loaded row has shown
+// the column, so a database without it loads and saves the lists as before.
+let factorHasCuttingMaterial = false;
 let stockHasRemovedDetails = false;
 let stockHasCustomerRevision = false;
 function itemToDbRow(item) {
@@ -778,6 +782,8 @@ async function loadMasterFromTables() {
         if (listName === "sections") entry.grade = r.grade || "";
         // A section built from its type's boxes keeps its numbers.
         if (listName === "sections" && r.dimensions) entry.dimensions = r.dimensions;
+        if ("cutting_material" in r) factorHasCuttingMaterial = true;
+        if (listName === "cncGrades" && r.cutting_material) entry.cuttingMaterial = r.cutting_material;
         return entry;
       });
   }
@@ -3091,6 +3097,7 @@ export default function StockControl() {
               grade: (e.grade || "").trim(),
               // Needs setup-section-dimensions.sql on the database.
               ...(listName === "sections" ? { dimensions: e.dimensions || null } : {}),
+              ...(listName === "cncGrades" && factorHasCuttingMaterial ? { cutting_material: e.cuttingMaterial || null } : {}),
             }))
           )
         );
@@ -3114,6 +3121,11 @@ export default function StockControl() {
         // short name back on the list with it.
         if (listName === "grades") delete changes.short_name;
         if (listName === "sections") changes.dimensions = e.dimensions || null;
+        // A grade's cutting data only when it is what changed, so a price
+        // saved from a tablet that has not reloaded never puts an old link back.
+        if (listName === "cncGrades" && factorHasCuttingMaterial && (prevByKey.get(rowKey(listName, e))?.cuttingMaterial || "") !== (e.cuttingMaterial || "")) {
+          changes.cutting_material = e.cuttingMaterial || null;
+        }
         let q = supabase.from("master_factor_items").update(changes).eq("list_name", listName).eq("name", e.name);
         if (listName === "sections") q = q.eq("grade", (e.grade || "").trim());
         ops.push(q);
@@ -17850,11 +17862,22 @@ export default function StockControl() {
               price: findPrice("cncGrades", g.name),
               ownPrice: g.price,
               density: g.factor,
+              // Its cutting data, on every grade once the database keeps it
+              // ("" = none linked: red, and not offered for a program).
+              ...(factorHasCuttingMaterial ? { cuttingMaterial: g.cuttingMaterial || "" } : {}),
             }))}
             canSeeValue={canSeeValue}
             isAdmin={isAdmin}
             onSaveMaterialPrice={(name, price) => setMaterialPrice("cncGrades", name, price)}
-            onAddMaterial={(name, density, price) => setMaterialPrice("cncGrades", name, price, { factor: density })}
+            onAddMaterial={(name, density, price, cuttingMaterial) =>
+              setMaterialPrice("cncGrades", name, price, { factor: density, ...(cuttingMaterial ? { cuttingMaterial } : {}) })
+            }
+            onLinkMaterial={(name, cuttingMaterial) =>
+              setMaster((prev) => ({
+                ...prev,
+                cncGrades: (prev.cncGrades || []).map((g) => (g.name === name ? { ...g, cuttingMaterial } : g)),
+              }))
+            }
             canEdit={canEditQty("cnc")}
             canDelete={isAdmin || !!profile?.permissions?.cnc?.delete}
             userName={profile?.name || profile?.email || ""}

@@ -31,7 +31,7 @@ import { loadMachines } from "./cncTables.js";
 const { borderColor: _unused, ...chipActiveRest } = S.chipActive;
 const CHIP_ON = { ...chipActiveRest, border: `1px solid ${C.accentFinished}` };
 
-export default function CncTab({ customers, materials, canEdit, canDelete, canSeeValue, isAdmin, onSaveMaterialPrice, onAddMaterial, userName }) {
+export default function CncTab({ customers, materials, canEdit, canDelete, canSeeValue, isAdmin, onSaveMaterialPrice, onAddMaterial, onLinkMaterial, userName }) {
   const [programs, setPrograms] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -152,6 +152,7 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
             userName={userName}
             onSavePrice={onSaveMaterialPrice}
             onAdd={onAddMaterial}
+            onLink={onLinkMaterial}
             onBarPrices={setBarPrices}
           />
         </ErrorBoundary>

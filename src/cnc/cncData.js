@@ -6,6 +6,7 @@
 import { supabase } from "../lib/supabaseClient.js";
 import { barSizeOf, findBarPrice, kgPerMetre, materialPricing, sameSize } from "./pricing.js";
 import { DEFAULT_SETUP_PRICE, blockClashes, inBlocks } from "./cncRules.js";
+import { gradeProblem } from "./gradeLink.js";
 import { COSTING_KEYS, CRIB_KEYS, costingPart, dayInSA, engineErrorText, exportRows, faultText, revisionChanges, stockText, MAX_STEP_BYTES } from "./cncRules.js";
 
 // The engine (ERS TURNING APP, its own repository and Vercel project). It
@@ -152,6 +153,13 @@ export async function runEngine({ name, stepText, settings, extra = {} }) {
   } catch {
     body = null;
   }
+  // An engine from before the grade link (turnpath 6462442) refuses the key
+  // ("unknown settings: cutting_material"): asked once more without it, so
+  // the app and the engine may go live in either order.
+  if (res.status === 400 && settings?.cutting_material && /unknown settings:.*cutting_material/.test(String(body?.error || ""))) {
+    const { cutting_material: _c, ...older } = settings;
+    return runEngine({ name, stepText, settings: older, extra });
+  }
   if (!res.ok || !body) throw new Error(engineErrorText(res.status, body));
   return body;
 }
@@ -217,9 +225,11 @@ export async function removeBarPrice(id) {
 export function engineSettings({ settings, material, programNo, size = null }) {
   // The price and weight are always today's: an old one kept in saved
   // settings is dropped first.
-  const { material_price: _p, price_unit: _u, density: _d, ...rest } = settings || {};
+  // The cutting-data link too: always the grade's own today (gradeLink.js).
+  const { material_price: _p, price_unit: _u, density: _d, cutting_material: _c, ...rest } = settings || {};
   const out = { ...rest, program_no: programNo };
   if (material?.name) out.material = material.name;
+  if (material?.cuttingMaterial) out.cutting_material = material.cuttingMaterial;
   if (Number(material?.density) > 0) out.density = Number(material.density);
   const { send } = materialPricing({
     priceBy: rest.price_by || "kg",
@@ -241,6 +251,9 @@ export function engineSettings({ settings, material, programNo, size = null }) {
 // when that bar has a price of its own that differs from what was sent,
 // the engine is asked once more with it.
 async function runPriced({ name, stepText, settings, material, programNo, extra = {}, barHint = null }) {
+  // A grade with no cutting data linked never reaches the engine (Heinrich, 17 Oct 2026).
+  const problem = gradeProblem(material);
+  if (problem) throw new Error(problem);
   const size = barSizeOf(settings, null) || barHint;
   let sent = engineSettings({ settings, material, programNo, size });
   let result = await runEngine({ name, stepText, settings: sent, extra });
@@ -261,7 +274,11 @@ async function runPriced({ name, stepText, settings, material, programNo, extra 
 // so the Program and Costing tabs can say so. No new column.
 function withSource(result) {
   if (!result?.costing) return null;
-  return result.data_source ? { ...result.costing, data_source: result.data_source } : result.costing;
+  const out = result.data_source ? { ...result.costing, data_source: result.data_source } : result.costing;
+  // Which cutting data the grade was machined by (engine setup.material:
+  // grade, cutting_name), so the Program tab can say "Stainless 303 → SS303".
+  const used = result.setup?.material;
+  return used?.cutting_name ? { ...out, material_used: { grade: used.grade, cutting_name: used.cutting_name } } : out;
 }
 
 // A revision row from the engine's answer. The letter is the database's
