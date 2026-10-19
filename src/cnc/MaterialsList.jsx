@@ -1,8 +1,7 @@
-// The CNC tab's Materials, each with its bar sizes. Since 19 Oct 2026 the
-// CNC tab's own list (cncMaterials.js, setup-cnc-19: "CNC has its own
-// material types library", own R/kg); before that file is pasted, Stock
-// Manager's CNC Bar Grades (Heinrich, 8 Oct 2026, option A). CncTab hands in
-// whichever it has, with the save calls that go with it.
+// The CNC tab's Materials, each with its bar sizes: the CNC tab's own list
+// (cncMaterials.js, setup-cnc-19, Heinrich 19 Oct 2026: "CNC has its own
+// material types library", own R/kg), apart from Stock Manager. CncTab
+// hands it in with the save calls that go with it.
 //
 // A grade's own price is R/kg ("no supplier" price on the grade); what every
 // screen uses is the cheapest of it and the grade's supplier prices, shown

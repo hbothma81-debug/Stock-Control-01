@@ -5,9 +5,8 @@
 // once from Stock Manager's CNC Bar Grades, then kept here alone - its own
 // R/kg, density and cutting data. Read once when the CNC tab opens.
 //
-// Until that file is pasted the table is missing: loadCncMaterials gives
-// null and the tab keeps Stock Manager's CNC Bar Grades as before (App.jsx
-// still hands them in), so nothing changes before the paste.
+// A database without the table (setup-cnc-19 not pasted) gives null and the
+// CNC tab says so on Materials.
 
 import { supabase } from "../lib/supabaseClient.js";
 

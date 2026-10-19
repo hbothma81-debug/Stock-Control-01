@@ -17849,35 +17849,15 @@ export default function StockControl() {
           <DrawingsTab ctx={drawingsCtx} />
         </ErrorBoundary>
       ) : tab === "cnc" ? (
-        // The CNC module (src/cnc): it reads and saves everything itself
-        // and is handed only the lists and ticks below. Materials are
-        // Stock Manager's CNC Bar Grades, priced as every screen prices
-        // them (findPrice), by Heinrich's choice of one list (8 Oct 2026).
+        // The CNC module (src/cnc): it reads and saves everything itself,
+        // its materials too (its own list, cnc_materials - Heinrich 19 Oct
+        // 2026: "CNC should stay a separate engine"), and is handed only the
+        // lists and ticks below.
         <ErrorBoundary key="cnc" box what="the CNC tab">
           <CncTab
             customers={master.customers}
-            materials={(master.cncGrades || []).map((g) => ({
-              name: g.shortName || g.name,
-              fullName: g.name,
-              price: findPrice("cncGrades", g.name),
-              ownPrice: g.price,
-              density: g.factor,
-              // Its cutting data, on every grade once the database keeps it
-              // ("" = none linked: red, and not offered for a program).
-              ...(factorHasCuttingMaterial ? { cuttingMaterial: g.cuttingMaterial || "" } : {}),
-            }))}
             canSeeValue={canSeeValue}
             isAdmin={isAdmin}
-            onSaveMaterialPrice={(name, price) => setMaterialPrice("cncGrades", name, price)}
-            onAddMaterial={(name, density, price, cuttingMaterial) =>
-              setMaterialPrice("cncGrades", name, price, { factor: density, ...(cuttingMaterial ? { cuttingMaterial } : {}) })
-            }
-            onLinkMaterial={(name, cuttingMaterial) =>
-              setMaster((prev) => ({
-                ...prev,
-                cncGrades: (prev.cncGrades || []).map((g) => (g.name === name ? { ...g, cuttingMaterial } : g)),
-              }))
-            }
             canEdit={canEditQty("cnc")}
             canDelete={isAdmin || !!profile?.permissions?.cnc?.delete}
             userName={profile?.name || profile?.email || ""}

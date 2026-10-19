@@ -1,9 +1,8 @@
 // The CNC tab (lathe programs from STEP models; brief in
 // docs/CNC-MODULE-PLAN.md). App.jsx draws it inside a crash net and hands
 // it only what it cannot read for itself: the customer list, the person's
-// ticks and name, and Stock Manager's CNC Bar Grades - used only until the
-// CNC tab's own Materials list exists (cncMaterials.js, setup-cnc-19).
-// Everything else is in src/cnc.
+// ticks and name. Its materials are its own (cncMaterials.js, setup-cnc-19),
+// not Stock Manager's. Everything else is in src/cnc.
 //
 // Screens: the Programs list, the Shapes list (Heinrich, 8 Oct 2026: a
 // shape to type sizes, beside Programs), New program (from a STEP or a
@@ -34,14 +33,13 @@ import { addCncMaterial, loadCncMaterials, saveCncMaterial } from "./cncMaterial
 const { borderColor: _unused, ...chipActiveRest } = S.chipActive;
 const CHIP_ON = { ...chipActiveRest, border: `1px solid ${C.accentFinished}` };
 
-export default function CncTab({ customers, materials: stockMaterials, canEdit, canDelete, canSeeValue, isAdmin, onSaveMaterialPrice, onAddMaterial, onLinkMaterial, userName }) {
-  // The CNC tab's own Materials list (cncMaterials.js, Heinrich 19 Oct 2026):
-  // undefined while asked, null when the database has no cnc_materials yet
-  // (setup-cnc-19 not pasted) - then Stock Manager's CNC Bar Grades, handed
-  // in by App, as before.
+export default function CncTab({ customers, canEdit, canDelete, canSeeValue, isAdmin, userName }) {
+  // The CNC tab's own Materials list (cncMaterials.js, Heinrich 19 Oct 2026:
+  // "CNC should stay a separate engine that can function without the main
+  // app"): [] while asked or when it can't be read (said on Materials).
   const [ownMaterials, setOwnMaterials] = useState(undefined);
   const [materialsError, setMaterialsError] = useState("");
-  const materials = ownMaterials || stockMaterials;
+  const materials = ownMaterials || [];
   const [programs, setPrograms] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -86,14 +84,13 @@ export default function CncTab({ customers, materials: stockMaterials, canEdit, 
     loadEngineList("pipes").then(setPipes);
     loadBarPrices().then(setBarPrices);
     loadCncMaterials()
-      .then(setOwnMaterials)
-      .catch((err) => {
-        setOwnMaterials(null);
-        setMaterialsError(`The CNC materials could not be read (${err.message || err}) - Stock Manager's CNC Bar Grades are shown until the page is reloaded.`);
-      });
+      .then((list) => {
+        setOwnMaterials(list || []);
+        if (!list) setMaterialsError("The CNC materials list is missing on this database: paste setup-cnc-19-own-materials.sql.");
+      })
+      .catch((err) => setMaterialsError(`The CNC materials could not be read: ${err.message || err}. Reload the page to try again.`));
   }, []);
 
-  // Saves on the CNC list once it exists, else on Stock Manager's (App).
   function ownByName(fullName) {
     return (ownMaterials || []).find((m) => m.fullName === fullName || m.name === fullName);
   }
@@ -107,17 +104,14 @@ export default function CncTab({ customers, materials: stockMaterials, canEdit, 
     }
   }
   function savePrice(fullName, price) {
-    const m = ownMaterials && ownByName(fullName);
-    if (!ownMaterials) return onSaveMaterialPrice(fullName, price);
+    const m = ownByName(fullName);
     if (m) saveOwn(() => saveCncMaterial({ id: m.id, price, userName }));
   }
   function addMaterial(name, density, price, cuttingMaterial) {
-    if (!ownMaterials) return onAddMaterial(name, density, price, cuttingMaterial);
     saveOwn(() => addCncMaterial({ name, density, price, cuttingMaterial, userName }));
   }
   function linkMaterial(fullName, cuttingMaterial) {
-    const m = ownMaterials && ownByName(fullName);
-    if (!ownMaterials) return onLinkMaterial(fullName, cuttingMaterial);
+    const m = ownByName(fullName);
     if (m) saveOwn(() => saveCncMaterial({ id: m.id, cuttingMaterial, userName }));
   }
 
