@@ -225,7 +225,16 @@ with checks (setup_file, looks_for, found) as (
     ('setup-cnc-18-inside-tools.sql', 'cnc_tools row GEPI2 (the inside tools and thread insert packs on the Tools list)',
       exists (select 1 from public.cnc_tools where tool_key = 'GEPI2')),
     ('setup-cnc-19-own-materials.sql', 'table cnc_materials (the CNC tab''s own Materials list, own R/kg)',
-      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_materials'))
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'cnc_materials')),
+    ('setup-procurement-1-access.sql', 'column profiles.can_procure (the Procurement tick) and app_settings.ai_monthly_cap_usd',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'can_procure')
+      and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'app_settings' and column_name = 'ai_monthly_cap_usd')),
+    ('setup-procurement-2-requests.sql', 'table procurement_requests (the quote request register)',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'procurement_requests')),
+    ('setup-procurement-3-supplier-bank.sql', 'table supplier_payment_details and its change log',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'supplier_bank_changes')),
+    ('setup-claude-reader-1-log.sql', 'table ai_document_reads and function ai_start_read (Claude reads and limits)',
+      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'ai_start_read'))
 )
 select
   setup_file,

@@ -6585,3 +6585,403 @@ select name, full_name, density, price_per_kg,
        coalesce(cutting_material, '-- none: pick it on CNC -> Materials') as cutting_data
   from public.cnc_materials order by name;
 
+
+-- ============================================================
+-- setup-procurement-1-access.sql
+-- ============================================================
+-- Procurement page, step 1 of the SQL: who may use it, and the Claude limits.
+--
+-- Adds to each person in User Management:
+--   * a "Procurement" tick (can_procure). Only ticked people see the
+--     Procurement page. This counts for admins too: an admin without the
+--     tick does not see it.
+--   * "Claude documents a month" (ai_docs_per_month). 0 means the person
+--     cannot have documents read by Claude at all.
+-- Adds to the app-wide settings:
+--   * the monthly Claude spend cap for the whole app, US$15 to start
+--   * the shared mailboxes the Procurement page reads (sales@)
+--
+-- Nobody is ticked by this file. Heinrich ticks himself in User
+-- Management once the box is there. Only admins can change either one:
+-- the existing rules on profiles and app_settings already say so.
+--
+-- Run on PRACTICE first. Select nothing before pressing Run.
+-- Safe to run more than once.
+
+alter table public.profiles add column if not exists can_procure boolean not null default false;
+alter table public.profiles add column if not exists ai_docs_per_month integer not null default 0;
+
+alter table public.app_settings add column if not exists ai_monthly_cap_usd numeric(8,2) not null default 15;
+alter table public.app_settings add column if not exists procurement_shared_mailboxes text[] not null
+  default '{sales@ersupplies.co.za}';
+
+-- One place that knows whether the signed-in person has the Procurement
+-- tick. "security definer" lets the row rules read profiles on their behalf.
+create or replace function public.can_procure()
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $body$
+  select coalesce((select p.can_procure from public.profiles p where p.id = auth.uid()), false);
+$body$;
+
+grant execute on function public.can_procure() to authenticated;
+
+
+-- ============ Check ============
+
+select 'procurement access' as step,
+       case when exists (select 1 from information_schema.columns where table_schema = 'public'
+                         and table_name = 'profiles' and column_name = 'can_procure')
+             and exists (select 1 from information_schema.columns where table_schema = 'public'
+                         and table_name = 'app_settings' and column_name = 'ai_monthly_cap_usd')
+            then 'ready - cap US$' || (select ai_monthly_cap_usd from public.app_settings where id)
+            else 'SOMETHING IS MISSING - tell Claude' end as result;
+
+
+-- ============================================================
+-- setup-procurement-2-requests.sql
+-- ============================================================
+-- Procurement page, step 2 of the SQL: the quote request register.
+--
+-- One row per quote request sent to a supplier, as the PR-001.. register
+-- in the Procurement folder keeps it today.
+--
+-- Who sees a row:
+--   * a request from a person's own mailbox (Drawings@ for Heinrich) is
+--     theirs alone: owner_id is that person.
+--   * a request from a shared mailbox (sales@) has no owner_id and is seen
+--     by everyone with the Procurement tick.
+-- Nobody without the tick sees any row. A row is never deleted: a mail
+-- the page took for a request by mistake is marked "Not a request", so
+-- the next mailbox refresh does not bring it back.
+--
+-- Needs setup-procurement-1-access.sql first.
+-- Run on PRACTICE first. Select nothing before pressing Run.
+-- Safe to run more than once.
+
+create table if not exists public.procurement_requests (
+  id                  uuid primary key default gen_random_uuid(),
+  pr_number           text not null unique,
+  mailbox             text not null,
+  owner_id            uuid references auth.users(id) on delete set null,
+  supplier_id         text references public.master_suppliers(id) on delete set null,
+  supplier_name       text not null default '',
+  contact_email       text not null default '',
+  item                text not null default '',
+  qty                 text not null default '',
+  old_quote           text not null default '',
+  status              text not null default 'Sent' check (status in ('Draft', 'Sent', 'Reply',
+                        'Pro forma', 'Paid', 'Ordered', 'Received', 'Closed', 'Not a request')),
+  requested_at        timestamptz,
+  waiting_since       date,
+  chases              integer not null default 0,
+  notes               text not null default '',
+  conversation_id     text,
+  request_message_id  text,
+  reply_message_id    text,
+  reminder_message_id text,
+  created_at          timestamptz not null default now(),
+  created_by          text,
+  updated_at          timestamptz not null default now(),
+  updated_by          text
+);
+
+create unique index if not exists procurement_requests_message_idx
+  on public.procurement_requests (mailbox, request_message_id);
+create index if not exists procurement_requests_conversation_idx
+  on public.procurement_requests (conversation_id);
+
+-- A row is the person's own, or from a shared mailbox in app_settings.
+create or replace function public.procurement_row_visible(p_owner uuid, p_mailbox text)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $body$
+  select public.can_procure() and (
+    p_owner = auth.uid()
+    or (p_owner is null and lower(p_mailbox) = any (
+          select lower(m) from public.app_settings s, unnest(s.procurement_shared_mailboxes) m where s.id)));
+$body$;
+
+grant execute on function public.procurement_row_visible(uuid, text) to authenticated;
+
+alter table public.procurement_requests enable row level security;
+
+drop policy if exists "Procurement people read their requests" on public.procurement_requests;
+create policy "Procurement people read their requests" on public.procurement_requests
+  for select to authenticated using (public.procurement_row_visible(owner_id, mailbox));
+
+drop policy if exists "Procurement people add requests" on public.procurement_requests;
+create policy "Procurement people add requests" on public.procurement_requests
+  for insert to authenticated with check (public.procurement_row_visible(owner_id, mailbox));
+
+drop policy if exists "Procurement people update their requests" on public.procurement_requests;
+create policy "Procurement people update their requests" on public.procurement_requests
+  for update to authenticated
+  using (public.procurement_row_visible(owner_id, mailbox))
+  with check (public.procurement_row_visible(owner_id, mailbox));
+
+
+-- ============ Check ============
+
+select 'procurement requests' as step,
+       case when exists (select 1 from pg_policies where schemaname = 'public'
+                         and tablename = 'procurement_requests' and cmd = 'UPDATE')
+            then 'ready - ' || (select count(*) from public.procurement_requests) || ' requests'
+            else 'SOMETHING IS MISSING - tell Claude' end as result;
+
+
+-- ============================================================
+-- setup-procurement-3-supplier-bank.sql
+-- ============================================================
+-- Procurement page, step 3 of the SQL: each supplier's terms and bank details.
+--
+-- Kept in their own table, apart from master_suppliers, because the
+-- supplier list can be read and changed by everybody signed in, and bank
+-- details must not be:
+--   * people with the Procurement tick can read them
+--   * only an admin who also has the tick can add or change them
+--   * every add, change or removal is written to supplier_bank_changes,
+--     with who and when. That log cannot be edited by anyone, and only
+--     admins can read it.
+-- The page's fraud check compares the bank details on a supplier's quote
+-- or pro forma with the details here.
+--
+-- Needs setup-procurement-1-access.sql first.
+-- Run on PRACTICE first. Select nothing before pressing Run.
+-- Safe to run more than once.
+
+create table if not exists public.supplier_payment_details (
+  supplier_id     text primary key references public.master_suppliers(id) on delete cascade,
+  terms           text check (terms in ('Account', 'Pro forma')),
+  our_account_no  text not null default '',
+  bank_name       text not null default '',
+  account_holder  text not null default '',
+  account_number  text not null default '',
+  branch_code     text not null default '',
+  updated_by      text,
+  updated_by_user uuid default auth.uid(),
+  updated_at      timestamptz not null default now()
+);
+
+create table if not exists public.supplier_bank_changes (
+  id              uuid primary key default gen_random_uuid(),
+  supplier_id     text not null,
+  action          text not null,
+  old_details     jsonb,
+  new_details     jsonb,
+  changed_by_user uuid default auth.uid(),
+  changed_at      timestamptz not null default now()
+);
+
+create index if not exists supplier_bank_changes_supplier_idx
+  on public.supplier_bank_changes (supplier_id, changed_at desc);
+
+create or replace function public.log_supplier_bank_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $body$
+begin
+  insert into public.supplier_bank_changes (supplier_id, action, old_details, new_details)
+  values (coalesce(new.supplier_id, old.supplier_id), lower(tg_op),
+          case when tg_op = 'INSERT' then null else to_jsonb(old) end,
+          case when tg_op = 'DELETE' then null else to_jsonb(new) end);
+  return null;
+end;
+$body$;
+
+drop trigger if exists supplier_payment_details_log on public.supplier_payment_details;
+create trigger supplier_payment_details_log
+  after insert or update or delete on public.supplier_payment_details
+  for each row execute function public.log_supplier_bank_change();
+
+alter table public.supplier_payment_details enable row level security;
+alter table public.supplier_bank_changes enable row level security;
+
+drop policy if exists "Procurement people read supplier bank" on public.supplier_payment_details;
+create policy "Procurement people read supplier bank" on public.supplier_payment_details
+  for select to authenticated using (public.can_procure());
+
+drop policy if exists "Admins add supplier bank" on public.supplier_payment_details;
+create policy "Admins add supplier bank" on public.supplier_payment_details
+  for insert to authenticated with check (public.can_procure() and public.is_admin());
+
+drop policy if exists "Admins change supplier bank" on public.supplier_payment_details;
+create policy "Admins change supplier bank" on public.supplier_payment_details
+  for update to authenticated
+  using (public.can_procure() and public.is_admin())
+  with check (public.can_procure() and public.is_admin());
+
+drop policy if exists "Admins remove supplier bank" on public.supplier_payment_details;
+create policy "Admins remove supplier bank" on public.supplier_payment_details
+  for delete to authenticated using (public.can_procure() and public.is_admin());
+
+drop policy if exists "Admins read bank changes" on public.supplier_bank_changes;
+create policy "Admins read bank changes" on public.supplier_bank_changes
+  for select to authenticated using (public.is_admin());
+
+
+-- ============ Check ============
+
+select 'supplier bank details' as step,
+       case when exists (select 1 from pg_trigger where tgname = 'supplier_payment_details_log')
+            then 'ready - ' || (select count(*) from public.supplier_payment_details) || ' suppliers on file, every change logged'
+            else 'SOMETHING IS MISSING - tell Claude' end as result;
+
+
+-- ============================================================
+-- setup-claude-reader-1-log.sql
+-- ============================================================
+-- Claude document reader: the record of every read, and the limits check.
+--
+-- Every PDF sent to Claude (a supplier quote, a customer PO, a supplier
+-- invoice) gets one row here: who, when, which file, how many pages, what
+-- it cost. The Procurement page, New Job and the supplier invoice reader
+-- all use the same record and the same limits.
+--
+-- Nobody writes these rows from the browser. Only the server function that
+-- holds the Claude key can, through the two functions below. That stops
+-- anyone from wiping their own count. A person reads their own rows; an
+-- admin reads everyone's.
+--
+-- The limits, checked before every read, inside the database, so two reads
+-- at the same moment cannot both slip under the cap:
+--   * the whole app's spend this calendar month (South African time) stays
+--     under app_settings.ai_monthly_cap_usd
+--   * the person's reads this month stay under profiles.ai_docs_per_month
+--     (0 = not allowed)
+--
+-- Needs setup-procurement-1-access.sql first.
+-- Run on PRACTICE first. Select nothing before pressing Run.
+-- Safe to run more than once.
+
+create table if not exists public.ai_document_reads (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references auth.users(id) on delete cascade,
+  kind          text not null check (kind in ('supplier_quote', 'customer_po', 'supplier_invoice')),
+  file_name     text not null default '',
+  pages         integer,
+  status        text not null default 'started' check (status in ('started', 'done', 'failed')),
+  reserved_usd  numeric(10,4) not null default 0,
+  cost_usd      numeric(10,4),
+  model         text,
+  input_tokens  integer,
+  output_tokens integer,
+  error         text,
+  related_id    text,
+  created_at    timestamptz not null default now(),
+  finished_at   timestamptz
+);
+
+create index if not exists ai_document_reads_month_idx on public.ai_document_reads (created_at desc);
+create index if not exists ai_document_reads_user_idx on public.ai_document_reads (user_id, created_at desc);
+
+alter table public.ai_document_reads enable row level security;
+
+drop policy if exists "People read their own Claude reads" on public.ai_document_reads;
+create policy "People read their own Claude reads" on public.ai_document_reads
+  for select to authenticated using (user_id = auth.uid() or public.is_admin());
+
+-- Spend this month: finished reads at what they cost, reads still running
+-- at what was set aside for them (a read stuck for 15 minutes stops counting).
+create or replace function public.ai_month_spend()
+returns numeric
+language sql
+security definer
+stable
+set search_path = public
+as $body$
+  select coalesce(sum(case when r.status = 'started'
+                            then case when r.created_at > now() - interval '15 minutes' then r.reserved_usd else 0 end
+                            else coalesce(r.cost_usd, 0) end), 0)
+  from public.ai_document_reads r
+  where r.created_at >= date_trunc('month', now() at time zone 'Africa/Johannesburg') at time zone 'Africa/Johannesburg';
+$body$;
+
+grant execute on function public.ai_month_spend() to authenticated;
+
+-- Called by the server function before it sends a PDF to Claude. Refuses
+-- with a hint the app can show ('ai_app_cap', 'ai_person_off',
+-- 'ai_person_cap'), or records the read as started and returns its id.
+create or replace function public.ai_start_read(p_user uuid, p_kind text, p_file text,
+                                                p_pages integer, p_reserve_usd numeric)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $body$
+declare
+  v_cap numeric;
+  v_allowed integer;
+  v_used integer;
+  v_id uuid;
+begin
+  -- One read at a time passes this point, so the totals below stay true.
+  perform pg_advisory_xact_lock(hashtext('ai_document_reads'));
+
+  select ai_monthly_cap_usd into v_cap from public.app_settings where id;
+  if public.ai_month_spend() + p_reserve_usd > coalesce(v_cap, 0) then
+    raise exception 'The app''s Claude budget for this month is used up.'
+      using errcode = 'P0001', hint = 'ai_app_cap';
+  end if;
+
+  select ai_docs_per_month into v_allowed from public.profiles where id = p_user;
+  if coalesce(v_allowed, 0) <= 0 then
+    raise exception 'Claude reading is not switched on for you. Ask an admin.'
+      using errcode = 'P0001', hint = 'ai_person_off';
+  end if;
+
+  select count(*) into v_used from public.ai_document_reads
+  where user_id = p_user and status <> 'failed'
+    and created_at >= date_trunc('month', now() at time zone 'Africa/Johannesburg') at time zone 'Africa/Johannesburg';
+  if v_used >= v_allowed then
+    raise exception 'You have used your % Claude documents for this month.', v_allowed
+      using errcode = 'P0001', hint = 'ai_person_cap';
+  end if;
+
+  insert into public.ai_document_reads (user_id, kind, file_name, pages, reserved_usd)
+  values (p_user, p_kind, coalesce(p_file, ''), p_pages, p_reserve_usd)
+  returning id into v_id;
+  return v_id;
+end;
+$body$;
+
+-- Called by the server function when Claude has answered or failed.
+create or replace function public.ai_finish_read(p_id uuid, p_status text, p_cost_usd numeric,
+                                                 p_model text, p_input integer, p_output integer,
+                                                 p_error text)
+returns void
+language sql
+security definer
+set search_path = public
+as $body$
+  update public.ai_document_reads
+  set status = p_status, cost_usd = p_cost_usd, model = p_model, input_tokens = p_input,
+      output_tokens = p_output, error = p_error, finished_at = now()
+  where id = p_id and status = 'started';
+$body$;
+
+-- Only the server function (which signs in as service_role) may call these
+-- two. Supabase lets anybody call a public function unless told otherwise.
+revoke execute on function public.ai_start_read(uuid, text, text, integer, numeric) from public, anon, authenticated;
+revoke execute on function public.ai_finish_read(uuid, text, numeric, text, integer, integer, text) from public, anon, authenticated;
+grant execute on function public.ai_start_read(uuid, text, text, integer, numeric) to service_role;
+grant execute on function public.ai_finish_read(uuid, text, numeric, text, integer, integer, text) to service_role;
+
+
+-- ============ Check ============
+
+select 'Claude reader log' as step,
+       case when exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                         where n.nspname = 'public' and p.proname = 'ai_start_read')
+            then 'ready - spent this month US$' || public.ai_month_spend()
+                 || ' of US$' || (select ai_monthly_cap_usd from public.app_settings where id)
+            else 'SOMETHING IS MISSING - tell Claude' end as result;
+

@@ -130,6 +130,10 @@ ORDER=(
   setup-cnc-17-grade-cutting-data.sql
   setup-cnc-18-inside-tools.sql
   setup-cnc-19-own-materials.sql
+  setup-procurement-1-access.sql
+  setup-procurement-2-requests.sql
+  setup-procurement-3-supplier-bank.sql
+  setup-claude-reader-1-log.sql
 )
 
 OUT=setup-ALL.sql
