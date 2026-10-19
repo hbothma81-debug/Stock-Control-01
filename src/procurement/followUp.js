@@ -48,13 +48,17 @@ export async function sendFollowUp({ supabase, appUserId, userName, row, text })
   const subject = `Follow-up ${row.pr_number}: ${row.item || ""}`.trim();
 
   if (practice) {
-    await graph(pass, "POST", "/me/sendMail", {
-      message: graphMessage({
+    // graphMessage gives sendMail's whole body ({ message, saveToSentItems }).
+    await graph(
+      pass,
+      "POST",
+      "/me/sendMail",
+      graphMessage({
         to: [me],
         subject: `[PRACTICE] ${subject}`,
         body: `PRACTICE COPY. On the live app this would have gone as a reply in the request's thread, from ${row.mailbox}, to ${row.contact_email}.\n\n${text}`,
-      }),
-    });
+      })
+    );
   } else if (row.reply_message_id) {
     await graph(pass, "POST", `${base}/messages/${row.reply_message_id}/reply`, { comment: textToHtml(text) });
   } else {
@@ -67,7 +71,7 @@ export async function sendFollowUp({ supabase, appUserId, userName, row, text })
     if (requestId) {
       await graph(pass, "POST", `${base}/messages/${requestId}/replyAll`, { comment: textToHtml(text) });
     } else {
-      await graph(pass, "POST", `${base}/sendMail`, { message: graphMessage({ to: [row.contact_email], subject, body: text }) });
+      await graph(pass, "POST", `${base}/sendMail`, graphMessage({ to: [row.contact_email], subject, body: text }));
     }
   }
 
