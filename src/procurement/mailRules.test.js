@@ -9,7 +9,7 @@ const book = addressBook(
 );
 
 test("a price request to a known supplier becomes a request on that supplier", () => {
-  const r = quoteRequestFrom({ subject: "RE: Please quote 50mm 304 round bar", bodyPreview: "Hi Tash", toRecipients: [to("TashS@eurosteel.co.za")] }, book);
+  const r = quoteRequestFrom({ subject: "FW: Please quote 50mm 304 round bar", bodyPreview: "Hi Tash", toRecipients: [to("TashS@eurosteel.co.za")] }, book);
   assert.deepEqual(r, { supplier_id: "s1", supplier_name: "Eurosteel", contact_email: "tashs@eurosteel.co.za", item: "Please quote 50mm 304 round bar" });
 });
 
@@ -68,6 +68,29 @@ test("our reminders on later days are chases; the request itself is not", () => 
 test("nothing moves past Pro forma, and nothing moves without news", () => {
   assert.equal(threadUpdate({ ...sent, status: "Ordered" }, [fromSupplier("2026-10-16T08:00:00Z")], ""), null);
   assert.equal(threadUpdate(sent, [], ""), null);
+});
+
+// The three faults of the first practice read, 19 Oct 2026, as they came.
+const exchangeName = "/O=EXCHANGELABS/OU=EXCHANGE ADMINISTRATIVE GROUP (FYDIBOHF23SPDLT)/CN=RECIPIENTS/CN=402A68C5207D44A99B111DD3B825CE01-DRAWINGS";
+
+test("our own request, sent under Exchange's internal name, is not a supplier reply (PR-010)", () => {
+  const seeded = { status: "Sent", requested_at: "2026-10-19T00:00:00+00:00", chases: 0 };
+  const own = { id: "o1", from: to(exchangeName), subject: "Quote request – 304 stainless fittings (300 lb)", receivedDateTime: "2026-10-19T08:15:00Z" };
+  assert.equal(threadUpdate(seeded, [own], ""), null);
+});
+
+test("the supplier forwarding our request inside their company is not an answer (PR-011)", () => {
+  const seeded = { status: "Sent", requested_at: "2026-10-19T00:00:00+00:00", chases: 0 };
+  const thread = [
+    { id: "o1", from: to(exchangeName), subject: "Quote request - 4x heavy duty castors 1500kg", receivedDateTime: "2026-10-19T11:06:00Z" },
+    { id: "f1", from: to("roland@nationalcastors.co.za"), subject: "FW: Quote request - 4x heavy duty castors 1500kg", receivedDateTime: "2026-10-19T11:42:29Z" },
+  ];
+  assert.equal(threadUpdate(seeded, thread, "Pro forma"), null);
+  assert.equal(threadUpdate(seeded, [{ ...thread[1], subject: "Automatic reply: Quote request" }], ""), null);
+});
+
+test("answering a customer's RFQ is not a new request (PR-012)", () => {
+  assert.equal(quoteRequestFrom({ subject: "RE: RFQ", bodyPreview: "Please find our quotation attached", toRecipients: [to("johanb@bwie.co.za", "Johan Burger")] }, book), null);
 });
 
 test("PR numbers count on", () => {

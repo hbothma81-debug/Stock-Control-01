@@ -20,7 +20,13 @@ const PRO_FORMA = /(pro[\s-]?forma|proforma|\binvoice\b|\binv[\s_-]?\d)/i;
 
 export const addressOf = (r) => (r?.emailAddress?.address || "").trim().toLowerCase();
 export const domainOf = (address) => (address.split("@")[1] || "").toLowerCase();
-export const isOurs = (address) => domainOf(address) === OUR_DOMAIN || domainOf(address).endsWith(`.${OUR_DOMAIN}`);
+// Ours: an @ersupplies.co.za address, or no address at all. Microsoft gives
+// the sender of a mail in the person's own mailbox as an internal Exchange
+// name ("/O=EXCHANGELABS/.../CN=...-DRAWINGS"), not an email address (found
+// on the first practice read, 19 Oct 2026: it made our own requests look
+// like supplier replies). Every outside sender has an @.
+export const isOurs = (address) =>
+  !String(address || "").includes("@") || domainOf(address) === OUR_DOMAIN || domainOf(address).endsWith(`.${OUR_DOMAIN}`);
 
 // Subject without RE:/FW:/FWD: in front, for the request's item line.
 export function cleanSubject(subject) {
@@ -47,6 +53,11 @@ export function addressBook(suppliers, customerEmails) {
 // A sent mail (Graph message: subject, bodyPreview, toRecipients) -> the
 // request it starts, or null when it is not a quote request.
 export function quoteRequestFrom(message, book) {
+  // A new request starts a mail. "RE:" is an answer in somebody else's
+  // thread: most often ERS answering a customer's RFQ with a quote (PR-012
+  // on the first practice read). Our own reminders in a request's thread are
+  // found through that thread, not here.
+  if (/^\s*(re|aw)\s*:/i.test(message.subject || "")) return null;
   const text = `${message.subject || ""}\n${message.bodyPreview || ""}`;
   if (!ASKS_FOR_PRICE.test(text) || IS_ORDER_OR_ACCOUNTS.test(text)) return null;
   const outside = (message.toRecipients || []).filter((r) => addressOf(r) && !isOurs(addressOf(r)));
@@ -92,7 +103,15 @@ export function threadUpdate(row, thread, terms) {
   const when = (m) => m.receivedDateTime || m.sentDateTime || "";
   const after = row.requested_at || "";
   const msgs = [...(thread || [])].filter((m) => when(m) > after).sort((a, b) => (when(a) < when(b) ? -1 : 1));
-  const fromSupplier = msgs.filter((m) => addressOf(m.from) && !isOurs(addressOf(m.from)));
+  // A supplier's mail is an answer to us unless it is them forwarding our
+  // request inside their own company (FW:, PR-011 on the first practice
+  // read), or an automatic one (out of office, read and delivery receipts).
+  const fromSupplier = msgs.filter(
+    (m) =>
+      !isOurs(addressOf(m.from)) &&
+      !/^\s*(fw|fwd|wg)\s*:/i.test(m.subject || "") &&
+      !/^\s*(automatic reply|auto(matic)?[- ]?reply|out of (the )?office|read:|delivered:|undeliverable|not read:)/i.test(m.subject || "")
+  );
   const isProFormaTerms = (terms || "").toLowerCase().startsWith("pro");
   const day = (m) => todayInSA(Date.parse(when(m)));
 

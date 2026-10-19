@@ -193,7 +193,14 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
               key={m.key}
               type="button"
               className="stk-btn"
-              style={{ ...S.chip, ...(m.key === activeMailbox ? S.chipActive : {}) }}
+              // The whole border, never borderColor beside it: React warns
+              // when a shorthand and its part change on the same element.
+              style={{
+                ...S.chip,
+                ...(m.key === activeMailbox
+                  ? { background: S.chipActive.background, color: S.chipActive.color, fontWeight: S.chipActive.fontWeight, border: `1px solid ${C.accentFinished}` }
+                  : {}),
+              }}
               onClick={() => setMailbox(m.key)}
             >
               {m.label} ({m.count})
