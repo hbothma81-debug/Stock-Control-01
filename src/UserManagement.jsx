@@ -237,6 +237,39 @@ export default function UserManagement({
               />
               Is a Shortage Handler (always notified of shortages, sees the Shortage Center tab)
             </label>
+            {/* Shown for admins too: an admin without this tick does not see
+                Quote requests (setup-procurement-1-access.sql). Hidden on a
+                database without that file, where it could not save. */}
+            {p.canProcure !== undefined && (
+              <label style={S.deptToggleItem}>
+                <input
+                  type="checkbox"
+                  checked={!!p.canProcure}
+                  onChange={(e) => updatePersonField(p.id, "canProcure", e.target.checked)}
+                />
+                Procurement (sees Quote requests: supplier quote requests and follow-ups)
+              </label>
+            )}
+            {/* How many PDFs Claude may read for this person a month; 0 = none.
+                The database checks it before every read, beside the whole
+                app's monthly cap (setup-claude-reader-1-log.sql). */}
+            {p.aiDocsPerMonth !== undefined && (
+              <label style={{ ...S.deptToggleItem, gap: 8 }}>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  style={{ ...S.input, width: 80, padding: "4px 8px" }}
+                  defaultValue={p.aiDocsPerMonth}
+                  key={`ai-${p.id}-${p.aiDocsPerMonth}`}
+                  onBlur={(e) => {
+                    const n = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                    if (n !== p.aiDocsPerMonth) updatePersonField(p.id, "aiDocsPerMonth", n);
+                  }}
+                />
+                Claude documents a month (0 = cannot have documents read by Claude)
+              </label>
+            )}
             {/* Which shift this person works. Nothing is enforced yet --
                 setting it changes nothing about their day until the lockout
                 itself is built -- so the whole shop can be put on shifts and

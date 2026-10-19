@@ -184,6 +184,7 @@ import CustomerStock from "./stock/CustomerStock.jsx";
 import { useDrawingsState, useDrawings } from "./drawings/useDrawings.jsx";
 import { DrawingsTab, DrawingUploadPopup } from "./drawings/DrawingsScreens.jsx";
 import CncTab from "./cnc/CncTab.jsx";
+import ProcurementPage from "./procurement/ProcurementPage.jsx";
 import { useAssetsState, useAssets } from "./assets/useAssets.jsx";
 import { AssetRemovePopup, AssetHistoryPopup, ServiceNowPopup, RepairListPopup } from "./assets/AssetPopups.jsx";
 
@@ -2928,6 +2929,7 @@ export default function StockControl() {
                 allowedProcessTypes: data.allowed_process_types || [],
                 isSalesPerson: !!data.is_sales_person,
                 isShortageHandler: !!data.is_shortage_handler,
+                canProcure: !!data.can_procure,
                 theme: data.theme || "dark",
                 department: data.department || "",
               }
@@ -11568,6 +11570,10 @@ export default function StockControl() {
         allowedProcessTypes: d.allowed_process_types || [],
         isSalesPerson: !!d.is_sales_person,
         isShortageHandler: !!d.is_shortage_handler,
+        // Left undefined on a database without setup-procurement-1-access.sql,
+        // so User Management hides the two boxes there instead of failing to save.
+        canProcure: "can_procure" in d ? !!d.can_procure : undefined,
+        aiDocsPerMonth: "ai_docs_per_month" in d ? Number(d.ai_docs_per_month) || 0 : undefined,
         shiftId: d.shift_id || null,
         canManageShifts: !!d.can_manage_shifts,
         department: d.department || "",
@@ -11592,6 +11598,8 @@ export default function StockControl() {
     allowedProcessTypes: "allowed_process_types",
     isSalesPerson: "is_sales_person",
     isShortageHandler: "is_shortage_handler",
+    canProcure: "can_procure",
+    aiDocsPerMonth: "ai_docs_per_month",
     shiftId: "shift_id",
     canManageShifts: "can_manage_shifts",
     theme: "theme",
@@ -11745,6 +11753,9 @@ export default function StockControl() {
   }, [profile, people]);
 
   function canView(section) {
+    // Quote requests follow the Procurement tick alone, for admins too: the
+    // database shows the rows to ticked people only (can_procure()).
+    if (section === "procurement") return !!profile?.canProcure;
     if (isAdmin) return true;
     if (section === "requisitions") return !!profile?.canRequisition || !!profile?.canManageRequisitions;
     if (section === "purchaseOrders") return !!profile?.canManageRequisitions || !!profile?.canRaisePO;
@@ -17857,6 +17868,11 @@ export default function StockControl() {
       ) : tab === "drawings" ? (
         <ErrorBoundary key="drawings" box what="the Drawings tab">
           <DrawingsTab ctx={drawingsCtx} />
+        </ErrorBoundary>
+      ) : tab === "procurement" ? (
+        // Quote requests (src/procurement): reads procurement_requests itself.
+        <ErrorBoundary key="procurement" box what="the Quote requests tab">
+          <ProcurementPage suppliers={master.suppliers} currentUserId={currentUser?.id || null} />
         </ErrorBoundary>
       ) : tab === "cnc" ? (
         // The CNC module (src/cnc): it reads and saves everything itself,
