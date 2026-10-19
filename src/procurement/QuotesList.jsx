@@ -61,7 +61,7 @@ export function QuoteLines({ quotes, onOpen, onReadAgain, raisePoFor, showSuppli
           </button>
           {raisePoFor?.(q) && (
             <button type="button" className="stk-btn" style={S.reqActionBtnAlertOn} onClick={raisePoFor(q)}>
-              <ShoppingCart size={12} /> Raise PO from this quote
+              <ShoppingCart size={12} /> Create PO from quote
             </button>
           )}
         </div>

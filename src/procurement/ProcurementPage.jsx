@@ -27,6 +27,7 @@ import { sweepMailboxes } from "./mailSweep.js";
 import { emailIsSetUp, outlookErrorText } from "../email/outlook.js";
 import SupplierList from "./SupplierList.jsx";
 import QuotesTab, { QuoteLines } from "./QuotesList.jsx";
+import ItemsList from "./ItemsList.jsx";
 
 const OPEN_STATUSES = ["Draft", "Sent", "Reply", "Pro forma", "Paid", "Ordered"];
 const RECENT_DAYS = 90;
@@ -70,6 +71,91 @@ function Detail({ label, children }) {
 }
 
 const fmtDate = (d) => (d ? String(d).slice(0, 10) : "");
+
+// Close quote: a request that will not be ordered (Heinrich, 19 Oct 2026:
+// "Just a close quote button. Basic"; the reason "Optional"). It goes to
+// Done as Closed, "No order" and the reason first in its notes; its quotes
+// stay on the supplier's page. Reopen puts it back. Open line (1), Close
+// quote (2), Save (3).
+function CloseQuote({ row, userName, hasQuote, onSaved }) {
+  const [reason, setReason] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const closable = ["Draft", "Sent", "Reply", "Pro forma", "Paid"].includes(row.status);
+  const reopenable = row.status === "Closed" && !row.po_number;
+  if (!closable && !reopenable) return null;
+
+  async function save(fields) {
+    setBusy(true);
+    const { data, error } = await supabase
+      .from("procurement_requests")
+      .update({ ...fields, updated_at: new Date().toISOString(), updated_by: userName })
+      .eq("id", row.id)
+      .select()
+      .single();
+    setBusy(false);
+    if (error || !data) {
+      alert("That did not save. Check your connection and try again.");
+      return;
+    }
+    setReason(null);
+    onSaved(data);
+  }
+
+  if (reopenable) {
+    return (
+      <button
+        type="button"
+        className="stk-btn"
+        style={{ ...S.reqActionBtnMuted, marginTop: 8 }}
+        disabled={busy}
+        onClick={() =>
+          save({
+            status: hasQuote ? "Reply" : "Sent",
+            waiting_since: hasQuote ? null : todayInSA(Date.now()),
+            notes: (row.notes || "").replace(/^No order[^\n]*\n?/, ""),
+          })
+        }
+      >
+        Reopen
+      </button>
+    );
+  }
+  if (reason === null) {
+    return (
+      <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 8 }} onClick={() => setReason("")}>
+        Close quote
+      </button>
+    );
+  }
+  return (
+    <div style={{ marginTop: 8 }}>
+      <input
+        style={S.input}
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="Why, if you want to say (optional): too expensive, job cancelled…"
+        autoFocus
+      />
+      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+        <button
+          type="button"
+          className="stk-btn"
+          style={S.reqActionBtnAlertOn}
+          disabled={busy}
+          onClick={() => {
+            const line = `No order${reason.trim() ? `: ${reason.trim()}` : ""} (closed ${todayInSA(Date.now())}${userName ? ` by ${userName}` : ""})`;
+            save({ status: "Closed", waiting_since: null, notes: row.notes ? `${line}\n${row.notes}` : line });
+          }}
+        >
+          {busy ? "Saving…" : "Save"}
+        </button>
+        <button type="button" className="stk-btn" style={S.reqActionBtnMuted} disabled={busy} onClick={() => setReason(null)}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // Send follow-up, on every line waiting on the supplier (Heinrich, 19 Oct
 // 2026: "every line"), stronger once the reminder is due. After two chases
@@ -146,6 +232,7 @@ function FollowUp({ row, supplier, c, userName, currentUserId, onSent }) {
 const VIEWS = [
   { key: "requests", label: "Quote requests" },
   { key: "quotes", label: "Quotes" },
+  { key: "items", label: "Items quoted" },
   { key: "suppliers", label: "Supplier list" },
 ];
 // Saved quotes loaded with the page: the newest, never the whole table.
@@ -162,7 +249,7 @@ const chipStyle = (active) => ({
 
 // supplierEdits: App's own supplier functions (the ones Stock Manager uses),
 // so a change here saves exactly as one made there.
-export default function ProcurementPage({ suppliers, currentUserId, userName, customerEmails, canEditSuppliers, supplierEdits, openPdf, onRaisePo }) {
+export default function ProcurementPage({ suppliers, currentUserId, userName, customerEmails, canEditSuppliers, supplierEdits, openPdf, onRaisePo, onAddStock }) {
   const [view, setView] = useState("requests");
   const [rows, setRows] = useState(null);
   const [quotes, setQuotes] = useState(null);
@@ -299,14 +386,20 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
     return () => window.removeEventListener("procurement-requests-changed", again);
   }, [fetchRows]);
 
-  // Raise PO is offered on a read quote with lines whose request is not on
-  // a PO yet.
+  // Create PO from quote: on every read quote with lines, any time, so
+  // ordering again later is one press (Heinrich, 19 Oct 2026). The request
+  // moves to Ordered only while it is still open and not on a PO.
+  const requestStillOpen = (q) => {
+    const req = (rows || []).find((r) => r.id === q.request_id);
+    return !!req && !req.po_number && ["Sent", "Reply", "Pro forma", "Paid"].includes(req.status);
+  };
   const raisePoFor = (q) => {
     if (!onRaisePo || q.read_status !== "read" || !(q.lines || []).length) return null;
-    const req = (rows || []).find((r) => r.id === q.request_id);
-    if (req && (req.po_number || ["Ordered", "Received", "Closed", "Not a request"].includes(req.status))) return null;
-    return () => onRaisePo(q);
+    return () => onRaisePo(q, { linkRequest: requestStillOpen(q) });
   };
+  // One item from Items quoted on its own PO.
+  const raiseItemPo = onRaisePo ? (q, line) => onRaisePo(q, { lines: [line], linkRequest: requestStillOpen(q) }) : null;
+  const addStock = onAddStock || null;
 
   useEffect(() => {
     load(false);
@@ -480,6 +573,12 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
                   currentUserId={currentUserId}
                   onSent={(saved) => setRows((prev) => prev.map((x) => (x.id === saved.id ? saved : x)))}
                 />
+                <CloseQuote
+                  row={r}
+                  userName={userName}
+                  hasQuote={!!r.reply_message_id || (quotes || []).some((q) => q.request_id === r.id)}
+                  onSaved={(saved) => setRows((prev) => prev.map((x) => (x.id === saved.id ? saved : x)))}
+                />
                 {["Draft", "Sent"].includes(r.status) && (
                   <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 8 }} onClick={() => setStatus(r, "Not a request")}>
                     Not a request
@@ -500,12 +599,16 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
 
       {view === "quotes" && <QuotesTab quotes={quotes} onOpen={openQuote} onReadAgain={readAgain} raisePoFor={raisePoFor} />}
 
+      {view === "items" && <ItemsList quotes={quotes} onOpenQuote={openQuote} raiseItemPo={raiseItemPo} addStock={addStock} />}
+
       {view === "suppliers" && (
         <SupplierList
           quotes={quotes}
           onOpenQuote={openQuote}
           onReadAgain={readAgain}
           raisePoFor={raisePoFor}
+          raiseItemPo={raiseItemPo}
+          addStock={addStock}
           suppliers={suppliers}
           requests={rows}
           canEdit={canEditSuppliers}

@@ -2233,6 +2233,9 @@ export default function StockControl() {
   const [customerFilter, setCustomerFilter] = useState(null);
   const [sectionTypeFilter, setSectionTypeFilter] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
+  // What "Add as stock item" on a quoted item filled in (openAddFromQuote), kept
+  // while the form is open so picking another Category does not lose it.
+  const [addPrefill, setAddPrefill] = useState(null);
   const [saveState, setSaveState] = useState("idle");
   // A brief inline "✓ Saved" confirmation next to whichever field just
   // saved successfully — { key, at } so a field can check "was that me,
@@ -8608,11 +8611,14 @@ export default function StockControl() {
   // filled with the quote's supplier, lines and number. Saving it moves the
   // quote request to Ordered (usePurchasing, procurementRequestId). A
   // supplier not on the list yet is added, as the Buy-outs tab does.
-  function raisePoFromQuote(quote) {
+  // options.lines: only these lines (one item from Items quoted); options.
+  // linkRequest: move the quote request to Ordered when the PO is saved (only
+  // while it is still open; a re-order later leaves it as it is).
+  function raisePoFromQuote(quote, options = {}) {
     let supplier = (master.suppliers || []).find((s) => s.id === quote.supplier_id);
     if (!supplier) supplier = addSupplierFromJob(quote.supplier_name);
     if (!supplier) return;
-    const lines = (quote.lines || []).filter((l) => (l.description || "").trim());
+    const lines = (options.lines || quote.lines || []).filter((l) => (l.description || "").trim());
     openPoBuilder(
       [],
       supplier.id,
@@ -8625,8 +8631,29 @@ export default function StockControl() {
     setPoBuilder((b) => ({
       ...b,
       reference: quote.quote_number ? `Your quote ${quote.quote_number}` : quote.pr_number || "",
-      procurementRequestId: quote.request_id || null,
+      procurementRequestId: options.linkRequest ? quote.request_id || null : null,
     }));
+  }
+
+  // "Add as stock item" on an item a supplier quoted (Suppliers page,
+  // Heinrich 19 Oct 2026: "Yes"): the usual New stock item form, with the
+  // description, supplier and price ex VAT filled in. Stores to start; the
+  // Category buttons keep these three when another division is picked.
+  function openAddFromQuote(quote, line) {
+    const qty = Number(line.qty) > 0 ? Number(line.qty) : 1;
+    const unit = line.unit_price_ex_vat != null ? line.unit_price_ex_vat : line.line_total_ex_vat != null ? line.line_total_ex_vat / qty : "";
+    const sup = resolveField((master.suppliers || []).map((x) => x.name), quote.supplier_name || "");
+    const prefill = {
+      name: line.description || "",
+      supplier: sup.field,
+      customSupplier: sup.custom,
+      value: unit === "" ? "" : String(Math.round(unit * 100) / 100),
+    };
+    setAddPrefill(prefill);
+    setForm({ ...emptyForm, id: uid(), mainCat: "stores", ...prefill });
+    setEditingId(null);
+    setAllowDuplicate(false);
+    setShowAdd(true);
   }
 
   // ---- Cut to size ----
@@ -13895,6 +13922,7 @@ export default function StockControl() {
   }
 
   function closeAdd() {
+    setAddPrefill(null);
     setForm({ ...emptyForm, mainCat: tab, trackLength: tab === "structural" });
     setEditingId(null);
     setAllowDuplicate(false);
@@ -17905,6 +17933,7 @@ export default function StockControl() {
             customerEmails={Object.values(master.customerContacts || {}).flat().map((c) => c.email).filter(Boolean)}
             canEditSuppliers={isAdmin || canAccessStockManager}
             onRaisePo={canRaisePO ? raisePoFromQuote : null}
+            onAddStock={canAdd ? openAddFromQuote : null}
             openPdf={(url, name) => {
               setPreviewItem({ attachmentType: "pdf", attachmentName: name || "Quote.pdf" });
               setPreviewData(url);
@@ -18734,7 +18763,7 @@ export default function StockControl() {
                   key={t.key}
                   className="stk-btn"
                   disabled={!!editingId || allowDuplicate}
-                  onClick={() => setForm({ ...emptyForm, mainCat: t.key, trackLength: t.key === "structural" })}
+                  onClick={() => setForm({ ...emptyForm, mainCat: t.key, trackLength: t.key === "structural", ...(addPrefill || {}) })}
                   style={{
                     ...S.segBtn,
                     ...(form.mainCat === t.key ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
