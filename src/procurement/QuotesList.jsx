@@ -8,7 +8,7 @@
 // says "not read: totals not checked", never shown as checked.
 
 import { useMemo, useState } from "react";
-import { FileText } from "lucide-react";
+import { FileText, ShoppingCart } from "lucide-react";
 import Section from "../Section.jsx";
 import RecordRow from "../RecordRow.jsx";
 import { C, S } from "../theme.js";
@@ -35,7 +35,7 @@ function Line({ label, children }) {
 }
 
 // The quotes themselves, with no heading: for a request line or a card.
-export function QuoteLines({ quotes, onOpen, onReadAgain, showSupplier = true }) {
+export function QuoteLines({ quotes, onOpen, onReadAgain, raisePoFor, showSupplier = true }) {
   if (!quotes?.length) return null;
   return quotes.map((q) => {
     const st = STATUS[q.read_status] || STATUS.waiting;
@@ -55,9 +55,16 @@ export function QuoteLines({ quotes, onOpen, onReadAgain, showSupplier = true })
         summary={summary || q.file_name}
         right={<span style={{ fontSize: 12, fontWeight: 700, color: st.color, whiteSpace: "nowrap" }}>{st.label}</span>}
       >
-        <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => onOpen(q)}>
-          <FileText size={12} /> Open {q.file_name}
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => onOpen(q)}>
+            <FileText size={12} /> Open {q.file_name}
+          </button>
+          {raisePoFor?.(q) && (
+            <button type="button" className="stk-btn" style={S.reqActionBtnAlertOn} onClick={raisePoFor(q)}>
+              <ShoppingCart size={12} /> Raise PO from this quote
+            </button>
+          )}
+        </div>
         {q.read_status !== "read" && (
           <div style={{ color: q.read_status === "waiting" ? C.muted : C.danger, fontSize: 14, marginTop: 6 }}>
             {q.read_status === "waiting" ? "Claude has not read this PDF yet." : `PDF not read: totals not checked.${q.read_note ? ` (${q.read_note})` : ""}`}
@@ -84,7 +91,7 @@ export function QuoteLines({ quotes, onOpen, onReadAgain, showSupplier = true })
 }
 
 // The Quotes tab: every saved quote, newest first, one search box.
-export default function QuotesTab({ quotes, onOpen, onReadAgain }) {
+export default function QuotesTab({ quotes, onOpen, onReadAgain, raisePoFor }) {
   const [search, setSearch] = useState("");
   const shown = useMemo(() => {
     const words = search.toLowerCase().split(/\s+/).filter(Boolean);
@@ -110,7 +117,7 @@ export default function QuotesTab({ quotes, onOpen, onReadAgain }) {
       )}
       {shown.length > 0 && (
         <Section title="Quotes" count={shown.length} defaultOpen>
-          <QuoteLines quotes={shown} onOpen={onOpen} onReadAgain={onReadAgain} />
+          <QuoteLines quotes={shown} onOpen={onOpen} onReadAgain={onReadAgain} raisePoFor={raisePoFor} />
         </Section>
       )}
     </div>

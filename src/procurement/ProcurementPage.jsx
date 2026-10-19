@@ -162,7 +162,7 @@ const chipStyle = (active) => ({
 
 // supplierEdits: App's own supplier functions (the ones Stock Manager uses),
 // so a change here saves exactly as one made there.
-export default function ProcurementPage({ suppliers, currentUserId, userName, customerEmails, canEditSuppliers, supplierEdits, openPdf }) {
+export default function ProcurementPage({ suppliers, currentUserId, userName, customerEmails, canEditSuppliers, supplierEdits, openPdf, onRaisePo }) {
   const [view, setView] = useState("requests");
   const [rows, setRows] = useState(null);
   const [quotes, setQuotes] = useState(null);
@@ -291,6 +291,22 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
     },
     [fetchRows, fetchQuotes, readWaiting, currentUserId, userName, suppliers, customerEmails]
   );
+
+  // A PO raised from a quote moved its request on (usePurchasing): show it.
+  useEffect(() => {
+    const again = () => fetchRows().then(setRows).catch(() => {});
+    window.addEventListener("procurement-requests-changed", again);
+    return () => window.removeEventListener("procurement-requests-changed", again);
+  }, [fetchRows]);
+
+  // Raise PO is offered on a read quote with lines whose request is not on
+  // a PO yet.
+  const raisePoFor = (q) => {
+    if (!onRaisePo || q.read_status !== "read" || !(q.lines || []).length) return null;
+    const req = (rows || []).find((r) => r.id === q.request_id);
+    if (req && (req.po_number || ["Ordered", "Received", "Closed", "Not a request"].includes(req.status))) return null;
+    return () => onRaisePo(q);
+  };
 
   useEffect(() => {
     load(false);
@@ -448,11 +464,12 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
                 <Detail label="Our account no">{supplier?.accountNo || ""}</Detail>
                 <Detail label="Phone">{supplier?.phone || ""}</Detail>
                 <Detail label="Old quote">{r.old_quote}</Detail>
+                <Detail label="On PO">{r.po_number}</Detail>
                 <Detail label="Notes">{r.notes}</Detail>
                 {(quotes || []).some((q) => q.request_id === r.id) && (
                   <div style={{ marginTop: 8 }}>
                     <label style={S.label}>Quotes received</label>
-                    <QuoteLines quotes={quotes.filter((q) => q.request_id === r.id)} onOpen={openQuote} onReadAgain={readAgain} showSupplier={false} />
+                    <QuoteLines quotes={quotes.filter((q) => q.request_id === r.id)} onOpen={openQuote} onReadAgain={readAgain} raisePoFor={raisePoFor} showSupplier={false} />
                   </div>
                 )}
                 <FollowUp
@@ -481,13 +498,14 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
         </>
       )}
 
-      {view === "quotes" && <QuotesTab quotes={quotes} onOpen={openQuote} onReadAgain={readAgain} />}
+      {view === "quotes" && <QuotesTab quotes={quotes} onOpen={openQuote} onReadAgain={readAgain} raisePoFor={raisePoFor} />}
 
       {view === "suppliers" && (
         <SupplierList
           quotes={quotes}
           onOpenQuote={openQuote}
           onReadAgain={readAgain}
+          raisePoFor={raisePoFor}
           suppliers={suppliers}
           requests={rows}
           canEdit={canEditSuppliers}

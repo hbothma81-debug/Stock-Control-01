@@ -236,7 +236,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-claude-reader-1-log.sql', 'table ai_document_reads and function ai_start_read (Claude reads and limits)',
       exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'ai_start_read')),
     ('setup-procurement-4-quotes.sql', 'table supplier_quotes and the supplier-quotes file store',
-      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'supplier_quotes'))
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'supplier_quotes')),
+    ('setup-procurement-5-po-link.sql', 'columns procurement_requests.po_id and po_number (the PO a quote request became)',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'procurement_requests' and column_name = 'po_number'))
 )
 select
   setup_file,

@@ -32,7 +32,7 @@ function Field({ label, value, canEdit, onChange, placeholder }) {
   );
 }
 
-export default function SupplierList({ suppliers, requests, quotes, onOpenQuote, onReadAgain, canEdit, onField, onAddSupplier, onAddContact, onContactField, onRemoveContact }) {
+export default function SupplierList({ suppliers, requests, quotes, onOpenQuote, onReadAgain, raisePoFor, canEdit, onField, onAddSupplier, onAddContact, onContactField, onRemoveContact }) {
   const [search, setSearch] = useState("");
 
   // Open requests per supplier, shown on the line.
@@ -114,7 +114,7 @@ export default function SupplierList({ suppliers, requests, quotes, onOpenQuote,
                   theirs.length > 0 && (
                     <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
                       <label style={S.label}>Their quotes ({theirs.length}), newest first</label>
-                      <QuoteLines quotes={theirs} onOpen={onOpenQuote} onReadAgain={onReadAgain} showSupplier={false} />
+                      <QuoteLines quotes={theirs} onOpen={onOpenQuote} onReadAgain={onReadAgain} raisePoFor={raisePoFor} showSupplier={false} />
                     </div>
                   )
                 );

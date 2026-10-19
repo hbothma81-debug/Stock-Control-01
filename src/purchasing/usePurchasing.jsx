@@ -788,6 +788,18 @@ export function usePurchasing(deps) {
       )
     );
     allocateReceivedToJob(receivingPo, landedLines, timestamp);
+    // A quote request that became this PO is now Received (Suppliers page;
+    // setup-procurement-5-po-link.sql). Nothing happens without the columns.
+    if (supabase) {
+      supabase
+        .from("procurement_requests")
+        .update({ status: "Received", updated_at: timestamp, updated_by: roleLabel })
+        .eq("po_id", receivingPo.id)
+        .eq("status", "Ordered")
+        .then(({ error }) => {
+          if (error && !/po_id/.test(error.message || "")) console.error("The quote request was not moved to Received:", error);
+        });
+    }
     closeReceiving();
   }
 
@@ -1416,6 +1428,28 @@ export function usePurchasing(deps) {
             logJobEvent(stampedJobId, "PO raised", `${po.poNumber} — ${po.supplierName}, ${validLines.length} line${validLines.length === 1 ? "" : "s"}`);
             if (jobDetail?.job.id === stampedJobId) openJobDetail(jobDetail.job);
           }
+        });
+    }
+    // A PO raised from a saved supplier quote (Suppliers page, src/procurement):
+    // its quote request moves to Ordered and remembers the PO, so receiving
+    // it can move the request to Received (setup-procurement-5-po-link.sql;
+    // Heinrich, 19 Oct 2026). On a database without those two columns the
+    // request still moves to Ordered.
+    if (poBuilder.procurementRequestId && supabase) {
+      const requestId = poBuilder.procurementRequestId;
+      const stamp = { status: "Ordered", updated_at: new Date().toISOString(), updated_by: roleLabel };
+      const move = (fields) =>
+        supabase
+          .from("procurement_requests")
+          .update(fields)
+          .eq("id", requestId)
+          .in("status", ["Sent", "Reply", "Pro forma", "Paid"])
+          .select("id");
+      move({ ...stamp, po_id: po.id, po_number: po.poNumber })
+        .then(({ error }) => (error && /po_id|po_number/.test(error.message || "") ? move(stamp) : { error }))
+        .then(({ error } = {}) => {
+          if (error) console.error(`${po.poNumber} was raised, but its quote request was not moved to Ordered:`, error);
+          window.dispatchEvent(new Event("procurement-requests-changed"));
         });
     }
     // Bundling requisitions into a PO is the "ordering" step — move them on

@@ -8604,6 +8604,31 @@ export default function StockControl() {
     }));
   }
 
+  // A PO from a saved supplier quote (Suppliers page): the usual PO window,
+  // filled with the quote's supplier, lines and number. Saving it moves the
+  // quote request to Ordered (usePurchasing, procurementRequestId). A
+  // supplier not on the list yet is added, as the Buy-outs tab does.
+  function raisePoFromQuote(quote) {
+    let supplier = (master.suppliers || []).find((s) => s.id === quote.supplier_id);
+    if (!supplier) supplier = addSupplierFromJob(quote.supplier_name);
+    if (!supplier) return;
+    const lines = (quote.lines || []).filter((l) => (l.description || "").trim());
+    openPoBuilder(
+      [],
+      supplier.id,
+      lines.map((l) => {
+        const qty = Number(l.qty) > 0 ? Number(l.qty) : 1;
+        const unit = l.unit_price_ex_vat != null ? l.unit_price_ex_vat : l.line_total_ex_vat != null ? l.line_total_ex_vat / qty : "";
+        return { description: l.description, partNumber: "", qty: String(qty), unitPrice: unit === "" ? "" : String(Math.round(unit * 100) / 100) };
+      })
+    );
+    setPoBuilder((b) => ({
+      ...b,
+      reference: quote.quote_number ? `Your quote ${quote.quote_number}` : quote.pr_number || "",
+      procurementRequestId: quote.request_id || null,
+    }));
+  }
+
   // ---- Cut to size ----
   // The parts to be cut from structural stock. Same shape of function as
   // the quoted items above; the screen itself is src/jobs/CutToSize.jsx.
@@ -17879,6 +17904,7 @@ export default function StockControl() {
             userName={roleLabel}
             customerEmails={Object.values(master.customerContacts || {}).flat().map((c) => c.email).filter(Boolean)}
             canEditSuppliers={isAdmin || canAccessStockManager}
+            onRaisePo={canRaisePO ? raisePoFromQuote : null}
             openPdf={(url, name) => {
               setPreviewItem({ attachmentType: "pdf", attachmentName: name || "Quote.pdf" });
               setPreviewData(url);
