@@ -132,7 +132,7 @@ ORDER=(
   setup-cnc-19-own-materials.sql
   setup-procurement-1-access.sql
   setup-procurement-2-requests.sql
-  setup-procurement-3-supplier-bank.sql
+  setup-procurement-3-supplier-terms.sql
   setup-claude-reader-1-log.sql
 )
 
