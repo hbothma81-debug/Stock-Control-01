@@ -23,6 +23,7 @@ import { supabase } from "../lib/supabaseClient.js";
 import { GROUPS, classify, matchesSearch, supplierFor, todayInSA } from "./procurementRules.js";
 import { sweepMailboxes } from "./mailSweep.js";
 import { emailIsSetUp, outlookErrorText } from "../email/outlook.js";
+import SupplierList from "./SupplierList.jsx";
 
 const OPEN_STATUSES = ["Draft", "Sent", "Reply", "Pro forma", "Paid", "Ordered"];
 const RECENT_DAYS = 90;
@@ -67,7 +68,25 @@ function Detail({ label, children }) {
 
 const fmtDate = (d) => (d ? String(d).slice(0, 10) : "");
 
-export default function ProcurementPage({ suppliers, currentUserId, userName, customerEmails }) {
+// The page's own tabs. Quotes (saved supplier quotes) joins with step 3.
+const VIEWS = [
+  { key: "requests", label: "Quote requests" },
+  { key: "suppliers", label: "Supplier list" },
+];
+
+// The whole border, never borderColor beside it: React warns when a
+// shorthand and its part change on the same element.
+const chipStyle = (active) => ({
+  ...S.chip,
+  ...(active
+    ? { background: S.chipActive.background, color: S.chipActive.color, fontWeight: S.chipActive.fontWeight, border: `1px solid ${C.accentFinished}` }
+    : {}),
+});
+
+// supplierEdits: App's own supplier functions (the ones Stock Manager uses),
+// so a change here saves exactly as one made there.
+export default function ProcurementPage({ suppliers, currentUserId, userName, customerEmails, canEditSuppliers, supplierEdits }) {
+  const [view, setView] = useState("requests");
   const [rows, setRows] = useState(null);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -186,6 +205,16 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
 
   return (
     <div style={S.list}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+        {VIEWS.map((v) => (
+          <button key={v.key} type="button" className="stk-btn" style={chipStyle(view === v.key)} onClick={() => setView(v.key)}>
+            {v.label}
+          </button>
+        ))}
+      </div>
+
+      {view === "requests" && (
+        <>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         {mailboxes.length > 1 &&
           mailboxes.map((m) => (
@@ -193,14 +222,7 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
               key={m.key}
               type="button"
               className="stk-btn"
-              // The whole border, never borderColor beside it: React warns
-              // when a shorthand and its part change on the same element.
-              style={{
-                ...S.chip,
-                ...(m.key === activeMailbox
-                  ? { background: S.chipActive.background, color: S.chipActive.color, fontWeight: S.chipActive.fontWeight, border: `1px solid ${C.accentFinished}` }
-                  : {}),
-              }}
+              style={chipStyle(m.key === activeMailbox)}
               onClick={() => setMailbox(m.key)}
             >
               {m.label} ({m.count})
@@ -302,6 +324,21 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
           </Section>
         );
       })}
+        </>
+      )}
+
+      {view === "suppliers" && (
+        <SupplierList
+          suppliers={suppliers}
+          requests={rows}
+          canEdit={canEditSuppliers}
+          onField={supplierEdits.updateSupplierField}
+          onAddSupplier={supplierEdits.addSupplier}
+          onAddContact={supplierEdits.addSupplierContact}
+          onContactField={supplierEdits.updateSupplierContact}
+          onRemoveContact={supplierEdits.removeSupplierContact}
+        />
+      )}
     </div>
   );
 }

@@ -17870,13 +17870,22 @@ export default function StockControl() {
           <DrawingsTab ctx={drawingsCtx} />
         </ErrorBoundary>
       ) : tab === "procurement" ? (
-        // Quote requests (src/procurement): reads procurement_requests itself.
-        <ErrorBoundary key="procurement" box what="the Quote requests tab">
+        // Suppliers (src/procurement): quote requests (it reads
+        // procurement_requests itself) and the supplier list.
+        <ErrorBoundary key="procurement" box what="the Suppliers tab">
           <ProcurementPage
             suppliers={master.suppliers}
             currentUserId={currentUser?.id || null}
             userName={roleLabel}
             customerEmails={Object.values(master.customerContacts || {}).flat().map((c) => c.email).filter(Boolean)}
+            canEditSuppliers={isAdmin || canAccessStockManager}
+            supplierEdits={{
+              updateSupplierField,
+              addSupplier: addSupplierFromJob,
+              addSupplierContact,
+              updateSupplierContact,
+              removeSupplierContact,
+            }}
           />
         </ErrorBoundary>
       ) : tab === "cnc" ? (

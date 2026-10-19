@@ -247,7 +247,7 @@ export default function UserManagement({
                   checked={!!p.canProcure}
                   onChange={(e) => updatePersonField(p.id, "canProcure", e.target.checked)}
                 />
-                Procurement (sees Quote requests: supplier quote requests and follow-ups)
+                Procurement (sees Suppliers: quote requests, follow-ups, the supplier list and saved quotes)
               </label>
             )}
             {/* How many PDFs Claude may read for this person a month; 0 = none.

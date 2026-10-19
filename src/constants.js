@@ -37,10 +37,11 @@ export const NAV_TABS = [
   { key: "requisitions", label: "Requisitions" },
   { key: "purchaseOrders", label: "Purchase Orders" },
   { key: "receiving", label: "Receiving" },
-  // The supplier quote requests register (src/procurement), its own item in
-  // the top row (Heinrich, 19 Oct 2026), not inside the Procurement menu.
+  // Suppliers (src/procurement): quote requests, the supplier list, and
+  // saved quotes; its own item in the top row, not inside the Procurement
+  // menu (Heinrich, 19 Oct 2026: "rename the Quote request to Suppliers").
   // Shown with the Procurement tick only, admins included.
-  { key: "procurement", label: "Quote requests" },
+  { key: "procurement", label: "Suppliers" },
   { key: "invoicing", label: "Invoicing" },
   { key: "deliveryNotes", label: "Delivery Notes" },
   { key: "processSheets", label: "Process Sheets" },
