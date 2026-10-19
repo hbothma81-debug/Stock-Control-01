@@ -114,6 +114,21 @@ Deno.serve(async (req) => {
     if (!quote) return reply({ error: "No such quote" }, 404);
     if (quote.read_status === "read") return reply({ status: "read" });
 
+    // Claim it, so two pages opening at once (or one page's first load
+    // twice over) never pay Claude twice for one PDF: found on practice, 19
+    // Oct 2026, Neuc's quote read twice. Only one call gets the row back. A
+    // claim older than 5 minutes is a read that died, and may be taken over.
+    const now = new Date();
+    const stale = `reading since ${new Date(now.getTime() - 5 * 60000).toISOString()}`;
+    const { data: claimed } = await admin
+      .from("supplier_quotes")
+      .update({ read_note: `reading since ${now.toISOString()}` })
+      .eq("id", quoteId)
+      .neq("read_status", "read")
+      .or(`read_note.not.like."reading since*",read_note.lt."${stale}"`)
+      .select("id");
+    if (!claimed?.length) return reply({ status: "busy" });
+
     const { data: file, error: fileError } = await admin.storage.from("supplier-quotes").download(quote.storage_path);
     if (fileError || !file) {
       await markQuote({ read_status: "not read", read_note: "the PDF could not be found in the store" });

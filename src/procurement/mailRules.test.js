@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addressBook, cleanSubject, draftFollowUp, findExisting, nextPrNumber, quoteFiles, quoteRequestFrom, textToHtml, threadUpdate } from "./mailRules.js";
+import { addressBook, cleanSubject, draftFollowUp, findExisting, looksLikeQuoteMail, nextPrNumber, quoteFiles, quoteRequestFrom, requestForNewMail, textToHtml, threadUpdate } from "./mailRules.js";
 
 const to = (address, name = "") => ({ emailAddress: { address, name } });
 const book = addressBook(
@@ -117,6 +117,30 @@ test("only a supplier's real PDF attachments are saved as quotes", () => {
     ] },
   ];
   assert.deepEqual(quoteFiles(thread).map((x) => x.attachment.name), ["Quote EJB449418.pdf"]);
+});
+
+test("a quote in a new email goes with the newest open request to that supplier", () => {
+  const mcn = { id: "m", name: "McNaughtan", email: "salesrep@mcnaughtan.co.za", contacts: [{ email: "jhbsales4@mcnaughtan.co.za" }] };
+  const neuc = { id: "n", name: "Neuc", email: "cuen@neuc.co.za", contacts: [] };
+  const rows = [
+    { id: "r4", pr_number: "PR-004", status: "Reply", supplier_id: "m", contact_email: "salesrep@mcnaughtan.co.za", requested_at: "2026-10-15T00:00:00+00:00" },
+    { id: "r1", pr_number: "PR-0xx", status: "Closed", supplier_id: "m", contact_email: "salesrep@mcnaughtan.co.za", requested_at: "2026-10-16T00:00:00+00:00" },
+    { id: "r7", pr_number: "PR-007", status: "Reply", supplier_id: "n", supplier_name: "Neuc", contact_email: "cuen@neuc.co.za", requested_at: "2026-10-08T00:00:00+00:00" },
+  ];
+  const supplierOf = (r) => [mcn, neuc].find((s) => s.id === r.supplier_id);
+  const fromOtherRep = { from: to("jhbsales4@mcnaughtan.co.za", "Stephen Meselane"), subject: "Quotation 10896324", receivedDateTime: "2026-10-15T12:00:00Z" };
+  assert.equal(requestForNewMail(fromOtherRep, rows, supplierOf)?.pr_number, "PR-004");
+  const viaSage = { from: to("mail-service@accounting.sageone.co.za", "Neuc (Pty) Ltd"), subject: "Quote QUO0001816", receivedDateTime: "2026-10-09T08:00:00Z" };
+  assert.equal(requestForNewMail(viaSage, rows, supplierOf)?.pr_number, "PR-007");
+  assert.equal(requestForNewMail({ ...fromOtherRep, receivedDateTime: "2026-10-14T12:00:00Z" }, rows, supplierOf), null); // before the request
+  assert.equal(requestForNewMail({ ...viaSage, from: to("mail-service@accounting.sageone.co.za", "Someone Else") }, rows, supplierOf), null);
+  assert.equal(requestForNewMail({ ...fromOtherRep, from: to("drawings@ersupplies.co.za") }, rows, supplierOf), null);
+});
+
+test("only a quote or pro forma in a new email moves its request; a statement is only saved", () => {
+  assert.equal(looksLikeQuoteMail({ subject: "Quotation 10896324" }), true);
+  assert.equal(looksLikeQuoteMail({ subject: "Documents", attachments: [{ name: "QUO0001816.pdf" }] }), true);
+  assert.equal(looksLikeQuoteMail({ subject: "Your statement for October", attachments: [{ name: "Statement.pdf" }] }), false);
 });
 
 test("PR numbers count on", () => {

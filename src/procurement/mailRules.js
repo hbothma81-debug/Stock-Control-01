@@ -159,6 +159,48 @@ export function quoteFiles(thread) {
   return out;
 }
 
+// A quote that comes as a NEW email, not a reply in the request's thread
+// (found on practice, 19 Oct 2026: McNaughtan's came from another rep's
+// address, Neuc's through Sage). Heinrich: "yes go ahead". Such a mail goes
+// with the newest open request to the same supplier, sent before it came:
+//   * same supplier = the sender's email domain is the request contact's
+//     domain or one of the supplier's on the supplier list, or
+//   * the mail came through an accounts system (Sage and the like) and the
+//     supplier's name is in the sender's name or the subject.
+// Returns the request, or null.
+const SENDING_SERVICES = /(^|\.)(sageone\.co\.za|sage\.com|accounting\.sageone\.co\.za|skynamo\.com|intuit\.com|quickbooks\.com|xero\.com|zoho\.com|zohomail\.com|myob\.com|freshbooks\.com)$/i;
+const OPEN_FOR_QUOTES = ["Sent", "Reply", "Pro forma", "Paid", "Ordered"];
+
+export function requestForNewMail(message, rows, supplierOf) {
+  const sender = addressOf(message.from);
+  if (!sender || isOurs(sender)) return null;
+  const domain = domainOf(sender);
+  const viaService = SENDING_SERVICES.test(domain);
+  const words = `${message.from?.emailAddress?.name || ""} ${message.subject || ""}`.toLowerCase();
+  const when = message.receivedDateTime || message.sentDateTime || "";
+  const matches = (rows || []).filter((r) => {
+    if (!OPEN_FOR_QUOTES.includes(r.status) || (r.requested_at || "") > when) return false;
+    const supplier = supplierOf(r);
+    if (viaService) {
+      const name = (supplier?.name || r.supplier_name || "").toLowerCase().replace(/\(.*?\)/g, "").trim();
+      return name.length >= 3 && words.includes(name);
+    }
+    const domains = [r.contact_email, supplier?.email, ...(supplier?.contacts || []).map((c) => c.email)]
+      .map((e) => domainOf((e || "").toLowerCase()))
+      .filter(Boolean);
+    return domains.includes(domain);
+  });
+  return matches.sort((a, b) => ((a.requested_at || "") < (b.requested_at || "") ? 1 : -1))[0] || null;
+}
+
+// Whether a new mail's PDF moves its request on (like a reply in the
+// thread), or is only saved. Statements and remittances from the same
+// supplier must not move a request.
+export function looksLikeQuoteMail(message) {
+  const text = `${message.subject || ""} ${(message.attachments || []).map((a) => a.name).join(" ")}`;
+  return /(quot|\bquo\d|estimate|pro[\s-]?forma|\bqt[a-z]*\d|\bqu\d)/i.test(text) && !/(statement|remittance|proof of payment)/i.test(text);
+}
+
 // The follow-up a person sees, ready to edit, before Send. Short and in the
 // request's own thread: names the item, quantity and request date, and asks
 // for the quote, or for the pro forma when the quote is in on Pro forma

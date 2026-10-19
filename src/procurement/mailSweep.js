@@ -13,13 +13,13 @@
 // request.
 
 import { mailReadPass } from "../email/outlook.js";
-import { addressBook, addressOf, findExisting, isOurs, nextPrNumber, quoteFiles, quoteRequestFrom, threadUpdate } from "./mailRules.js";
+import { addressBook, addressOf, findExisting, isOurs, looksLikeQuoteMail, nextPrNumber, quoteFiles, quoteRequestFrom, requestForNewMail, threadUpdate } from "./mailRules.js";
 import { supplierFor, todayInSA } from "./procurementRules.js";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const LOOK_BACK_DAYS = 14;
 const MAX_PAGES = 6; // 50 a page: 300 mails a folder is two busy weeks
-const MESSAGE_FIELDS = "id,internetMessageId,conversationId,subject,bodyPreview,toRecipients,ccRecipients,from,sentDateTime,receivedDateTime";
+const MESSAGE_FIELDS = "id,internetMessageId,conversationId,subject,bodyPreview,toRecipients,ccRecipients,from,sentDateTime,receivedDateTime,hasAttachments";
 
 async function graphList(pass, url) {
   const out = [];
@@ -140,13 +140,15 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
 
   for (const box of mailboxes) {
     let candidates = [];
+    let inbox = [];
     try {
       const sentUrl = `${GRAPH}${box.base}/mailFolders/sentitems/messages?$filter=${encodeURIComponent(`sentDateTime ge ${since}`)}&$select=${MESSAGE_FIELDS}&$orderby=sentDateTime desc&$top=50`;
       candidates = (await graphList(pass, sentUrl)).map((m) => ({ m, mailbox: box.address, owner: box.owner }));
+      const inboxUrl = `${GRAPH}${box.base}/mailFolders/inbox/messages?$filter=${encodeURIComponent(`receivedDateTime ge ${since}`)}&$select=${MESSAGE_FIELDS}&$orderby=receivedDateTime desc&$top=50`;
+      inbox = await graphList(pass, inboxUrl);
       if (box.owner) {
         // A colleague's request with this person in Cc (Gawie from sales@, Cc Heinrich).
-        const inboxUrl = `${GRAPH}${box.base}/mailFolders/inbox/messages?$filter=${encodeURIComponent(`receivedDateTime ge ${since}`)}&$select=${MESSAGE_FIELDS}&$orderby=receivedDateTime desc&$top=50`;
-        for (const m of await graphList(pass, inboxUrl)) {
+        for (const m of inbox) {
           const sender = addressOf(m.from);
           if (!isOurs(sender) || sender === me) continue;
           if (!(m.ccRecipients || []).some((r) => addressOf(r) === me)) continue;
@@ -208,10 +210,11 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
     // Finished ones too (Closed, Received: only their PDFs are saved, so a
     // supplier's quote history is whole; threadUpdate leaves them as they
     // are). Only what the page loaded: open work and 90 days of finished.
-    const live = known.filter((r) => r.mailbox === box.address && r.conversation_id && r.status !== "Not a request" && r.status !== "Draft");
+    const ofThisBox = known.filter((r) => r.mailbox === box.address && r.status !== "Not a request" && r.status !== "Draft");
+    const live = ofThisBox.filter((r) => r.conversation_id);
     const savedFiles = new Set();
-    if (live.length) {
-      const { data: had } = await supabase.from("supplier_quotes").select("message_id, file_name").in("request_id", live.map((r) => r.id));
+    if (ofThisBox.length) {
+      const { data: had } = await supabase.from("supplier_quotes").select("message_id, file_name").in("request_id", ofThisBox.map((r) => r.id));
       for (const q of had || []) savedFiles.add(`${q.message_id}|${q.file_name}`);
     }
     for (const row of live) {
@@ -246,6 +249,44 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
       }
       Object.assign(row, data);
       moved++;
+    }
+
+    // Quotes that came as a new email (another rep's address, or through
+    // Sage): with the newest open request to that supplier (mailRules).
+    for (const m of inbox) {
+      if (!m.hasAttachments || isOurs(addressOf(m.from))) continue;
+      const row = requestForNewMail(m, ofThisBox, (r) => supplierFor(r, suppliers));
+      if (!row) continue;
+      try {
+        m.attachments = await graphList(pass, `${GRAPH}${box.base}/messages/${m.id}/attachments?$select=id,name,contentType,size,isInline`);
+      } catch {
+        continue;
+      }
+      let savedAny = false;
+      for (const { message, attachment } of quoteFiles([m])) {
+        const key = `${message.internetMessageId || message.id}|${attachment.name}`;
+        if (savedFiles.has(key)) continue;
+        try {
+          const saved = await saveQuote(supabase, pass, box.base, row, message, attachment, userName);
+          savedFiles.add(key);
+          if (saved) {
+            newQuotes.push(saved);
+            savedAny = true;
+          }
+        } catch (err) {
+          problems.push(`${row.pr_number}: ${attachment.name} was not saved: ${err.message}`);
+        }
+      }
+      // A quote or pro forma moves the request on as a reply would; a
+      // statement from the same supplier is only saved.
+      if (!savedAny || !looksLikeQuoteMail(m)) continue;
+      const change = threadUpdate(row, [m], supplierFor(row, suppliers)?.terms || "");
+      if (!change) continue;
+      const { data } = await supabase.from("procurement_requests").update({ ...change, ...stamp() }).eq("id", row.id).select().single();
+      if (data) {
+        Object.assign(row, data);
+        moved++;
+      }
     }
   }
   return { connected: true, address: me, added, moved, newQuotes, problems };

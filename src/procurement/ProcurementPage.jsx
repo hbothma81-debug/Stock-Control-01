@@ -390,7 +390,8 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
           )}
           {!mailBusy && mail?.connected &&
             `Mailbox ${mail.address} read at ${mail.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}: ` +
-              `${mail.added} new request${mail.added === 1 ? "" : "s"}, ${mail.moved} moved on.`}
+              `${mail.added} new request${mail.added === 1 ? "" : "s"}, ${mail.moved} moved on` +
+              (mail.newQuotes?.length ? `, ${mail.newQuotes.length} quote${mail.newQuotes.length === 1 ? "" : "s"} saved.` : ".")}
           {mailError && <div style={{ color: C.danger }}>Reading the mailbox failed: {mailError}</div>}
           {(mail?.problems || []).map((p) => (
             <div key={p} style={{ color: C.danger }}>{p}</div>
