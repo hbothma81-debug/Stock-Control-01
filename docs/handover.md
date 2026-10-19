@@ -5848,3 +5848,34 @@ Jobs or Production, the busy flags), and a real push watched from a
 tablet. The first push after this one is the real test: every open
 tablet should be on the new build within about five minutes of it,
 without anybody touching it.
+
+---
+
+## 19 Oct 2026 — Claude API / Procurement conversation: the Suppliers page, LIVE (`cf87b75..1fa9097` and the go-live)
+
+Pushed today by the release gate ("Current working folder") on Heinrich's word, each
+step read back: 178fd31 → 1fa9097. Live SQL: setup-procurement-1, -2, -3 (terms; ran
+without its first drop-trigger line, since fixed in e96347b), setup-claude-reader-1,
+setup-procurement-4, -5, and SEED-procurement-live.sql (a7e16a8: 130 suppliers, 11
+requests, owner drawings@ersupplies.co.za, the live sign-in). Edge Function
+`read-document` deployed on live (v1) and practice (v3); `ANTHROPIC_API_KEY` set by
+Heinrich on both (a separate key each).
+
+**What it is:** a top-row **Suppliers** item for people with the Procurement tick
+(admins too only when ticked), tabs Quote requests / Quotes / Items quoted / Supplier
+list. It reads the person's own mailbox (and sales@) when it opens and on Refresh,
+delegated Mail.Read only: new quote requests from Sent Items, replies and quotes that
+come in a thread or as a new mail from the same supplier (or through Sage), each
+supplier PDF saved (bucket supplier-quotes) and read once by Claude Opus 5.5 (no tools,
+structured output; limits US$15 a month for the app and "Claude documents a month" per
+person, both checked in the database before every read). Send follow-up (a reply in the
+thread; practice sends to the sender only), Close quote / Reopen, Create PO from quote
+and Raise PO per item (the PO moves the request to Ordered, receiving it to Received),
+Add as stock item, a page per supplier (Quotes, Items quoted, Details). Supplier
+account no prints on POs (28542ad). No bank details anywhere, by his decision.
+
+**Tried on practice, read back:** every step above. **On live:** 3 quotes read right
+(US$0.054). **Not tried anywhere:** a follow-up sent in a real supplier thread on live;
+sales@ (needs IT: Full Access and Send As for each user); a second ticked person.
+**Open with Heinrich:** whether Claude Code's /procure stops now (the Procurement
+conversation has stopped adding PR rows to requests.md).
