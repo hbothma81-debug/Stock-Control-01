@@ -238,7 +238,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-procurement-4-quotes.sql', 'table supplier_quotes and the supplier-quotes file store',
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'supplier_quotes')),
     ('setup-procurement-5-po-link.sql', 'columns procurement_requests.po_id and po_number (the PO a quote request became)',
-      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'procurement_requests' and column_name = 'po_number'))
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'procurement_requests' and column_name = 'po_number')),
+    ('setup-procurement-6-supplier-categories.sql', 'columns master_suppliers.categories and buys, and the supplierCategories list',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'master_suppliers' and column_name = 'categories'))
 )
 select
   setup_file,

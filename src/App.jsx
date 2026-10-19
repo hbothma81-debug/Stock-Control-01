@@ -185,6 +185,7 @@ import { useDrawingsState, useDrawings } from "./drawings/useDrawings.jsx";
 import { DrawingsTab, DrawingUploadPopup } from "./drawings/DrawingsScreens.jsx";
 import CncTab from "./cnc/CncTab.jsx";
 import ProcurementPage from "./procurement/ProcurementPage.jsx";
+import SupplierCategoriesField from "./procurement/SupplierCategories.jsx";
 import { useAssetsState, useAssets } from "./assets/useAssets.jsx";
 import { AssetRemovePopup, AssetHistoryPopup, ServiceNowPopup, RepairListPopup } from "./assets/AssetPopups.jsx";
 
@@ -323,6 +324,9 @@ let factorHasCuttingMaterial = false;
 // A supplier's account no and terms (setup-procurement-3-supplier-terms.sql):
 // read and written only once a loaded row has shown the columns.
 let supplierHasAccountNo = false;
+// A supplier's categories and "what we buy" (setup-procurement-6-supplier-
+// categories.sql): read and written only once a loaded row has the columns.
+let supplierHasCategories = false;
 let stockHasRemovedDetails = false;
 let stockHasCustomerRevision = false;
 function itemToDbRow(item) {
@@ -349,6 +353,9 @@ const MASTER_STRING_LISTS = [
   "storeCategories", "fastenerCategories", "fastenerGrades", "fastenerFinishes", "sheetNames",
   "laserMaterials",
   "laserThicknesses",
+  // The broad categories a supplier can carry (Steel & sections, ...), the
+  // pills on Suppliers -> Supplier list (setup-procurement-6-supplier-categories.sql).
+  "supplierCategories",
 ];
 // Lists where the order on screen is the order that matters, not just how
 // they happen to be stored. Job Process Types is the factory flow: the
@@ -798,9 +805,11 @@ async function loadMasterFromTables() {
   }
   result.suppliers = (suppliers.data || []).map((s) => {
     if ("account_no" in s) supplierHasAccountNo = true;
+    if ("categories" in s) supplierHasCategories = true;
     return {
       id: s.id, name: s.name, email: s.email, phone: s.phone, address: s.address, vatNumber: s.vat_number,
       accountNo: s.account_no || "", terms: s.terms || "",
+      categories: Array.isArray(s.categories) ? s.categories : [], buys: s.buys || "",
       contacts: contactsBySupplier[s.id] || [],
     };
   });
@@ -3154,6 +3163,7 @@ export default function StockControl() {
       const toRow = (s) => ({
         id: s.id, name: s.name, email: s.email || "", phone: s.phone || "", address: s.address || "", vat_number: s.vatNumber || "",
         ...(supplierHasAccountNo ? { account_no: s.accountNo || "", terms: s.terms || null } : {}),
+        ...(supplierHasCategories ? { categories: s.categories || [], buys: s.buys || "" } : {}),
       });
       const added = nextSuppliers.filter((s) => !prevById.has(s.id));
       const removedIds = prevSuppliers.filter((s) => !nextById.has(s.id)).map((s) => s.id);
@@ -17939,7 +17949,9 @@ export default function StockControl() {
               setPreviewData(url);
               setPreviewLoading(false);
             }}
+            supplierCategories={supplierHasCategories ? master.supplierCategories || [] : null}
             supplierEdits={{
+              setCategoryList: (list) => setMaster((prev) => ({ ...prev, supplierCategories: list })),
               updateSupplierField,
               addSupplier: addSupplierFromJob,
               addSupplierContact,
@@ -20520,6 +20532,22 @@ export default function StockControl() {
                               <option value="Account">Account</option>
                               <option value="Pro forma">Pro forma</option>
                             </select>
+                          </div>
+                        )}
+                        {supplierHasCategories && (
+                          <div style={{ marginTop: 8 }}>
+                            <SupplierCategoriesField
+                              value={s.categories || []}
+                              options={master.supplierCategories || []}
+                              onChange={(v) => updateSupplierField(s.id, "categories", v)}
+                              canEdit
+                            />
+                            <input
+                              style={{ ...S.input, marginTop: 6 }}
+                              value={s.buys || ""}
+                              onChange={(e) => updateSupplierField(s.id, "buys", e.target.value)}
+                              placeholder="What we buy from them (e.g. Engineering steel, EN8 bar)"
+                            />
                           </div>
                         )}
                         <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
