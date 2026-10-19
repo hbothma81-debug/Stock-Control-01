@@ -35,7 +35,7 @@ function Line({ label, children }) {
 }
 
 // The quotes themselves, with no heading: for a request line or a card.
-export function QuoteLines({ quotes, onOpen, showSupplier = true }) {
+export function QuoteLines({ quotes, onOpen, onReadAgain, showSupplier = true }) {
   if (!quotes?.length) return null;
   return quotes.map((q) => {
     const st = STATUS[q.read_status] || STATUS.waiting;
@@ -61,6 +61,11 @@ export function QuoteLines({ quotes, onOpen, showSupplier = true }) {
         {q.read_status !== "read" && (
           <div style={{ color: q.read_status === "waiting" ? C.muted : C.danger, fontSize: 14, marginTop: 6 }}>
             {q.read_status === "waiting" ? "Claude has not read this PDF yet." : `PDF not read: totals not checked.${q.read_note ? ` (${q.read_note})` : ""}`}
+            {q.read_status !== "waiting" && onReadAgain && (
+              <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginLeft: 8 }} onClick={() => onReadAgain(q)}>
+                Read again
+              </button>
+            )}
           </div>
         )}
         <Line label="Supplier">{q.supplier_name}</Line>
@@ -79,7 +84,7 @@ export function QuoteLines({ quotes, onOpen, showSupplier = true }) {
 }
 
 // The Quotes tab: every saved quote, newest first, one search box.
-export default function QuotesTab({ quotes, onOpen }) {
+export default function QuotesTab({ quotes, onOpen, onReadAgain }) {
   const [search, setSearch] = useState("");
   const shown = useMemo(() => {
     const words = search.toLowerCase().split(/\s+/).filter(Boolean);
@@ -105,7 +110,7 @@ export default function QuotesTab({ quotes, onOpen }) {
       )}
       {shown.length > 0 && (
         <Section title="Quotes" count={shown.length} defaultOpen>
-          <QuoteLines quotes={shown} onOpen={onOpen} />
+          <QuoteLines quotes={shown} onOpen={onOpen} onReadAgain={onReadAgain} />
         </Section>
       )}
     </div>

@@ -196,8 +196,43 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
       .select("*")
       .order("received_at", { ascending: false, nullsFirst: false })
       .limit(QUOTES_SHOWN);
-    setQuotes(error ? [] : data || []);
+    const list = error ? [] : data || [];
+    setQuotes(list);
+    return list;
   }, []);
+
+  // Claude reads each saved quote still waiting (read-document server
+  // function, which checks the Procurement tick and the monthly limits
+  // itself). A few per page open, one at a time; stops at the first refusal.
+  const [reading, setReading] = useState("");
+  const [readerProblem, setReaderProblem] = useState("");
+  const readWaiting = useCallback(
+    async (list) => {
+      const waiting = (list || []).filter((q) => q.read_status === "waiting").slice(0, 10);
+      if (!waiting.length) return;
+      setReaderProblem("");
+      for (let i = 0; i < waiting.length; i++) {
+        setReading(`Claude is reading quote ${i + 1} of ${waiting.length}…`);
+        const { data, error } = await supabase.functions.invoke("read-document", { body: { quoteId: waiting[i].id } });
+        if (error) {
+          setReaderProblem("The Claude reader is not set up yet, or could not be reached. The quotes are saved and wait to be read.");
+          break;
+        }
+        if (data?.status === "limit") {
+          setReaderProblem(data.message || "The Claude limit is reached for now. The quotes are saved and wait to be read.");
+          break;
+        }
+      }
+      setReading("");
+      fetchQuotes();
+    },
+    [fetchQuotes]
+  );
+
+  async function readAgain(q) {
+    await supabase.from("supplier_quotes").update({ read_status: "waiting", read_note: "" }).eq("id", q.id);
+    readWaiting([{ ...q, read_status: "waiting" }]);
+  }
 
   async function openQuote(q) {
     const { data, error } = await supabase.storage.from("supplier-quotes").createSignedUrl(q.storage_path, 600);
@@ -216,10 +251,11 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
       setLoading(true);
       setFailed(false);
       let current;
+      let quotesNow = [];
       try {
         current = await fetchRows();
         setRows(current);
-        fetchQuotes();
+        quotesNow = await fetchQuotes();
       } catch (err) {
         console.error("Procurement requests did not load:", err);
         setFailed(true);
@@ -244,15 +280,16 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
         });
         setMail({ ...result, at: new Date() });
         if (result.connected && (result.added || result.moved)) setRows(await fetchRows());
-        if (result.connected && result.newQuotes?.length) fetchQuotes();
+        if (result.connected && result.newQuotes?.length) quotesNow = await fetchQuotes();
       } catch (err) {
         console.error("Reading the mailbox failed:", err);
         setMailError(outlookErrorText(err));
       } finally {
         setMailBusy(false);
       }
+      readWaiting(quotesNow);
     },
-    [fetchRows, fetchQuotes, currentUserId, userName, suppliers, customerEmails]
+    [fetchRows, fetchQuotes, readWaiting, currentUserId, userName, suppliers, customerEmails]
   );
 
   useEffect(() => {
@@ -358,6 +395,8 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
           {(mail?.problems || []).map((p) => (
             <div key={p} style={{ color: C.danger }}>{p}</div>
           ))}
+          {reading && <div>{reading}</div>}
+          {readerProblem && <div style={{ color: C.danger }}>{readerProblem}</div>}
         </div>
       )}
 
@@ -412,7 +451,7 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
                 {(quotes || []).some((q) => q.request_id === r.id) && (
                   <div style={{ marginTop: 8 }}>
                     <label style={S.label}>Quotes received</label>
-                    <QuoteLines quotes={quotes.filter((q) => q.request_id === r.id)} onOpen={openQuote} showSupplier={false} />
+                    <QuoteLines quotes={quotes.filter((q) => q.request_id === r.id)} onOpen={openQuote} onReadAgain={readAgain} showSupplier={false} />
                   </div>
                 )}
                 <FollowUp
@@ -441,12 +480,13 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
         </>
       )}
 
-      {view === "quotes" && <QuotesTab quotes={quotes} onOpen={openQuote} />}
+      {view === "quotes" && <QuotesTab quotes={quotes} onOpen={openQuote} onReadAgain={readAgain} />}
 
       {view === "suppliers" && (
         <SupplierList
           quotes={quotes}
           onOpenQuote={openQuote}
+          onReadAgain={readAgain}
           suppliers={suppliers}
           requests={rows}
           canEdit={canEditSuppliers}
