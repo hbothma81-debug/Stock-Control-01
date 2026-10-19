@@ -1,7 +1,9 @@
 // The CNC tab (lathe programs from STEP models; brief in
 // docs/CNC-MODULE-PLAN.md). App.jsx draws it inside a crash net and hands
-// it only what it cannot read for itself: the customer list, the CNC Bar
-// Grades, the person's ticks and name. Everything else is in src/cnc.
+// it only what it cannot read for itself: the customer list, the person's
+// ticks and name, and Stock Manager's CNC Bar Grades - used only until the
+// CNC tab's own Materials list exists (cncMaterials.js, setup-cnc-19).
+// Everything else is in src/cnc.
 //
 // Screens: the Programs list, the Shapes list (Heinrich, 8 Oct 2026: a
 // shape to type sizes, beside Programs), New program (from a STEP or a
@@ -25,13 +27,21 @@ import CuttingDataScreen from "./CuttingDataScreen.jsx";
 import MachinesScreen from "./MachinesScreen.jsx";
 import ToolsScreen from "./ToolsScreen.jsx";
 import { loadMachines } from "./cncTables.js";
+import { addCncMaterial, loadCncMaterials, saveCncMaterial } from "./cncMaterials.js";
 
 // S.chipActive sets borderColor, which React will not mix with S.chip's
 // border shorthand once a chip switches on; the whole border is given.
 const { borderColor: _unused, ...chipActiveRest } = S.chipActive;
 const CHIP_ON = { ...chipActiveRest, border: `1px solid ${C.accentFinished}` };
 
-export default function CncTab({ customers, materials, canEdit, canDelete, canSeeValue, isAdmin, onSaveMaterialPrice, onAddMaterial, onLinkMaterial, userName }) {
+export default function CncTab({ customers, materials: stockMaterials, canEdit, canDelete, canSeeValue, isAdmin, onSaveMaterialPrice, onAddMaterial, onLinkMaterial, userName }) {
+  // The CNC tab's own Materials list (cncMaterials.js, Heinrich 19 Oct 2026):
+  // undefined while asked, null when the database has no cnc_materials yet
+  // (setup-cnc-19 not pasted) - then Stock Manager's CNC Bar Grades, handed
+  // in by App, as before.
+  const [ownMaterials, setOwnMaterials] = useState(undefined);
+  const [materialsError, setMaterialsError] = useState("");
+  const materials = ownMaterials || stockMaterials;
   const [programs, setPrograms] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -75,7 +85,41 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
     loadEngineList("shapes").then(setShapes);
     loadEngineList("pipes").then(setPipes);
     loadBarPrices().then(setBarPrices);
+    loadCncMaterials()
+      .then(setOwnMaterials)
+      .catch((err) => {
+        setOwnMaterials(null);
+        setMaterialsError(`The CNC materials could not be read (${err.message || err}) - Stock Manager's CNC Bar Grades are shown until the page is reloaded.`);
+      });
   }, []);
+
+  // Saves on the CNC list once it exists, else on Stock Manager's (App).
+  function ownByName(fullName) {
+    return (ownMaterials || []).find((m) => m.fullName === fullName || m.name === fullName);
+  }
+  async function saveOwn(work) {
+    setMaterialsError("");
+    try {
+      const row = await work();
+      setOwnMaterials((list) => [...(list || []).filter((m) => m.id !== row.id), row].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })));
+    } catch (err) {
+      setMaterialsError(err.message || String(err));
+    }
+  }
+  function savePrice(fullName, price) {
+    const m = ownMaterials && ownByName(fullName);
+    if (!ownMaterials) return onSaveMaterialPrice(fullName, price);
+    if (m) saveOwn(() => saveCncMaterial({ id: m.id, price, userName }));
+  }
+  function addMaterial(name, density, price, cuttingMaterial) {
+    if (!ownMaterials) return onAddMaterial(name, density, price, cuttingMaterial);
+    saveOwn(() => addCncMaterial({ name, density, price, cuttingMaterial, userName }));
+  }
+  function linkMaterial(fullName, cuttingMaterial) {
+    const m = ownMaterials && ownByName(fullName);
+    if (!ownMaterials) return onLinkMaterial(fullName, cuttingMaterial);
+    if (m) saveOwn(() => saveCncMaterial({ id: m.id, cuttingMaterial, userName }));
+  }
 
   const subTabs = (
     <div style={{ display: "flex", gap: 6 }}>
@@ -142,6 +186,7 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
     return (
       <div style={S.list}>
         {subTabs}
+        {materialsError && <div style={{ color: C.accentRaw }}>{materialsError}</div>}
         <ErrorBoundary box what="the Materials list">
           <MaterialsList
             materials={materials}
@@ -150,9 +195,9 @@ export default function CncTab({ customers, materials, canEdit, canDelete, canSe
             canEdit={canEdit}
             canSeeValue={canSeeValue}
             userName={userName}
-            onSavePrice={onSaveMaterialPrice}
-            onAdd={onAddMaterial}
-            onLink={onLinkMaterial}
+            onSavePrice={savePrice}
+            onAdd={addMaterial}
+            onLink={linkMaterial}
             onBarPrices={setBarPrices}
           />
         </ErrorBoundary>

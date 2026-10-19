@@ -1,5 +1,8 @@
-// The CNC tab's Materials: Stock Manager's CNC Bar Grades, the one list of
-// CNC materials (Heinrich, 8 Oct 2026, option A), each with its bar sizes.
+// The CNC tab's Materials, each with its bar sizes. Since 19 Oct 2026 the
+// CNC tab's own list (cncMaterials.js, setup-cnc-19: "CNC has its own
+// material types library", own R/kg); before that file is pasted, Stock
+// Manager's CNC Bar Grades (Heinrich, 8 Oct 2026, option A). CncTab hands in
+// whichever it has, with the save calls that go with it.
 //
 // A grade's own price is R/kg ("no supplier" price on the grade); what every
 // screen uses is the cheapest of it and the grade's supplier prices, shown
@@ -160,7 +163,7 @@ export default function MaterialsList({ materials, barPrices, pipes, canEdit, ca
                   "–"
                 ) : mayChange ? (
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <NumberBox style={{ ...S.input, width: 90 }} value={m.ownPrice} placeholder="30" title="This grade's own price, saved to CNC Bar Grades" onCommit={(n) => onSavePrice(m.fullName, n)} />
+                    <NumberBox style={{ ...S.input, width: 90 }} value={m.ownPrice} placeholder="30" title="This material's own price, R/kg" onCommit={(n) => onSavePrice(m.fullName, n)} />
                     {Number(m.price) > 0 && Number(m.price) !== Number(m.ownPrice) && <span style={{ fontSize: 12.5, color: C.muted }}>uses R {m.price} (cheapest supplier)</span>}
                     {!(Number(m.price) > 0) && <span style={{ fontSize: 12.5, color: C.accentRaw }}>not priced: R30</span>}
                   </div>
