@@ -134,6 +134,7 @@ ORDER=(
   setup-procurement-2-requests.sql
   setup-procurement-3-supplier-terms.sql
   setup-claude-reader-1-log.sql
+  setup-procurement-4-quotes.sql
 )
 
 OUT=setup-ALL.sql

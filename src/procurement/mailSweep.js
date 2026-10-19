@@ -13,7 +13,7 @@
 // request.
 
 import { mailReadPass } from "../email/outlook.js";
-import { addressBook, addressOf, findExisting, isOurs, nextPrNumber, quoteRequestFrom, threadUpdate } from "./mailRules.js";
+import { addressBook, addressOf, findExisting, isOurs, nextPrNumber, quoteFiles, quoteRequestFrom, threadUpdate } from "./mailRules.js";
 import { supplierFor, todayInSA } from "./procurementRules.js";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
@@ -48,17 +48,59 @@ async function threadOf(pass, base, conversationId) {
   const id = String(conversationId).replace(/'/g, "''");
   const msgs = await graphList(
     pass,
-    `${GRAPH}${base}/messages?$filter=${encodeURIComponent(`conversationId eq '${id}'`)}&$select=id,from,subject,sentDateTime,receivedDateTime,hasAttachments&$top=50`
+    `${GRAPH}${base}/messages?$filter=${encodeURIComponent(`conversationId eq '${id}'`)}&$select=id,internetMessageId,from,subject,sentDateTime,receivedDateTime,hasAttachments&$top=50`
   );
   for (const m of msgs) {
     if (!m.hasAttachments || isOurs(addressOf(m.from))) continue;
     try {
-      m.attachments = await graphList(pass, `${GRAPH}${base}/messages/${m.id}/attachments?$select=name`);
+      m.attachments = await graphList(pass, `${GRAPH}${base}/messages/${m.id}/attachments?$select=id,name,contentType,size,isInline`);
     } catch {
       m.attachments = [];
     }
   }
   return msgs;
+}
+
+// Saves one supplier PDF: the file into the private supplier-quotes store,
+// a line into supplier_quotes. Returns the saved line, or null when it was
+// already there.
+async function saveQuote(supabase, pass, base, row, message, attachment, userName) {
+  const res = await fetch(`${GRAPH}${base}/messages/${message.id}/attachments/${attachment.id}`, {
+    headers: { Authorization: `Bearer ${pass}` },
+  });
+  if (!res.ok) throw new Error(`the file did not download (${res.status})`);
+  const { contentBytes } = await res.json();
+  const bytes = Uint8Array.from(atob(contentBytes || ""), (ch) => ch.charCodeAt(0));
+  const safeName = (attachment.name || "quote.pdf").replace(/[^\w.\- ]+/g, "_");
+  const path = `${row.pr_number || "no-pr"}/${Date.now()}-${safeName}`;
+  const up = await supabase.storage.from("supplier-quotes").upload(path, new Blob([bytes], { type: "application/pdf" }), {
+    contentType: "application/pdf",
+  });
+  if (up.error) throw up.error;
+  const { data, error } = await supabase
+    .from("supplier_quotes")
+    .insert({
+      request_id: row.id,
+      pr_number: row.pr_number,
+      supplier_id: row.supplier_id || null,
+      supplier_name: row.supplier_name || "",
+      mailbox: row.mailbox,
+      message_id: message.internetMessageId || message.id,
+      file_name: attachment.name || safeName,
+      storage_path: path,
+      file_size: attachment.size || bytes.length,
+      received_at: message.receivedDateTime || message.sentDateTime || null,
+      created_by: userName,
+    })
+    .select()
+    .single();
+  if (error) {
+    // Somebody else saved the same file a moment ago: drop this copy.
+    await supabase.storage.from("supplier-quotes").remove([path]);
+    if (error.code === "23505") return null;
+    throw error;
+  }
+  return data;
 }
 
 // Adds a request under the next free PR number. Another person may take a
@@ -91,6 +133,7 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
   const problems = [];
   let added = 0;
   let moved = 0;
+  const newQuotes = [];
   const stamp = () => ({ updated_at: new Date().toISOString(), updated_by: userName });
 
   const mailboxes = [{ base: "/me", address: me, owner: appUserId }, ...shared.map((a) => ({ base: `/users/${encodeURIComponent(a)}`, address: a, owner: null }))];
@@ -161,13 +204,31 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
       }
     }
 
-    // Replies and reminders on the open requests from this mailbox.
-    for (const row of known.filter((r) => r.mailbox === box.address && r.conversation_id && ["Sent", "Reply"].includes(r.status))) {
+    // Replies, reminders and the supplier's PDFs on this mailbox's requests
+    // that are not finished.
+    const live = known.filter((r) => r.mailbox === box.address && r.conversation_id && ["Sent", "Reply", "Pro forma", "Paid", "Ordered"].includes(r.status));
+    const savedFiles = new Set();
+    if (live.length) {
+      const { data: had } = await supabase.from("supplier_quotes").select("message_id, file_name").in("request_id", live.map((r) => r.id));
+      for (const q of had || []) savedFiles.add(`${q.message_id}|${q.file_name}`);
+    }
+    for (const row of live) {
       let thread;
       try {
         thread = await threadOf(pass, box.base, row.conversation_id);
       } catch {
         continue; // an old thread id from requests.md Microsoft does not know
+      }
+      for (const { message, attachment } of quoteFiles(thread)) {
+        const key = `${message.internetMessageId || message.id}|${attachment.name}`;
+        if (savedFiles.has(key)) continue;
+        try {
+          const saved = await saveQuote(supabase, pass, box.base, row, message, attachment, userName);
+          savedFiles.add(key);
+          if (saved) newQuotes.push(saved);
+        } catch (err) {
+          problems.push(`${row.pr_number}: ${attachment.name} was not saved: ${err.message}`);
+        }
       }
       const change = threadUpdate(row, thread, supplierFor(row, suppliers)?.terms || "");
       if (!change) continue;
@@ -185,5 +246,5 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
       moved++;
     }
   }
-  return { connected: true, address: me, added, moved, problems };
+  return { connected: true, address: me, added, moved, newQuotes, problems };
 }

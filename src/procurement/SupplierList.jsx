@@ -12,6 +12,7 @@ import { Plus, Trash2 } from "lucide-react";
 import Section from "../Section.jsx";
 import RecordRow from "../RecordRow.jsx";
 import { C, S } from "../theme.js";
+import { QuoteLines } from "./QuotesList.jsx";
 
 function Field({ label, value, canEdit, onChange, placeholder }) {
   if (!canEdit) {
@@ -31,7 +32,7 @@ function Field({ label, value, canEdit, onChange, placeholder }) {
   );
 }
 
-export default function SupplierList({ suppliers, requests, canEdit, onField, onAddSupplier, onAddContact, onContactField, onRemoveContact }) {
+export default function SupplierList({ suppliers, requests, quotes, onOpenQuote, canEdit, onField, onAddSupplier, onAddContact, onContactField, onRemoveContact }) {
   const [search, setSearch] = useState("");
 
   // Open requests per supplier, shown on the line.
@@ -104,6 +105,20 @@ export default function SupplierList({ suppliers, requests, canEdit, onField, on
               )}
               <Field label="Address" value={s.address} canEdit={canEdit} onChange={(v) => onField(s.id, "address", v)} />
               <Field label="VAT number" value={s.vatNumber} canEdit={canEdit} onChange={(v) => onField(s.id, "vatNumber", v)} />
+
+              {(() => {
+                const theirs = (quotes || []).filter(
+                  (q) => q.supplier_id === s.id || (!q.supplier_id && (q.supplier_name || "").trim().toLowerCase() === (s.name || "").trim().toLowerCase())
+                );
+                return (
+                  theirs.length > 0 && (
+                    <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
+                      <label style={S.label}>Their quotes ({theirs.length}), newest first</label>
+                      <QuoteLines quotes={theirs} onOpen={onOpenQuote} showSupplier={false} />
+                    </div>
+                  )
+                );
+              })()}
 
               <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>

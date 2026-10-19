@@ -142,6 +142,23 @@ export function threadUpdate(row, thread, terms) {
   return null;
 }
 
+// The PDFs a supplier sent in a request's thread, to be saved as quotes:
+// from an outside address, real attachments (not a logo in the signature),
+// PDF, at most 10 MB. Returns [{ message, attachment }].
+export const MAX_QUOTE_BYTES = 10 * 1024 * 1024;
+export function quoteFiles(thread) {
+  const out = [];
+  for (const m of thread || []) {
+    if (isOurs(addressOf(m.from))) continue;
+    for (const a of m.attachments || []) {
+      const isPdf = /pdf/i.test(a.contentType || "") || /\.pdf$/i.test(a.name || "");
+      if (!isPdf || a.isInline || (a.size || 0) > MAX_QUOTE_BYTES) continue;
+      out.push({ message: m, attachment: a });
+    }
+  }
+  return out;
+}
+
 // The follow-up a person sees, ready to edit, before Send. Short and in the
 // request's own thread: names the item, quantity and request date, and asks
 // for the quote, or for the pro forma when the quote is in on Pro forma

@@ -26,6 +26,7 @@ import { GROUPS, classify, matchesSearch, supplierFor, todayInSA } from "./procu
 import { sweepMailboxes } from "./mailSweep.js";
 import { emailIsSetUp, outlookErrorText } from "../email/outlook.js";
 import SupplierList from "./SupplierList.jsx";
+import QuotesTab, { QuoteLines } from "./QuotesList.jsx";
 
 const OPEN_STATUSES = ["Draft", "Sent", "Reply", "Pro forma", "Paid", "Ordered"];
 const RECENT_DAYS = 90;
@@ -141,11 +142,14 @@ function FollowUp({ row, supplier, c, userName, currentUserId, onSent }) {
   );
 }
 
-// The page's own tabs. Quotes (saved supplier quotes) joins with step 3.
+// The page's own tabs.
 const VIEWS = [
   { key: "requests", label: "Quote requests" },
+  { key: "quotes", label: "Quotes" },
   { key: "suppliers", label: "Supplier list" },
 ];
+// Saved quotes loaded with the page: the newest, never the whole table.
+const QUOTES_SHOWN = 500;
 
 // The whole border, never borderColor beside it: React warns when a
 // shorthand and its part change on the same element.
@@ -158,9 +162,10 @@ const chipStyle = (active) => ({
 
 // supplierEdits: App's own supplier functions (the ones Stock Manager uses),
 // so a change here saves exactly as one made there.
-export default function ProcurementPage({ suppliers, currentUserId, userName, customerEmails, canEditSuppliers, supplierEdits }) {
+export default function ProcurementPage({ suppliers, currentUserId, userName, customerEmails, canEditSuppliers, supplierEdits, openPdf }) {
   const [view, setView] = useState("requests");
   const [rows, setRows] = useState(null);
+  const [quotes, setQuotes] = useState(null);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -183,6 +188,26 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
     return data || [];
   }, []);
 
+  // Saved quotes, newest first. A database without setup-procurement-4
+  // simply shows none.
+  const fetchQuotes = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("supplier_quotes")
+      .select("*")
+      .order("received_at", { ascending: false, nullsFirst: false })
+      .limit(QUOTES_SHOWN);
+    setQuotes(error ? [] : data || []);
+  }, []);
+
+  async function openQuote(q) {
+    const { data, error } = await supabase.storage.from("supplier-quotes").createSignedUrl(q.storage_path, 600);
+    if (error || !data?.signedUrl) {
+      alert("That PDF could not be opened. Check your connection and try again.");
+      return;
+    }
+    openPdf(data.signedUrl, q.file_name);
+  }
+
   // Rows first, so the page shows at once; then the mailbox, then the rows
   // again with whatever the mailbox changed. interactive: Refresh was
   // pressed, so Microsoft may ask the person to sign in or allow reading.
@@ -194,6 +219,7 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
       try {
         current = await fetchRows();
         setRows(current);
+        fetchQuotes();
       } catch (err) {
         console.error("Procurement requests did not load:", err);
         setFailed(true);
@@ -218,6 +244,7 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
         });
         setMail({ ...result, at: new Date() });
         if (result.connected && (result.added || result.moved)) setRows(await fetchRows());
+        if (result.connected && result.newQuotes?.length) fetchQuotes();
       } catch (err) {
         console.error("Reading the mailbox failed:", err);
         setMailError(outlookErrorText(err));
@@ -225,7 +252,7 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
         setMailBusy(false);
       }
     },
-    [fetchRows, currentUserId, userName, suppliers, customerEmails]
+    [fetchRows, fetchQuotes, currentUserId, userName, suppliers, customerEmails]
   );
 
   useEffect(() => {
@@ -382,6 +409,12 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
                 <Detail label="Phone">{supplier?.phone || ""}</Detail>
                 <Detail label="Old quote">{r.old_quote}</Detail>
                 <Detail label="Notes">{r.notes}</Detail>
+                {(quotes || []).some((q) => q.request_id === r.id) && (
+                  <div style={{ marginTop: 8 }}>
+                    <label style={S.label}>Quotes received</label>
+                    <QuoteLines quotes={quotes.filter((q) => q.request_id === r.id)} onOpen={openQuote} showSupplier={false} />
+                  </div>
+                )}
                 <FollowUp
                   row={r}
                   supplier={supplier}
@@ -408,8 +441,12 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
         </>
       )}
 
+      {view === "quotes" && <QuotesTab quotes={quotes} onOpen={openQuote} />}
+
       {view === "suppliers" && (
         <SupplierList
+          quotes={quotes}
+          onOpenQuote={openQuote}
           suppliers={suppliers}
           requests={rows}
           canEdit={canEditSuppliers}

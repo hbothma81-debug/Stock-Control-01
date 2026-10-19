@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addressBook, cleanSubject, draftFollowUp, findExisting, nextPrNumber, quoteRequestFrom, textToHtml, threadUpdate } from "./mailRules.js";
+import { addressBook, cleanSubject, draftFollowUp, findExisting, nextPrNumber, quoteFiles, quoteRequestFrom, textToHtml, threadUpdate } from "./mailRules.js";
 
 const to = (address, name = "") => ({ emailAddress: { address, name } });
 const book = addressBook(
@@ -104,6 +104,19 @@ test("the follow-up names item, qty and date, and asks for the quote or the pro 
   assert.match(pf, /pro forma invoice/);
   assert.doesNotMatch(pf, /qty|bank|account/i);
   assert.equal(textToHtml("a < b\nc & d"), "a &lt; b<br>c &amp; d");
+});
+
+test("only a supplier's real PDF attachments are saved as quotes", () => {
+  const thread = [
+    { id: "o", from: to(exchangeName), attachments: [{ name: "Drawing.pdf", contentType: "application/pdf" }] },
+    { id: "s", from: to("tashs@eurosteel.co.za"), attachments: [
+      { name: "Quote EJB449418.pdf", contentType: "application/pdf", size: 120000 },
+      { name: "logo.png", contentType: "image/png", isInline: true },
+      { name: "signature.pdf", contentType: "application/pdf", isInline: true },
+      { name: "Huge.pdf", contentType: "application/pdf", size: 11 * 1024 * 1024 },
+    ] },
+  ];
+  assert.deepEqual(quoteFiles(thread).map((x) => x.attachment.name), ["Quote EJB449418.pdf"]);
 });
 
 test("PR numbers count on", () => {

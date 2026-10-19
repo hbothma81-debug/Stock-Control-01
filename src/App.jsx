@@ -17879,6 +17879,11 @@ export default function StockControl() {
             userName={roleLabel}
             customerEmails={Object.values(master.customerContacts || {}).flat().map((c) => c.email).filter(Boolean)}
             canEditSuppliers={isAdmin || canAccessStockManager}
+            openPdf={(url, name) => {
+              setPreviewItem({ attachmentType: "pdf", attachmentName: name || "Quote.pdf" });
+              setPreviewData(url);
+              setPreviewLoading(false);
+            }}
             supplierEdits={{
               updateSupplierField,
               addSupplier: addSupplierFromJob,

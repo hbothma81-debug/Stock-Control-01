@@ -234,7 +234,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-procurement-3-supplier-terms.sql', 'columns master_suppliers.account_no and terms (printed on the PO; no bank details)',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'master_suppliers' and column_name = 'account_no')),
     ('setup-claude-reader-1-log.sql', 'table ai_document_reads and function ai_start_read (Claude reads and limits)',
-      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'ai_start_read'))
+      exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'ai_start_read')),
+    ('setup-procurement-4-quotes.sql', 'table supplier_quotes and the supplier-quotes file store',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'supplier_quotes'))
 )
 select
   setup_file,
