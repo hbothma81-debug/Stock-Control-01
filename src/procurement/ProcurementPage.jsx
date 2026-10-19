@@ -14,8 +14,10 @@
 // Loads open work plus anything finished in the last 90 days, never the
 // whole table: the register will keep growing.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { RefreshCw, Send } from "lucide-react";
+import { draftFollowUp } from "./mailRules.js";
+import { sendFollowUp } from "./followUp.js";
 import Section from "../Section.jsx";
 import RecordRow from "../RecordRow.jsx";
 import { C, S } from "../theme.js";
@@ -67,6 +69,77 @@ function Detail({ label, children }) {
 }
 
 const fmtDate = (d) => (d ? String(d).slice(0, 10) : "");
+
+// Send follow-up, on every line waiting on the supplier (Heinrich, 19 Oct
+// 2026: "every line"), stronger once the reminder is due. After two chases
+// the line says to phone instead (the Email follow-up program's rule).
+// Open line (1), Send follow-up (2), Send (3).
+function FollowUp({ row, supplier, c, userName, currentUserId, onSent }) {
+  const [text, setText] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [note, setNote] = useState("");
+  const sending = useRef(false);
+
+  if (c.group !== "waiting") return null;
+  if (c.action === "phone") {
+    return (
+      <div style={{ marginTop: 8, color: C.danger, fontWeight: 700 }}>
+        Chased {row.chases} times: phone them{supplier?.phone ? ` on ${supplier.phone}` : ""}.
+      </div>
+    );
+  }
+
+  function start() {
+    const contact = (supplier?.contacts || []).find((x) => (x.email || "").toLowerCase() === (row.contact_email || "").toLowerCase());
+    setText(draftFollowUp({ row, contactName: contact?.name || "", owesProForma: row.status === "Reply", senderName: userName }));
+    setError("");
+    setNote("");
+  }
+
+  async function send() {
+    if (sending.current || !text?.trim()) return;
+    sending.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await sendFollowUp({ supabase, appUserId: currentUserId, userName, row, text: text.trim() });
+      setNote(result.practice ? `PRACTICE: sent to your own mailbox (${result.sentTo}) only.` : `Sent to ${result.sentTo}, in the same email thread.`);
+      setText(null);
+      if (result.row) onSent(result.row);
+    } catch (err) {
+      setError(outlookErrorText(err));
+    } finally {
+      sending.current = false;
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      {note && <div style={{ color: C.accentFinished, fontSize: 14 }}>{note}</div>}
+      {text === null ? (
+        <button type="button" className="stk-btn" style={c.isOverdue ? S.reqActionBtnAlertOn : S.reqActionBtnMuted} onClick={start}>
+          <Send size={12} /> Send follow-up{c.isOverdue ? " (due)" : ""}
+        </button>
+      ) : (
+        <>
+          <label style={S.label}>To {row.contact_email}, in the same email thread</label>
+          <textarea style={{ ...S.input, minHeight: 150, fontFamily: "inherit" }} value={text} onChange={(e) => setText(e.target.value)} />
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <button type="button" className="stk-btn" style={S.reqActionBtnAlertOn} onClick={send} disabled={busy}>
+              <Send size={12} /> {busy ? "Sending…" : "Send"}
+            </button>
+            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => setText(null)} disabled={busy}>
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+      {error && <div style={{ color: C.danger, fontSize: 14, marginTop: 4 }}>Not sent: {error}</div>}
+    </div>
+  );
+}
 
 // The page's own tabs. Quotes (saved supplier quotes) joins with step 3.
 const VIEWS = [
@@ -309,6 +382,14 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
                 <Detail label="Phone">{supplier?.phone || ""}</Detail>
                 <Detail label="Old quote">{r.old_quote}</Detail>
                 <Detail label="Notes">{r.notes}</Detail>
+                <FollowUp
+                  row={r}
+                  supplier={supplier}
+                  c={c}
+                  userName={userName}
+                  currentUserId={currentUserId}
+                  onSent={(saved) => setRows((prev) => prev.map((x) => (x.id === saved.id ? saved : x)))}
+                />
                 {["Draft", "Sent"].includes(r.status) && (
                   <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 8 }} onClick={() => setStatus(r, "Not a request")}>
                     Not a request

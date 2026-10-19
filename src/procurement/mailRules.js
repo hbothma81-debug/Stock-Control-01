@@ -142,6 +142,32 @@ export function threadUpdate(row, thread, terms) {
   return null;
 }
 
+// The follow-up a person sees, ready to edit, before Send. Short and in the
+// request's own thread: names the item, quantity and request date, and asks
+// for the quote, or for the pro forma when the quote is in on Pro forma
+// terms. Never mentions payment details. (Brief from the Procurement
+// conversation, 19 Oct 2026; same rules as the Email follow-up program.)
+// owesProForma: the classify() note says the quote is in and the pro forma is not.
+export function draftFollowUp({ row, contactName, owesProForma, senderName }) {
+  const first = (contactName || "").trim().split(/\s+/)[0];
+  const qty = row.qty && !/see list/i.test(row.qty) ? ` (qty ${row.qty})` : "";
+  const item = (row.item || "").trim() || "the items we asked about";
+  const date = (row.requested_at || "").slice(0, 10);
+  const ask = owesProForma
+    ? `Thank you for your quotation for ${item}${qty}. Please send us a pro forma invoice so that we can go ahead.`
+    : `We asked you for a quotation${date ? ` on ${date}` : ""} for ${item}${qty}. Could you please send it to us, with the lead time?`;
+  return `${first ? `Hi ${first}` : "Good day"},\n\n${ask}\n\nKind regards,\n${senderName || ""}\nEast Rand Supplies`.replace(/\n{3,}/g, "\n\n");
+}
+
+// Plain text to the HTML Microsoft's reply takes, line breaks kept.
+export function textToHtml(text) {
+  return String(text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\n/g, "<br>");
+}
+
 // "PR-011" -> "PR-012".
 export function nextPrNumber(highest) {
   const n = Number(String(highest || "").replace(/\D/g, "")) || 0;

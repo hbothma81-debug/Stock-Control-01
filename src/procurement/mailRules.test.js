@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addressBook, cleanSubject, findExisting, nextPrNumber, quoteRequestFrom, threadUpdate } from "./mailRules.js";
+import { addressBook, cleanSubject, draftFollowUp, findExisting, nextPrNumber, quoteRequestFrom, textToHtml, threadUpdate } from "./mailRules.js";
 
 const to = (address, name = "") => ({ emailAddress: { address, name } });
 const book = addressBook(
@@ -91,6 +91,19 @@ test("the supplier forwarding our request inside their company is not an answer 
 
 test("answering a customer's RFQ is not a new request (PR-012)", () => {
   assert.equal(quoteRequestFrom({ subject: "RE: RFQ", bodyPreview: "Please find our quotation attached", toRecipients: [to("johanb@bwie.co.za", "Johan Burger")] }, book), null);
+});
+
+test("the follow-up names item, qty and date, and asks for the quote or the pro forma", () => {
+  const row = { item: "Gas strut, series 4100", qty: "2", requested_at: "2026-10-15T00:00:00+00:00" };
+  const quote = draftFollowUp({ row, contactName: "Shovan Bezuidenhout", owesProForma: false, senderName: "Heinrich" });
+  assert.match(quote, /^Hi Shovan,/);
+  assert.match(quote, /quotation on 2026-10-15 for Gas strut, series 4100 \(qty 2\)/);
+  assert.match(quote, /Kind regards,\nHeinrich\nEast Rand Supplies$/);
+  const pf = draftFollowUp({ row: { ...row, qty: "see list" }, contactName: "", owesProForma: true, senderName: "Heinrich" });
+  assert.match(pf, /^Good day,/);
+  assert.match(pf, /pro forma invoice/);
+  assert.doesNotMatch(pf, /qty|bank|account/i);
+  assert.equal(textToHtml("a < b\nc & d"), "a &lt; b<br>c &amp; d");
 });
 
 test("PR numbers count on", () => {

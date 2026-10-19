@@ -226,7 +226,20 @@ export async function sendOutlookMail(appUserId, payload) {
 //   (a pop-up, or the whole page where pop-ups are blocked).
 const READ_SCOPES = ["Mail.Read", "Mail.Read.Shared"];
 
-export async function mailReadPass(appUserId, { interactive = false } = {}) {
+export function mailReadPass(appUserId, options) {
+  return passFor(READ_SCOPES, appUserId, options);
+}
+
+// Sending a follow-up in a request's own thread, from the mailbox the
+// request came from: the person's own, or a shared one (sales@) they have
+// Send As rights on. Same rules as mailReadPass.
+const SEND_SHARED_SCOPES = ["Mail.Send", "Mail.Send.Shared", "Mail.Read", "Mail.Read.Shared"];
+
+export function mailSendPass(appUserId, options) {
+  return passFor(SEND_SHARED_SCOPES, appUserId, options);
+}
+
+async function passFor(scopes, appUserId, { interactive = false } = {}) {
   if (!emailIsSetUp()) return null;
   const client = await getClient();
   const { InteractionRequiredAuthError } = await import("@azure/msal-browser");
@@ -238,7 +251,7 @@ export async function mailReadPass(appUserId, { interactive = false } = {}) {
   }
   if (account) {
     try {
-      const got = await client.acquireTokenSilent({ scopes: READ_SCOPES, account });
+      const got = await client.acquireTokenSilent({ scopes, account });
       return { pass: got.accessToken, address: (account.username || "").toLowerCase() };
     } catch (err) {
       if (!(err instanceof InteractionRequiredAuthError) || !interactive) {
@@ -250,15 +263,15 @@ export async function mailReadPass(appUserId, { interactive = false } = {}) {
   if (!interactive) return null;
   try {
     const got = account
-      ? await client.acquireTokenPopup({ scopes: READ_SCOPES, account })
-      : await client.loginPopup({ scopes: READ_SCOPES, prompt: "select_account" });
+      ? await client.acquireTokenPopup({ scopes, account })
+      : await client.loginPopup({ scopes, prompt: "select_account" });
     writeOwner(String(appUserId || ""));
     return { pass: got.accessToken, address: (got.account?.username || "").toLowerCase() };
   } catch (err) {
     if (!popupWasBlocked(err)) throw err;
     // No pop-ups here: the whole page goes to Microsoft and comes back.
     writePending(String(appUserId || ""));
-    await client.acquireTokenRedirect({ scopes: READ_SCOPES, ...(account ? { account } : { prompt: "select_account" }) });
+    await client.acquireTokenRedirect({ scopes, ...(account ? { account } : { prompt: "select_account" }) });
     return null;
   }
 }
