@@ -1,10 +1,11 @@
 // The Procurement page: the supplier quote requests register.
 //
-// Step one (Heinrich, 19 Oct 2026; plan in the Claude API conversation's
-// memory, claude-api-reader-and-procurement-page): READ ONLY. It
-// shows procurement_requests as the Procurement panel in Claude Code does,
-// one tab per mailbox, pills per stage of the job. Reading the mailbox,
-// marking a mail "Not a request" and Send follow-up come in later steps.
+// Heinrich, 19 Oct 2026. It shows procurement_requests as the Procurement
+// panel in Claude Code does: one tab per mailbox, pills per stage of the
+// job. When the page opens and on Refresh it reads the mailbox
+// (mailSweep.js) for new requests and replies. A mail taken for a request
+// by mistake can be marked "Not a request". Send follow-up and the Claude
+// reading of quote PDFs come in later steps.
 //
 // Who sees what is the database's decision (setup-procurement-2-requests.sql):
 // rows from a person's own mailbox are theirs alone, sales@ rows go to
@@ -20,6 +21,8 @@ import RecordRow from "../RecordRow.jsx";
 import { C, S } from "../theme.js";
 import { supabase } from "../lib/supabaseClient.js";
 import { GROUPS, classify, matchesSearch, supplierFor, todayInSA } from "./procurementRules.js";
+import { sweepMailboxes } from "./mailSweep.js";
+import { emailIsSetUp, outlookErrorText } from "../email/outlook.js";
 
 const OPEN_STATUSES = ["Draft", "Sent", "Reply", "Pro forma", "Paid", "Ordered"];
 const RECENT_DAYS = 90;
@@ -64,16 +67,19 @@ function Detail({ label, children }) {
 
 const fmtDate = (d) => (d ? String(d).slice(0, 10) : "");
 
-export default function ProcurementPage({ suppliers, currentUserId }) {
+export default function ProcurementPage({ suppliers, currentUserId, userName, customerEmails }) {
   const [rows, setRows] = useState(null);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [mailbox, setMailbox] = useState(null);
+  // What the last mailbox read found: null (not tried), { connected: false },
+  // or { connected, address, added, moved, problems, at }.
+  const [mail, setMail] = useState(null);
+  const [mailBusy, setMailBusy] = useState(false);
+  const [mailError, setMailError] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setFailed(false);
+  const fetchRows = useCallback(async () => {
     const since = new Date(Date.now() - RECENT_DAYS * 86400000).toISOString();
     const open = OPEN_STATUSES.map((s) => `"${s}"`).join(",");
     const { data, error } = await supabase
@@ -81,18 +87,75 @@ export default function ProcurementPage({ suppliers, currentUserId }) {
       .select("*")
       .or(`status.in.(${open}),updated_at.gte.${since}`)
       .order("pr_number", { ascending: false });
-    setLoading(false);
-    if (error) {
-      console.error("Procurement requests did not load:", error);
-      setFailed(true);
-      return;
-    }
-    setRows(data || []);
+    if (error) throw error;
+    return data || [];
   }, []);
 
+  // Rows first, so the page shows at once; then the mailbox, then the rows
+  // again with whatever the mailbox changed. interactive: Refresh was
+  // pressed, so Microsoft may ask the person to sign in or allow reading.
+  const load = useCallback(
+    async (interactive) => {
+      setLoading(true);
+      setFailed(false);
+      let current;
+      try {
+        current = await fetchRows();
+        setRows(current);
+      } catch (err) {
+        console.error("Procurement requests did not load:", err);
+        setFailed(true);
+        setLoading(false);
+        return;
+      }
+      setLoading(false);
+      if (!emailIsSetUp()) return;
+      setMailBusy(true);
+      setMailError("");
+      try {
+        const { data: settings } = await supabase.from("app_settings").select("procurement_shared_mailboxes").maybeSingle();
+        const result = await sweepMailboxes({
+          supabase,
+          appUserId: currentUserId,
+          userName,
+          interactive,
+          rows: current,
+          suppliers,
+          customerEmails,
+          sharedMailboxes: settings?.procurement_shared_mailboxes || [],
+        });
+        setMail({ ...result, at: new Date() });
+        if (result.connected && (result.added || result.moved)) setRows(await fetchRows());
+      } catch (err) {
+        console.error("Reading the mailbox failed:", err);
+        setMailError(outlookErrorText(err));
+      } finally {
+        setMailBusy(false);
+      }
+    },
+    [fetchRows, currentUserId, userName, suppliers, customerEmails]
+  );
+
   useEffect(() => {
-    load();
-  }, [load]);
+    load(false);
+    // Once when the page opens; Refresh reads again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // "Not a request" and back. The next mailbox read leaves a row marked so alone.
+  async function setStatus(row, status) {
+    const { data, error } = await supabase
+      .from("procurement_requests")
+      .update({ status, updated_at: new Date().toISOString(), updated_by: userName })
+      .eq("id", row.id)
+      .select()
+      .single();
+    if (error || !data) {
+      alert("That did not save. Check your connection and try again.");
+      return;
+    }
+    setRows((prev) => prev.map((r) => (r.id === data.id ? data : r)));
+  }
 
   const today = todayInSA(Date.now());
 
@@ -141,12 +204,33 @@ export default function ProcurementPage({ suppliers, currentUserId }) {
           type="button"
           className="stk-btn"
           style={{ ...S.reqActionBtnMuted, marginLeft: "auto" }}
-          onClick={load}
-          disabled={loading}
+          onClick={() => load(true)}
+          disabled={loading || mailBusy}
         >
-          <RefreshCw size={13} /> {loading ? "Loading…" : "Refresh"}
+          <RefreshCw size={13} /> {loading ? "Loading…" : mailBusy ? "Reading mail…" : "Refresh"}
         </button>
       </div>
+
+      {emailIsSetUp() && (
+        <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>
+          {mailBusy && "Reading the mailbox…"}
+          {!mailBusy && mail?.connected === false && (
+            <>
+              The mailbox is not read yet on this device.{" "}
+              <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => load(true)}>
+                Read my mailbox
+              </button>
+            </>
+          )}
+          {!mailBusy && mail?.connected &&
+            `Mailbox ${mail.address} read at ${mail.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}: ` +
+              `${mail.added} new request${mail.added === 1 ? "" : "s"}, ${mail.moved} moved on.`}
+          {mailError && <div style={{ color: C.danger }}>Reading the mailbox failed: {mailError}</div>}
+          {(mail?.problems || []).map((p) => (
+            <div key={p} style={{ color: C.danger }}>{p}</div>
+          ))}
+        </div>
+      )}
 
       <input
         style={{ ...S.input, marginTop: 10 }}
@@ -196,6 +280,16 @@ export default function ProcurementPage({ suppliers, currentUserId }) {
                 <Detail label="Phone">{supplier?.phone || ""}</Detail>
                 <Detail label="Old quote">{r.old_quote}</Detail>
                 <Detail label="Notes">{r.notes}</Detail>
+                {["Draft", "Sent"].includes(r.status) && (
+                  <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 8 }} onClick={() => setStatus(r, "Not a request")}>
+                    Not a request
+                  </button>
+                )}
+                {r.status === "Not a request" && (
+                  <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginTop: 8 }} onClick={() => setStatus(r, "Sent")}>
+                    It is a request after all
+                  </button>
+                )}
               </RecordRow>
             ))}
           </Section>

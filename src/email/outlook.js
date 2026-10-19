@@ -213,6 +213,56 @@ export async function sendOutlookMail(appUserId, payload) {
   throw new Error(reason);
 }
 
+// Reading mail, for the Quote requests page (src/procurement/mailSweep.js;
+// added 19 Oct 2026 by the Claude API / Procurement conversation). A
+// separate pass from sending: Mail.Read for the person's own mailbox and
+// Mail.Read.Shared for shared ones (sales@). Asked for only by that page,
+// so nobody else is ever shown the extra permission. Needs both added to
+// the app registration with admin consent (docs/EMAIL-SETUP-MICROSOFT.md).
+//
+// interactive false: a pass only if one can be had without a window (the
+//   page opening). Returns null otherwise.
+// interactive true: the person pressed a button, so Microsoft may ask them
+//   (a pop-up, or the whole page where pop-ups are blocked).
+const READ_SCOPES = ["Mail.Read", "Mail.Read.Shared"];
+
+export async function mailReadPass(appUserId, { interactive = false } = {}) {
+  if (!emailIsSetUp()) return null;
+  const client = await getClient();
+  const { InteractionRequiredAuthError } = await import("@azure/msal-browser");
+  let account = client.getAllAccounts()[0];
+  if (account && readOwner() !== String(appUserId || "")) {
+    await client.clearCache();
+    writeOwner("");
+    account = null;
+  }
+  if (account) {
+    try {
+      const got = await client.acquireTokenSilent({ scopes: READ_SCOPES, account });
+      return { pass: got.accessToken, address: (account.username || "").toLowerCase() };
+    } catch (err) {
+      if (!(err instanceof InteractionRequiredAuthError) || !interactive) {
+        if (!interactive) return null;
+        throw err;
+      }
+    }
+  }
+  if (!interactive) return null;
+  try {
+    const got = account
+      ? await client.acquireTokenPopup({ scopes: READ_SCOPES, account })
+      : await client.loginPopup({ scopes: READ_SCOPES, prompt: "select_account" });
+    writeOwner(String(appUserId || ""));
+    return { pass: got.accessToken, address: (got.account?.username || "").toLowerCase() };
+  } catch (err) {
+    if (!popupWasBlocked(err)) throw err;
+    // No pop-ups here: the whole page goes to Microsoft and comes back.
+    writePending(String(appUserId || ""));
+    await client.acquireTokenRedirect({ scopes: READ_SCOPES, ...(account ? { account } : { prompt: "select_account" }) });
+    return null;
+  }
+}
+
 // A page sign-in on its way back is finished as the app loads, not when
 // somebody next opens a send window. Nothing is loaded otherwise. Kept at
 // the very end: everything it touches is declared above it.

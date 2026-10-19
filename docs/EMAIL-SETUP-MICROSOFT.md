@@ -36,7 +36,13 @@ that person's own mailbox and shows in their own Sent Items.
    and tick:
    - `Mail.Send` (send mail as the signed-in person)
    - `User.Read` (read the signed-in person's name and address; usually already there)
-   Do **not** choose "Application permissions".
+   - `Mail.Read` and `Mail.Read.Shared` (added 19 Oct 2026, for the Quote
+     requests page: it reads the person's own Sent Items and the shared
+     sales@ mailbox when the page opens. Reading only; it never sends or
+     deletes. Shared mailboxes also need the person to have access to them
+     in Exchange, as they do in Outlook.)
+   Do **not** choose "Application permissions": those would let the app read
+   every mailbox in the company with nobody signed in.
 7. Press **Grant admin consent for East Rand Supplies** and confirm. Without
    this, every person gets a permission question the first time.
 8. Open **Overview** and copy two values to Heinrich:

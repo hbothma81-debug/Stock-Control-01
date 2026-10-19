@@ -17872,7 +17872,12 @@ export default function StockControl() {
       ) : tab === "procurement" ? (
         // Quote requests (src/procurement): reads procurement_requests itself.
         <ErrorBoundary key="procurement" box what="the Quote requests tab">
-          <ProcurementPage suppliers={master.suppliers} currentUserId={currentUser?.id || null} />
+          <ProcurementPage
+            suppliers={master.suppliers}
+            currentUserId={currentUser?.id || null}
+            userName={roleLabel}
+            customerEmails={Object.values(master.customerContacts || {}).flat().map((c) => c.email).filter(Boolean)}
+          />
         </ErrorBoundary>
       ) : tab === "cnc" ? (
         // The CNC module (src/cnc): it reads and saves everything itself,
