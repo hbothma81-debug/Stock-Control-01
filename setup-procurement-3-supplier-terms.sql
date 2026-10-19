@@ -29,8 +29,15 @@ begin
   end if;
 end $do$;
 
--- Undo the earlier versions where they ran (practice).
-drop trigger if exists supplier_payment_details_log on public.supplier_payment_details;
+-- Undo the earlier versions where they ran (practice). Every step on that
+-- table sits inside the check that it exists: "drop trigger if exists ... on
+-- a table" still fails on a database that never had the table (live, 19 Oct).
+do $do$
+begin
+  if to_regclass('public.supplier_payment_details') is not null then
+    drop trigger if exists supplier_payment_details_log on public.supplier_payment_details;
+  end if;
+end $do$;
 drop function if exists public.log_supplier_bank_change();
 drop table if exists public.supplier_bank_changes;
 
