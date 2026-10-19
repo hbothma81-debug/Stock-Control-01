@@ -204,9 +204,11 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
       }
     }
 
-    // Replies, reminders and the supplier's PDFs on this mailbox's requests
-    // that are not finished.
-    const live = known.filter((r) => r.mailbox === box.address && r.conversation_id && ["Sent", "Reply", "Pro forma", "Paid", "Ordered"].includes(r.status));
+    // Replies, reminders and the supplier's PDFs on this mailbox's requests.
+    // Finished ones too (Closed, Received: only their PDFs are saved, so a
+    // supplier's quote history is whole; threadUpdate leaves them as they
+    // are). Only what the page loaded: open work and 90 days of finished.
+    const live = known.filter((r) => r.mailbox === box.address && r.conversation_id && r.status !== "Not a request" && r.status !== "Draft");
     const savedFiles = new Set();
     if (live.length) {
       const { data: had } = await supabase.from("supplier_quotes").select("message_id, file_name").in("request_id", live.map((r) => r.id));
