@@ -6741,75 +6741,63 @@ select 'procurement requests' as step,
 -- ============================================================
 -- Procurement page, step 3 of the SQL: each supplier's terms and our account no.
 --
--- Terms are Account (ERS orders on the quote) or Pro forma (ERS pays up
--- front, so a pro forma invoice is needed). Our account no is the number
--- the supplier knows ERS by. People with the Procurement tick read them;
--- only an admin who also has the tick changes them.
+-- Two new boxes on every supplier in Stock Manager -> Suppliers:
+--   * account_no: the account number the supplier gave ERS (EAS007 at
+--     Eurosteel, COD037 at McNaughtan). It prints on every purchase order,
+--     so it sits on the supplier list itself, which everyone who raises a
+--     PO can read.
+--   * terms: Account (ERS orders on the quote) or Pro forma (ERS pays up
+--     front, so a pro forma invoice is needed). The Procurement page's
+--     reminders ask for a pro forma only on Pro forma terms.
 --
 -- NO BANK DETAILS. Heinrich's decision, 19 Oct 2026: supplier banking
--- stays with accounts, never in the app, because a bank number kept here
--- is one more thing a fraudster can change. An earlier version of this
--- file (setup-procurement-3-supplier-bank.sql, run on practice only) made
--- bank columns and a bank change log; this file takes them away again.
+-- stays with accounts, never in the app. Earlier versions of this file,
+-- run on practice only, made a separate supplier_payment_details table
+-- (first with bank columns and a change log); this one takes all of that
+-- away again, and drops that table only while it holds no rows.
 --
--- Needs setup-procurement-1-access.sql first.
 -- Run on PRACTICE first. Select nothing before pressing Run.
 -- Safe to run more than once.
 
-create table if not exists public.supplier_payment_details (
-  supplier_id     text primary key references public.master_suppliers(id) on delete cascade,
-  terms           text check (terms in ('Account', 'Pro forma')),
-  our_account_no  text not null default '',
-  updated_by      text,
-  updated_by_user uuid default auth.uid(),
-  updated_at      timestamptz not null default now()
-);
+alter table public.master_suppliers add column if not exists account_no text not null default '';
+alter table public.master_suppliers add column if not exists terms text;
 
--- Undo the earlier bank version where it ran (practice).
+do $do$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'master_suppliers_terms_check') then
+    alter table public.master_suppliers add constraint master_suppliers_terms_check
+      check (terms in ('Account', 'Pro forma'));
+  end if;
+end $do$;
+
+-- Undo the earlier versions where they ran (practice).
 drop trigger if exists supplier_payment_details_log on public.supplier_payment_details;
 drop function if exists public.log_supplier_bank_change();
 drop table if exists public.supplier_bank_changes;
-alter table public.supplier_payment_details drop column if exists bank_name;
-alter table public.supplier_payment_details drop column if exists account_holder;
-alter table public.supplier_payment_details drop column if exists account_number;
-alter table public.supplier_payment_details drop column if exists branch_code;
 
-alter table public.supplier_payment_details enable row level security;
-
-drop policy if exists "Procurement people read supplier bank" on public.supplier_payment_details;
-drop policy if exists "Admins add supplier bank" on public.supplier_payment_details;
-drop policy if exists "Admins change supplier bank" on public.supplier_payment_details;
-drop policy if exists "Admins remove supplier bank" on public.supplier_payment_details;
-
-drop policy if exists "Procurement people read supplier terms" on public.supplier_payment_details;
-create policy "Procurement people read supplier terms" on public.supplier_payment_details
-  for select to authenticated using (public.can_procure());
-
-drop policy if exists "Admins add supplier terms" on public.supplier_payment_details;
-create policy "Admins add supplier terms" on public.supplier_payment_details
-  for insert to authenticated with check (public.can_procure() and public.is_admin());
-
-drop policy if exists "Admins change supplier terms" on public.supplier_payment_details;
-create policy "Admins change supplier terms" on public.supplier_payment_details
-  for update to authenticated
-  using (public.can_procure() and public.is_admin())
-  with check (public.can_procure() and public.is_admin());
-
-drop policy if exists "Admins remove supplier terms" on public.supplier_payment_details;
-create policy "Admins remove supplier terms" on public.supplier_payment_details
-  for delete to authenticated using (public.can_procure() and public.is_admin());
+do $do$
+begin
+  if to_regclass('public.supplier_payment_details') is not null then
+    if exists (select 1 from public.supplier_payment_details) then
+      raise notice 'supplier_payment_details still holds rows: left in place, tell Claude';
+    else
+      drop table public.supplier_payment_details;
+    end if;
+  end if;
+end $do$;
 
 
 -- ============ Check ============
 
-select 'supplier terms' as step,
-       case when exists (select 1 from information_schema.tables where table_schema = 'public'
-                         and table_name = 'supplier_payment_details')
-             and not exists (select 1 from information_schema.columns where table_schema = 'public'
-                         and table_name = 'supplier_payment_details' and column_name = 'account_number')
-             and not exists (select 1 from information_schema.tables where table_schema = 'public'
-                         and table_name = 'supplier_bank_changes')
-            then 'ready - ' || (select count(*) from public.supplier_payment_details) || ' suppliers with terms, no bank details kept'
+select 'supplier terms and account no' as step,
+       case when exists (select 1 from information_schema.columns where table_schema = 'public'
+                         and table_name = 'master_suppliers' and column_name = 'account_no')
+             and exists (select 1 from information_schema.columns where table_schema = 'public'
+                         and table_name = 'master_suppliers' and column_name = 'terms')
+             and to_regclass('public.supplier_payment_details') is null
+             and to_regclass('public.supplier_bank_changes') is null
+            then 'ready - ' || (select count(*) from public.master_suppliers where account_no <> '')
+                 || ' suppliers with an account no, no bank details kept'
             else 'SOMETHING IS MISSING - tell Claude' end as result;
 
 

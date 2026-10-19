@@ -476,6 +476,8 @@ export function usePurchasing(deps) {
       c3y += 5;
     };
     metaLine("Number:", po.poNumber);
+    // The account number the supplier gave ERS (Stock Manager -> Suppliers).
+    metaLine("Our Account No:", supplier?.accountNo);
     metaLine("Date:", new Date(po.dateCreated).toLocaleDateString());
     metaLine("Reference:", po.reference);
     metaLine("Sales person:", po.salesPerson);

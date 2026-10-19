@@ -319,6 +319,9 @@ let stockHasPaidPrice = false;
 // src/cnc/gradeLink.js): read and written only once a loaded row has shown
 // the column, so a database without it loads and saves the lists as before.
 let factorHasCuttingMaterial = false;
+// A supplier's account no and terms (setup-procurement-3-supplier-terms.sql):
+// read and written only once a loaded row has shown the columns.
+let supplierHasAccountNo = false;
 let stockHasRemovedDetails = false;
 let stockHasCustomerRevision = false;
 function itemToDbRow(item) {
@@ -792,10 +795,14 @@ async function loadMasterFromTables() {
   for (const c of supplierContacts.data || []) {
     (contactsBySupplier[c.supplier_id] ||= []).push({ id: c.id, name: c.name, email: c.email });
   }
-  result.suppliers = (suppliers.data || []).map((s) => ({
-    id: s.id, name: s.name, email: s.email, phone: s.phone, address: s.address, vatNumber: s.vat_number,
-    contacts: contactsBySupplier[s.id] || [],
-  }));
+  result.suppliers = (suppliers.data || []).map((s) => {
+    if ("account_no" in s) supplierHasAccountNo = true;
+    return {
+      id: s.id, name: s.name, email: s.email, phone: s.phone, address: s.address, vatNumber: s.vat_number,
+      accountNo: s.account_no || "", terms: s.terms || "",
+      contacts: contactsBySupplier[s.id] || [],
+    };
+  });
 
   result.storesCatalog = (storesCatalog.data || []).map((r) => ({
     id: r.id, code: r.code, name: r.name, category: r.category, supplier: r.supplier, price: Number(r.price),
@@ -3139,7 +3146,10 @@ export default function StockControl() {
       const nextSuppliers = newMaster.suppliers || [];
       const prevById = new Map(prevSuppliers.map((s) => [s.id, s]));
       const nextById = new Map(nextSuppliers.map((s) => [s.id, s]));
-      const toRow = (s) => ({ id: s.id, name: s.name, email: s.email || "", phone: s.phone || "", address: s.address || "", vat_number: s.vatNumber || "" });
+      const toRow = (s) => ({
+        id: s.id, name: s.name, email: s.email || "", phone: s.phone || "", address: s.address || "", vat_number: s.vatNumber || "",
+        ...(supplierHasAccountNo ? { account_no: s.accountNo || "", terms: s.terms || null } : {}),
+      });
       const added = nextSuppliers.filter((s) => !prevById.has(s.id));
       const removedIds = prevSuppliers.filter((s) => !nextById.has(s.id)).map((s) => s.id);
       const modified = nextSuppliers.filter((s) => {
@@ -20401,6 +20411,27 @@ export default function StockControl() {
                           onChange={(e) => updateSupplierField(s.id, "vatNumber", e.target.value)}
                           placeholder="VAT number (optional)"
                         />
+                        {supplierHasAccountNo && (
+                          <div style={{ ...S.formGrid, marginTop: 8 }}>
+                            <input
+                              style={S.input}
+                              value={s.accountNo || ""}
+                              onChange={(e) => updateSupplierField(s.id, "accountNo", e.target.value)}
+                              placeholder="Our account no (prints on the PO)"
+                              title="The account number this supplier gave ERS. It prints on every purchase order to them."
+                            />
+                            <select
+                              style={S.input}
+                              value={s.terms || ""}
+                              onChange={(e) => updateSupplierField(s.id, "terms", e.target.value)}
+                              title="Account: ERS orders on the quote. Pro forma: ERS pays first, so a pro forma invoice is needed."
+                            >
+                              <option value="">Terms not known</option>
+                              <option value="Account">Account</option>
+                              <option value="Pro forma">Pro forma</option>
+                            </select>
+                          </div>
+                        )}
                         <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                             <label style={S.label}>Contact people</label>

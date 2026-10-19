@@ -231,9 +231,8 @@ with checks (setup_file, looks_for, found) as (
       and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'app_settings' and column_name = 'ai_monthly_cap_usd')),
     ('setup-procurement-2-requests.sql', 'table procurement_requests (the quote request register)',
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'procurement_requests')),
-    ('setup-procurement-3-supplier-terms.sql', 'table supplier_payment_details (terms and our account no, no bank details)',
-      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'supplier_payment_details')
-      and not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'supplier_payment_details' and column_name = 'account_number')),
+    ('setup-procurement-3-supplier-terms.sql', 'columns master_suppliers.account_no and terms (printed on the PO; no bank details)',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'master_suppliers' and column_name = 'account_no')),
     ('setup-claude-reader-1-log.sql', 'table ai_document_reads and function ai_start_read (Claude reads and limits)',
       exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'ai_start_read'))
 )
