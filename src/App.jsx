@@ -22639,7 +22639,11 @@ export default function StockControl() {
                     </button>
                   )}
                 </div>
-                {jobDetailLoading && <div style={S.empty}>Loading…</div>}
+                {/* Only while there is nothing to show yet. Every save comes
+                    back through a reload, and a Loading line that appears
+                    above a list already on screen pushes the whole page
+                    down and back (Heinrich, 20 Oct 2026). */}
+                {jobDetailLoading && jobDetail.processes.length === 0 && <div style={S.empty}>Loading…</div>}
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
                   {/* The job's own stages only. A shortage's catch-up run
                       is stored against the same job, so without this the
