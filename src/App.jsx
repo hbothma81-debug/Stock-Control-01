@@ -23082,22 +23082,19 @@ export default function StockControl() {
                       .map((l) => ({ value: l.id, label: `${Number(l.qty) || 0}× ${l.description || "(no description)"}` }));
                     return (
                       <div key={it.id}>
-                      <div style={S.managerRow}>
-                        {canActOnThis && (
-                          <input
-                            type="number"
-                            min="0"
-                            max={remaining}
-                            step="0.01"
-                            value={invoiceQtyInputs[it.id] || ""}
-                            onChange={(e) => setInvoiceQty(it.id, e.target.value)}
-                            placeholder="Qty"
-                            title={`Qty to invoice or deliver — up to ${remaining} remaining`}
-                            style={{ ...S.input, width: 64, fontSize: 14, padding: "5px 6px", marginTop: 1 }}
-                          />
-                        )}
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
+                      {/* Two rows per line (Heinrich, 20 Oct 2026: "info is
+                          all over the place"). Row one is the line itself:
+                          code, description, how many, price each, where it
+                          is made, its material on a tube line, its extra
+                          stages, the bin. Row two is what has happened to
+                          it (invoiced so far, the To-invoice box the
+                          Invoice and Delivery tabs read, stock and revision)
+                          and what can be done with it (the part buttons).
+                          Its parts follow inside the same box. The price is
+                          shown once: the box, or the words when the line
+                          cannot be edited. */}
+                      <div style={{ ...S.managerRow, flexDirection: "column", alignItems: "stretch", gap: 4 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                             {canEditThisJob ? (
                               <>
                                 {/* Stock code, description, how many,
@@ -23110,7 +23107,7 @@ export default function StockControl() {
                                   key={`code-${it.id}-${it.stock_code || ""}-${it.linked_item_id || ""}`}
                                   defaultValue={jobLineCode(it, linkedItem)}
                                   onBlur={(e) => setJobLineStockCode(jobDetail.job, it, linkedItem, e.target.value)}
-                                  style={{ ...S.input, width: 110, fontSize: 14, padding: "4px 6px" }}
+                                  style={{ ...S.input, width: 120, fontSize: 14, padding: "4px 6px" }}
                                   placeholder="Stock code"
                                   title="The customer's stock code. Type one to attach the part and pull its description and price through."
                                 />
@@ -23118,7 +23115,7 @@ export default function StockControl() {
                                   key={`desc-${it.id}-${it.stock_code || ""}-${it.linked_item_id || ""}`}
                                   defaultValue={jobLineDescription(it, linkedItem)}
                                   onBlur={(e) => updateJobQuoteItem(jobDetail.job, it, "description", e.target.value)}
-                                  style={{ ...S.input, flex: 1, minWidth: 90, fontSize: 14, padding: "4px 6px" }}
+                                  style={{ ...S.input, flex: "1 1 220px", minWidth: 160, fontSize: 14, padding: "4px 6px" }}
                                   placeholder="Description"
                                 />
                                 {/* The quantity refuses to go below what
@@ -23129,10 +23126,10 @@ export default function StockControl() {
                                   step="0.01"
                                   defaultValue={it.qty}
                                   onBlur={(e) => updateJobQuoteItem(jobDetail.job, it, "qty", e.target.value)}
-                                  style={{ ...S.input, width: 62, fontSize: 14, padding: "4px 6px" }}
+                                  style={{ ...S.input, width: 72, fontSize: 14, padding: "4px 6px" }}
                                   title={
                                     Number(it.qty_invoiced || 0) > 0
-                                      ? `${it.qty_invoiced} already invoiced — cannot go below that`
+                                      ? `Quantity — ${it.qty_invoiced} already invoiced, cannot go below that`
                                       : "Quantity"
                                   }
                                 />
@@ -23150,42 +23147,22 @@ export default function StockControl() {
                                     key={`price-${it.id}-${it.unit_price}`}
                                     defaultValue={it.unit_price}
                                     onBlur={(e) => updateJobQuoteItem(jobDetail.job, it, "unit_price", e.target.value)}
-                                    style={{ ...S.input, width: 84, fontSize: 14, padding: "4px 6px" }}
-                                    title="Price each"
+                                    style={{ ...S.input, width: 92, fontSize: 14, padding: "4px 6px" }}
+                                    title="Price each, before VAT"
                                   />
                                 )}
-                              </>
-                            ) : (
-                              <>
-                                {jobLineCode(it, linkedItem) && (
-                                  <span style={{ fontSize: 14, fontWeight: 600 }}>{jobLineCode(it, linkedItem)}</span>
-                                )}
-                                <span style={{ fontSize: 14 }}>{jobLineDescription(it, linkedItem)}</span>
-                                <span style={{ fontSize: 14, fontWeight: 600 }}>× {it.qty}</span>
-                              </>
-                            )}
-                            <SavedCheck fieldKey={`quoteitem-${it.id}`} />
-                            <SavedCheck fieldKey={`quoteitem-price-${it.id}`} />
-                            {status === "out_external" && (
-                              <span style={{ marginLeft: 6, fontSize: 12, fontWeight: 600, color: C.danger }}>Out — external</span>
-                            )}
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
-                            {canSeeValue && <span style={S.roleHint}>R{Number(it.unit_price).toFixed(2)} each</span>}
-                            <span style={S.roleHint}>{canSeeValue ? "— " : ""}Invoiced {it.qty_invoiced} / {it.qty}</span>
-                            {/* Where this line is made. Blank shows on
-                                every stage, as before. */}
-                            {canEditThisJob ? (
-                              <>
+                                <SavedCheck fieldKey={`quoteitem-${it.id}`} />
+                                <SavedCheck fieldKey={`quoteitem-price-${it.id}`} />
+                                {/* Where this line is made. Blank shows on
+                                    every stage, as before. */}
                                 <select
                                   value={it.made_on || ""}
                                   onChange={(e) => setJobItemMadeOn(jobDetail.job, it, e.target.value)}
                                   style={{
                                     ...S.input,
                                     width: "auto",
-                                    fontSize: 12.5,
-                                    padding: "2px 6px",
-                                    marginLeft: 6,
+                                    fontSize: 13,
+                                    padding: "4px 6px",
                                     // The whole border, not just its colour:
                                     // S.input sets border as one value and
                                     // React refuses to mix the two.
@@ -23215,8 +23192,8 @@ export default function StockControl() {
                                 {it.made_on === "tube_laser" && (
                                   <>
                                     <TypeToFind
-                                      style={{ width: 220, marginLeft: 6 }}
-                                      inputStyle={{ fontSize: 12.5, padding: "2px 24px 2px 6px" }}
+                                      style={{ width: 200 }}
+                                      inputStyle={{ fontSize: 13, padding: "4px 24px 4px 6px" }}
                                       options={[...new Set([...tubeMaterialList(), it.material_type || ""].filter(Boolean))]}
                                       value={it.material_type || ""}
                                       onChange={(v) => setJobLineMaterial(jobDetail.job, it, v || "")}
@@ -23228,18 +23205,25 @@ export default function StockControl() {
                                 )}
                               </>
                             ) : (
-                              it.made_on && (
-                                <span style={S.roleHint}>
-                                  — {madeOnLabel(it.made_on)}
-                                  {it.made_on === "tube_laser" && it.material_type ? ` · ${it.material_type}` : ""}
-                                </span>
-                              )
+                              <>
+                                {jobLineCode(it, linkedItem) && (
+                                  <span style={{ fontSize: 14, fontWeight: 600 }}>{jobLineCode(it, linkedItem)}</span>
+                                )}
+                                <span style={{ fontSize: 14, flex: "1 1 160px", minWidth: 0 }}>{jobLineDescription(it, linkedItem)}</span>
+                                <span style={{ fontSize: 14, fontWeight: 600 }}>× {it.qty}</span>
+                                {canSeeValue && <span style={{ fontSize: 13, color: C.muted }}>R{Number(it.unit_price).toFixed(2)} each</span>}
+                                {it.made_on && (
+                                  <span style={S.roleHint}>
+                                    {madeOnLabel(it.made_on)}
+                                    {it.made_on === "tube_laser" && it.material_type ? ` · ${it.material_type}` : ""}
+                                  </span>
+                                )}
+                              </>
                             )}
-                          </div>
                           {/* Its extra stages, in order. Not on a line with
                               parts: its parts carry them. */}
                           {parts.length === 0 && (
-                            <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3 }}>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                               <ExtraStagesBox
                                 line={it}
                                 stages={thenBoxStages()}
@@ -23249,10 +23233,52 @@ export default function StockControl() {
                                 onChange={(list) => setJobLineExtraStages(jobDetail.job, it, list)}
                               />
                               <SavedCheck fieldKey={`quoteitem-extra-${it.id}`} />
-                            </div>
+                            </span>
+                          )}
+                          {canEditThisJob &&
+                            Number(it.qty_invoiced || 0) === 0 &&
+                            !jobDetail.deliveryNotes.some((dn) => dn.quote_item_id === it.id) && (
+                              <button
+                                type="button"
+                                className="stk-btn"
+                                style={{ ...S.managerDelete, marginLeft: "auto" }}
+                                onClick={() => removeJobQuoteItem(jobDetail.job, it)}
+                                title="Remove this item from the job"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 13 }}>
+                          {canActOnThis && (
+                            <label style={{ display: "inline-flex", alignItems: "center", gap: 4, color: C.muted }} title={`How many to invoice or deliver now — up to ${remaining} remaining. The Invoice and Delivery tabs act on this.`}>
+                              To invoice
+                              <input
+                                type="number"
+                                min="0"
+                                max={remaining}
+                                step="0.01"
+                                value={invoiceQtyInputs[it.id] || ""}
+                                onChange={(e) => setInvoiceQty(it.id, e.target.value)}
+                                placeholder="Qty"
+                                style={{ ...S.input, width: 72, fontSize: 14, padding: "4px 6px" }}
+                              />
+                            </label>
+                          )}
+                          <span style={{ color: remaining > 0 ? C.text : C.muted }}>
+                            Invoiced {it.qty_invoiced} of {it.qty}
+                            {remaining > 0 ? ` — ${remaining} to go` : ""}
+                          </span>
+                          {remaining <= 0 && (
+                            <span style={{ fontWeight: 600, color: jobDetail.job.status === "invoiced" ? C.accentFinished : C.accentRaw }}>
+                              {jobDetail.job.status === "invoiced" ? "Invoiced" : "Invoice requested — awaiting accounts"}
+                            </span>
+                          )}
+                          {status === "out_external" && (
+                            <span style={{ fontWeight: 600, color: C.danger }}>Out — external</span>
                           )}
                           {linkedItem && (
-                            <div style={S.roleHint}>
+                            <span style={{ color: C.muted }}>
                               Available: {linkedItem.qty}
                               {revision && (
                                 <>
@@ -23261,60 +23287,160 @@ export default function StockControl() {
                                   {revision.customerRevision ? `, customer rev ${revision.customerRevision}` : ""}
                                 </>
                               )}
-                            </div>
+                            </span>
                           )}
-                          {revision && canView("drawings") && (
-                            <button
-                              type="button"
-                              className="stk-btn"
-                              style={{ ...S.reqActionBtnMuted, marginTop: 4 }}
-                              onClick={() => openDrawingPreviewByPartNumber(linkedItem.partNumber.trim())}
-                            >
-                              <FileText size={12} /> View drawing
-                            </button>
-                          )}
-                          {status === "out_external" && openDeliveryNote && canEditThisJob && (
-                            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                          <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                            {revision && canView("drawings") && (
                               <button
                                 type="button"
                                 className="stk-btn"
                                 style={S.reqActionBtnMuted}
-                                onClick={() => viewDeliveryNoteDocument(jobDetail.job, openDeliveryNote)}
+                                onClick={() => openDrawingPreviewByPartNumber(linkedItem.partNumber.trim())}
                               >
-                                <FileText size={13} /> View document
+                                <FileText size={12} /> View drawing
                               </button>
+                            )}
+                            {status === "out_external" && openDeliveryNote && canEditThisJob && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="stk-btn"
+                                  style={S.reqActionBtnMuted}
+                                  onClick={() => viewDeliveryNoteDocument(jobDetail.job, openDeliveryNote)}
+                                >
+                                  <FileText size={13} /> View document
+                                </button>
+                                <button
+                                  type="button"
+                                  className="stk-btn"
+                                  style={S.reqActionBtn}
+                                  onClick={() => checkInDeliveryNote(jobDetail.job, openDeliveryNote, it)}
+                                >
+                                  Check back in ({openDeliveryNote.delivery_note_number})
+                                </button>
+                              </>
+                            )}
+                            {canEditThisJob && addPartUnder !== it.id && (
+                              <>
                               <button
                                 type="button"
                                 className="stk-btn"
-                                style={S.reqActionBtn}
-                                onClick={() => checkInDeliveryNote(jobDetail.job, openDeliveryNote, it)}
+                                style={S.reqActionBtnMuted}
+                                onClick={() => {
+                                  setNewPartForm({ description: "", qty: "", lengthMm: "", madeOn: "", linkedItemId: null });
+                                  setAddPartUnder(it.id);
+                                }}
+                                title="Add a part under this line. Parts are cut and counted; this line is what gets invoiced."
                               >
-                                Check back in ({openDeliveryNote.delivery_note_number})
+                                <Plus size={11} /> Add part
                               </button>
-                            </div>
-                          )}
+                              {/* Building a customer's parts up as the
+                                  job is worked down. Always here rather
+                                  than appearing only when something
+                                  typed matches nothing, so the row keeps
+                                  its shape the whole way down the list.
+                                  The part is made with nothing on the
+                                  shelf; it is a catalogue entry, not a
+                                  delivery. */}
+                              {(() => {
+                                const alreadyLinked = !!it.linked_item_id;
+                                const noCustomer = !jobDetail.job.customer;
+                                const off = alreadyLinked || noCustomer;
+                                return (
+                                  <button
+                                    type="button"
+                                    className="stk-btn"
+                                    style={{ ...S.reqActionBtnMuted, ...(off ? { opacity: 0.45, cursor: "not-allowed" } : {}) }}
+                                    disabled={off}
+                                    title={
+                                      alreadyLinked
+                                        ? `Already in Customer Stock${linkedItem?.partNumber ? ` as ${linkedItem.partNumber}` : ""}`
+                                        : noCustomer
+                                          ? "Customer Stock is kept per customer, and this job has none yet. Set the customer on Overview first."
+                                          : "Add this line to Customer Stock as a part, with nothing on the shelf, and link the line to it"
+                                    }
+                                    onClick={() =>
+                                      setNewStockItemModal({
+                                        forJobLine: it.id,
+                                        customer: jobDetail.job.customer,
+                                        // A code already typed on the line
+                                        // is the code this part should
+                                        // have: that is the whole point of
+                                        // being able to type one before
+                                        // the part exists.
+                                        partNumber: jobLineCode(it, linkedItem),
+                                        name: jobLineDescription(it, linkedItem),
+                                        value: it.unit_price ?? "",
+                                        loc: "",
+                                      })
+                                    }
+                                  >
+                                    <Plus size={11} /> Add to Customer Stock
+                                  </button>
+                                );
+                              })()}
+                              {/* The two files the shop already works
+                                  from. Parts land under this line, which
+                                  is what stays on the invoice. */}
+                              <label
+                                className="stk-btn"
+                                style={{ ...S.reqActionBtnMuted, cursor: importingPartsFor ? "wait" : "pointer" }}
+                                title="Read the plate parts off a SigmaNest quote and put them under this line"
+                              >
+                                <Upload size={11} /> {importingPartsFor === it.id ? "Reading…" : "SigmaNest parts"}
+                                <input
+                                  type="file"
+                                  accept=".pdf"
+                                  style={{ display: "none" }}
+                                  disabled={!!importingPartsFor}
+                                  onChange={(e) => {
+                                    const file = e.target.files[0] || null;
+                                    e.target.value = "";
+                                    if (file) importPartsUnderLine(jobDetail.job, it, file, "sigmanest");
+                                  }}
+                                />
+                              </label>
+                              <label
+                                className="stk-btn"
+                                style={{ ...S.reqActionBtnMuted, cursor: importingPartsFor ? "wait" : "pointer" }}
+                                title="Read the parts and lengths off a tube nesting report and put them under this line"
+                              >
+                                <Upload size={11} /> {importingPartsFor === it.id ? "Reading…" : "Tube nest parts"}
+                                <input
+                                  type="file"
+                                  accept=".xlsx,.xls"
+                                  style={{ display: "none" }}
+                                  disabled={!!importingPartsFor}
+                                  onChange={(e) => {
+                                    const file = e.target.files[0] || null;
+                                    e.target.value = "";
+                                    if (file) importPartsUnderLine(jobDetail.job, it, file, "tubenest");
+                                  }}
+                                />
+                              </label>
+                              {/* A line that turns out to be a part of
+                                  another one. Offered only where it can
+                                  actually go somewhere: a line with parts
+                                  of its own cannot become a part, and
+                                  there has to be another line to go
+                                  under. */}
+                              {parts.length === 0 && moveTargets.length > 0 && (
+                                <TypeToFind
+                                  style={{ flex: "0 1 190px", minWidth: 140 }}
+                                  options={moveTargets}
+                                  value=""
+                                  onChange={(v) => v && moveJobLineUnder(jobDetail.job, it, v)}
+                                  emptyLabel="Move under…"
+                                  title="Make this line a part of another line on this job"
+                                  inputStyle={{ fontSize: 13, padding: "3px 5px" }}
+                                />
+                              )}
+                              </>
+                            )}
+                          </div>
                         </div>
-                        {canEditThisJob &&
-                          Number(it.qty_invoiced || 0) === 0 &&
-                          !jobDetail.deliveryNotes.some((dn) => dn.quote_item_id === it.id) && (
-                            <button
-                              type="button"
-                              className="stk-btn"
-                              style={S.managerDelete}
-                              onClick={() => removeJobQuoteItem(jobDetail.job, it)}
-                              title="Remove this item from the job"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          )}
-                        {remaining <= 0 && (
-                          <span style={{ ...S.roleHint, color: jobDetail.job.status === "invoiced" ? C.accentFinished : C.accentRaw }}>
-                            {jobDetail.job.status === "invoiced" ? "Invoiced" : "Invoice requested — awaiting accounts"}
-                          </span>
-                        )}
-                      </div>
-                      {(parts.length > 0 || canEditThisJob) && (
-                        <div style={{ marginLeft: 22, marginTop: 4, display: "flex", flexDirection: "column", gap: 3 }}>
+                        {(parts.length > 0 || (canEditThisJob && addPartUnder === it.id)) && (
+                        <div style={{ marginLeft: 22, marginTop: 2, display: "flex", flexDirection: "column", gap: 3 }}>
                           {parts.length > 0 && (
                             <div style={S.roleHint}>
                               {parts.length} part{parts.length === 1 ? "" : "s"} · {parts.reduce((n, c) => n + (Number(c.qty) || 0), 0)} off
@@ -23537,125 +23663,9 @@ export default function StockControl() {
                               </button>
                             </div>
                           )}
-                          {canEditThisJob && addPartUnder !== it.id && (
-                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                              <button
-                                type="button"
-                                className="stk-btn"
-                                style={S.reqActionBtnMuted}
-                                onClick={() => {
-                                  setNewPartForm({ description: "", qty: "", lengthMm: "", madeOn: "", linkedItemId: null });
-                                  setAddPartUnder(it.id);
-                                }}
-                                title="Add a part under this line. Parts are cut and counted; this line is what gets invoiced."
-                              >
-                                <Plus size={11} /> Add part
-                              </button>
-                              {/* Building a customer's parts up as the
-                                  job is worked down. Always here rather
-                                  than appearing only when something
-                                  typed matches nothing, so the row keeps
-                                  its shape the whole way down the list.
-                                  The part is made with nothing on the
-                                  shelf; it is a catalogue entry, not a
-                                  delivery. */}
-                              {(() => {
-                                const alreadyLinked = !!it.linked_item_id;
-                                const noCustomer = !jobDetail.job.customer;
-                                const off = alreadyLinked || noCustomer;
-                                return (
-                                  <button
-                                    type="button"
-                                    className="stk-btn"
-                                    style={{ ...S.reqActionBtnMuted, ...(off ? { opacity: 0.45, cursor: "not-allowed" } : {}) }}
-                                    disabled={off}
-                                    title={
-                                      alreadyLinked
-                                        ? `Already in Customer Stock${linkedItem?.partNumber ? ` as ${linkedItem.partNumber}` : ""}`
-                                        : noCustomer
-                                          ? "Customer Stock is kept per customer, and this job has none yet. Set the customer on Overview first."
-                                          : "Add this line to Customer Stock as a part, with nothing on the shelf, and link the line to it"
-                                    }
-                                    onClick={() =>
-                                      setNewStockItemModal({
-                                        forJobLine: it.id,
-                                        customer: jobDetail.job.customer,
-                                        // A code already typed on the line
-                                        // is the code this part should
-                                        // have: that is the whole point of
-                                        // being able to type one before
-                                        // the part exists.
-                                        partNumber: jobLineCode(it, linkedItem),
-                                        name: jobLineDescription(it, linkedItem),
-                                        value: it.unit_price ?? "",
-                                        loc: "",
-                                      })
-                                    }
-                                  >
-                                    <Plus size={11} /> Add to Customer Stock
-                                  </button>
-                                );
-                              })()}
-                              {/* The two files the shop already works
-                                  from. Parts land under this line, which
-                                  is what stays on the invoice. */}
-                              <label
-                                className="stk-btn"
-                                style={{ ...S.reqActionBtnMuted, cursor: importingPartsFor ? "wait" : "pointer" }}
-                                title="Read the plate parts off a SigmaNest quote and put them under this line"
-                              >
-                                <Upload size={11} /> {importingPartsFor === it.id ? "Reading…" : "SigmaNest parts"}
-                                <input
-                                  type="file"
-                                  accept=".pdf"
-                                  style={{ display: "none" }}
-                                  disabled={!!importingPartsFor}
-                                  onChange={(e) => {
-                                    const file = e.target.files[0] || null;
-                                    e.target.value = "";
-                                    if (file) importPartsUnderLine(jobDetail.job, it, file, "sigmanest");
-                                  }}
-                                />
-                              </label>
-                              <label
-                                className="stk-btn"
-                                style={{ ...S.reqActionBtnMuted, cursor: importingPartsFor ? "wait" : "pointer" }}
-                                title="Read the parts and lengths off a tube nesting report and put them under this line"
-                              >
-                                <Upload size={11} /> {importingPartsFor === it.id ? "Reading…" : "Tube nest parts"}
-                                <input
-                                  type="file"
-                                  accept=".xlsx,.xls"
-                                  style={{ display: "none" }}
-                                  disabled={!!importingPartsFor}
-                                  onChange={(e) => {
-                                    const file = e.target.files[0] || null;
-                                    e.target.value = "";
-                                    if (file) importPartsUnderLine(jobDetail.job, it, file, "tubenest");
-                                  }}
-                                />
-                              </label>
-                              {/* A line that turns out to be a part of
-                                  another one. Offered only where it can
-                                  actually go somewhere: a line with parts
-                                  of its own cannot become a part, and
-                                  there has to be another line to go
-                                  under. */}
-                              {parts.length === 0 && moveTargets.length > 0 && (
-                                <TypeToFind
-                                  style={{ flex: "0 1 190px", minWidth: 140 }}
-                                  options={moveTargets}
-                                  value=""
-                                  onChange={(v) => v && moveJobLineUnder(jobDetail.job, it, v)}
-                                  emptyLabel="Move under…"
-                                  title="Make this line a part of another line on this job"
-                                  inputStyle={{ fontSize: 13, padding: "3px 5px" }}
-                                />
-                              )}
-                            </div>
-                          )}
                         </div>
-                      )}
+                        )}
+                      </div>
                       </div>
                     );
                   })}
