@@ -105,6 +105,10 @@ test("the follow-up names item, qty and date, and asks for the quote or the pro 
   assert.match(pf, /pro forma invoice/);
   assert.doesNotMatch(pf, /qty|bank|account/i);
   assert.equal(textToHtml("a < b\nc & d"), "a &lt; b<br>c &amp; d");
+  // PR-004: our "New item" note and its stray full stop are not for the supplier.
+  const pr4 = draftFollowUp({ row: { item: "Gas strut, series 4100 (10mm rod), 1200mm long. New item", qty: "2" }, contactName: "Shovan", owesProForma: true });
+  assert.match(pr4, /quotation for Gas strut, series 4100 \(10mm rod\), 1200mm long \(qty 2\)\. Please send/);
+  assert.match(draftFollowUp({ row: { item: "New item" }, owesProForma: true }), /quotation for the items we asked about\./);
 });
 
 test("only a supplier's real PDF attachments are saved as quotes", () => {

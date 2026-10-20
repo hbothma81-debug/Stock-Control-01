@@ -269,7 +269,15 @@ export function looksLikeQuoteMail(message) {
 export function draftFollowUp({ row, contactName, owesProForma, senderName }) {
   const first = (contactName || "").trim().split(/\s+/)[0];
   const qty = row.qty && !/see list/i.test(row.qty) ? ` (qty ${row.qty})` : "";
-  const item = (row.item || "").trim() || "the items we asked about";
+  // "New item" is our own note (not in stock yet), not for the supplier; a
+  // full stop left at the end would break the sentence (Heinrich, 20 Oct
+  // 2026: "drop it").
+  const item =
+    (row.item || "")
+      .replace(/[.,;\s]*\bnew item\b[.,;]*/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/[.,;]+$/, "") || "the items we asked about";
   const date = (row.requested_at || "").slice(0, 10);
   const ask = owesProForma
     ? `Thank you for your quotation for ${item}${qty}. Please send us a pro forma invoice so that we can go ahead.`
