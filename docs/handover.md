@@ -5919,3 +5919,16 @@ your screens work for people without the Procurement tick, unless it says so.
 - `6f4eacc` (committed, NOT pushed at writing): someone signed in to Microsoft AS
   sales@ (the shared password the sales staff use today) has what the page reads
   filed as shared, not as theirs.
+
+## 20 Oct 2026 — Claude API / Procurement conversation: push of `2bba078` (09:29)
+
+On Heinrich's word in this conversation ("push both"), after he was told `1d22aa6`
+(the follow-up's notes in red, from a fork of this conversation) was not this
+session's. Live tip before: `0d2bfa1` (the gate's push). Queue read as its own step:
+`1d22aa6`, `2bba078`, nothing else. A clean clone of `2bba078` built, 592 tests pass,
+names check clean. After the push CHECK-what-is-live found "Change signature" and "It
+is a quote: read it". `2bba078`: User Management shows each person's email signature
+on their card with Change signature (src/email/PersonSignature.jsx; useSignature takes
+`{ by }`, SignatureBox `forOther`); no SQL. Earlier the same day the gate's push took
+`92ee23c` (mailbox read side by side) and `c8574be` (one copy of a file per request,
+the latest; drawings saved as NOT A QUOTE, not read by Claude) live.
