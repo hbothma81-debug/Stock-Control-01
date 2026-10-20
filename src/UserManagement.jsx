@@ -3,6 +3,7 @@ import { ChevronDown, RefreshCw, Trash2 } from "lucide-react";
 import { F, C, S } from "./theme.js";
 import { NAV_TABS, EXTRA_SECTIONS, SECTIONS } from "./constants.js";
 import TypeToFind from "./TypeToFind.jsx";
+import PersonSignature from "./email/PersonSignature.jsx";
 
 // The User Management screen — who can see and do what.
 //
@@ -311,6 +312,10 @@ export default function UserManagement({
                 emptyLabel="Not set"
               />
             </div>
+            {/* Their email signature, as it goes out, with Change signature
+                (Heinrich, 20 Oct 2026: "yes add to user manager"). Read
+                only while the card is open. */}
+            <PersonSignature person={p} />
             <div style={{ marginTop: 8 }}>
               <label style={S.label}>
                 Production access — which processes this person handles (gives them the Production tab, scoped to just these)

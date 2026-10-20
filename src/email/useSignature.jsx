@@ -29,8 +29,10 @@ function companyParts() {
 }
 
 // sig: { text, logo, ready, canSave, saved, save(text) }. `mailbox` is the
-// address the email goes from, for the made signature's Email line.
-export function useSignature(appUser, mailbox) {
+// address the email goes from, for the made signature's Email line. `by`
+// names who saves, when that is not the person themself (an admin on User
+// Management, PersonSignature.jsx).
+export function useSignature(appUser, mailbox, { by } = {}) {
   const [saved, setSaved] = useState(null);
   const [company, setCompany] = useState({ phone: "", logo: "" });
   const [ready, setReady] = useState(false);
@@ -63,7 +65,7 @@ export function useSignature(appUser, mailbox) {
     const clean = String(text || "").replace(/\r\n/g, "\n").trim();
     const { data, error } = await supabase
       .from("email_signatures")
-      .upsert({ user_id: userId, signature: clean, updated_at: new Date().toISOString(), updated_by: appUser?.name || null })
+      .upsert({ user_id: userId, signature: clean, updated_at: new Date().toISOString(), updated_by: by || appUser?.name || null })
       .select("signature")
       .maybeSingle();
     if (error) throw new Error(error.message);
@@ -82,7 +84,9 @@ export function useSignature(appUser, mailbox) {
 }
 
 // The signature as it will go out, under the message box, and its editor.
-export function SignatureBox({ sig, disabled }) {
+// forOther: an admin changing somebody else's (User Management): the words
+// say "signature", not "my signature".
+export function SignatureBox({ sig, disabled, forOther = false }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -92,14 +96,14 @@ export function SignatureBox({ sig, disabled }) {
   if (editing) {
     return (
       <div style={{ marginTop: 8 }}>
-        <label style={{ ...S.label, display: "block" }}>MY SIGNATURE</label>
+        <label style={{ ...S.label, display: "block" }}>{forOther ? "EMAIL SIGNATURE" : "MY SIGNATURE"}</label>
         <textarea
           style={{ ...S.input, boxSizing: "border-box", minHeight: 150, resize: "vertical", fontFamily: "inherit", lineHeight: 1.45 }}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           autoFocus
         />
-        <div style={S.roleHint}>The words only: the app writes them in the company's blue and adds the logo. Leave it empty to have one made from your name.</div>
+        <div style={S.roleHint}>The words only: the app writes them in the company's blue and adds the logo. Leave it empty to have one made from {forOther ? "their" : "your"} name.</div>
         {problem && <div style={{ ...S.roleHint, color: C.danger }}>{problem}</div>}
         <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
           <button
@@ -120,7 +124,7 @@ export function SignatureBox({ sig, disabled }) {
               }
             }}
           >
-            {busy ? "Saving…" : "Save my signature"}
+            {busy ? "Saving…" : forOther ? "Save signature" : "Save my signature"}
           </button>
           <button type="button" className="stk-btn" style={S.reqActionBtnMuted} disabled={busy} onClick={() => setEditing(false)}>
             Cancel
@@ -133,7 +137,7 @@ export function SignatureBox({ sig, disabled }) {
   return (
     <div style={{ marginTop: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ ...S.label, display: "block" }}>SIGNATURE</span>
+        <span style={{ ...S.label, display: "block" }}>{forOther ? "EMAIL SIGNATURE" : "SIGNATURE"}</span>
         {sig.canSave && !disabled && (
           <button
             type="button"
@@ -145,7 +149,7 @@ export function SignatureBox({ sig, disabled }) {
               setEditing(true);
             }}
           >
-            <Pencil size={11} /> Change my signature
+            <Pencil size={11} /> {forOther ? "Change signature" : "Change my signature"}
           </button>
         )}
       </div>
