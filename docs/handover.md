@@ -5879,3 +5879,43 @@ account no prints on POs (28542ad). No bank details anywhere, by his decision.
 sales@ (needs IT: Full Access and Send As for each user); a second ticked person.
 **Open with Heinrich:** whether Claude Code's /procure stops now (the Procurement
 conversation has stopped adding PR rows to requests.md).
+
+---
+
+## 20 Oct 2026 — Claude API / Procurement conversation: what other conversations' areas got from the Suppliers work
+
+Read this when you come back; each line names the commit. Nothing below changes how
+your screens work for people without the Procurement tick, unless it says so.
+
+- **Stock Manager** — `28542ad` (LIVE): master_suppliers.account_no and terms; the
+  Suppliers card has "Our account no" and a Terms dropdown (hidden without the
+  columns). `546b7d4` then `82d5975` (LIVE): master_suppliers.categories (text[]) and
+  buys; the card has a categories box (chips, type-to-find suggesting every category
+  on any supplier, a new one typed). Categories are the detailed words from the
+  Procurement folder's Buys column, split at commas (121 of them on 100 suppliers);
+  the short list of 12 broad ones was tried and removed on Heinrich's word
+  (setup-procurement-7). The card's own search already read s.categories.
+- **Purchasing / Requisitions** — `28542ad` (LIVE): the PO PDF prints "Our Account
+  No:" under Number. `cf87b75` (LIVE): usePurchasing.submitPurchaseOrder moves a quote
+  request to Ordered when poBuilder.procurementRequestId is set (only by "Create PO
+  from quote"); submitReceiving moves requests on that PO from Ordered to Received
+  (procurement_requests.po_id / po_number, setup-procurement-5). App.raisePoFromQuote
+  sits beside raisePoForBuyouts. `1fa9097` (LIVE): App.openAddFromQuote opens the New
+  stock item form on Stores, filled from a quoted item; the form's Category buttons
+  keep that prefill (addPrefill) when another division is picked.
+- **Requisitions (Customer Stock)** — `c1e029b` (committed, NOT pushed at writing): an
+  opened part shows "Last quoted: <supplier>, R…, <date> (<quote no>)" from
+  stock_item_quotes (src/procurement/LastQuoted.jsx; setup-procurement-8, not yet run
+  anywhere), value-seers only, opening the quote for Procurement people; ctx gains
+  openSupplierQuote.
+- **Email** — `63548f2` (LIVE): src/email/outlook.js gained mailReadPass and (aff1c03)
+  mailSendPass, a separate delegated pass (Mail.Read, Mail.Read.Shared; Mail.Send,
+  Mail.Send.Shared) asked for only by the Suppliers page; the send path for documents
+  is unchanged. Heinrich granted admin consent for those delegated scopes on 19 Oct.
+  **Scope:** delegated Mail.Read.Shared reads only the mailboxes the signed-in person
+  already has Full Access to in Exchange (sales@ for whoever is on its Delegation
+  tab), never every mailbox; application permissions, which would be tenant-wide,
+  were deliberately not used.
+- `6f4eacc` (committed, NOT pushed at writing): someone signed in to Microsoft AS
+  sales@ (the shared password the sales staff use today) has what the page reads
+  filed as shared, not as theirs.
