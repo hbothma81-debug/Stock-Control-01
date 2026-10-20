@@ -1,7 +1,7 @@
 // "Holes and threads" on New program and Update program (Heinrich 20 Oct
 // 2026: "yes your recommendation on holes and threads"): what a model
 // can't show - a tapped or threaded hole, an H7 hole to ream, a thread's
-// starts, an inch thread's form. One line each; a button per kind adds one
+// starts, an inch thread's form, a knurl (20 Oct). One line each; a button per kind adds one
 // (a click, then its size and end). Rules and the engine's settings:
 // holesThreads.js. The lines live in the form as `holes`.
 
@@ -9,7 +9,7 @@ import { Plus, Trash2 } from "lucide-react";
 import Section from "../Section.jsx";
 import TypeToFind from "../TypeToFind.jsx";
 import { C, S } from "../theme.js";
-import { ENDS, FORMS, HOLE_SIZES, HOLE_TYPES, newLine } from "./holesThreads.js";
+import { ENDS, FORMS, HOLE_SIZES, HOLE_TYPES, KNURL_PITCHES, KNURL_TYPES, newLine } from "./holesThreads.js";
 
 export default function HolesThreads({ form, setForm }) {
   const lines = form.holes || [];
@@ -17,7 +17,7 @@ export default function HolesThreads({ form, setForm }) {
   const change = (i, key, v) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, [key]: v } : l)));
 
   return (
-    <Section title="Holes and threads" count={lines.length || undefined} defaultOpen={lines.length > 0} quiet>
+    <Section title="Holes, threads and knurls" count={lines.length || undefined} defaultOpen={lines.length > 0} quiet>
       <div style={{ fontSize: 12.5, color: C.muted, marginBottom: 6 }}>
         What the model can't show. Threads, pipe threads and grooves drawn on the model are found by the engine.
       </div>
@@ -29,6 +29,34 @@ export default function HolesThreads({ form, setForm }) {
               <label style={S.label}>Size</label>
               <TypeToFind options={HOLE_SIZES} value={l.size} onChange={(v) => change(i, "size", v ?? "")} allowNew placeholder="M8, 1/2-13 UNC, G1/2" />
             </div>
+          )}
+          {l.type === "knurl" && (
+            <>
+              <div style={{ width: 110 }}>
+                <label style={S.label}>Diameter (mm)</label>
+                <input style={S.input} value={l.dia} inputMode="decimal" onChange={(e) => change(i, "dia", e.target.value)} placeholder="25" />
+              </div>
+              <div style={{ width: 150 }}>
+                <label style={S.label}>Pattern</label>
+                <select style={S.input} value={l.knurl} onChange={(e) => change(i, "knurl", e.target.value)}>
+                  {KNURL_TYPES.map((k) => (
+                    <option key={k.value} value={k.value}>
+                      {k.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ width: 90 }}>
+                <label style={S.label}>Pitch (mm)</label>
+                <select style={S.input} value={l.pitch} onChange={(e) => change(i, "pitch", e.target.value)}>
+                  {KNURL_PITCHES.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
           )}
           {l.type === "ream" && (
             <div style={{ width: 110 }}>
@@ -55,7 +83,7 @@ export default function HolesThreads({ form, setForm }) {
             </div>
           )}
           <div style={{ width: 100 }}>
-            <label style={S.label}>{l.type === "tap" || l.type === "ream" ? "Opens at" : "Thread at"}</label>
+            <label style={S.label}>{l.type === "tap" || l.type === "ream" ? "Opens at" : l.type === "knurl" ? "Nearest" : "Thread at"}</label>
             <select style={S.input} value={l.end} onChange={(e) => change(i, "end", e.target.value)}>
               {ENDS.map((e) => (
                 <option key={e.value} value={e.value}>
@@ -64,10 +92,10 @@ export default function HolesThreads({ form, setForm }) {
               ))}
             </select>
           </div>
-          {(l.type === "tap" || l.type === "ream") && (
+          {(l.type === "tap" || l.type === "ream" || l.type === "knurl") && (
             <div style={{ width: 120 }}>
               <label style={S.label}>Length (mm)</label>
-              <input style={S.input} value={l.length} inputMode="decimal" onChange={(e) => change(i, "length", e.target.value)} placeholder="whole hole" />
+              <input style={S.input} value={l.length} inputMode="decimal" onChange={(e) => change(i, "length", e.target.value)} placeholder={l.type === "knurl" ? "whole dia" : "whole hole"} />
             </div>
           )}
           <button type="button" className="stk-btn" style={{ ...S.chip, padding: "6px 8px", color: C.danger }} title="Remove this line" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>

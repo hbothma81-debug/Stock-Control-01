@@ -5,7 +5,8 @@
 // the engine's job settings here. Pure rules, tested in holesThreads.test.js.
 //
 // Mirrors the engine's job.py (turnpath): id_thread {end, size, length},
-// ream {dia, end, length}, thread_starts {end: n}, thread_form {end: form};
+// ream {dia, end, length}, thread_starts {end: n}, thread_form {end: form},
+// knurl {dia, type, pitch, end, length};
 // end = the model's end the hole or thread opens at, "0" or "L" (as "Side 1
 // is the model's"). Sizes the engine reads: M8, M24x2, 1/2-13 UNC, 1/2 UNF,
 // 1/2 BSW, G1/2 (id_thread.py parse_size, inch_thread.py parse).
@@ -15,7 +16,16 @@ export const HOLE_TYPES = [
   { value: "ream", label: "Ream H7" },
   { value: "starts", label: "Thread starts" },
   { value: "form", label: "Inch thread form" },
+  { value: "knurl", label: "Knurl" },
 ];
+
+// Knurls (engine knurl.py, Heinrich 20 Oct 2026: "knurling, straight and
+// cross"): straight = DIN 82 RAA, cross = RGE 30 deg diamond; DIN 403 pitches.
+export const KNURL_TYPES = [
+  { value: "straight", label: "Straight" },
+  { value: "cross", label: "Cross (diamond)" },
+];
+export const KNURL_PITCHES = ["0.5", "0.6", "0.8", "1.0", "1.2", "1.5", "1.6", "2.0"];
 
 export const ENDS = [
   { value: "0", label: "0 end" },
@@ -53,7 +63,7 @@ const num = (v) => {
   return Number.isFinite(n) ? n : NaN;
 };
 
-export const newLine = (type) => ({ type, end: "0", size: "", dia: "", length: "", starts: "2", form: "UNC" });
+export const newLine = (type) => ({ type, end: "0", size: "", dia: "", length: "", starts: "2", form: "UNC", knurl: "straight", pitch: "1.0" });
 
 // The lines as job settings, and the lines that can't be sent (words).
 export function holesToSettings(lines) {
@@ -61,6 +71,7 @@ export function holesToSettings(lines) {
   const errors = [];
   const tap = [];
   const ream = [];
+  const knurl = [];
   for (const l of lines || []) {
     const end = l.end === "L" ? "L" : "0";
     const length = num(l.length);
@@ -82,6 +93,14 @@ export function holesToSettings(lines) {
         continue;
       }
       ream.push({ dia, end, ...(length ? { length } : {}) });
+    } else if (l.type === "knurl") {
+      const dia = num(l.dia);
+      const pitch = num(l.pitch);
+      if (!dia || Number.isNaN(dia) || dia <= 0 || !pitch || Number.isNaN(pitch) || pitch <= 0) {
+        errors.push("Knurl: its diameter and pitch");
+        continue;
+      }
+      knurl.push({ dia, type: l.knurl === "cross" ? "cross" : "straight", pitch, end, ...(length ? { length } : {}) });
     } else if (l.type === "starts") {
       const n = num(l.starts);
       if (!Number.isInteger(n) || n < 1 || n > 6) {
@@ -99,6 +118,7 @@ export function holesToSettings(lines) {
   }
   if (tap.length) out.id_thread = tap.length === 1 ? tap[0] : tap;
   if (ream.length) out.ream = ream.length === 1 ? ream[0] : ream;
+  if (knurl.length) out.knurl = knurl.length === 1 ? knurl[0] : knurl;
   return { settings: out, errors };
 }
 
@@ -114,6 +134,16 @@ export function settingsToHoles(settings) {
   }
   for (const r of many(s.ream)) {
     lines.push({ ...newLine("ream"), end: String(r.end ?? "0"), dia: String(r.dia ?? ""), length: r.length != null ? String(r.length) : "" });
+  }
+  for (const k of many(s.knurl)) {
+    lines.push({
+      ...newLine("knurl"),
+      end: String(k.end ?? "0"),
+      dia: String(k.dia ?? ""),
+      knurl: k.type === "cross" ? "cross" : "straight",
+      pitch: Number(k.pitch ?? 1).toFixed(1),
+      length: k.length != null ? String(k.length) : "",
+    });
   }
   for (const [end, n] of Object.entries(s.thread_starts || {})) lines.push({ ...newLine("starts"), end, starts: String(n) });
   for (const [end, f] of Object.entries(s.thread_form || {})) lines.push({ ...newLine("form"), end, form: f });

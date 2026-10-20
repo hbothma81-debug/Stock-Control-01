@@ -8,6 +8,7 @@ test("one line of each kind becomes the engine's job settings", () => {
     { ...newLine("ream"), dia: "12", end: "L" },
     { ...newLine("starts"), starts: "2" },
     { ...newLine("form"), end: "L", form: "BSW" },
+    { ...newLine("knurl"), dia: "25", knurl: "cross", pitch: "1.2", length: "20" },
   ]);
   assert.deepEqual(errors, []);
   assert.deepEqual(settings, {
@@ -15,6 +16,7 @@ test("one line of each kind becomes the engine's job settings", () => {
     ream: { dia: 12, end: "L" },
     thread_starts: { 0: 2 },
     thread_form: { L: "BSW" },
+    knurl: { dia: 25, type: "cross", pitch: 1.2, end: "0", length: 20 },
   });
 });
 
@@ -31,7 +33,7 @@ test("a line that can't be sent is named, not sent", () => {
 });
 
 test("saved settings come back as the same lines", () => {
-  const lines = [{ ...newLine("tap"), size: "1/2-13 UNC", end: "L", length: "20" }, { ...newLine("ream"), dia: "16" }, { ...newLine("form"), form: "UNF" }];
+  const lines = [{ ...newLine("tap"), size: "1/2-13 UNC", end: "L", length: "20" }, { ...newLine("ream"), dia: "16" }, { ...newLine("form"), form: "UNF" }, { ...newLine("knurl"), dia: "30" }];
   const back = settingsToHoles(holesToSettings(lines).settings);
   assert.deepEqual(holesToSettings(back).settings, holesToSettings(lines).settings);
 });
