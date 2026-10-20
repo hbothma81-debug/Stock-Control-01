@@ -625,6 +625,25 @@ export async function checkMachineCopy({ program, current, programs, edited = fa
   return { result, step, settings, quick };
 }
 
+// + Add operation on a kept revision (a machine copy or an edit, Heinrich
+// 20 Oct 2026: "add knurling between N4 and N5"): the engine makes only the
+// new tool block and puts it after the block picked (engine action
+// "insert", turnpath insert_op.py); the answer is its check of the joined
+// program, plus inserted and engine_also (what it would change elsewhere).
+export async function insertOperation({ program, base, newSettings, kind, after }) {
+  const settings = base?.settings || program.settings || {};
+  const quick = base?.quick || program.quick || null;
+  const step = quick ? null : await storedStep(program.id, base);
+  if (!step && !quick) throw new Error("No STEP file is stored for this program, so the engine can't make the new block.");
+  const result = await runEngine({
+    name: program.part_name,
+    stepText: step?.text,
+    settings,
+    extra: { action: "insert", new_settings: forEngine(newSettings), kind, after, programs: base.programs || [], ...(quick ? { quick } : {}) },
+  });
+  return { result, step, settings: newSettings, quick };
+}
+
 // Import machine copy, second half: the made revision. Ready, by
 // Heinrich's answer (8 Oct 2026: what ran on the machine is what is made);
 // whatever the check found is kept with it and shown. The STEP and the

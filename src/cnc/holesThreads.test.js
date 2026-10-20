@@ -37,3 +37,11 @@ test("saved settings come back as the same lines", () => {
   const back = settingsToHoles(holesToSettings(lines).settings);
   assert.deepEqual(holesToSettings(back).settings, holesToSettings(lines).settings);
 });
+
+test("+ Add operation keeps the revision's own lines and adds the new one", async () => {
+  const { withLines } = await import("./holesThreads.js");
+  const saved = { material: "EN8", qty: 5, ream: { dia: 12, end: "0" } };
+  const { settings, errors } = withLines(saved, [{ ...newLine("knurl"), dia: "40", length: "15" }]);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(settings, { material: "EN8", qty: 5, ream: { dia: 12, end: "0" }, knurl: { dia: 40, type: "straight", pitch: 1, end: "0", length: 15 } });
+});

@@ -150,6 +150,21 @@ export function settingsToHoles(settings) {
   return lines;
 }
 
+// The job keys these lines make, and a revision's settings with more lines
+// added (Steps tab, + Add operation: Heinrich 20 Oct 2026).
+export const HOLE_KEYS = ["id_thread", "ream", "knurl", "thread_starts", "thread_form"];
+
+export function withLines(settings, lines) {
+  const rest = Object.fromEntries(Object.entries(settings || {}).filter(([k]) => !HOLE_KEYS.includes(k)));
+  const { settings: holes, errors } = holesToSettings([...settingsToHoles(settings), ...(lines || [])]);
+  return { settings: { ...rest, ...holes }, errors };
+}
+
+// The engine's insert kind for a line: what can be added to a kept program
+// (a machine copy or an edit) - a thread's starts or form change a thread
+// already there, so they need the program made again.
+export const INSERT_KIND = { tap: "tap", ream: "ream", knurl: "knurl" };
+
 function label(l) {
   return HOLE_TYPES.find((t) => t.value === l.type)?.label || "Line";
 }

@@ -16,6 +16,7 @@ import { CNC_FIELDS } from "./cncFields.js";
 import { faultText, inBlocks, oNumber, pipeLabel, programFiles, programLabels, settingText, sourceTag } from "./cncRules.js";
 import { canWriteToFolder, copyToFolder, downloadFiles } from "./programOut.js";
 import UpdateProgram from "./UpdateProgram.jsx";
+import AddOperation from "./AddOperation.jsx";
 import ImportMachineCopy from "./ImportMachineCopy.jsx";
 import EditProgram from "./EditProgram.jsx";
 import CostingTab from "./CostingTab.jsx";
@@ -56,6 +57,8 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
   const [updating, setUpdating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [editing, setEditing] = useState(false);
+  // + Add operation from the Steps tab (Heinrich 20 Oct 2026), on the revision on screen.
+  const [adding, setAdding] = useState(false);
   const [turning, setTurning] = useState(false);
   // The engine's toolpath answers, per revision, while the program is open.
   const [toolpaths, setToolpaths] = useState({});
@@ -142,6 +145,26 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
           setEditing(false);
           setRevId(null);
           setTab("program");
+          setReads((n) => n + 1);
+        }}
+      />
+    );
+  }
+
+  if (adding && shown) {
+    return (
+      <AddOperation
+        program={p}
+        revisions={revisions}
+        current={current}
+        base={shown}
+        materials={materials}
+        userName={userName}
+        onCancel={() => setAdding(false)}
+        onSaved={() => {
+          setAdding(false);
+          setRevId(null);
+          setTab("steps");
           setReads((n) => n + 1);
         }}
       />
@@ -368,7 +391,7 @@ export default function ProgramView({ id, canEdit, canDelete, customers, materia
       )}
       {tab === "sheet" && <SetupSheetTab program={p} rev={shown} answers={toolpaths} setAnswers={setToolpaths} />}
       {tab === "toolpath" && <ToolpathTab program={p} rev={shown} answers={toolpaths} setAnswers={setToolpaths} />}
-      {tab === "steps" && <StepsTab program={p} rev={shown} answers={toolpaths} setAnswers={setToolpaths} />}
+      {tab === "steps" && <StepsTab program={p} rev={shown} answers={toolpaths} setAnswers={setToolpaths} onAdd={canEdit ? () => setAdding(true) : null} />}
       {tab === "history" && <HistoryTab program={p} canSeeValue={canSeeValue} />}
       {tab === "waste" && <OffcutWastageTab costing={p.costing || current?.costing || null} canSeeValue={canSeeValue} />}
       {tab === "costing" && (

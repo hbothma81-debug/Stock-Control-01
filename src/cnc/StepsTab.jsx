@@ -5,11 +5,14 @@
 // answer the Toolpath tab loads (ProgramView keeps them); nothing is saved.
 
 import { useEffect, useState } from "react";
+import { Plus } from "lucide-react";
 import { C, S } from "../theme.js";
 import { loadToolpath } from "./cncData.js";
 import ProcessBreakdown, { TurretList } from "./ProcessBreakdown.jsx";
 
-export default function StepsTab({ program, rev, answers, setAnswers }) {
+// onAdd: + Add operation (Heinrich 20 Oct 2026: AddOperation.jsx), the CNC
+// Edit tick only.
+export default function StepsTab({ program, rev, answers, setAnswers, onAdd = null }) {
   const answer = rev ? answers[rev.id] : null;
   const [error, setError] = useState("");
 
@@ -26,10 +29,18 @@ export default function StepsTab({ program, rev, answers, setAnswers }) {
   }, [rev?.id]);
 
   if (!rev) return <div style={S.empty}>No revision yet.</div>;
-  if (error) return <div style={{ color: C.danger, fontSize: 14 }}>{error}</div>;
+  const add = onAdd && (
+    <div>
+      <button type="button" className="stk-btn" style={S.chip} onClick={onAdd} title="A tapped hole, reamed hole, knurl or thread change">
+        <Plus size={14} /> Add operation
+      </button>
+    </div>
+  );
+  if (error) return <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>{add}<div style={{ color: C.danger, fontSize: 14 }}>{error}</div></div>;
   if (!answer) return <div style={S.empty}>Asking the engine for rev {rev.rev}'s steps…</div>;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {add}
       <ProcessBreakdown answer={answer} />
       <div>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Turret</div>
