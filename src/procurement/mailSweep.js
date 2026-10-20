@@ -118,6 +118,17 @@ async function addRequest(supabase, row, highest) {
   throw new Error("Could not find a free PR number.");
 }
 
+// Runs work(item) for every item, at most `size` at a time. Microsoft
+// answers a busy shared mailbox in about 10 seconds a request (sales@, 20
+// Oct 2026), so one after the other took minutes.
+async function inPool(items, size, work) {
+  let next = 0;
+  const runners = Array.from({ length: Math.min(size, items.length) }, async () => {
+    while (next < items.length) await work(items[next++]);
+  });
+  await Promise.all(runners);
+}
+
 // rows: the requests already loaded on the page (all this person can see).
 // Returns { connected: false } when no Microsoft pass could be had, or
 // { connected: true, address, added, moved, problems }.
@@ -145,14 +156,19 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
     ...shared.map((a) => ({ base: `/users/${encodeURIComponent(a)}`, address: a, owner: null })),
   ];
 
-  for (const box of mailboxes) {
+  await Promise.all(mailboxes.map(async (box) => {
     let candidates = [];
     let inbox = [];
     try {
+      // Sent Items and the inbox at the same time. A shared mailbox's inbox
+      // only for mail with attachments (quotes that come as a new mail); a
+      // person's own inbox whole, for the colleague's requests they are Cc'd on.
       const sentUrl = `${GRAPH}${box.base}/mailFolders/sentitems/messages?$filter=${encodeURIComponent(`sentDateTime ge ${since}`)}&$select=${MESSAGE_FIELDS}&$orderby=sentDateTime desc&$top=50`;
-      candidates = (await graphList(pass, sentUrl)).map((m) => ({ m, mailbox: box.address, owner: box.owner }));
-      const inboxUrl = `${GRAPH}${box.base}/mailFolders/inbox/messages?$filter=${encodeURIComponent(`receivedDateTime ge ${since}`)}&$select=${MESSAGE_FIELDS}&$orderby=receivedDateTime desc&$top=50`;
-      inbox = await graphList(pass, inboxUrl);
+      const inboxFilter = box.owner ? `receivedDateTime ge ${since}` : `receivedDateTime ge ${since} and hasAttachments eq true`;
+      const inboxUrl = `${GRAPH}${box.base}/mailFolders/inbox/messages?$filter=${encodeURIComponent(inboxFilter)}&$select=${MESSAGE_FIELDS}&$orderby=receivedDateTime desc&$top=50`;
+      const [sent, received] = await Promise.all([graphList(pass, sentUrl), graphList(pass, inboxUrl)]);
+      candidates = sent.map((m) => ({ m, mailbox: box.address, owner: box.owner }));
+      inbox = received;
       if (box.owner) {
         // A colleague's request with this person in Cc (Gawie from sales@, Cc Heinrich).
         for (const m of inbox) {
@@ -165,7 +181,7 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
       }
     } catch (err) {
       problems.push(`${box.address}: ${err.status === 403 || err.status === 404 ? "this sign-in cannot open it (ask IT for access to the mailbox)" : err.message}`);
-      continue;
+      return;
     }
 
     for (const { m, mailbox, owner } of candidates) {
@@ -224,12 +240,12 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
       const { data: had } = await supabase.from("supplier_quotes").select("message_id, file_name").in("request_id", ofThisBox.map((r) => r.id));
       for (const q of had || []) savedFiles.add(`${q.message_id}|${q.file_name}`);
     }
-    for (const row of live) {
+    await inPool(live, 4, async (row) => {
       let thread;
       try {
         thread = await threadOf(pass, box.base, row.conversation_id);
       } catch {
-        continue; // an old thread id from requests.md Microsoft does not know
+        return; // an old thread id from requests.md Microsoft does not know
       }
       for (const { message, attachment } of quoteFiles(thread)) {
         const key = `${message.internetMessageId || message.id}|${attachment.name}`;
@@ -243,7 +259,7 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
         }
       }
       const change = threadUpdate(row, thread, supplierFor(row, suppliers)?.terms || "");
-      if (!change) continue;
+      if (!change) return;
       const { data, error } = await supabase
         .from("procurement_requests")
         .update({ ...change, ...stamp() })
@@ -252,22 +268,22 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
         .single();
       if (error || !data) {
         problems.push(`${row.pr_number} was not updated${error ? `: ${error.message}` : ""}`);
-        continue;
+        return;
       }
       Object.assign(row, data);
       moved++;
-    }
+    });
 
     // Quotes that came as a new email (another rep's address, or through
     // Sage): with the newest open request to that supplier (mailRules).
-    for (const m of inbox) {
-      if (!m.hasAttachments || isOurs(addressOf(m.from))) continue;
+    const withFiles = inbox.filter((m) => m.hasAttachments && !isOurs(addressOf(m.from)));
+    await inPool(withFiles, 4, async (m) => {
       const row = requestForNewMail(m, ofThisBox, (r) => supplierFor(r, suppliers));
-      if (!row) continue;
+      if (!row) return;
       try {
         m.attachments = await graphList(pass, `${GRAPH}${box.base}/messages/${m.id}/attachments?$select=id,name,contentType,size,isInline`);
       } catch {
-        continue;
+        return;
       }
       let savedAny = false;
       for (const { message, attachment } of quoteFiles([m])) {
@@ -286,15 +302,15 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
       }
       // A quote or pro forma moves the request on as a reply would; a
       // statement from the same supplier is only saved.
-      if (!savedAny || !looksLikeQuoteMail(m)) continue;
+      if (!savedAny || !looksLikeQuoteMail(m)) return;
       const change = threadUpdate(row, [m], supplierFor(row, suppliers)?.terms || "");
-      if (!change) continue;
+      if (!change) return;
       const { data } = await supabase.from("procurement_requests").update({ ...change, ...stamp() }).eq("id", row.id).select().single();
       if (data) {
         Object.assign(row, data);
         moved++;
       }
-    }
-  }
+    });
+  }));
   return { connected: true, address: me, added, moved, newQuotes, problems };
 }
