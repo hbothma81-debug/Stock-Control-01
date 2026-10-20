@@ -13,6 +13,7 @@ import Section from "../Section.jsx";
 import RecordRow from "../RecordRow.jsx";
 import { C, S } from "../theme.js";
 import { ItemButtons, itemFigures } from "./ItemsList.jsx";
+import QuoteFilters, { isSupplier, supplierOptions } from "./QuoteFilters.jsx";
 
 const money = (n) =>
   n == null || n === "" ? "" : `R ${Number(n).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -122,25 +123,31 @@ export function QuoteLines({ quotes, onOpen, onReadAgain, raisePoFor, showSuppli
   });
 }
 
-// The Quotes tab: every saved quote, newest first, one search box.
+// The Quotes tab: every saved quote, newest first, a search box and a
+// Supplier box (QuoteFilters.jsx).
 export default function QuotesTab({ quotes, onOpen, onReadAgain, raisePoFor }) {
   const [search, setSearch] = useState("");
+  const [supplier, setSupplier] = useState("");
+  const options = useMemo(() => supplierOptions(quotes, (q) => q.supplier_name, "quote"), [quotes]);
   const shown = useMemo(() => {
     const words = search.toLowerCase().split(/\s+/).filter(Boolean);
     return (quotes || []).filter((q) => {
-      const text = [q.supplier_name, q.quote_number, q.pr_number, q.file_name, q.lead_time, ...(q.lines || []).map((l) => l?.description)]
+      if (!isSupplier(q.supplier_name, supplier)) return false;
+      const text = [q.quote_number, q.pr_number, q.file_name, q.lead_time, ...(q.lines || []).map((l) => l?.description)]
         .join(" ")
         .toLowerCase();
       return words.every((w) => text.includes(w));
     });
-  }, [quotes, search]);
+  }, [quotes, search, supplier]);
   return (
     <div>
-      <input
-        style={{ ...S.input, marginTop: 10 }}
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search supplier, quote number, PR number or item…"
+      <QuoteFilters
+        search={search}
+        setSearch={setSearch}
+        placeholder="Search item, quote number or PR number…"
+        supplier={supplier}
+        setSupplier={setSupplier}
+        options={options}
       />
       {quotes && quotes.length === 0 && (
         <div style={{ color: C.muted, marginTop: 12 }}>

@@ -1,5 +1,5 @@
 // Items quoted: every line Claude read from the saved supplier quotes, one
-// line per item, newest quote first, one search box (Heinrich, 19 Oct 2026:
+// line per item, newest quote first, a search box and a Supplier box (Heinrich, 19 Oct 2026:
 // "one listing each item quoted ... with search filters"). On each supplier's
 // own page, and as its own tab across all suppliers ("Both but all items
 // should be on its own tab").
@@ -15,6 +15,7 @@ import { FileText, Link2, PackagePlus, ShoppingCart } from "lucide-react";
 import Section from "../Section.jsx";
 import RecordRow from "../RecordRow.jsx";
 import { C, S } from "../theme.js";
+import QuoteFilters, { isSupplier, supplierOptions } from "./QuoteFilters.jsx";
 
 // Items shown at once; the search finds the rest.
 const SHOWN = 300;
@@ -127,6 +128,7 @@ export function itemFigures(line) {
 
 export default function ItemsList({ quotes, showSupplier = true, onOpenQuote, raiseItemPo, addStock, stockItems, onLinkStock }) {
   const [search, setSearch] = useState("");
+  const [supplier, setSupplier] = useState("");
 
   const items = useMemo(
     () =>
@@ -140,21 +142,25 @@ export default function ItemsList({ quotes, showSupplier = true, onOpenQuote, ra
     [quotes]
   );
 
+  const options = useMemo(() => supplierOptions(items, (it) => it.q.supplier_name, "item"), [items]);
   const shown = useMemo(() => {
     const words = search.toLowerCase().split(/\s+/).filter(Boolean);
     return items.filter(({ q, line }) => {
-      const text = [line.description, q.supplier_name, q.quote_number, q.pr_number].join(" ").toLowerCase();
+      if (showSupplier && !isSupplier(q.supplier_name, supplier)) return false;
+      const text = [line.description, q.quote_number, q.pr_number].join(" ").toLowerCase();
       return words.every((w) => text.includes(w));
     });
-  }, [items, search]);
+  }, [items, search, supplier, showSupplier]);
 
   return (
     <div>
-      <input
-        style={{ ...S.input, marginTop: 10 }}
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder={showSupplier ? "Search item, supplier or quote number…" : "Search item or quote number…"}
+      <QuoteFilters
+        search={search}
+        setSearch={setSearch}
+        placeholder="Search item description or quote number…"
+        supplier={supplier}
+        setSupplier={showSupplier ? setSupplier : null}
+        options={options}
       />
       {items.length === 0 && (
         <div style={{ color: C.muted, marginTop: 12 }}>No items yet. They come from the quotes once Claude has read them.</div>
