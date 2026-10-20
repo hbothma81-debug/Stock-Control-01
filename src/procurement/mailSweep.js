@@ -13,7 +13,7 @@
 // request.
 
 import { mailReadPass } from "../email/outlook.js";
-import { addressBook, addressOf, findExisting, isOurs, looksLikeDrawing, looksLikeQuoteMail, newestFiles, nextPrNumber, quoteFiles, quoteRequestFrom, requestForNewMail, threadUpdate } from "./mailRules.js";
+import { addressBook, addressOf, emailAnswers, emailFileName, findExisting, isOurs, looksLikeDrawing, looksLikeQuoteMail, newestFiles, nextPrNumber, quoteFiles, quoteRequestFrom, requestForNewMail, threadUpdate } from "./mailRules.js";
 import { supplierFor, todayInSA } from "./procurementRules.js";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
@@ -106,6 +106,49 @@ async function saveQuote(supabase, pass, base, row, message, attachment, userNam
     throw error;
   }
   return data;
+}
+
+// Saves a supplier's answer that came with no PDF: its own text (the new
+// part only, not our request quoted under it) as a .txt in the same store,
+// a line in supplier_quotes, for Claude to read as it reads a PDF. Returns
+// the saved line, or null when it was already there or had no text.
+async function saveEmail(supabase, pass, base, row, message, fileName, userName) {
+  const res = await fetch(`${GRAPH}${base}/messages/${message.id}?$select=uniqueBody,body`, {
+    headers: { Authorization: `Bearer ${pass}`, Prefer: 'outlook.body-content-type="text"' },
+  });
+  if (!res.ok) throw new Error(`the email did not download (${res.status})`);
+  const data = await res.json();
+  const words = (String(data.uniqueBody?.content || "").trim() || String(data.body?.content || "").trim()).slice(0, 40000);
+  if (!words) return null;
+  const from = message.from?.emailAddress || {};
+  const text = `From: ${from.name || ""} <${from.address || ""}>\nSent: ${message.receivedDateTime || message.sentDateTime || ""}\nSubject: ${message.subject || ""}\n\n${words}`;
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const path = `${row.pr_number || "no-pr"}/${Date.now()}-email.txt`;
+  const up = await supabase.storage.from("supplier-quotes").upload(path, blob, { contentType: "text/plain;charset=utf-8" });
+  if (up.error) throw up.error;
+  const { data: saved, error } = await supabase
+    .from("supplier_quotes")
+    .insert({
+      request_id: row.id,
+      pr_number: row.pr_number,
+      supplier_id: row.supplier_id || null,
+      supplier_name: row.supplier_name || "",
+      mailbox: row.mailbox,
+      message_id: message.internetMessageId || message.id,
+      file_name: fileName,
+      storage_path: path,
+      file_size: blob.size,
+      received_at: message.receivedDateTime || message.sentDateTime || null,
+      created_by: userName,
+    })
+    .select()
+    .single();
+  if (error) {
+    await supabase.storage.from("supplier-quotes").remove([path]);
+    if (error.code === "23505") return null;
+    throw error;
+  }
+  return saved;
 }
 
 // Adds a request under the next free PR number. Another person may take a
@@ -275,6 +318,18 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
         return; // an old thread id from requests.md Microsoft does not know
       }
       await saveNewest(row, quoteFiles(thread));
+      // Answers with no PDF: the email's own text, once each.
+      for (const m of emailAnswers(row, thread)) {
+        const name = emailFileName(m);
+        if ((had.get(row.id) || []).some((q) => String(q.file_name || "").toLowerCase() === name.toLowerCase())) continue;
+        try {
+          const saved = await saveEmail(supabase, pass, box.base, row, m, name, userName);
+          had.set(row.id, [...(had.get(row.id) || []), { file_name: name }]);
+          if (saved) newQuotes.push(saved);
+        } catch (err) {
+          problems.push(`${row.pr_number}: the email of ${String(m.receivedDateTime || "").slice(0, 10)} was not saved: ${err.message}`);
+        }
+      }
       const theirs = thread
         .filter((m) => !isOurs(addressOf(m.from)))
         .sort((a, b) => (String(a.receivedDateTime || a.sentDateTime) < String(b.receivedDateTime || b.sentDateTime) ? 1 : -1))[0];

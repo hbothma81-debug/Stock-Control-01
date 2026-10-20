@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addressBook, cleanSubject, draftFollowUp, findExisting, latestCopies, looksLikeDrawing, looksLikeQuoteMail, newestFiles, nextPrNumber, quoteFiles, quoteRequestFrom, requestForNewMail, textToHtml, threadUpdate } from "./mailRules.js";
+import { addressBook, cleanSubject, draftFollowUp, emailAnswers, emailFileName, findExisting, isEmailWithoutPrice, latestCopies, looksLikeDrawing, repliedWithoutQuote, looksLikeQuoteMail, newestFiles, nextPrNumber, quoteFiles, quoteRequestFrom, requestForNewMail, textToHtml, threadUpdate } from "./mailRules.js";
 
 const to = (address, name = "") => ({ emailAddress: { address, name } });
 const book = addressBook(
@@ -191,4 +191,34 @@ test("lists show the latest copy of a file on a request, every upload, and keep 
     q(6, null, "Quotation.pdf", "2026-10-02", "upload:b"),
   ];
   assert.deepEqual(latestCopies(list).map((x) => x.id), [1, 3, 4, 5, 6]);
+});
+
+test("a supplier's answer with no PDF is read from the email; ours, forwards, auto-replies and PDF mails are not", () => {
+  const row = { status: "Reply", requested_at: "2026-10-19T11:18:00Z" };
+  const m = (id, from, when, subject = "RE: Quote please", attachments = []) => ({ id, from: to(from), receivedDateTime: when, subject, attachments });
+  const thread = [
+    m("ours", "sales@ersupplies.co.za", "2026-10-19T11:18:00Z", "Quote please"),
+    m("price", "morne@macsteelexpress.co.za", "2026-10-19T12:00:00Z"),
+    m("pdf", "morne@macsteelexpress.co.za", "2026-10-19T13:00:00Z", "RE: Quote please", [{ name: "Q1.pdf", contentType: "application/pdf", size: 100 }]),
+    m("fw", "boss@macsteelexpress.co.za", "2026-10-19T12:30:00Z", "FW: Quote please"),
+    m("away", "morne@macsteelexpress.co.za", "2026-10-19T12:10:00Z", "Automatic reply: Quote please"),
+    m("before", "morne@macsteelexpress.co.za", "2026-10-18T09:00:00Z"),
+  ];
+  assert.deepEqual(emailAnswers(row, thread).map((x) => x.id), ["price"]);
+  // A request already ordered or closed is not read again.
+  assert.deepEqual(emailAnswers({ ...row, status: "Ordered" }, thread), []);
+  // Named by when it came, South African time.
+  assert.equal(emailFileName(thread[1]), "Email reply 2026-10-19 1400.txt");
+});
+
+test("replied with no price only while no real quote is in", () => {
+  const email = (doc_type, read_status = "read") => ({ storage_path: "PR-1/1-email.txt", read_status, doc_type });
+  const pdf = (doc_type) => ({ storage_path: "PR-1/1-Q1.pdf", read_status: "read", doc_type });
+  assert.equal(isEmailWithoutPrice(email("other")), true);
+  assert.equal(isEmailWithoutPrice(pdf("other")), false);
+  assert.equal(repliedWithoutQuote([email("other")]), true);
+  assert.equal(repliedWithoutQuote([email("other"), pdf("quote")]), false);
+  assert.equal(repliedWithoutQuote([email("other"), email("quote")]), false);
+  assert.equal(repliedWithoutQuote([email("other", "waiting")]), false);
+  assert.equal(repliedWithoutQuote([pdf("other")]), false);
 });

@@ -97,21 +97,24 @@ export function findExisting(rows, message, contactEmail) {
 // attachments: [{ name }]). terms: the supplier's Account / Pro forma.
 // Returns the changes to save, or null when nothing moved. Only ever moves
 // a request forward, and never touches one past Pro forma.
+// A supplier's mail is an answer to us unless it is them forwarding our
+// request inside their own company (FW:, PR-011 on the first practice
+// read), or an automatic one (out of office, read and delivery receipts).
+export function isSupplierAnswer(m) {
+  return (
+    !isOurs(addressOf(m.from)) &&
+    !/^\s*(fw|fwd|wg)\s*:/i.test(m.subject || "") &&
+    !/^\s*(automatic reply|auto(matic)?[- ]?reply|out of (the )?office|read:|delivered:|undeliverable|not read:)/i.test(m.subject || "")
+  );
+}
+
 export function threadUpdate(row, thread, terms) {
   const status = row.status;
   if (!["Sent", "Reply"].includes(status)) return null;
   const when = (m) => m.receivedDateTime || m.sentDateTime || "";
   const after = row.requested_at || "";
   const msgs = [...(thread || [])].filter((m) => when(m) > after).sort((a, b) => (when(a) < when(b) ? -1 : 1));
-  // A supplier's mail is an answer to us unless it is them forwarding our
-  // request inside their own company (FW:, PR-011 on the first practice
-  // read), or an automatic one (out of office, read and delivery receipts).
-  const fromSupplier = msgs.filter(
-    (m) =>
-      !isOurs(addressOf(m.from)) &&
-      !/^\s*(fw|fwd|wg)\s*:/i.test(m.subject || "") &&
-      !/^\s*(automatic reply|auto(matic)?[- ]?reply|out of (the )?office|read:|delivered:|undeliverable|not read:)/i.test(m.subject || "")
-  );
+  const fromSupplier = msgs.filter(isSupplierAnswer);
   const isProFormaTerms = (terms || "").toLowerCase().startsWith("pro");
   const day = (m) => todayInSA(Date.parse(when(m)));
 
@@ -216,6 +219,40 @@ export function latestCopies(quotes) {
     const key = keyOf(q);
     return !key || keep.get(key) === q;
   });
+}
+
+// A supplier's answer with no PDF: the price, if there is one, is typed in
+// the email itself (Heinrich, 20 Oct 2026: "with no pdf the price is
+// written in the email itself"; Claude reads it, "yes"). Answers after the
+// request was sent, on a request still open for a quote. Returns messages.
+export const EMAIL_FOR = ["Sent", "Reply"];
+export function emailAnswers(row, thread) {
+  if (!EMAIL_FOR.includes(row?.status)) return [];
+  const when = (m) => m.receivedDateTime || m.sentDateTime || "";
+  const after = row.requested_at || "";
+  return (thread || []).filter((m) => when(m) > after && isSupplierAnswer(m) && quoteFiles([m]).length === 0);
+}
+
+// The name an email is saved under, by when it came in South Africa, so two
+// emails on one request never share a name: "Email reply 2026-10-19 1318.txt".
+export function emailFileName(m) {
+  const t = new Date(Date.parse(m.receivedDateTime || m.sentDateTime || "") + 2 * 3600000).toISOString();
+  return `Email reply ${t.slice(0, 10)} ${t.slice(11, 13)}${t.slice(14, 16)}.txt`;
+}
+
+// A saved quote that is an email's text, not a PDF.
+export const isEmailQuote = (q) => /\.txt$/i.test(q?.storage_path || "");
+
+// An email Claude found no price in.
+export const isEmailWithoutPrice = (q) => isEmailQuote(q) && q.read_status === "read" && q.doc_type === "other";
+
+// A request whose supplier answered by email with no price and has sent no
+// quote: "Replied, no quote" instead of "Quote in" (Heinrich, 20 Oct 2026:
+// "yes"). The page's own rule; classify (the mirror of the Claude Code
+// panel) is left as it is.
+export function repliedWithoutQuote(quotes) {
+  const list = quotes || [];
+  return list.some(isEmailWithoutPrice) && !list.some((q) => q.read_status === "read" && ["quote", "pro forma", "invoice"].includes(q.doc_type));
 }
 
 // A quote that comes as a NEW email, not a reply in the request's thread

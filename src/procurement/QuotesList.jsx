@@ -63,7 +63,7 @@ export function QuoteLines({ quotes, onOpen, onReadAgain, raisePoFor, showSuppli
       >
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => onOpen(q)}>
-            <FileText size={12} /> Open {q.file_name}
+            <FileText size={12} /> {/\.txt$/i.test(q.storage_path || "") ? "Open the email" : `Open ${q.file_name}`}
           </button>
           {raisePoFor?.(q) && (
             <button type="button" className="stk-btn" style={S.reqActionBtnAlertOn} onClick={raisePoFor(q)}>

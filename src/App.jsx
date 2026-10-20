@@ -8681,6 +8681,11 @@ export default function StockControl() {
       return;
     }
     const { data, error } = await supabase.storage.from("supplier-quotes").createSignedUrl(q.storage_path, 600);
+    // A quote typed in an email (src/procurement/mailRules.js) is text: its own tab.
+    if (/\.txt$/i.test(q.storage_path || "") && data?.signedUrl) {
+      window.open(data.signedUrl, "_blank", "noopener");
+      return;
+    }
     if (error || !data?.signedUrl) {
       alert("That quote could not be opened. Check your connection and try again.");
       return;

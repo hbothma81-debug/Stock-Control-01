@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, Send } from "lucide-react";
-import { draftFollowUp, latestCopies } from "./mailRules.js";
+import { draftFollowUp, isEmailQuote, isEmailWithoutPrice, latestCopies, repliedWithoutQuote } from "./mailRules.js";
 import { sendFollowUp } from "./followUp.js";
 import Section from "../Section.jsx";
 import RecordRow from "../RecordRow.jsx";
@@ -401,7 +401,17 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
   }
 
   async function openQuote(q) {
+    // An email's text opens in a new tab; the tab is opened before the wait,
+    // or the browser takes it for a pop-up and blocks it.
+    const tab = isEmailQuote(q) ? window.open("", "_blank") : null;
     const { data, error } = await supabase.storage.from("supplier-quotes").createSignedUrl(q.storage_path, 600);
+    if (tab) {
+      if (error || !data?.signedUrl) tab.close();
+      else {
+        tab.location = data.signedUrl;
+        return;
+      }
+    }
     if (error || !data?.signedUrl) {
       alert("That PDF could not be opened. Check your connection and try again.");
       return;
@@ -523,9 +533,14 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
         .filter((r) => matchesSearch(r, search))
         .map((r) => {
           const supplier = supplierFor(r, suppliers);
-          return { r, supplier, c: classify(r, today, supplier?.terms || "") };
+          const c = classify(r, today, supplier?.terms || "");
+          // Answered by email with no price, no quote yet (mailRules).
+          if (c.pill.label === "QUOTE IN" && repliedWithoutQuote((quotes || []).filter((q) => q.request_id === r.id))) {
+            return { r, supplier, c: { ...c, note: "They answered with no price: reply to them", pill: { label: "REPLIED, NO QUOTE", tone: "amber" } } };
+          }
+          return { r, supplier, c };
         }),
-    [rows, activeMailbox, search, suppliers, today]
+    [rows, activeMailbox, search, suppliers, today, quotes]
   );
 
   return (
@@ -615,7 +630,10 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
         // A quote's line carries its request's details and buttons too.
         const lines = inGroup
           .flatMap((x) => {
-            const theirs = (quotes || []).filter((q) => q.request_id === x.r.id);
+            // An email with no price is shown only while there is no other
+            // quote on the request: beside a quote it is just "thanks".
+            const all = (quotes || []).filter((q) => q.request_id === x.r.id);
+            const theirs = all.some((q) => !isEmailWithoutPrice(q)) ? all.filter((q) => !isEmailWithoutPrice(q)) : all;
             return theirs.length
               ? theirs.map((q) => ({ ...x, q, when: String(q.quote_date || q.received_at || "") }))
               : [{ ...x, q: null, when: String(x.r.requested_at || "") }];
@@ -637,7 +655,13 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
                   q
                     ? [
                         r.supplier_name || "—",
-                        q.doc_type === "other" ? `not a quote: ${q.file_name}` : `quote ${q.quote_number || q.file_name}`,
+                        isEmailWithoutPrice(q)
+                          ? "replied by email, no price"
+                          : isEmailQuote(q) && q.read_status !== "read"
+                            ? "email reply, being read"
+                            : q.doc_type === "other"
+                              ? `not a quote: ${q.file_name}`
+                              : `quote ${q.quote_number || (isEmailQuote(q) ? "in the email" : q.file_name)}`,
                         q.total_ex_vat != null ? `${fmtMoney(q.total_ex_vat)} ex VAT` : "",
                         fmtDate(q.quote_date || q.received_at),
                       ]
@@ -721,7 +745,7 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
         </>
       )}
 
-      {view === "quotes" && <QuotesTab quotes={quotes} onOpen={openQuote} onReadAgain={readAgain} raisePoFor={raisePoFor} />}
+      {view === "quotes" && <QuotesTab quotes={(quotes || []).filter((q) => !isEmailWithoutPrice(q))} onOpen={openQuote} onReadAgain={readAgain} raisePoFor={raisePoFor} />}
 
       {view === "items" && (
         <ItemsList quotes={quotes} onOpenQuote={openQuote} raiseItemPo={raiseItemPo} addStock={addStock} stockItems={customStock} onLinkStock={onLinkStock} />
@@ -729,7 +753,7 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
 
       {view === "suppliers" && (
         <SupplierList
-          quotes={quotes}
+          quotes={(quotes || []).filter((q) => !isEmailWithoutPrice(q))}
           onOpenQuote={openQuote}
           onReadAgain={readAgain}
           raisePoFor={raisePoFor}
