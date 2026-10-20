@@ -5932,3 +5932,14 @@ on their card with Change signature (src/email/PersonSignature.jsx; useSignature
 `{ by }`, SignatureBox `forOther`); no SQL. Earlier the same day the gate's push took
 `92ee23c` (mailbox read side by side) and `c8574be` (one copy of a file per request,
 the latest; drawings saved as NOT A QUOTE, not read by Claude) live.
+
+## 20 Oct 2026 — Claude API / Suppliers fork: push of `e70489d` (about 09:45)
+
+On Heinrich's "push" in this conversation. Live tip before: `2bba078`. Queue read as
+its own step: `e70489d` (mine) and `7ade0c9` (the handover note above, another
+conversation's). `e70489d`'s parent is the live tip, so it went out alone with
+`git push origin e70489d:main`; `7ade0c9` stays queued. The gate had built `e70489d`
+in a clean copy (592 tests, build, names). Live bundle App-DgP9E_XD.js became
+App-CroKWfNy.js; CHECK-what-is-live found the new rule; the live page loads with no
+console errors. `e70489d`: the supplier follow-up leaves out our "New item" note and
+the stray full stop before it (PR-004 now reads "...1200mm long (qty 2). Please send...").
