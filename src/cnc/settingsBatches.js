@@ -66,6 +66,7 @@ export function stockAndProcessPicked(form) {
 // the engine; switching back still shows what was typed.
 export function keepShown(form) {
   const keys = new Set([
+    "holes",                       // Holes and threads (HolesThreads.jsx): always sent
     "stock_type",
     "holding",
     ...(STOCK_BOXES[form?.stock_type] || []),

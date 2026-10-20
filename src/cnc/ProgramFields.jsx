@@ -11,6 +11,7 @@ import TypeToFind from "../TypeToFind.jsx";
 import { C, S } from "../theme.js";
 import SettingsBoxes from "./SettingsBoxes.jsx";
 import StockProcess from "./StockProcess.jsx";
+import HolesThreads from "./HolesThreads.jsx";
 import { FINISH_BOXES } from "./settingsBatches.js";
 import { gradeProblem, gradesForPrograms } from "./gradeLink.js";
 
@@ -31,7 +32,7 @@ export default function ProgramFields({ fields, setFields, customers, materials,
           <TypeToFind options={customers || []} value={fields.customer} onChange={set("customer")} placeholder="Type to find…" />
         </div>
         <div>
-          <label style={S.label}>Material (Stock Manager → CNC Bar Grades)</label>
+          <label style={S.label}>Material (CNC → Materials)</label>
           {/* Only grades linked to their cutting data are offered (gradeLink.js, Heinrich 17 Oct 2026). */}
           <TypeToFind options={gradesForPrograms(materials).map((m) => m.name)} value={fields.materialName} onChange={set("materialName")} placeholder="Type to find…" />
           {gradeProblem((materials || []).find((m) => m.name === fields.materialName)) && (
@@ -41,17 +42,18 @@ export default function ProgramFields({ fields, setFields, customers, materials,
           )}
           {(materials || []).length === 0 && (
             <div style={{ fontSize: 12.5, color: C.danger, marginTop: 4 }}>
-              No CNC Bar Grades yet: add them under Stock Manager → CNC Bar Grades.
+              No CNC materials yet: add them under CNC → Materials.
             </div>
           )}
           {fields.materialName && !(materials || []).some((m) => m.name === fields.materialName) && (
             <div style={{ fontSize: 12.5, color: C.danger, marginTop: 4 }}>
-              "{fields.materialName}" is not on the CNC Bar Grades list any more: pick one that is.
+              "{fields.materialName}" is not on the CNC Materials list any more: pick one that is.
             </div>
           )}
         </div>
       </div>
       <StockProcess form={fields.form} setForm={setForm} pipes={pipes} />
+      <HolesThreads form={fields.form} setForm={setForm} />
       <Section title="More settings" defaultOpen={settingsOpen} quiet>
         {moreAbove}
         <SettingsBoxes keys={shape ? FINISH_BOXES.filter((k) => k !== "side1") : FINISH_BOXES} pipes={pipes} form={fields.form} setForm={setForm} />

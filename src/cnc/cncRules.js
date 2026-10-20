@@ -3,6 +3,7 @@
 // in cncRules.test.js.
 
 import { CNC_FIELDS } from "./cncFields.js";
+import { holesToSettings, settingsToHoles } from "./holesThreads.js";
 
 // The machine's own spelling of a program number: O and eight digits, as
 // the engine writes it inside the program (O%08d) and as the hand programs
@@ -92,6 +93,13 @@ export function cleanSettings(form, fields = CNC_FIELDS) {
       settings[f.key] = String(v).trim();
     }
   }
+  // Holes and threads (holesThreads.js, Heinrich 20 Oct 2026): its lines as
+  // the engine's id_thread / ream / thread_starts / thread_form.
+  if (form?.holes?.length) {
+    const h = holesToSettings(form.holes);
+    Object.assign(settings, h.settings);
+    errors.push(...h.errors);
+  }
   return { settings, errors };
 }
 
@@ -105,6 +113,8 @@ export function settingsToForm(settings, fields = CNC_FIELDS) {
     else if (f.kind === "yesno" || f.kind === "tick") form[f.key] = v === true;
     else form[f.key] = String(v);
   }
+  const holes = settingsToHoles(settings);
+  if (holes.length) form.holes = holes;
   return form;
 }
 

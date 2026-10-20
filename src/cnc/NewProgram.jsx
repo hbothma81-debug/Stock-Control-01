@@ -67,7 +67,7 @@ export default function NewProgram({ customers, materials, pipes, shape = null, 
     setError("");
     const { settings, errors } = cleanSettings(keepShown(fields.form));
     if (errors.length) {
-      setError(`Check ${errors.join(", ")}: not a number the engine can use.`);
+      setError(`Check ${errors.join(", ")}: the engine can't use what is typed there.`);
       return;
     }
     let quick = null;
