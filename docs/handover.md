@@ -5943,3 +5943,13 @@ in a clean copy (592 tests, build, names). Live bundle App-DgP9E_XD.js became
 App-CroKWfNy.js; CHECK-what-is-live found the new rule; the live page loads with no
 console errors. `e70489d`: the supplier follow-up leaves out our "New item" note and
 the stray full stop before it (PR-004 now reads "...1200mm long (qty 2). Please send...").
+
+## 20 Oct 2026 — Claude API / Procurement conversation: push of `7397d01`
+
+On Heinrich's "push" in this conversation, and the gate was told. Live tip before:
+`1930fd2`; queue read as its own step: `7397d01` alone. A clean clone built, 594 tests
+pass, names clean; CHECK-what-is-live found "All suppliers" and "Search item
+description or quote number". The Quotes and Items quoted tabs have two boxes on top
+(src/procurement/QuoteFilters.jsx): the words, and a type-to-find Supplier box A to Z
+with counts; no pills, by his answer. A supplier's own page keeps only the search box.
+No SQL.
