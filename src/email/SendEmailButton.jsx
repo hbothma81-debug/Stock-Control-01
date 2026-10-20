@@ -15,6 +15,8 @@ import {
 } from "./outlook.js";
 import { MAX_ATTACHMENT_BYTES, goesToSelf, checkAddresses, actualRecipients, graphMessage, sentLine } from "./emailRules.js";
 import { recordSentEmail } from "./sentEmails.js";
+import { signMessage } from "./signature.js";
+import { useSignature, SignatureBox } from "./useSignature.jsx";
 
 // "Email …" on a document, and the window it opens: To, Cc, subject and
 // message filled in and all changeable, the PDF attached, sent from the
@@ -101,6 +103,8 @@ function SendEmailModal({ heading, appUser, defaults, buildAttachment, attachmen
   // order twice; state alone is a render too late for a fast double tap.
   const sendingRef = useRef(false);
   const toSelf = goesToSelf(window.location.hostname);
+  // The sender's own signature, under the message (signature.js).
+  const sig = useSignature(appUser, mailbox?.address);
 
   useEffect(() => {
     let alive = true;
@@ -124,7 +128,7 @@ function SendEmailModal({ heading, appUser, defaults, buildAttachment, attachmen
   const toCheck = checkAddresses(to);
   const ccCheck = checkAddresses(cc);
   const unreadable = [...toCheck.bad, ...ccCheck.bad];
-  const canSend = !!mailbox && !busy && !sentNote && toCheck.list.length > 0 && unreadable.length === 0 && subject.trim() !== "";
+  const canSend = !!mailbox && sig.ready && !busy && !sentNote && toCheck.list.length > 0 && unreadable.length === 0 && subject.trim() !== "";
   const unused = (defaults.suggestions || []).filter((s) => !toCheck.list.some((a) => a.toLowerCase() === s.email.toLowerCase()));
   const unusedCc = (defaults.ccSuggestions || []).filter(
     (s) => ![...toCheck.list, ...ccCheck.list].some((a) => a.toLowerCase() === s.email.toLowerCase())
@@ -183,13 +187,13 @@ function SendEmailModal({ heading, appUser, defaults, buildAttachment, attachmen
       if (real.to.length === 0) throw new Error("Microsoft gave no address for your mailbox, so there is nowhere to send a practice email.");
       await sendOutlookMail(
         appUser?.id,
-        graphMessage({
+        signMessage(graphMessage({
           to: real.to,
           cc: real.cc,
           subject: toSelf ? `[PRACTICE] ${subject.trim()}` : subject.trim(),
           body: toSelf ? `PRACTICE COPY. On the live app this would have gone to: ${toCheck.list.join(", ")}${ccCheck.list.length ? ` (cc ${ccCheck.list.join(", ")})` : ""}\n\n${body}` : body,
           attachment: { fileName: file.fileName, base64, contentType: file.contentType || file.blob.type || "application/pdf" },
-        })
+        }), sig)
       );
       gone = true;
       const row = {
@@ -336,6 +340,7 @@ function SendEmailModal({ heading, appUser, defaults, buildAttachment, attachmen
 
         <label style={{ ...S.label, display: "block" }}>MESSAGE</label>
         <textarea style={{ ...box, minHeight: 170, resize: "vertical", fontFamily: "inherit", lineHeight: 1.45 }} value={body} onChange={(e) => setBody(e.target.value)} disabled={!!sentNote} />
+        <SignatureBox sig={sig} disabled={!!sentNote || !!busy} />
 
         <div style={S.roleHint}>{attachmentNote || "Attached: the PDF of this document, made fresh when you press Send."}</div>
 

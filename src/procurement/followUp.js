@@ -15,7 +15,7 @@
 import { mailSendPass } from "../email/outlook.js";
 import { goesToSelf, graphMessage } from "../email/emailRules.js";
 import { recordSentEmail } from "../email/sentEmails.js";
-import { textToHtml } from "./mailRules.js";
+import { signMessage, signedReply } from "../email/signature.js";
 import { todayInSA } from "./procurementRules.js";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
@@ -39,7 +39,9 @@ async function graph(pass, method, url, body) {
 
 // Returns { sentTo, practice }. Throws, with Microsoft's reason, when it did
 // not go; once Microsoft accepted it, nothing after can make it "not sent".
-export async function sendFollowUp({ supabase, appUserId, userName, row, text }) {
+// sig: the sender's signature ({ text, logo }, useSignature), signed under
+// the message on every route.
+export async function sendFollowUp({ supabase, appUserId, userName, row, text, sig }) {
   const got = await mailSendPass(appUserId, { interactive: true });
   if (!got) throw new Error("Outlook is not connected on this device yet. Press Send again after signing in.");
   const { pass, address: me } = got;
@@ -53,14 +55,17 @@ export async function sendFollowUp({ supabase, appUserId, userName, row, text })
       pass,
       "POST",
       "/me/sendMail",
-      graphMessage({
-        to: [me],
-        subject: `[PRACTICE] ${subject}`,
-        body: `PRACTICE COPY. On the live app this would have gone as a reply in the request's thread, from ${row.mailbox}, to ${row.contact_email}.\n\n${text}`,
-      })
+      signMessage(
+        graphMessage({
+          to: [me],
+          subject: `[PRACTICE] ${subject}`,
+          body: `PRACTICE COPY. On the live app this would have gone as a reply in the request's thread, from ${row.mailbox}, to ${row.contact_email}.\n\n${text}`,
+        }),
+        sig
+      )
     );
   } else if (row.reply_message_id) {
-    await graph(pass, "POST", `${base}/messages/${row.reply_message_id}/reply`, { comment: textToHtml(text) });
+    await graph(pass, "POST", `${base}/messages/${row.reply_message_id}/reply`, signedReply(text, sig));
   } else {
     let requestId = null;
     if (row.request_message_id) {
@@ -69,9 +74,9 @@ export async function sendFollowUp({ supabase, appUserId, userName, row, text })
       requestId = found?.value?.[0]?.id || null;
     }
     if (requestId) {
-      await graph(pass, "POST", `${base}/messages/${requestId}/replyAll`, { comment: textToHtml(text) });
+      await graph(pass, "POST", `${base}/messages/${requestId}/replyAll`, signedReply(text, sig));
     } else {
-      await graph(pass, "POST", `${base}/sendMail`, graphMessage({ to: [row.contact_email], subject, body: text }));
+      await graph(pass, "POST", `${base}/sendMail`, signMessage(graphMessage({ to: [row.contact_email], subject, body: text }), sig));
     }
   }
 

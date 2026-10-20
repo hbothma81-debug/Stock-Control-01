@@ -98,7 +98,8 @@ test("the follow-up names item, qty and date, and asks for the quote or the pro 
   const quote = draftFollowUp({ row, contactName: "Shovan Bezuidenhout", owesProForma: false, senderName: "Heinrich" });
   assert.match(quote, /^Hi Shovan,/);
   assert.match(quote, /quotation on 2026-10-15 for Gas strut, series 4100 \(qty 2\)/);
-  assert.match(quote, /Kind regards,\nHeinrich\nEast Rand Supplies$/);
+  assert.match(quote, /with the lead time\?$/);
+  assert.doesNotMatch(quote, /Kind regards/, "the signature goes under the message, not in it");
   const pf = draftFollowUp({ row: { ...row, qty: "see list" }, contactName: "", owesProForma: true, senderName: "Heinrich" });
   assert.match(pf, /^Good day,/);
   assert.match(pf, /pro forma invoice/);

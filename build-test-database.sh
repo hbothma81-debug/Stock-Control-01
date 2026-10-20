@@ -139,6 +139,7 @@ ORDER=(
   setup-procurement-6-supplier-categories.sql
   setup-procurement-7-supplier-categories-words.sql
   setup-procurement-8-stock-item-quotes.sql
+  setup-email-signatures.sql
 )
 
 OUT=setup-ALL.sql

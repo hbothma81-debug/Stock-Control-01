@@ -25,6 +25,7 @@ import { supabase } from "../lib/supabaseClient.js";
 import { GROUPS, classify, matchesSearch, supplierFor, todayInSA } from "./procurementRules.js";
 import { sweepMailboxes } from "./mailSweep.js";
 import { emailIsSetUp, outlookErrorText } from "../email/outlook.js";
+import { useSignature, SignatureBox } from "../email/useSignature.jsx";
 import SupplierList from "./SupplierList.jsx";
 import QuotesTab, { QuoteLines } from "./QuotesList.jsx";
 import ItemsList from "./ItemsList.jsx";
@@ -184,13 +185,13 @@ function FollowUp({ row, supplier, c, userName, currentUserId, onSent }) {
     setNote("");
   }
 
-  async function send() {
+  async function send(sig) {
     if (sending.current || !text?.trim()) return;
     sending.current = true;
     setBusy(true);
     setError("");
     try {
-      const result = await sendFollowUp({ supabase, appUserId: currentUserId, userName, row, text: text.trim() });
+      const result = await sendFollowUp({ supabase, appUserId: currentUserId, userName, row, text: text.trim(), sig });
       setNote(result.practice ? `PRACTICE: sent to your own mailbox (${result.sentTo}) only.` : `Sent to ${result.sentTo}, in the same email thread.`);
       setText(null);
       if (result.row) onSent(result.row);
@@ -210,21 +211,39 @@ function FollowUp({ row, supplier, c, userName, currentUserId, onSent }) {
           <Send size={12} /> Send follow-up{c.isOverdue ? " (due)" : ""}
         </button>
       ) : (
-        <>
-          <label style={S.label}>To {row.contact_email}, in the same email thread</label>
-          <textarea style={{ ...S.input, minHeight: 150, fontFamily: "inherit" }} value={text} onChange={(e) => setText(e.target.value)} />
-          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-            <button type="button" className="stk-btn" style={S.reqActionBtnAlertOn} onClick={send} disabled={busy}>
-              <Send size={12} /> {busy ? "Sending…" : "Send"}
-            </button>
-            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => setText(null)} disabled={busy}>
-              Cancel
-            </button>
-          </div>
-        </>
+        <FollowUpCompose
+          row={row}
+          text={text}
+          setText={setText}
+          busy={busy}
+          onSend={send}
+          appUser={{ id: currentUserId, name: userName }}
+        />
       )}
       {error && <div style={{ color: C.danger, fontSize: 14, marginTop: 4 }}>Not sent: {error}</div>}
     </div>
+  );
+}
+
+// The follow-up being written: the message, the sender's signature under
+// it, Send. Its own piece so the signature is read only while somebody is
+// writing one, not once for every line on the page.
+function FollowUpCompose({ row, text, setText, busy, onSend, appUser }) {
+  const sig = useSignature(appUser, row.mailbox);
+  return (
+    <>
+      <label style={S.label}>To {row.contact_email}, in the same email thread</label>
+      <textarea style={{ ...S.input, minHeight: 150, fontFamily: "inherit" }} value={text} onChange={(e) => setText(e.target.value)} />
+      <SignatureBox sig={sig} disabled={busy} />
+      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+        <button type="button" className="stk-btn" style={S.reqActionBtnAlertOn} onClick={() => onSend(sig)} disabled={busy || !sig.ready}>
+          <Send size={12} /> {busy ? "Sending…" : "Send"}
+        </button>
+        <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => setText(null)} disabled={busy}>
+          Cancel
+        </button>
+      </div>
+    </>
   );
 }
 

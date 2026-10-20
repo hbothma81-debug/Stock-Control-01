@@ -75,7 +75,8 @@ test("a purchase order's email opens filled in", () => {
   assert.match(d.body, /purchase order PO-0123/);
   assert.match(d.body, /Delivery required by: 2026-09-30/);
   assert.match(d.body, /Reference: JOB-0042/);
-  assert.match(d.body, /Kind regards,\nHeinrich\nEast Rand Supplies\n011 000 0000$/);
+  assert.match(d.body, /Please confirm receipt of this order\.$/);
+  assert.doesNotMatch(d.body, /Kind regards/, "the signature goes under the message, not in it");
 });
 
 test("a supplier with no address leaves To empty, and nothing blank is printed", () => {
@@ -84,7 +85,7 @@ test("a supplier with no address leaves To empty, and nothing blank is printed",
   assert.equal(d.subject, "Purchase Order PO-1");
   assert.ok(!/Delivery required/.test(d.body));
   assert.ok(!/undefined|null/.test(d.body));
-  assert.match(d.body, /Kind regards,$/);
+  assert.match(d.body, /Please confirm receipt of this order\.$/);
 });
 
 test("on practice the email goes to the sender alone", () => {
@@ -151,7 +152,7 @@ test("a Sage invoice's email: the first time To is empty and the contacts are of
   assert.match(d.body, /our invoice 20616\./);
   assert.match(d.body, /Your order number: 4500123/);
   assert.match(d.body, /Our reference: JOB-0042/);
-  assert.match(d.body, /Kind regards,\nChante\nEast Rand Supplies\n011 000 0000$/);
+  assert.match(d.body, /Our reference: JOB-0042$/);
 });
 
 test("a Sage invoice's email: next time To is where the last one went", () => {
@@ -202,8 +203,7 @@ test("a customer's delivery note: To empty the first time, the order number in t
   assert.deepEqual(d.suggestions, [{ name: "Stores", email: "stores@greenzone.co.za" }]);
   assert.deepEqual(d.ccSuggestions, [{ name: "Mark", email: "mark@ersupplies.co.za" }]);
   assert.equal(d.subject, "Delivery note DN-0042 - your order 18074 - JOB-0088 - East Rand Supplies");
-  assert.match(d.body, /our delivery note DN-0042\.\nYour order number: 18074\nOur reference: JOB-0088/);
-  assert.match(d.body, /Kind regards,\nHeinrich\nEast Rand Supplies\n011 000 0000$/);
+  assert.match(d.body, /our delivery note DN-0042\.\nYour order number: 18074\nOur reference: JOB-0088$/);
 });
 
 test("a customer's delivery note: next time To is where their last delivery note went", () => {

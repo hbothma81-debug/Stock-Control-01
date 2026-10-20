@@ -68,9 +68,8 @@ export function knownAddresses(party) {
   return out;
 }
 
-function signOff(senderName, company) {
-  return ["Kind regards,", senderName, company?.name, company?.phone].filter((l) => String(l || "").trim()).join("\n");
-}
+// No "Kind regards" in the messages below: every email is signed with the
+// sender's own signature under the message (signature.js, 20 Oct 2026).
 
 // What the send window opens with for a purchase order. Everything can be
 // changed in the window before it goes.
@@ -79,7 +78,7 @@ export function poEmailDefaults({ po, supplier, company, senderName }) {
   const lines = ["Good day,", "", `Please find attached our purchase order ${po.poNumber}.`];
   if (po.deliveryDate) lines.push(`Delivery required by: ${po.deliveryDate}`);
   if (po.reference) lines.push(`Reference: ${po.reference}`);
-  lines.push("", "Please confirm receipt of this order.", "", signOff(senderName, company));
+  lines.push("", "Please confirm receipt of this order.");
   return {
     to: known[0]?.email || "",
     cc: "",
@@ -118,7 +117,6 @@ export function invoiceEmailDefaults({ job, contacts, lastTo, salesRep, ownAddre
   const lines = ["Good day,", "", number ? `Please find attached our invoice ${number}.` : "Please find our invoice attached."];
   if (po) lines.push(`Your order number: ${po}`);
   lines.push(`Our reference: ${job.job_number}`);
-  lines.push("", signOff(senderName, company));
   const rep = salesRep && isEmail(salesRep.email) && String(salesRep.email).toLowerCase() !== String(ownAddress || "").toLowerCase() ? [{ name: salesRep.name || "Sales rep", email: salesRep.email }] : [];
   return { to: to.join("; "), cc: "", subject, body: lines.join("\n"), suggestions: known, ccSuggestions: rep };
 }
@@ -143,7 +141,6 @@ export function deliveryNoteEmailDefaults({ note, job, supplier, contacts, lastT
   const lines = ["Good day,", "", toSupplier ? `Please find attached our delivery note ${number} for the work sent to you.` : `Please find attached our delivery note ${number}.`];
   if (po) lines.push(`Your order number: ${po}`);
   if (job?.job_number) lines.push(`Our reference: ${job.job_number}`);
-  lines.push("", signOff(senderName, company));
   const rep = salesRep && isEmail(salesRep.email) && String(salesRep.email).toLowerCase() !== String(ownAddress || "").toLowerCase() ? [{ name: salesRep.name || "Sales rep", email: salesRep.email }] : [];
   return { to, cc: "", subject, body: lines.join("\n"), suggestions: known, ccSuggestions: rep };
 }

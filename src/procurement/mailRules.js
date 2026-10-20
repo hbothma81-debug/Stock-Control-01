@@ -274,7 +274,8 @@ export function draftFollowUp({ row, contactName, owesProForma, senderName }) {
   const ask = owesProForma
     ? `Thank you for your quotation for ${item}${qty}. Please send us a pro forma invoice so that we can go ahead.`
     : `We asked you for a quotation${date ? ` on ${date}` : ""} for ${item}${qty}. Could you please send it to us, with the lead time?`;
-  return `${first ? `Hi ${first}` : "Good day"},\n\n${ask}\n\nKind regards,\n${senderName || ""}\nEast Rand Supplies`.replace(/\n{3,}/g, "\n\n");
+  // Signed under the message by the sender's own signature (signature.js).
+  return `${first ? `Hi ${first}` : "Good day"},\n\n${ask}`;
 }
 
 // Plain text to the HTML Microsoft's reply takes, line breaks kept.
