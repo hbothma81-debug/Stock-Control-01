@@ -1,15 +1,28 @@
-// A supplier's broad categories (Steel & sections, Electrical & controls, ...),
-// several per supplier, chosen from the short editable list
-// master.supplierCategories (setup-procurement-6-supplier-categories.sql).
-// The same box on Suppliers -> a supplier's Details tab and on Stock
-// Manager -> Suppliers, so the two always agree (Heinrich, 19 Oct 2026).
-//
-// A chip per category, an x to take one off, and a type-to-find box that
-// offers only the list's categories the supplier does not have yet.
+// A supplier's categories: the detailed words of what ERS buys from them
+// ("Engineering steel (EN8 bar)", "Springs", "Wire forms"), several per
+// supplier (Heinrich, 20 Oct 2026: "each supplier will have their
+// categories, more than one possible, and they are also searchable with
+// the bigger list of categories like we had"). There is no separate list:
+// the box suggests every category already on any supplier, and a new one
+// is simply typed. Decided first with the Stock Manager conversation on 10
+// Sep 2026. The same box on Suppliers -> a supplier's Details tab and on
+// Stock Manager -> Suppliers, so the two always agree.
 
 import { X } from "lucide-react";
 import TypeToFind from "../TypeToFind.jsx";
 import { C, S } from "../theme.js";
+
+// Every category on any supplier, once each (capitals ignored), A-Z.
+export function allSupplierCategories(suppliers) {
+  const seen = new Map();
+  for (const s of suppliers || []) {
+    for (const c of s.categories || []) {
+      const key = String(c).trim().toLowerCase();
+      if (key && !seen.has(key)) seen.set(key, String(c).trim());
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
 
 export function CategoryChips({ value }) {
   if (!value?.length) return null;
@@ -34,7 +47,17 @@ export default function SupplierCategoriesField({ value, options, onChange, canE
       </div>
     );
   }
-  const left = (options || []).filter((o) => !chosen.includes(o));
+  const has = (c) => chosen.some((x) => x.toLowerCase() === c.toLowerCase());
+  const left = (options || []).filter((o) => !has(o));
+  // A typed category that is already on another supplier takes that
+  // spelling, so "springs" and "Springs" stay one category.
+  function add(text) {
+    const typed = String(text || "").trim();
+    if (!typed) return;
+    const known = (options || []).find((o) => o.toLowerCase() === typed.toLowerCase());
+    const c = known || typed.charAt(0).toUpperCase() + typed.slice(1);
+    if (!has(c)) onChange([...chosen, c]);
+  }
   return (
     <div>
       <label style={S.label}>Categories</label>
@@ -57,14 +80,7 @@ export default function SupplierCategoriesField({ value, options, onChange, canE
           </span>
         ))}
       </div>
-      {left.length > 0 && (
-        <TypeToFind
-          options={left}
-          value=""
-          onChange={(v) => v && left.includes(v) && onChange([...chosen, v])}
-          placeholder="Add a category…"
-        />
-      )}
+      <TypeToFind options={left} value="" onChange={add} allowNew placeholder="Add a category: type to find one, or a new one…" />
     </div>
   );
 }

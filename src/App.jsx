@@ -185,7 +185,7 @@ import { useDrawingsState, useDrawings } from "./drawings/useDrawings.jsx";
 import { DrawingsTab, DrawingUploadPopup } from "./drawings/DrawingsScreens.jsx";
 import CncTab from "./cnc/CncTab.jsx";
 import ProcurementPage from "./procurement/ProcurementPage.jsx";
-import SupplierCategoriesField from "./procurement/SupplierCategories.jsx";
+import SupplierCategoriesField, { allSupplierCategories } from "./procurement/SupplierCategories.jsx";
 import { useAssetsState, useAssets } from "./assets/useAssets.jsx";
 import { AssetRemovePopup, AssetHistoryPopup, ServiceNowPopup, RepairListPopup } from "./assets/AssetPopups.jsx";
 
@@ -324,8 +324,9 @@ let factorHasCuttingMaterial = false;
 // A supplier's account no and terms (setup-procurement-3-supplier-terms.sql):
 // read and written only once a loaded row has shown the columns.
 let supplierHasAccountNo = false;
-// A supplier's categories and "what we buy" (setup-procurement-6-supplier-
-// categories.sql): read and written only once a loaded row has the columns.
+// A supplier's categories, the detailed words of what we buy from them
+// (setup-procurement-6 and -7): read and written only once a loaded row has
+// the column. "buys" keeps the words as first loaded and is carried along.
 let supplierHasCategories = false;
 let stockHasRemovedDetails = false;
 let stockHasCustomerRevision = false;
@@ -353,9 +354,6 @@ const MASTER_STRING_LISTS = [
   "storeCategories", "fastenerCategories", "fastenerGrades", "fastenerFinishes", "sheetNames",
   "laserMaterials",
   "laserThicknesses",
-  // The broad categories a supplier can carry (Steel & sections, ...), the
-  // pills on Suppliers -> Supplier list (setup-procurement-6-supplier-categories.sql).
-  "supplierCategories",
 ];
 // Lists where the order on screen is the order that matters, not just how
 // they happen to be stored. Job Process Types is the factory flow: the
@@ -17949,9 +17947,8 @@ export default function StockControl() {
               setPreviewData(url);
               setPreviewLoading(false);
             }}
-            supplierCategories={supplierHasCategories ? master.supplierCategories || [] : null}
+            hasSupplierCategories={supplierHasCategories}
             supplierEdits={{
-              setCategoryList: (list) => setMaster((prev) => ({ ...prev, supplierCategories: list })),
               updateSupplierField,
               addSupplier: addSupplierFromJob,
               addSupplierContact,
@@ -20538,15 +20535,9 @@ export default function StockControl() {
                           <div style={{ marginTop: 8 }}>
                             <SupplierCategoriesField
                               value={s.categories || []}
-                              options={master.supplierCategories || []}
+                              options={allSupplierCategories(master.suppliers)}
                               onChange={(v) => updateSupplierField(s.id, "categories", v)}
                               canEdit
-                            />
-                            <input
-                              style={{ ...S.input, marginTop: 6 }}
-                              value={s.buys || ""}
-                              onChange={(e) => updateSupplierField(s.id, "buys", e.target.value)}
-                              placeholder="What we buy from them (e.g. Engineering steel, EN8 bar)"
                             />
                           </div>
                         )}

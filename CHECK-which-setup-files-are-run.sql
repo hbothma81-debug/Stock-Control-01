@@ -240,7 +240,10 @@ with checks (setup_file, looks_for, found) as (
     ('setup-procurement-5-po-link.sql', 'columns procurement_requests.po_id and po_number (the PO a quote request became)',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'procurement_requests' and column_name = 'po_number')),
     ('setup-procurement-6-supplier-categories.sql', 'columns master_suppliers.categories and buys, and the supplierCategories list',
-      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'master_suppliers' and column_name = 'categories'))
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'master_suppliers' and column_name = 'categories')),
+    ('setup-procurement-7-supplier-categories-words.sql', 'no broad supplier categories left (categories are the detailed words)',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'master_suppliers' and column_name = 'categories')
+      and not exists (select 1 from public.master_string_lists where list_name = 'supplierCategories'))
 )
 select
   setup_file,

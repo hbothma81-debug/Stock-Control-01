@@ -13,6 +13,12 @@
 -- This file makes the columns and the starting list only; which supplier
 -- is in which category is loaded by SEED-supplier-categories.sql.
 --
+-- 20 Oct 2026: the 12 broad categories were dropped again on Heinrich's
+-- word; setup-procurement-7-supplier-categories-words.sql takes them off
+-- and makes a supplier's categories its detailed words. This file still
+-- adds the starting list (it ran on both databases as it is), and file 7,
+-- always run after it, removes it.
+--
 -- Run on PRACTICE first. Select nothing before pressing Run.
 -- Safe to run more than once: the starting list is added only while the
 -- app has no supplier categories at all, so later edits are never undone.

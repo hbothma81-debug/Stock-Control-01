@@ -249,7 +249,7 @@ const chipStyle = (active) => ({
 
 // supplierEdits: App's own supplier functions (the ones Stock Manager uses),
 // so a change here saves exactly as one made there.
-export default function ProcurementPage({ suppliers, currentUserId, userName, customerEmails, canEditSuppliers, supplierEdits, openPdf, onRaisePo, onAddStock, supplierCategories }) {
+export default function ProcurementPage({ suppliers, currentUserId, userName, customerEmails, canEditSuppliers, supplierEdits, openPdf, onRaisePo, onAddStock, hasSupplierCategories }) {
   const [view, setView] = useState("requests");
   const [rows, setRows] = useState(null);
   const [quotes, setQuotes] = useState(null);
@@ -609,8 +609,7 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
           raisePoFor={raisePoFor}
           raiseItemPo={raiseItemPo}
           addStock={addStock}
-          categoryList={supplierCategories}
-          onCategoryList={supplierEdits.setCategoryList}
+          hasCategories={hasSupplierCategories}
           suppliers={suppliers}
           requests={rows}
           canEdit={canEditSuppliers}
