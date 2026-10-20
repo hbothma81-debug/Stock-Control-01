@@ -664,7 +664,17 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
                 {q && (
                   <div style={{ marginTop: 8 }}>
                     <label style={S.label}>This quote</label>
-                    <QuoteLines quotes={[q]} onOpen={openQuote} onReadAgain={readAgain} raisePoFor={raisePoFor} showSupplier={false} />
+                    <QuoteLines
+                      quotes={[q]}
+                      onOpen={openQuote}
+                      onReadAgain={readAgain}
+                      raisePoFor={raisePoFor}
+                      showSupplier={false}
+                      raiseItemPo={raiseItemPo}
+                      addStock={addStock}
+                      stockItems={customStock}
+                      onLinkStock={onLinkStock}
+                    />
                   </div>
                 )}
                 {!q && mail?.replies?.[r.id] && (
