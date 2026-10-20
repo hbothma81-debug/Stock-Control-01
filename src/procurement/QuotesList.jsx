@@ -22,6 +22,7 @@ const STATUS = {
   read: { label: "READ", color: C.accentFinished },
   "not read": { label: "NOT READ", color: C.danger },
   "over cap": { label: "NOT READ", color: C.danger },
+  other: { label: "NOT A QUOTE", color: C.muted },
 };
 
 function Line({ label, children }) {
@@ -38,7 +39,7 @@ function Line({ label, children }) {
 export function QuoteLines({ quotes, onOpen, onReadAgain, raisePoFor, showSupplier = true }) {
   if (!quotes?.length) return null;
   return quotes.map((q) => {
-    const st = STATUS[q.read_status] || STATUS.waiting;
+    const st = q.read_status === "read" && q.doc_type === "other" ? STATUS.other : STATUS[q.read_status] || STATUS.waiting;
     const summary = [
       showSupplier ? q.supplier_name : "",
       q.quote_number,
@@ -71,6 +72,18 @@ export function QuoteLines({ quotes, onOpen, onReadAgain, raisePoFor, showSuppli
             {q.read_status !== "waiting" && onReadAgain && (
               <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginLeft: 8 }} onClick={() => onReadAgain(q)}>
                 Read again
+              </button>
+            )}
+          </div>
+        )}
+        {q.read_status === "read" && q.read_note && (
+          // A drawing by its file name, never sent to Claude; a quote taken
+          // for one is sent with Read again.
+          <div style={{ color: C.muted, fontSize: 14, marginTop: 6 }}>
+            {q.read_note}
+            {onReadAgain && (
+              <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, marginLeft: 8 }} onClick={() => onReadAgain(q)}>
+                It is a quote: read it
               </button>
             )}
           </div>

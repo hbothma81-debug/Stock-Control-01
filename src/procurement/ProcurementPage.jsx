@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, Send } from "lucide-react";
-import { draftFollowUp } from "./mailRules.js";
+import { draftFollowUp, latestCopies } from "./mailRules.js";
 import { sendFollowUp } from "./followUp.js";
 import Section from "../Section.jsx";
 import RecordRow from "../RecordRow.jsx";
@@ -286,7 +286,9 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
     // Newest by the quote's own date where Claude has read one, so old quotes
     // uploaded today sit where they belong, not at the top.
     const when = (q) => String(q.quote_date || q.received_at || q.created_at || "");
-    const list = (error ? [] : data || []).sort((a, b) => (when(a) < when(b) ? 1 : -1));
+    // Of copies of one file on one request only the latest shows, and only it
+    // is read (Heinrich, 20 Oct 2026: "always use latest date").
+    const list = latestCopies((error ? [] : data || []).sort((a, b) => (when(a) < when(b) ? 1 : -1)));
     setQuotes(list);
     return list;
   }, []);

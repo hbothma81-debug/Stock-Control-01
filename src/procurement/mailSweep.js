@@ -13,7 +13,7 @@
 // request.
 
 import { mailReadPass } from "../email/outlook.js";
-import { addressBook, addressOf, findExisting, isOurs, looksLikeQuoteMail, nextPrNumber, quoteFiles, quoteRequestFrom, requestForNewMail, threadUpdate } from "./mailRules.js";
+import { addressBook, addressOf, findExisting, isOurs, looksLikeDrawing, looksLikeQuoteMail, newestFiles, nextPrNumber, quoteFiles, quoteRequestFrom, requestForNewMail, threadUpdate } from "./mailRules.js";
 import { supplierFor, todayInSA } from "./procurementRules.js";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
@@ -91,6 +91,11 @@ async function saveQuote(supabase, pass, base, row, message, attachment, userNam
       file_size: attachment.size || bytes.length,
       received_at: message.receivedDateTime || message.sentDateTime || null,
       created_by: userName,
+      // A drawing or catalogue is kept with the request but never sent to
+      // Claude: saved as already read, "not a quote" (mailRules).
+      ...(looksLikeDrawing(attachment.name)
+        ? { read_status: "read", doc_type: "other", lines: [], read_note: "Not sent to Claude: the file name says it is a drawing or catalogue." }
+        : {}),
     })
     .select()
     .single();
@@ -235,11 +240,29 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
     // are). Only what the page loaded: open work and 90 days of finished.
     const ofThisBox = known.filter((r) => r.mailbox === box.address && r.status !== "Not a request" && r.status !== "Draft");
     const live = ofThisBox.filter((r) => r.conversation_id);
-    const savedFiles = new Set();
+    // What each request already has, so a file is saved once, the latest
+    // copy (newestFiles).
+    const had = new Map();
     if (ofThisBox.length) {
-      const { data: had } = await supabase.from("supplier_quotes").select("message_id, file_name").in("request_id", ofThisBox.map((r) => r.id));
-      for (const q of had || []) savedFiles.add(`${q.message_id}|${q.file_name}`);
+      const { data } = await supabase.from("supplier_quotes").select("request_id, file_name, file_size, received_at").in("request_id", ofThisBox.map((r) => r.id));
+      for (const q of data || []) had.set(q.request_id, [...(had.get(q.request_id) || []), q]);
     }
+    const saveNewest = async (row, candidates) => {
+      let savedAny = false;
+      for (const { message, attachment } of newestFiles(candidates, had.get(row.id))) {
+        try {
+          const saved = await saveQuote(supabase, pass, box.base, row, message, attachment, userName);
+          had.set(row.id, [...(had.get(row.id) || []), { file_name: attachment.name, file_size: attachment.size, received_at: message.receivedDateTime || message.sentDateTime }]);
+          if (saved) {
+            newQuotes.push(saved);
+            savedAny = true;
+          }
+        } catch (err) {
+          problems.push(`${row.pr_number}: ${attachment.name} was not saved: ${err.message}`);
+        }
+      }
+      return savedAny;
+    };
     await inPool(live, 4, async (row) => {
       let thread;
       try {
@@ -247,17 +270,7 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
       } catch {
         return; // an old thread id from requests.md Microsoft does not know
       }
-      for (const { message, attachment } of quoteFiles(thread)) {
-        const key = `${message.internetMessageId || message.id}|${attachment.name}`;
-        if (savedFiles.has(key)) continue;
-        try {
-          const saved = await saveQuote(supabase, pass, box.base, row, message, attachment, userName);
-          savedFiles.add(key);
-          if (saved) newQuotes.push(saved);
-        } catch (err) {
-          problems.push(`${row.pr_number}: ${attachment.name} was not saved: ${err.message}`);
-        }
-      }
+      await saveNewest(row, quoteFiles(thread));
       const change = threadUpdate(row, thread, supplierFor(row, suppliers)?.terms || "");
       if (!change) return;
       const { data, error } = await supabase
@@ -285,21 +298,7 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
       } catch {
         return;
       }
-      let savedAny = false;
-      for (const { message, attachment } of quoteFiles([m])) {
-        const key = `${message.internetMessageId || message.id}|${attachment.name}`;
-        if (savedFiles.has(key)) continue;
-        try {
-          const saved = await saveQuote(supabase, pass, box.base, row, message, attachment, userName);
-          savedFiles.add(key);
-          if (saved) {
-            newQuotes.push(saved);
-            savedAny = true;
-          }
-        } catch (err) {
-          problems.push(`${row.pr_number}: ${attachment.name} was not saved: ${err.message}`);
-        }
-      }
+      const savedAny = await saveNewest(row, quoteFiles([m]));
       // A quote or pro forma moves the request on as a reply would; a
       // statement from the same supplier is only saved.
       if (!savedAny || !looksLikeQuoteMail(m)) return;

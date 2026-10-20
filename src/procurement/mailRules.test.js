@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addressBook, cleanSubject, draftFollowUp, findExisting, looksLikeQuoteMail, nextPrNumber, quoteFiles, quoteRequestFrom, requestForNewMail, textToHtml, threadUpdate } from "./mailRules.js";
+import { addressBook, cleanSubject, draftFollowUp, findExisting, latestCopies, looksLikeDrawing, looksLikeQuoteMail, newestFiles, nextPrNumber, quoteFiles, quoteRequestFrom, requestForNewMail, textToHtml, threadUpdate } from "./mailRules.js";
 
 const to = (address, name = "") => ({ emailAddress: { address, name } });
 const book = addressBook(
@@ -146,4 +146,44 @@ test("only a quote or pro forma in a new email moves its request; a statement is
 test("PR numbers count on", () => {
   assert.equal(nextPrNumber("PR-011"), "PR-012");
   assert.equal(nextPrNumber(null), "PR-001");
+});
+
+test("drawings and catalogues are known by their file name", () => {
+  for (const name of ["End Cap DWG.pdf", "Poultry_House_Drawings_PH-000-008_RevA.pdf", "Layer_Coop_Starter_Unit_500_Drawings_CM-000-009_Re.pdf", "bracket.dxf.pdf", "Product Catalogue 2026.pdf", "DRAWING 12.pdf"]) {
+    assert.equal(looksLikeDrawing(name), true, name);
+  }
+  for (const name of ["NCT8025.pdf", "Quote_EJBOPP447234.pdf", "6X5X3-10M.pdf", "Quotation QU043638.PDF", "Redrawn quote.pdf", "MACSTEEL Quote confirmation 3006330164.PDF"]) {
+    assert.equal(looksLikeDrawing(name), false, name);
+  }
+});
+
+const mail = (when, name, size) => ({ message: { id: when, receivedDateTime: when }, attachment: { name, size } });
+
+test("one copy of a file per request: the latest, and not the same file again", () => {
+  // Three mails of one thread carry NCT8025.pdf: only the latest is saved.
+  const three = [mail("2026-10-12T08:00:00Z", "NCT8025.pdf", 151), mail("2026-10-12T09:00:00Z", "NCT8025.pdf", 151), mail("2026-10-13T07:00:00Z", "nct8025.PDF", 151)];
+  assert.deepEqual(newestFiles(three, []).map((c) => c.message.id), ["2026-10-13T07:00:00Z"]);
+  // Already saved: the same file again is skipped, older or newer.
+  const had = [{ file_name: "NCT8025.pdf", file_size: 151, received_at: "2026-10-12T08:00:00Z" }];
+  assert.deepEqual(newestFiles(three, had), []);
+  // A newer copy of another size is a revised quote: saved.
+  const revised = [mail("2026-10-14T07:00:00Z", "NCT8025.pdf", 145)];
+  assert.equal(newestFiles(revised, had).length, 1);
+  // An older one of another size is not.
+  assert.equal(newestFiles([mail("2026-10-11T07:00:00Z", "NCT8025.pdf", 145)], had).length, 0);
+  // Other names go through.
+  assert.equal(newestFiles([...three, mail("2026-10-12T08:00:00Z", "NCT8026.pdf", 145)], had).length, 1);
+});
+
+test("lists show the latest copy of a file on a request, every upload, and keep their order", () => {
+  const q = (id, request_id, file_name, received_at, message_id = `m${id}`) => ({ id, request_id, file_name, received_at, message_id });
+  const list = [
+    q(1, "r1", "NCT8025.pdf", "2026-10-13"),
+    q(2, "r1", "NCT8025.pdf", "2026-10-12"),
+    q(3, "r2", "NCT8025.pdf", "2026-10-10"),
+    q(4, "r1", "NCT8026.pdf", "2026-10-12"),
+    q(5, null, "Quotation.pdf", "2026-10-01", "upload:a"),
+    q(6, null, "Quotation.pdf", "2026-10-02", "upload:b"),
+  ];
+  assert.deepEqual(latestCopies(list).map((x) => x.id), [1, 3, 4, 5, 6]);
 });

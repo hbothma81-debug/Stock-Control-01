@@ -159,6 +159,65 @@ export function quoteFiles(thread) {
   return out;
 }
 
+// A PDF whose name says it is a drawing or a catalogue: saved with the
+// request, never sent to Claude (Heinrich, 20 Oct 2026, after the first
+// sales@ read paid to read "End Cap DWG.pdf" and two sets of poultry house
+// drawings). Underscores count as separators: "Poultry_House_Drawings_PH".
+export function looksLikeDrawing(name) {
+  return /(^|[^a-z])(dwgs?|dxf|drawings?|catalogue|catalog|brochure)([^a-z]|$)/i.test(String(name || ""));
+}
+
+// One copy of each file per request, the latest (Heinrich, 20 Oct 2026:
+// "always use latest date"). The same PDF sat on two or three mails of one
+// thread and was saved, and read, each time (Alberton's NCT8025 three times).
+// candidates: [{ message, attachment }] from quoteFiles; had: the request's
+// saved quotes ({ file_name, file_size, received_at }). Returns the
+// candidates to save: per file name the newest, and only when it is newer
+// than the newest copy saved and not that copy again (same size).
+const sentAt = (m) => String(m?.receivedDateTime || m?.sentDateTime || "");
+const nameKey = (name) => String(name || "").trim().toLowerCase();
+
+export function newestFiles(candidates, had) {
+  const newest = new Map();
+  for (const c of candidates || []) {
+    const key = nameKey(c.attachment?.name);
+    const best = newest.get(key);
+    if (!best || sentAt(c.message) > sentAt(best.message)) newest.set(key, c);
+  }
+  const out = [];
+  for (const [key, c] of newest) {
+    const saved = (had || [])
+      .filter((q) => nameKey(q.file_name) === key)
+      .sort((a, b) => (String(a.received_at || "") < String(b.received_at || "") ? 1 : -1))[0];
+    if (saved) {
+      if (sentAt(c.message) <= String(saved.received_at || "")) continue;
+      if (Number(saved.file_size) === Number(c.attachment?.size)) continue;
+    }
+    out.push(c);
+  }
+  return out;
+}
+
+// The quotes a list shows: of copies of one file on one request, only the
+// latest (by when it came). Copies saved before newestFiles stay stored and
+// are only hidden. Uploads by hand are each kept: an old supplier's files can
+// all be called "Quotation.pdf". Keeps the order it is given.
+export function latestCopies(quotes) {
+  const keep = new Map();
+  const keyOf = (q) => (q.request_id && !String(q.message_id || "").startsWith("upload:") ? `${q.request_id}|${nameKey(q.file_name)}` : null);
+  const when = (q) => String(q.received_at || q.created_at || "");
+  for (const q of quotes || []) {
+    const key = keyOf(q);
+    if (!key) continue;
+    const best = keep.get(key);
+    if (!best || when(q) > when(best)) keep.set(key, q);
+  }
+  return (quotes || []).filter((q) => {
+    const key = keyOf(q);
+    return !key || keep.get(key) === q;
+  });
+}
+
 // A quote that comes as a NEW email, not a reply in the request's thread
 // (found on practice, 19 Oct 2026: McNaughtan's came from another rep's
 // address, Neuc's through Sage). Heinrich: "yes go ahead". Such a mail goes
