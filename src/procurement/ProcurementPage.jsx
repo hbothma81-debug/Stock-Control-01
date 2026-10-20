@@ -232,6 +232,15 @@ function FollowUpCompose({ row, text, setText, busy, onSend, appUser }) {
   const sig = useSignature(appUser, row.mailbox);
   return (
     <>
+      {/* The request's notes, red above the message, so a quote that does not
+          match what was asked (PR-004: 1000 mm and 350 N against 1200 mm and
+          100 N) is settled before a pro forma is asked for (Heinrich, 20 Oct
+          2026: "show notes in red"). */}
+      {(row.notes || "").trim() && (
+        <div style={{ color: C.danger, fontSize: 14, fontWeight: 600, whiteSpace: "pre-wrap", marginBottom: 6 }}>
+          Notes: {row.notes.trim()}
+        </div>
+      )}
       <label style={S.label}>To {row.contact_email}, in the same email thread</label>
       <textarea style={{ ...S.input, minHeight: 150, fontFamily: "inherit" }} value={text} onChange={(e) => setText(e.target.value)} />
       <SignatureBox sig={sig} disabled={busy} />
