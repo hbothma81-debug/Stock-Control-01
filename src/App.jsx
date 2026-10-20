@@ -15281,6 +15281,11 @@ export default function StockControl() {
         /* A From/To pair is one child holding two fields -- it needs room
            for both, or the dates crush each other to nothing. */
         .stk-filter-bar > .stk-date-pair { flex: 1 1 320px; min-width: 300px; }
+        /* The job page's boxes: three columns, Description two wide;
+           one column on a phone. */
+        .stk-job-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 10px; }
+        .stk-job-grid > .stk-span2 { grid-column: span 2; }
+        @media (max-width: 700px) { .stk-job-grid { grid-template-columns: minmax(0, 1fr); } .stk-job-grid > .stk-span2 { grid-column: auto; } }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
 
@@ -22363,84 +22368,80 @@ export default function StockControl() {
 
           {jobDetailTab === "overview" && (
             <>
-              {canEditThisJob && (
-                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={S.label}>SigmaNest / laser job number</label>
-                    <input
-                      style={S.input}
-                      defaultValue={jobDetail.job.laser_job_reference || ""}
-                      onBlur={(e) => updateJobField(jobDetail.job.id, "laser_job_reference", e.target.value)}
-                      placeholder="Often only known once nesting is done — fill in when it exists"
-                    />
+              {/* The job's boxes in three columns (Heinrich, 20 Oct 2026:
+                  "a lot of wasted space"). Each box keeps its place: one
+                  a person may not see (Quoted value, the laser queue
+                  number) leaves its cell empty rather than shuffling the
+                  rest. Saved on leaving the box; the green tick flashes
+                  by the label. On a phone the grid is one column
+                  (.stk-job-grid in the style block). */}
+              {(() => {
+                const box = (label, fieldKey, control, extra) => (
+                  <div className={extra?.span2 ? "stk-span2" : undefined}>
+                    <label style={{ ...S.label, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span>{label}</span>
+                      <SavedCheck fieldKey={`job-${jobDetail.job.id}-${fieldKey}`} />
+                    </label>
+                    {control}
+                    {extra?.hint}
                   </div>
-                  <SavedCheck fieldKey={`job-${jobDetail.job.id}-laser_job_reference`} />
-                </div>
-              )}
-
-              {/* Editable here as well as on creation: a customer's PO
-                  regularly turns up after the job has already started. */}
-              {canEditThisJob && (
-                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={S.label}>Customer PO</label>
-                    <input
-                      style={S.input}
-                      defaultValue={jobDetail.job.customer_po || ""}
-                      onBlur={(e) => updateJobField(jobDetail.job.id, "customer_po", e.target.value)}
-                      placeholder="Their PO number — fill in when it arrives"
-                    />
-                  </div>
-                  <SavedCheck fieldKey={`job-${jobDetail.job.id}-customer_po`} />
-                </div>
-              )}
-
-              {/* The rest of what the New Job pop-up used to ask for,
-                  editable here now that the pop-up asks only for the
-                  customer. A job is filled in on the job. */}
-              {canEditThisJob && (
-                <>
-                  <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                    <div style={{ flex: 1 }}>
-                      <label style={S.label}>Description</label>
+                );
+                const edit = canEditThisJob;
+                const priority = canSetLaserPriority && !jobIsLocked && jobGoesToPlateLaser;
+                if (!edit && !priority) return null;
+                return (
+                  <div className="stk-job-grid" style={{ marginTop: 8 }}>
+                    {edit && box("SigmaNest / laser job number", "laser_job_reference",
+                      <input
+                        style={S.input}
+                        defaultValue={jobDetail.job.laser_job_reference || ""}
+                        onBlur={(e) => updateJobField(jobDetail.job.id, "laser_job_reference", e.target.value)}
+                        placeholder="Known once nested"
+                        title="Often only known once nesting is done — fill in when it exists"
+                      />
+                    )}
+                    {/* Editable here as well as on creation: a customer's PO
+                        regularly turns up after the job has already started. */}
+                    {edit && box("Customer PO", "customer_po",
+                      <input
+                        style={S.input}
+                        defaultValue={jobDetail.job.customer_po || ""}
+                        onBlur={(e) => updateJobField(jobDetail.job.id, "customer_po", e.target.value)}
+                        placeholder="Fill in when it arrives"
+                        title="Their PO number — fill in when it arrives"
+                      />
+                    )}
+                    {edit && box("Quote reference", "quote_reference",
+                      <input
+                        style={S.input}
+                        defaultValue={jobDetail.job.quote_reference || ""}
+                        onBlur={(e) => updateJobField(jobDetail.job.id, "quote_reference", e.target.value)}
+                        placeholder="e.g. QU226331"
+                        title="Filled in by a quote import too"
+                      />
+                    )}
+                    {/* The rest of what the New Job pop-up used to ask for,
+                        editable here now that the pop-up asks only for the
+                        customer. A job is filled in on the job. */}
+                    {edit && box("Description", "description",
                       <input
                         style={S.input}
                         defaultValue={jobDetail.job.description || ""}
                         onBlur={(e) => updateJobField(jobDetail.job.id, "description", e.target.value)}
                         placeholder="What this job is"
+                      />,
+                      { span2: true }
+                    )}
+                    {edit && box("Due date", "due_date",
+                      <input
+                        type="date"
+                        style={S.input}
+                        defaultValue={jobDetail.job.due_date ? String(jobDetail.job.due_date).slice(0, 10) : ""}
+                        onBlur={(e) => updateJobField(jobDetail.job.id, "due_date", e.target.value || null)}
                       />
-                    </div>
-                    <SavedCheck fieldKey={`job-${jobDetail.job.id}-description`} />
-                  </div>
-                  <div style={S.formGrid}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <div style={{ flex: 1 }}>
-                        <label style={S.label}>Due date</label>
-                        <input
-                          type="date"
-                          style={S.input}
-                          defaultValue={jobDetail.job.due_date ? String(jobDetail.job.due_date).slice(0, 10) : ""}
-                          onBlur={(e) => updateJobField(jobDetail.job.id, "due_date", e.target.value || null)}
-                        />
-                      </div>
-                      <SavedCheck fieldKey={`job-${jobDetail.job.id}-due_date`} />
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <div style={{ flex: 1 }}>
-                        <label style={S.label}>Quote reference</label>
-                        <input
-                          style={S.input}
-                          defaultValue={jobDetail.job.quote_reference || ""}
-                          onBlur={(e) => updateJobField(jobDetail.job.id, "quote_reference", e.target.value)}
-                          placeholder="e.g. QU226331 — filled in by a quote import too"
-                        />
-                      </div>
-                      <SavedCheck fieldKey={`job-${jobDetail.job.id}-quote_reference`} />
-                    </div>
-                    {canSeeValue && (
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <div style={{ flex: 1 }}>
-                          <label style={S.label}>Quoted value</label>
+                    )}
+                    {edit && (canSeeValue
+                      ? box("Quoted value", "quoted_value",
                           <input
                             type="number"
                             min="0"
@@ -22448,83 +22449,79 @@ export default function StockControl() {
                             style={S.input}
                             defaultValue={jobDetail.job.quoted_value ?? ""}
                             onBlur={(e) => updateJobField(jobDetail.job.id, "quoted_value", e.target.value === "" ? null : Number(e.target.value))}
-                            placeholder="Total quoted, before VAT"
+                            placeholder="Before VAT"
+                            title="Total quoted, before VAT"
                           />
-                        </div>
-                        <SavedCheck fieldKey={`job-${jobDetail.job.id}-quoted_value`} />
-                      </div>
+                        )
+                      : <div />)}
+                    {/* The plate laser's queue number (jobs.laser_priority). Its
+                        gate is its own, not canEditThisJob: Prince sets what he
+                        cuts next without being able to edit jobs. Only on a job
+                        the plate laser cuts; the tube laser has no queue number,
+                        by decision (16 Sep 2026). */}
+                    {priority
+                      ? box("Laser 4kw priority", "laser_priority",
+                          /* Keyed on the stored number so the box is rebuilt
+                             when somebody else changes it while this job is
+                             open; a plain defaultValue kept showing the old
+                             number and wrote it back on the next blur. A
+                             number box reports "" for text it cannot read
+                             ("1e"), which must not pass for "clear it". */
+                          <input
+                            key={jobDetail.job.laser_priority ?? "blank"}
+                            type="number"
+                            min="1"
+                            step="1"
+                            style={S.input}
+                            defaultValue={jobDetail.job.laser_priority ?? ""}
+                            onBlur={(e) => {
+                              if (e.target.validity?.badInput) return;
+                              setLaserPriority(jobDetail.job, e.target.value);
+                            }}
+                            placeholder="1 is cut first"
+                            title="1 is cut first — blank is ordinary work"
+                          />,
+                          {
+                            hint: jobDetail.job.laser_priority != null && (
+                              <div style={S.roleHint}>
+                                Set by {jobDetail.job.laser_priority_by || "someone"}
+                                {jobDetail.job.laser_priority_at ? ` — ${new Date(jobDetail.job.laser_priority_at).toLocaleString()}` : ""}.
+                                Clears itself once the laser is done with the job.
+                              </div>
+                            ),
+                          }
+                        )
+                      : edit && <div />}
+                    {edit && box("Status", "status",
+                      <select
+                        style={S.input}
+                        value={jobDetail.job.status}
+                        onChange={(e) => updateJobStatus(jobDetail.job.id, e.target.value)}
+                      >
+                        <option value="in_progress">In Progress</option>
+                        <option value="complete">Complete</option>
+                        <option value="cancelled">Cancelled</option>
+                        {/* Where the job is, never a choice: Invoiced comes from
+                            accounts, Closed from the last tick on a job with no
+                            Invoicing stage. An admin puts either back with In
+                            Progress. */}
+                        <option value="invoiced" disabled>Invoiced</option>
+                        <option value={CLOSED} disabled>Completed — no invoice</option>
+                      </select>
                     )}
                   </div>
-                </>
-              )}
-
-              {/* The plate laser's queue number (jobs.laser_priority). Its
-                  gate is its own, not canEditThisJob: Prince sets what he
-                  cuts next without being able to edit jobs. Only on a job
-                  the plate laser cuts; the tube laser has no queue number,
-                  by decision (16 Sep 2026). */}
-              {canSetLaserPriority && !jobIsLocked && jobGoesToPlateLaser && (
-                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={S.label}>Laser 4kw priority</label>
-                    {/* Keyed on the stored number so the box is rebuilt
-                        when somebody else changes it while this job is
-                        open; a plain defaultValue kept showing the old
-                        number and wrote it back on the next blur. A
-                        number box reports "" for text it cannot read
-                        ("1e"), which must not pass for "clear it". */}
-                    <input
-                      key={jobDetail.job.laser_priority ?? "blank"}
-                      type="number"
-                      min="1"
-                      step="1"
-                      style={S.input}
-                      defaultValue={jobDetail.job.laser_priority ?? ""}
-                      onBlur={(e) => {
-                        if (e.target.validity?.badInput) return;
-                        setLaserPriority(jobDetail.job, e.target.value);
-                      }}
-                      placeholder="1 is cut first — blank is ordinary work"
-                    />
-                    {jobDetail.job.laser_priority != null && (
-                      <div style={S.roleHint}>
-                        Set by {jobDetail.job.laser_priority_by || "someone"}
-                        {jobDetail.job.laser_priority_at ? ` — ${new Date(jobDetail.job.laser_priority_at).toLocaleString()}` : ""}.
-                        Clears itself once the laser is done with the job.
-                      </div>
-                    )}
-                  </div>
-                  <SavedCheck fieldKey={`job-${jobDetail.job.id}-laser_priority`} />
-                </div>
-              )}
+                );
+              })()}
 
             {jobDetail.quoteItems.length > 0 && (
-              <div style={{ marginTop: 8, padding: 10, background: C.bg, borderRadius: 6, border: `1px solid ${C.border}` }}>
-                <span style={{ fontWeight: 600 }}>
-                  {billableLines(jobDetail.quoteItems).reduce((sum, it) => sum + Math.max(Number(it.qty) - Number(it.qty_invoiced), 0), 0)} outstanding
-                  {" "}(not yet invoiced)
-                </span>
+              <div style={{ ...S.roleHint, marginTop: 8, color: C.text, fontWeight: 600 }}>
+                {billableLines(jobDetail.quoteItems).reduce((sum, it) => sum + Math.max(Number(it.qty) - Number(it.qty_invoiced), 0), 0)} outstanding
+                {" "}(not yet invoiced)
               </div>
             )}
 
             {canEditThisJob && (
-              <div style={{ marginTop: 8 }}>
-                <label style={S.label}>Status</label>
-                <select
-                  style={S.input}
-                  value={jobDetail.job.status}
-                  onChange={(e) => updateJobStatus(jobDetail.job.id, e.target.value)}
-                >
-                  <option value="in_progress">In Progress</option>
-                  <option value="complete">Complete</option>
-                  <option value="cancelled">Cancelled</option>
-                  {/* Where the job is, never a choice: Invoiced comes from
-                      accounts, Closed from the last tick on a job with no
-                      Invoicing stage. An admin puts either back with In
-                      Progress. */}
-                  <option value="invoiced" disabled>Invoiced</option>
-                  <option value={CLOSED} disabled>Completed — no invoice</option>
-                </select>
+              <div>
                 {/* The whole job in one press, while any stage is open, a
                     re-cut's run included: urgent on every open stage, and
                     every open stage closed (src/jobs/forceComplete.js). */}
