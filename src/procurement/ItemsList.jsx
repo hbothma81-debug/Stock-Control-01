@@ -94,6 +94,37 @@ function LinkToStock({ q, line, lineIndex, stockItems, onLinkStock }) {
   );
 }
 
+// One quoted item's buttons: Raise PO, Add as stock item, Link to a stock
+// item. The Items quoted tab and an opened quote under a request
+// (QuotesList.jsx, Heinrich 20 Oct 2026: "all", "yes") both draw these, so
+// the two places do the same thing.
+export function ItemButtons({ q, line, lineIndex, raiseItemPo, addStock, stockItems, onLinkStock, children }) {
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+      {raiseItemPo && (
+        <button type="button" className="stk-btn" style={S.reqActionBtnAlertOn} onClick={() => raiseItemPo(q, line)}>
+          <ShoppingCart size={12} /> Raise PO
+        </button>
+      )}
+      {addStock && (
+        <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => addStock(q, line)}>
+          <PackagePlus size={12} /> Add as stock item
+        </button>
+      )}
+      {children}
+      {onLinkStock && <LinkToStock q={q} line={line} lineIndex={lineIndex} stockItems={stockItems} onLinkStock={onLinkStock} />}
+    </div>
+  );
+}
+
+// "qty 2 · R 91,00 each ex VAT", the line's numbers in words.
+export function itemFigures(line) {
+  const unit = line.unit_price_ex_vat != null ? line.unit_price_ex_vat : null;
+  return [line.qty != null ? `qty ${line.qty}` : "", unit != null ? `${money(unit)} each ex VAT` : money(line.line_total_ex_vat)]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 export default function ItemsList({ quotes, showSupplier = true, onOpenQuote, raiseItemPo, addStock, stockItems, onLinkStock }) {
   const [search, setSearch] = useState("");
 
@@ -131,13 +162,7 @@ export default function ItemsList({ quotes, showSupplier = true, onOpenQuote, ra
       {shown.length > 0 && (
         <Section title="Items quoted" count={shown.length} defaultOpen>
           {shown.slice(0, SHOWN).map(({ q, line, lineIndex, key }) => {
-            const unit = line.unit_price_ex_vat != null ? line.unit_price_ex_vat : null;
-            const summary = [
-              showSupplier ? q.supplier_name : "",
-              line.qty != null ? `qty ${line.qty}` : "",
-              unit != null ? `${money(unit)} each ex VAT` : money(line.line_total_ex_vat),
-              day(q.quote_date || q.received_at),
-            ]
+            const summary = [showSupplier ? q.supplier_name : "", itemFigures(line), day(q.quote_date || q.received_at)]
               .filter(Boolean)
               .join(" · ");
             return (
@@ -151,22 +176,11 @@ export default function ItemsList({ quotes, showSupplier = true, onOpenQuote, ra
                   {q.pr_number ? ` · ${q.pr_number}` : ""}
                   {line.line_total_ex_vat != null ? ` · line ${money(line.line_total_ex_vat)} ex VAT` : ""}
                 </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-                  {raiseItemPo && (
-                    <button type="button" className="stk-btn" style={S.reqActionBtnAlertOn} onClick={() => raiseItemPo(q, line)}>
-                      <ShoppingCart size={12} /> Raise PO
-                    </button>
-                  )}
-                  {addStock && (
-                    <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => addStock(q, line)}>
-                      <PackagePlus size={12} /> Add as stock item
-                    </button>
-                  )}
+                <ItemButtons q={q} line={line} lineIndex={lineIndex} raiseItemPo={raiseItemPo} addStock={addStock} stockItems={stockItems} onLinkStock={onLinkStock}>
                   <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => onOpenQuote(q)}>
                     <FileText size={12} /> Open the quote
                   </button>
-                  {onLinkStock && <LinkToStock q={q} line={line} lineIndex={lineIndex} stockItems={stockItems} onLinkStock={onLinkStock} />}
-                </div>
+                </ItemButtons>
               </RecordRow>
             );
           })}

@@ -12,6 +12,7 @@ import { FileText, ShoppingCart } from "lucide-react";
 import Section from "../Section.jsx";
 import RecordRow from "../RecordRow.jsx";
 import { C, S } from "../theme.js";
+import { ItemButtons, itemFigures } from "./ItemsList.jsx";
 
 const money = (n) =>
   n == null || n === "" ? "" : `R ${Number(n).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -36,7 +37,11 @@ function Line({ label, children }) {
 }
 
 // The quotes themselves, with no heading: for a request line or a card.
-export function QuoteLines({ quotes, onOpen, onReadAgain, raisePoFor, showSupplier = true }) {
+// raiseItemPo, addStock, stockItems, onLinkStock: when given, an opened
+// quote lists its items, one line each, with Raise PO, Add as stock item
+// and Link to a stock item (the Items quoted tab's own buttons; Heinrich,
+// 20 Oct 2026: on every request's quotes, "all", with Raise PO, "yes").
+export function QuoteLines({ quotes, onOpen, onReadAgain, raisePoFor, showSupplier = true, raiseItemPo, addStock, stockItems, onLinkStock }) {
   if (!quotes?.length) return null;
   return quotes.map((q) => {
     const st = q.read_status === "read" && q.doc_type === "other" ? STATUS.other : STATUS[q.read_status] || STATUS.waiting;
@@ -98,6 +103,20 @@ export function QuoteLines({ quotes, onOpen, onReadAgain, raisePoFor, showSuppli
         <Line label="Lead time">{q.lead_time}</Line>
         <Line label="Valid until">{day(q.valid_until)}</Line>
         <Line label="Received">{day(q.received_at)}</Line>
+        {(raiseItemPo || addStock || onLinkStock) && q.read_status === "read" && q.doc_type !== "other" && (q.lines || []).some((l) => (l?.description || "").trim()) && (
+          <div style={{ marginTop: 10 }}>
+            <label style={S.label}>Items</label>
+            {(q.lines || []).map((line, lineIndex) =>
+              (line?.description || "").trim() ? (
+                <div key={lineIndex} style={{ borderTop: `1px solid ${C.border}`, paddingTop: 6, marginTop: 6 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, wordBreak: "break-word" }}>{line.description}</div>
+                  {itemFigures(line) && <div style={{ fontSize: 13, color: C.muted }}>{itemFigures(line)}</div>}
+                  <ItemButtons q={q} line={line} lineIndex={lineIndex} raiseItemPo={raiseItemPo} addStock={addStock} stockItems={stockItems} onLinkStock={onLinkStock} />
+                </div>
+              ) : null
+            )}
+          </div>
+        )}
       </RecordRow>
     );
   });
