@@ -72,6 +72,8 @@ function Detail({ label, children }) {
 }
 
 const fmtDate = (d) => (d ? String(d).slice(0, 10) : "");
+const fmtMoney = (n) =>
+  n == null || n === "" ? "" : `R ${Number(n).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 // Close quote: a request that will not be ordered (Heinrich, 19 Oct 2026:
 // "Just a close quote button. Basic"; the reason "Optional"). It goes to
@@ -607,19 +609,42 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
         const inGroup = classified.filter((x) => x.c.group === g.key);
         if (inGroup.length === 0) return null;
         const overdue = inGroup.filter((x) => x.c.isOverdue).length;
+        // Each quote its own line, a request with none one line, newest
+        // first by the quote's date or the day it was asked (Heinrich, 20
+        // Oct 2026: "each quote seperate", "should we not arrange by date").
+        // A quote's line carries its request's details and buttons too.
+        const lines = inGroup
+          .flatMap((x) => {
+            const theirs = (quotes || []).filter((q) => q.request_id === x.r.id);
+            return theirs.length
+              ? theirs.map((q) => ({ ...x, q, when: String(q.quote_date || q.received_at || "") }))
+              : [{ ...x, q: null, when: String(x.r.requested_at || "") }];
+          })
+          .sort((a, b) => (a.when < b.when ? 1 : a.when > b.when ? -1 : 0));
         return (
           <Section
             key={`${activeMailbox}-${g.key}`}
             title={overdue ? `${g.label} · ${overdue} overdue` : g.label}
-            count={inGroup.length}
+            count={lines.length}
             defaultOpen={g.startOpen}
             danger={overdue > 0}
           >
-            {inGroup.map(({ r, supplier, c }) => (
+            {lines.map(({ r, supplier, c, q }) => (
               <RecordRow
-                key={r.id}
+                key={q ? `${r.id}-${q.id}` : r.id}
                 title={r.pr_number}
-                summary={`${r.supplier_name || "—"} · ${r.item || ""}${r.qty ? ` · ${r.qty}` : ""}`}
+                summary={
+                  q
+                    ? [
+                        r.supplier_name || "—",
+                        q.doc_type === "other" ? `not a quote: ${q.file_name}` : `quote ${q.quote_number || q.file_name}`,
+                        q.total_ex_vat != null ? `${fmtMoney(q.total_ex_vat)} ex VAT` : "",
+                        fmtDate(q.quote_date || q.received_at),
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")
+                    : `${r.supplier_name || "—"} · ${r.item || ""}${r.qty ? ` · ${r.qty}` : ""}`
+                }
                 right={<Tag pill={c.pill} />}
               >
                 <Detail label="Next">
@@ -636,10 +661,22 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
                 <Detail label="Old quote">{r.old_quote}</Detail>
                 <Detail label="On PO">{r.po_number}</Detail>
                 <Detail label="Notes">{r.notes}</Detail>
-                {(quotes || []).some((q) => q.request_id === r.id) && (
+                {q && (
                   <div style={{ marginTop: 8 }}>
-                    <label style={S.label}>Quotes received</label>
-                    <QuoteLines quotes={quotes.filter((q) => q.request_id === r.id)} onOpen={openQuote} onReadAgain={readAgain} raisePoFor={raisePoFor} showSupplier={false} />
+                    <label style={S.label}>This quote</label>
+                    <QuoteLines quotes={[q]} onOpen={openQuote} onReadAgain={readAgain} raisePoFor={raisePoFor} showSupplier={false} />
+                  </div>
+                )}
+                {!q && mail?.replies?.[r.id] && (
+                  // A reply with no PDF: the price may be typed in the email.
+                  <div style={{ marginTop: 8 }}>
+                    <label style={S.label}>Their reply, {fmtDate(mail.replies[r.id].at)} (no PDF)</label>
+                    <div style={{ fontSize: 14, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{mail.replies[r.id].text || "(no text)"}</div>
+                    {mail.replies[r.id].link && (
+                      <a href={mail.replies[r.id].link} target="_blank" rel="noopener noreferrer" className="stk-btn" style={{ ...S.reqActionBtnMuted, display: "inline-flex", marginTop: 6, textDecoration: "none" }}>
+                        Open in Outlook
+                      </a>
+                    )}
                   </div>
                 )}
                 <FollowUp

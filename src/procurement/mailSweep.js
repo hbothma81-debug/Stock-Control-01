@@ -48,7 +48,7 @@ async function threadOf(pass, base, conversationId) {
   const id = String(conversationId).replace(/'/g, "''");
   const msgs = await graphList(
     pass,
-    `${GRAPH}${base}/messages?$filter=${encodeURIComponent(`conversationId eq '${id}'`)}&$select=id,internetMessageId,from,subject,sentDateTime,receivedDateTime,hasAttachments&$top=50`
+    `${GRAPH}${base}/messages?$filter=${encodeURIComponent(`conversationId eq '${id}'`)}&$select=id,internetMessageId,from,subject,sentDateTime,receivedDateTime,hasAttachments,bodyPreview,webLink&$top=50`
   );
   for (const m of msgs) {
     if (!m.hasAttachments || isOurs(addressOf(m.from))) continue;
@@ -150,6 +150,10 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
   let added = 0;
   let moved = 0;
   const newQuotes = [];
+  // Each request's latest reply from the supplier: the first lines and the
+  // link to it in Outlook, shown on a reply that came with no PDF (Heinrich,
+  // 20 Oct 2026: "text is fine"). Kept on the page only, never saved.
+  const replies = {};
   const stamp = () => ({ updated_at: new Date().toISOString(), updated_by: userName });
 
   // Signed in to Microsoft AS a shared mailbox (sales@ with its own password,
@@ -271,6 +275,10 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
         return; // an old thread id from requests.md Microsoft does not know
       }
       await saveNewest(row, quoteFiles(thread));
+      const theirs = thread
+        .filter((m) => !isOurs(addressOf(m.from)))
+        .sort((a, b) => (String(a.receivedDateTime || a.sentDateTime) < String(b.receivedDateTime || b.sentDateTime) ? 1 : -1))[0];
+      if (theirs) replies[row.id] = { text: theirs.bodyPreview || "", link: theirs.webLink || "", at: theirs.receivedDateTime || theirs.sentDateTime || "" };
       const change = threadUpdate(row, thread, supplierFor(row, suppliers)?.terms || "");
       if (!change) return;
       const { data, error } = await supabase
@@ -311,5 +319,5 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
       }
     });
   }));
-  return { connected: true, address: me, added, moved, newQuotes, problems };
+  return { connected: true, address: me, added, moved, newQuotes, replies, problems };
 }
