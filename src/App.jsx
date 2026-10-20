@@ -2262,8 +2262,14 @@ export default function StockControl() {
         return () => clearTimeout(t);
       }
     }, [lastSaved, fieldKey]);
-    if (!visible) return null;
-    return <Check size={13} strokeWidth={3} style={{ color: C.accentFinished, marginLeft: 4, flexShrink: 0 }} />;
+    // Always the same width, shown or not (Heinrich, 20 Oct 2026: the
+    // tick "makes the page jump"): a tick that takes no space until it
+    // appears pushes everything beside it, then pulls it back.
+    return (
+      <span style={{ display: "inline-flex", width: 17, height: 13, flexShrink: 0, alignItems: "center", visibility: visible ? "visible" : "hidden" }}>
+        <Check size={13} strokeWidth={3} style={{ color: C.accentFinished, marginLeft: 4 }} />
+      </span>
+    );
   }
   const [form, setForm] = useState(emptyForm);
   const [showManager, setShowManager] = useState(false);
@@ -15307,11 +15313,13 @@ export default function StockControl() {
           <SavedCheck fieldKey="core" />
           <button
             className="stk-btn"
-            style={S.roleChip}
+            style={{ ...S.roleChip, minWidth: 134, justifyContent: "center" }}
             onClick={manualRefresh}
             disabled={isRefreshing}
             title={lastRefreshedAt ? `Last updated ${lastRefreshedAt.toLocaleTimeString()}` : "Refresh"}
           >
+            {/* The word says what it is doing; the width must not change
+                with it, or the whole header shifts twice a refresh. */}
             <RefreshCw size={13} strokeWidth={2.5} style={isRefreshing ? { animation: "spin 0.8s linear infinite" } : {}} />
             {isRefreshing ? "Refreshing…" : "Refresh"}
           </button>
