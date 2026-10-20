@@ -22632,9 +22632,14 @@ export default function StockControl() {
                       with no way to tell which is the job and which is the
                       re-cut. The runs get their own section below. */}
                   {inFlowOrder(jobDetail.processes.filter((p) => !p.shortage_id), jobDetail.job).map((p) => (
-                    <div key={p.id} style={{ ...S.managerRow, alignItems: "flex-start" }}>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ ...S.checkRow, fontWeight: 600 }}>
+                    <div key={p.id} style={{ ...S.managerRow, flexDirection: "column", alignItems: "stretch", gap: 4 }}>
+                      {/* One line per stage (Heinrich, 20 Oct 2026): the
+                          tick and name, then who finished it and when, or
+                          the each-mode note, in muted text; the assignee,
+                          Notes, Batch and Allocate stock to the right.
+                          Wraps to a second line when the screen is narrow. */}
+                      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+                        <label style={{ ...S.checkRow, marginTop: 0, fontWeight: 600, flex: "0 0 auto" }}>
                           <input
                             type="checkbox"
                             checked={p.is_complete}
@@ -22645,96 +22650,39 @@ export default function StockControl() {
                         </label>
                         <SavedCheck fieldKey={`process-${p.id}`} />
                         {p.is_complete && (
-                          <div style={{ ...S.roleHint, marginLeft: 22 }}>
+                          <span style={{ ...S.roleHint, marginTop: 0 }}>
                             {p.completed_by} — {new Date(p.completed_at).toLocaleString()}
-                          </div>
+                          </span>
                         )}
                         {p.tracking_mode === "each" && !p.is_complete && (
-                          <div style={{ ...S.roleHint, marginLeft: 22 }}>
-                            Each-mode progress is tracked per item on the Production tab
+                          <span style={{ ...S.roleHint, marginTop: 0 }} title="Each-mode progress is tracked per item on the Production tab">
+                            Per item on Production
                             {onlyMarked(p.process_name)
-                              ? ` — the lines that go to it, ${itemsForStage(p.process_name, jobDetail.quoteItems).length} of ${jobDetail.quoteItems.length}.`
+                              ? ` — ${itemsForStage(p.process_name, jobDetail.quoteItems).length} of ${jobDetail.quoteItems.length} lines`
                               : cutsMadeOn(p.process_name)
-                              ? ` — the ${madeOnLabel(cutsMadeOn(p.process_name))} lines, ${itemsForStage(p.process_name, jobDetail.quoteItems).length} of ${jobDetail.quoteItems.length}.`
-                              : "."}
-                          </div>
-                        )}
-                        {/* An extra stage on one tick for the job cannot let
-                            one line through before another, so a line could
-                            be machined before it is bent when it should be
-                            the other way round. */}
-                        {p.tracking_mode !== "each" && !p.is_complete && onlyMarked(p.process_name) && (
-                          <div style={{ ...S.roleHint, marginLeft: 22, color: C.accentRaw }}>
-                            Set this stage to Each: an extra stage counts per item, so every line waits for its own previous step.
-                          </div>
-                        )}
-                        {stageHasNothingToCut(p.process_name, jobDetail.quoteItems) && (
-                          <div style={{ ...S.roleHint, marginLeft: 22, color: C.accentRaw, fontWeight: 600 }}>
-                            {nothingToCutText(p.process_name)}
-                          </div>
-                        )}
-                        {/* Material set aside for this stage. Shown here as
-                            well as on the operator's screen so whoever
-                            reserved it can see it is still waiting. */}
-                        {(() => {
-                          const mine = (jobDetail.allocations || []).filter(
-                            (a) => a.process_id === p.id && a.status !== "released"
-                          );
-                          if (mine.length === 0) return null;
-                          return (
-                            <div style={{ marginLeft: 22, marginTop: 4, display: "flex", flexDirection: "column", gap: 4 }}>
-                              {mine.map((a) => {
-                                const outstanding = Number(a.qty_allocated) - Number(a.qty_used);
-                                return (
-                                  <div key={a.id} className="stk-meta-row" style={{ ...S.rowMeta, alignItems: "center" }}>
-                                    <span style={{ color: outstanding > 0 ? C.accentRaw : C.muted }}>
-                                      <Package size={11} /> {a.item_name} — {a.qty_used > 0 ? `${a.qty_used} of ${a.qty_allocated} used` : `${a.qty_allocated} reserved`}
-                                    </span>
-                                    {canEditThisJob && outstanding > 0 && (
-                                      <button
-                                        type="button"
-                                        className="stk-btn"
-                                        style={S.managerDelete}
-                                        title="Release this material back"
-                                        onClick={() => releaseAllocation(a)}
-                                      >
-                                        <X size={12} />
-                                      </button>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          );
-                        })()}
-                        {canEditThisJob && !p.is_complete && (
-                          <button
-                            type="button"
-                            className="stk-btn"
-                            style={{ ...S.reqActionBtnMuted, marginLeft: 22, marginTop: 4 }}
-                            onClick={() => { setAllocateModal({ job: jobDetail.job, process: p, item: null }); setAllocateQty(""); }}
-                          >
-                            <Package size={12} /> Allocate stock
-                          </button>
+                              ? ` — ${madeOnLabel(cutsMadeOn(p.process_name))}, ${itemsForStage(p.process_name, jobDetail.quoteItems).length} of ${jobDetail.quoteItems.length} lines`
+                              : ""}
+                          </span>
                         )}
                         {canEditThisJob && (
-                          <div style={{ display: "flex", gap: 6, marginTop: 4, marginLeft: 22, flexWrap: "wrap" }}>
+                          <div style={{ display: "flex", gap: 6, alignItems: "center", flex: "1 1 380px", minWidth: 0, justifyContent: "flex-end", flexWrap: "wrap" }}>
                             <TypeToFind
-                              style={{ flex: "1 1 140px" }}
+                              style={{ flex: "0 1 150px", minWidth: 110 }}
                               inputStyle={{ fontSize: 14, padding: "5px 26px 5px 8px" }}
                               options={(people || []).map((person) => ({ value: person.id, label: person.name }))}
                               value={p.assigned_to || ""}
                               onChange={(v) => updateJobProcessAssignee(p, jobDetail.job, v)}
-                              emptyLabel="Not assigned yet"
+                              emptyLabel="Not assigned"
+                              title="Who this stage is assigned to"
                             />
                             <input
-                              style={{ ...S.input, fontSize: 14, padding: "5px 8px", flex: "1 1 140px" }}
+                              style={{ ...S.input, fontSize: 14, padding: "5px 8px", flex: "1 1 120px", minWidth: 100 }}
                               defaultValue={p.notes || ""}
                               onBlur={(e) => updateJobProcessField(p, "notes", e.target.value)}
                               placeholder="Notes"
                             />
                             <select
-                              style={{ ...S.input, fontSize: 14, padding: "5px 8px", width: 100, flexShrink: 0 }}
+                              style={{ ...S.input, fontSize: 14, padding: "5px 8px", width: 84, flexShrink: 0 }}
                               value={p.tracking_mode || "batch"}
                               onChange={(e) => updateJobProcessField(p, "tracking_mode", e.target.value)}
                               title="Batch: one tick completes the whole line. Each: a running count against the item's quantity."
@@ -22742,9 +22690,67 @@ export default function StockControl() {
                               <option value="batch">Batch</option>
                               <option value="each">Each</option>
                             </select>
+                            {!p.is_complete && (
+                              <button
+                                type="button"
+                                className="stk-btn"
+                                style={{ ...S.reqActionBtnMuted, flexShrink: 0 }}
+                                onClick={() => { setAllocateModal({ job: jobDetail.job, process: p, item: null }); setAllocateQty(""); }}
+                              >
+                                <Package size={12} /> Allocate stock
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
+                      {/* An extra stage on one tick for the job cannot let
+                          one line through before another, so a line could
+                          be machined before it is bent when it should be
+                          the other way round. */}
+                      {p.tracking_mode !== "each" && !p.is_complete && onlyMarked(p.process_name) && (
+                        <div style={{ ...S.roleHint, marginTop: 0, marginLeft: 22, color: C.accentRaw }}>
+                          Set this stage to Each: an extra stage counts per item, so every line waits for its own previous step.
+                        </div>
+                      )}
+                      {stageHasNothingToCut(p.process_name, jobDetail.quoteItems) && (
+                        <div style={{ ...S.roleHint, marginTop: 0, marginLeft: 22, color: C.accentRaw, fontWeight: 600 }}>
+                          {nothingToCutText(p.process_name)}
+                        </div>
+                      )}
+                      {/* Material set aside for this stage. Shown here as
+                          well as on the operator's screen so whoever
+                          reserved it can see it is still waiting. */}
+                      {(() => {
+                        const mine = (jobDetail.allocations || []).filter(
+                          (a) => a.process_id === p.id && a.status !== "released"
+                        );
+                        if (mine.length === 0) return null;
+                        return (
+                          <div style={{ marginLeft: 22, display: "flex", flexDirection: "column", gap: 4 }}>
+                            {mine.map((a) => {
+                              const outstanding = Number(a.qty_allocated) - Number(a.qty_used);
+                              return (
+                                <div key={a.id} className="stk-meta-row" style={{ ...S.rowMeta, alignItems: "center" }}>
+                                  <span style={{ color: outstanding > 0 ? C.accentRaw : C.muted }}>
+                                    <Package size={11} /> {a.item_name} — {a.qty_used > 0 ? `${a.qty_used} of ${a.qty_allocated} used` : `${a.qty_allocated} reserved`}
+                                  </span>
+                                  {canEditThisJob && outstanding > 0 && (
+                                    <button
+                                      type="button"
+                                      className="stk-btn"
+                                      style={S.managerDelete}
+                                      title="Release this material back"
+                                      onClick={() => releaseAllocation(a)}
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>
