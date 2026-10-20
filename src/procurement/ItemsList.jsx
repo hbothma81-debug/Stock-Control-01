@@ -6,10 +6,12 @@
 //
 // On an item: Raise PO (a PO with just this line, for ordering or
 // re-ordering later), Add as stock item (the New stock item form filled in),
-// and the quote's PDF.
+// Link to a stock item (a Customer Stock item remembers this quote, and
+// with the tick takes its price; Heinrich, 20 Oct 2026), and the quote's PDF.
 
 import { useMemo, useState } from "react";
-import { FileText, PackagePlus, ShoppingCart } from "lucide-react";
+import TypeToFind from "../TypeToFind.jsx";
+import { FileText, Link2, PackagePlus, ShoppingCart } from "lucide-react";
 import Section from "../Section.jsx";
 import RecordRow from "../RecordRow.jsx";
 import { C, S } from "../theme.js";
@@ -21,14 +23,89 @@ const money = (n) =>
   n == null || n === "" ? "" : `R ${Number(n).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const day = (d) => (d ? String(d).slice(0, 10) : "");
 
-export default function ItemsList({ quotes, showSupplier = true, onOpenQuote, raiseItemPo, addStock }) {
+// Picks a Customer Stock item and saves the link. Open item (1), Link to a
+// stock item (2), type and pick (3), Save (4).
+function LinkToStock({ q, line, lineIndex, stockItems, onLinkStock }) {
+  const [open, setOpen] = useState(false);
+  const [itemId, setItemId] = useState("");
+  const [usePrice, setUsePrice] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  const options = useMemo(
+    () =>
+      (stockItems || []).map((it) => ({
+        value: it.id,
+        label: `${it.partNumber || "no code"} — ${it.name || ""}`,
+        hint: it.customer || "",
+      })),
+    [stockItems]
+  );
+  if (!open) {
+    return (
+      <>
+        <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => setOpen(true)}>
+          <Link2 size={12} /> Link to a stock item
+        </button>
+        {note && <span style={{ color: C.accentFinished, fontSize: 13, alignSelf: "center" }}>{note}</span>}
+      </>
+    );
+  }
+  const chosen = (stockItems || []).find((it) => it.id === itemId);
+  return (
+    <div style={{ width: "100%", marginTop: 6 }}>
+      <TypeToFind options={options} value={itemId} onChange={setItemId} placeholder="Type a Customer Stock code or description…" autoFocus />
+      {chosen && (
+        <div style={{ fontSize: 13, color: C.muted, marginTop: 4 }}>
+          Its cost now R{Number(chosen.value || 0).toFixed(2)}
+          {chosen.supplier ? ` from ${chosen.supplier}` : ""}
+        </div>
+      )}
+      <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 14, marginTop: 6 }}>
+        <input type="checkbox" checked={usePrice} onChange={(e) => setUsePrice(e.target.checked)} />
+        Also use this quote's price (and supplier) for the item
+      </label>
+      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+        <button
+          type="button"
+          className="stk-btn"
+          style={S.reqActionBtnAlertOn}
+          disabled={!itemId || busy}
+          onClick={async () => {
+            setBusy(true);
+            const problem = await onLinkStock(q, line, lineIndex, itemId, usePrice);
+            setBusy(false);
+            if (problem) {
+              alert(problem);
+              return;
+            }
+            setNote(`Linked to ${chosen?.partNumber || "the item"}${usePrice ? ", price used" : ""}.`);
+            setOpen(false);
+            setItemId("");
+            setUsePrice(false);
+          }}
+        >
+          {busy ? "Saving…" : "Save"}
+        </button>
+        <button type="button" className="stk-btn" style={S.reqActionBtnMuted} disabled={busy} onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function ItemsList({ quotes, showSupplier = true, onOpenQuote, raiseItemPo, addStock, stockItems, onLinkStock }) {
   const [search, setSearch] = useState("");
 
   const items = useMemo(
     () =>
       (quotes || [])
         .filter((q) => q.read_status === "read")
-        .flatMap((q) => (q.lines || []).filter((l) => (l.description || "").trim()).map((line, i) => ({ q, line, key: `${q.id}-${i}` }))),
+        .flatMap((q) =>
+          (q.lines || [])
+            .map((line, lineIndex) => ({ q, line, lineIndex, key: `${q.id}-${lineIndex}` }))
+            .filter(({ line }) => (line.description || "").trim())
+        ),
     [quotes]
   );
 
@@ -53,7 +130,7 @@ export default function ItemsList({ quotes, showSupplier = true, onOpenQuote, ra
       )}
       {shown.length > 0 && (
         <Section title="Items quoted" count={shown.length} defaultOpen>
-          {shown.slice(0, SHOWN).map(({ q, line, key }) => {
+          {shown.slice(0, SHOWN).map(({ q, line, lineIndex, key }) => {
             const unit = line.unit_price_ex_vat != null ? line.unit_price_ex_vat : null;
             const summary = [
               showSupplier ? q.supplier_name : "",
@@ -84,6 +161,7 @@ export default function ItemsList({ quotes, showSupplier = true, onOpenQuote, ra
                   <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => onOpenQuote(q)}>
                     <FileText size={12} /> Open the quote
                   </button>
+                  {onLinkStock && <LinkToStock q={q} line={line} lineIndex={lineIndex} stockItems={stockItems} onLinkStock={onLinkStock} />}
                 </div>
               </RecordRow>
             );

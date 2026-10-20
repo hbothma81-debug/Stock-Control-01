@@ -8643,6 +8643,53 @@ export default function StockControl() {
     }));
   }
 
+  // "Link to a stock item" on an item a supplier quoted (Suppliers ->
+  // Items quoted; Heinrich, 20 Oct 2026: "b with a tick", "mainly for
+  // customer items"): remembers the quote on the item (stock_item_quotes,
+  // setup-procurement-8-stock-item-quotes.sql). With usePrice ticked the
+  // item's cost and supplier become the quote's, saved as any stock edit.
+  // Returns "" when saved, or what went wrong.
+  async function linkQuoteToStock(quote, line, lineIndex, itemId, usePrice) {
+    const qty = Number(line.qty) > 0 ? Number(line.qty) : 1;
+    const unit = line.unit_price_ex_vat != null ? line.unit_price_ex_vat : line.line_total_ex_vat != null ? line.line_total_ex_vat / qty : null;
+    const price = unit == null ? null : Math.round(unit * 100) / 100;
+    const { error } = await supabase.from("stock_item_quotes").insert({
+      stock_item_id: itemId,
+      quote_id: quote.id,
+      line_index: lineIndex,
+      description: line.description || "",
+      unit_price: price,
+      supplier_name: quote.supplier_name || "",
+      quote_number: quote.quote_number || null,
+      quote_date: quote.quote_date || (quote.received_at ? String(quote.received_at).slice(0, 10) : null),
+      used_as_price: !!(usePrice && price != null),
+      linked_by: roleLabel,
+    });
+    if (error && error.code !== "23505") return error.message || "It did not save.";
+    if (usePrice && price != null) {
+      setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, value: price, supplier: quote.supplier_name || it.supplier } : it)));
+    }
+    return error ? "That quoted item was already linked to this stock item." : "";
+  }
+
+  // Opens a saved supplier quote's PDF from anywhere (a stock item's "Last
+  // quoted" line). Only people with the Procurement tick can read the file.
+  async function openSupplierQuote(quoteId) {
+    const { data: q } = await supabase.from("supplier_quotes").select("storage_path, file_name").eq("id", quoteId).maybeSingle();
+    if (!q) {
+      alert("That quote can be opened only by people with the Procurement tick.");
+      return;
+    }
+    const { data, error } = await supabase.storage.from("supplier-quotes").createSignedUrl(q.storage_path, 600);
+    if (error || !data?.signedUrl) {
+      alert("That quote could not be opened. Check your connection and try again.");
+      return;
+    }
+    setPreviewItem({ attachmentType: "pdf", attachmentName: q.file_name || "Quote.pdf" });
+    setPreviewData(data.signedUrl);
+    setPreviewLoading(false);
+  }
+
   // "Add as stock item" on an item a supplier quoted (Suppliers page,
   // Heinrich 19 Oct 2026: "Yes"): the usual New stock item form, with the
   // description, supplier and price ex VAT filled in. Stores to start; the
@@ -17942,6 +17989,8 @@ export default function StockControl() {
             canEditSuppliers={isAdmin || canAccessStockManager}
             onRaisePo={canRaisePO ? raisePoFromQuote : null}
             onAddStock={canAdd ? openAddFromQuote : null}
+            onLinkStock={canEditItems ? linkQuoteToStock : null}
+            customStock={(items || []).filter((it) => it.mainCat === "custom")}
             openPdf={(url, name) => {
               setPreviewItem({ attachmentType: "pdf", attachmentName: name || "Quote.pdf" });
               setPreviewData(url);
@@ -18431,7 +18480,7 @@ export default function StockControl() {
               ctx={{
                 allocationsForItem, canDelete, canEditItems, canEditQty, canRequisition, canSeeValue, canView, drawingLookup,
                 isLowStock, items, master, openDrawingPreviewByPartNumber, openDuplicate, openEdit, openPreview, openRequest,
-                openUsageModal, query, removeItem, setQuery, updateCustomerStockField,
+                openUsageModal, query, removeItem, setQuery, updateCustomerStockField, openSupplierQuote,
               }}
             />
           </ErrorBoundary>

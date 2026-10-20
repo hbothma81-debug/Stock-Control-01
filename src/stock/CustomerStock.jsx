@@ -34,6 +34,7 @@
 
 import { useEffect, useState } from "react";
 import { AlertTriangle, ChevronLeft, ClipboardList, Copy, FileText, ImageIcon, Pencil, Search, Trash2 } from "lucide-react";
+import LastQuoted from "../procurement/LastQuoted.jsx";
 import TypeToFind from "../TypeToFind.jsx";
 import { C, S } from "../theme.js";
 import { stockSearchText, searchWords, matchesWords } from "../lib/stockSearch.js";
@@ -99,7 +100,7 @@ function SaveOnLeave({ value, onSave, style, placeholder, title, type = "text" }
 export default function CustomerStock({ ctx }) {
   const { allocationsForItem, canDelete, canEditItems, canEditQty, canRequisition, canSeeValue, canView, drawingLookup,
     isLowStock, items, master, openDrawingPreviewByPartNumber, openDuplicate, openEdit, openPreview, openRequest,
-    openUsageModal, query, removeItem, setQuery, updateCustomerStockField } = ctx;
+    openUsageModal, query, removeItem, setQuery, updateCustomerStockField, openSupplierQuote } = ctx;
   const saved = readStore();
   const [hasStockOnly, setHasStockOnly] = useState(!!saved.hasStockOnly);
   const [sort, setSort] = useState(SORTS[saved.sort] ? saved.sort : "code");
@@ -230,6 +231,9 @@ export default function CustomerStock({ ctx }) {
                 </button>
               )}
             </div>
+            {/* Supplier quotes linked to this part on Suppliers -> Items
+                quoted (src/procurement/LastQuoted.jsx); a tap opens the quote. */}
+            {canSeeValue && openSupplierQuote && <LastQuoted itemId={it.id} onOpenQuote={openSupplierQuote} />}
             {it.comment && <div style={S.itemComment}>{it.comment}</div>}
             {canEditItems && (
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>

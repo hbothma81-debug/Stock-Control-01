@@ -249,7 +249,7 @@ const chipStyle = (active) => ({
 
 // supplierEdits: App's own supplier functions (the ones Stock Manager uses),
 // so a change here saves exactly as one made there.
-export default function ProcurementPage({ suppliers, currentUserId, userName, customerEmails, canEditSuppliers, supplierEdits, openPdf, onRaisePo, onAddStock, hasSupplierCategories }) {
+export default function ProcurementPage({ suppliers, currentUserId, userName, customerEmails, canEditSuppliers, supplierEdits, openPdf, onRaisePo, onAddStock, hasSupplierCategories, onLinkStock, customStock }) {
   const [view, setView] = useState("requests");
   const [rows, setRows] = useState(null);
   const [quotes, setQuotes] = useState(null);
@@ -283,7 +283,10 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
       .select("*")
       .order("received_at", { ascending: false, nullsFirst: false })
       .limit(QUOTES_SHOWN);
-    const list = error ? [] : data || [];
+    // Newest by the quote's own date where Claude has read one, so old quotes
+    // uploaded today sit where they belong, not at the top.
+    const when = (q) => String(q.quote_date || q.received_at || q.created_at || "");
+    const list = (error ? [] : data || []).sort((a, b) => (when(a) < when(b) ? 1 : -1));
     setQuotes(list);
     return list;
   }, []);
@@ -295,7 +298,7 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
   const [readerProblem, setReaderProblem] = useState("");
   const readWaiting = useCallback(
     async (list) => {
-      const waiting = (list || []).filter((q) => q.read_status === "waiting").slice(0, 10);
+      const waiting = (list || []).filter((q) => q.read_status === "waiting").slice(0, 25);
       if (!waiting.length) return;
       setReaderProblem("");
       for (let i = 0; i < waiting.length; i++) {
@@ -315,6 +318,50 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
     },
     [fetchQuotes]
   );
+
+  // Old quotes uploaded by hand on a supplier's page (Heinrich, 20 Oct 2026:
+  // "a manual upload quote option per supplier ... to catch up"): saved like
+  // a quote from the mailbox, then read by Claude within the same limits.
+  // Returns how many were saved.
+  async function uploadQuotes(supplier, files) {
+    let saved = 0;
+    const skipped = [];
+    for (const file of files) {
+      const isPdf = /pdf/i.test(file.type || "") || /\.pdf$/i.test(file.name || "");
+      if (!isPdf || file.size > 10 * 1024 * 1024) {
+        skipped.push(file.name);
+        continue;
+      }
+      const safeName = (file.name || "quote.pdf").replace(/[^\w.\- ]+/g, "_");
+      const path = `upload/${supplier.id}/${Date.now()}-${safeName}`;
+      const up = await supabase.storage.from("supplier-quotes").upload(path, file, { contentType: "application/pdf" });
+      if (up.error) {
+        skipped.push(file.name);
+        continue;
+      }
+      const { error } = await supabase.from("supplier_quotes").insert({
+        supplier_id: supplier.id,
+        supplier_name: supplier.name,
+        mailbox: "",
+        message_id: `upload:${crypto.randomUUID()}`,
+        file_name: file.name,
+        storage_path: path,
+        file_size: file.size,
+        received_at: new Date().toISOString(),
+        created_by: userName,
+      });
+      if (error) {
+        await supabase.storage.from("supplier-quotes").remove([path]);
+        skipped.push(file.name);
+        continue;
+      }
+      saved++;
+    }
+    if (skipped.length) alert(`Not saved (not a PDF, over 10 MB, or no connection): ${skipped.join(", ")}`);
+    const list = await fetchQuotes();
+    readWaiting(list);
+    return saved;
+  }
 
   async function readAgain(q) {
     await supabase.from("supplier_quotes").update({ read_status: "waiting", read_note: "" }).eq("id", q.id);
@@ -599,7 +646,9 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
 
       {view === "quotes" && <QuotesTab quotes={quotes} onOpen={openQuote} onReadAgain={readAgain} raisePoFor={raisePoFor} />}
 
-      {view === "items" && <ItemsList quotes={quotes} onOpenQuote={openQuote} raiseItemPo={raiseItemPo} addStock={addStock} />}
+      {view === "items" && (
+        <ItemsList quotes={quotes} onOpenQuote={openQuote} raiseItemPo={raiseItemPo} addStock={addStock} stockItems={customStock} onLinkStock={onLinkStock} />
+      )}
 
       {view === "suppliers" && (
         <SupplierList
@@ -610,6 +659,9 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
           raiseItemPo={raiseItemPo}
           addStock={addStock}
           hasCategories={hasSupplierCategories}
+          stockItems={customStock}
+          onLinkStock={onLinkStock}
+          onUploadQuotes={uploadQuotes}
           suppliers={suppliers}
           requests={rows}
           canEdit={canEditSuppliers}

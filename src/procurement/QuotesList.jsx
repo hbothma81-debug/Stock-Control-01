@@ -51,7 +51,7 @@ export function QuoteLines({ quotes, onOpen, onReadAgain, raisePoFor, showSuppli
     return (
       <RecordRow
         key={q.id}
-        title={day(q.received_at) || day(q.created_at)}
+        title={day(q.quote_date) || day(q.received_at) || day(q.created_at)}
         summary={summary || q.file_name}
         right={<span style={{ fontSize: 12, fontWeight: 700, color: st.color, whiteSpace: "nowrap" }}>{st.label}</span>}
       >

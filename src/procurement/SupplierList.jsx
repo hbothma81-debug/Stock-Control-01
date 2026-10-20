@@ -10,7 +10,7 @@
 // access Stock Manager". Everyone else who sees the page reads the cards.
 
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Upload } from "lucide-react";
 import ItemsList from "./ItemsList.jsx";
 import SupplierCategoriesField, { CategoryChips, allSupplierCategories } from "./SupplierCategories.jsx";
 import { Plus, Trash2 } from "lucide-react";
@@ -51,8 +51,9 @@ const tabStyle = (active) => ({
 const sameSupplier = (q, s) =>
   q.supplier_id === s.id || (!q.supplier_id && (q.supplier_name || "").trim().toLowerCase() === (s.name || "").trim().toLowerCase());
 
-function SupplierPage({ s, suppliers, quotes, hasCategories, onBack, onOpenQuote, onReadAgain, raisePoFor, raiseItemPo, addStock, canEdit, onField, onAddContact, onContactField, onRemoveContact }) {
+function SupplierPage({ s, suppliers, quotes, hasCategories, stockItems, onLinkStock, onUploadQuotes, onBack, onOpenQuote, onReadAgain, raisePoFor, raiseItemPo, addStock, canEdit, onField, onAddContact, onContactField, onRemoveContact }) {
   const [tab, setTab] = useState("quotes");
+  const [uploading, setUploading] = useState("");
   const theirs = (quotes || []).filter((q) => sameSupplier(q, s));
   return (
     <div>
@@ -71,6 +72,27 @@ function SupplierPage({ s, suppliers, quotes, hasCategories, onBack, onOpenQuote
         ))}
       </div>
 
+      {tab === "quotes" && onUploadQuotes && (
+        <label style={{ ...S.reqActionBtnMuted, display: "inline-flex", alignItems: "center", gap: 6, marginTop: 10, cursor: "pointer" }}>
+          <Upload size={12} /> {uploading || "Upload quotes"}
+          <input
+            type="file"
+            accept="application/pdf,.pdf"
+            multiple
+            style={{ display: "none" }}
+            disabled={!!uploading}
+            onChange={async (e) => {
+              const files = [...(e.target.files || [])];
+              e.target.value = "";
+              if (!files.length) return;
+              setUploading(`Saving ${files.length} quote${files.length === 1 ? "" : "s"}…`);
+              await onUploadQuotes(s, files);
+              setUploading("");
+            }}
+          />
+        </label>
+      )}
+
       {tab === "quotes" &&
         (theirs.length ? (
           <Section title="Quotes" count={theirs.length} defaultOpen>
@@ -81,7 +103,7 @@ function SupplierPage({ s, suppliers, quotes, hasCategories, onBack, onOpenQuote
         ))}
 
       {tab === "items" && (
-        <ItemsList quotes={theirs} showSupplier={false} onOpenQuote={onOpenQuote} raiseItemPo={raiseItemPo} addStock={addStock} />
+        <ItemsList quotes={theirs} showSupplier={false} onOpenQuote={onOpenQuote} raiseItemPo={raiseItemPo} addStock={addStock} stockItems={stockItems} onLinkStock={onLinkStock} />
       )}
 
       {tab === "details" && (

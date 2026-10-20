@@ -243,7 +243,9 @@ with checks (setup_file, looks_for, found) as (
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'master_suppliers' and column_name = 'categories')),
     ('setup-procurement-7-supplier-categories-words.sql', 'no broad supplier categories left (categories are the detailed words)',
       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'master_suppliers' and column_name = 'categories')
-      and not exists (select 1 from public.master_string_lists where list_name = 'supplierCategories'))
+      and not exists (select 1 from public.master_string_lists where list_name = 'supplierCategories')),
+    ('setup-procurement-8-stock-item-quotes.sql', 'table stock_item_quotes (a quoted item linked to a stock item)',
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'stock_item_quotes'))
 )
 select
   setup_file,
