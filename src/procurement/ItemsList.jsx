@@ -141,7 +141,11 @@ export default function ItemsList({ quotes, showSupplier = true, onOpenQuote, ra
               .filter(Boolean)
               .join(" · ");
             return (
-              <RecordRow key={key} title={line.description} summary={summary}>
+              // A long description cut on the line (Hi Grade's ran 130
+              // characters and squeezed its prices into a narrow column on
+              // practice, 20 Oct 2026); the whole of it shows when opened.
+              <RecordRow key={key} title={line.description.length > 70 ? `${line.description.slice(0, 68)}…` : line.description} summary={summary}>
+                {line.description.length > 70 && <div style={{ fontSize: 14, marginBottom: 4 }}>{line.description}</div>}
                 <div style={{ fontSize: 14, color: C.muted }}>
                   {q.supplier_name} · quote {q.quote_number || q.file_name}
                   {q.pr_number ? ` · ${q.pr_number}` : ""}
