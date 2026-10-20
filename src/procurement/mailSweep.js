@@ -136,7 +136,14 @@ export async function sweepMailboxes({ supabase, appUserId, userName, interactiv
   const newQuotes = [];
   const stamp = () => ({ updated_at: new Date().toISOString(), updated_by: userName });
 
-  const mailboxes = [{ base: "/me", address: me, owner: appUserId }, ...shared.map((a) => ({ base: `/users/${encodeURIComponent(a)}`, address: a, owner: null }))];
+  // Signed in to Microsoft AS a shared mailbox (sales@ with its own password,
+  // as the sales staff do; Heinrich, 20 Oct 2026): what it finds is shared,
+  // not this one person's.
+  const meIsShared = (sharedMailboxes || []).some((a) => a.toLowerCase() === me);
+  const mailboxes = [
+    { base: "/me", address: me, owner: meIsShared ? null : appUserId },
+    ...shared.map((a) => ({ base: `/users/${encodeURIComponent(a)}`, address: a, owner: null })),
+  ];
 
   for (const box of mailboxes) {
     let candidates = [];
