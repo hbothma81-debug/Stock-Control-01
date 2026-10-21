@@ -6208,3 +6208,30 @@ stages each drawing goes to (`job_drawings.stages`). Today the Production
 card shows every drawing of a job on every stage; narrowing that is a
 behaviour change to put to him first. His later idea: create a stock item
 from a dropped drawing, for quoting.
+## 21 Oct 2026 — Planning (Jobs page side session): an item view on the Items tab, the start of quoting
+
+**Planning only.** No code, no SQL, nothing built. Heinrich's idea: each line
+on the job's Items tab opens into its own view holding the item's quote
+figures and its parts, and that view becomes the quote system.
+
+**Put to him:** an open icon per line opens the item view over the tab (1
+click, Back to return): the line's figures, its parts (the existing rows
+reused), then behind a tick one cost row per process (Laser, Tube laser,
+CNC, Cut to size, Welding, Bending, Finish, From stores) with typed cost,
+markup % and sell, totalled against Price each. A part's cut method says
+which process row it belongs to. No kind picker: a line with parts is the
+fabrication. The rows go in the step-one `quote_cost_lines` table pointed at
+the job line. Recommended that a quote is a job not yet accepted on the same
+page (QU number, sell-only PDF, Accept) rather than the 9 Sep plan's own
+Quotes screen.
+
+**Waiting on Heinrich, six questions:** quote on the Jobs page or its own
+screen; whether part rows and import icons leave the Items sheet once the
+view exists; who sees cost and markup (Rand tick or a sales-only tick); the
+total setting Price each itself or by a button; a price each on parts so
+SigmaNest prices add up to the Laser row; a default markup % per process
+under Stock Manager.
+
+**Next session:** his answers, then build in its own file under `src/jobs/`
+with one hook in App.jsx; the Drawings and Invoice & delivery tabs are being
+built on the same page by the Jobs page conversation.
