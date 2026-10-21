@@ -54,6 +54,23 @@ at for five minutes.
   (the steps are under "Checking what is live"), and I am told what is held
   back and what it does. A second "push from here" after being told covers
   the rest, once the held commit has been tried on practice (18 Sep 2026).
+- **Since 19 Oct 2026 the Planning conversation is the release gate** ("all new
+  commits run through this conversation"). Every commit, app and engine
+  (`4.APPS\2.CNC\turnpath`), is checked there on the committed tree in a
+  separate copy (`npm test`, the build, `CHECK-undefined-names.cjs`; for the
+  engine `service.selftest()` and `test_step2..6.py`, run from `ers_turning`,
+  where the only expected FAIL lines are the 6.35 spigot JAWS and the bolt
+  THREAD holder CLEARANCE, and the step-4 setup sheets rewrite their date
+  stamps every run), reported in plain words, and pushed only on my word
+  typed in that conversation; a word relayed by another conversation does
+  not count. A conversation pushing on my "push from here" tells the gate in
+  one line BEFORE the push, then writes its handover entry (20 Oct: a note
+  sent after the push was held while the gate was mid-turn, and the gate
+  found the tip moved first). A push nobody announced is health-checked by
+  the gate on exactly that commit. Commits that only build together (one
+  commit's `App.jsx` half sitting in another) go live together; a held
+  commit on top of the queue holds nothing back, so `git push origin
+  <sha>:main` pushes the checked part beneath it.
 - **Before pushing, run `git log --oneline origin/main..HEAD`.** If there is a
   commit you did not make, stop and tell me what it is and what it does. Do not
   push somebody else's work live on my say-so about yours — I may not know it
@@ -118,6 +135,7 @@ after asking me.
 
 - Every SQL change is a `setup-*.sql` file in the repo, proven on a real Postgres (`@electric-sql/pglite`) before I paste it, and safe to run twice. pglite is not in the repo's `node_modules`: install it in the scratchpad (`npm install @electric-sql/pglite` in a folder with an empty `package.json`) and import it by its file, `node_modules/@electric-sql/pglite/dist/index.js` as a file address; `require.resolve` does not find it, and an older conversation's scratch copy may be half cleared away.
 - I paste SQL into the Supabase SQL editor myself: practice (stock-control-TEST) first, then live. Give me the SQL itself in a code block — never a terminal command like `cat file.sql`, which the editor tries to run as SQL.
+- Since 19 Oct 2026 the gate conversation also runs setup files through the Supabase connector, on my word typed there ("paste practice", "paste on both", "push and paste both"): practice (`qcxcspajxyqsrczrvzsi`) first, then live (`vqigxugwrhiotfhrgfnh`), each read back by the file's own check line; and it deploys `edge-functions/read-document/index.ts` the same way (`verify_jwt` true, from the repo's file; comment lines may be left out of the deployed copy). The session's safety layer can refuse a live write, a push or even an edit outright (19 Oct: the live seed, a push and a `sed`): then the thing goes to me as a paste or a one-line `bash` Run button, never worked around. A seed that names a login by email must use my LIVE sign-in, `drawings@ersupplies.co.za` (the one live admin); `hbothma81@gmail.com` is practice's Test account. A seed that finds people by a name pattern must allow for two Marks on live (Mark Bezuidenhout, Mark Cindi): `%mark%` saved nothing until the exact name was used.
 - Keep a paste under about 40 lines and name dollar quotes (`$body$`, `$do$`) rather than bare `$$`. If the editor offers to change the query ("Potential issues detected"), run it unchanged.
 - Register every new setup file in `build-test-database.sh` and `CHECK-which-setup-files-are-run.sql`, then run `build-test-database.sh` to regenerate `setup-ALL.sql`.
 - `make-policies-idempotent.cjs`, the last step of `build-test-database.sh`, treats any `do $tag$ … end $tag$;` block as already guarded. Until 14 Sep it knew only bare `$$` and wrapped policies inside named blocks a second time, which broke `setup-ALL.sql`. After regenerating, `git diff setup-ALL.sql` should hold only the new file. From Git Bash, pipe nothing into `head`: it can stop the script before that step.
@@ -130,7 +148,7 @@ after asking me.
 
 ## Checking what is live
 
-- `node CHECK-what-is-live.cjs "text"` — pass text that exists only in the new build, each as its own argument (plain text, not a pattern). The build strips comments and renames code, so a comment-only or behaviour-only change has to be checked by reading the deployed code. It matches capitals exactly: text a PDF prints in capitals is written in capitals in the code ("DRAW FROM STORES"). A style-only change is found by its style's name (`reqActionBtnAlertOn`): the keys of `S` survive the build.
+- `node CHECK-what-is-live.cjs "text"` — pass text that exists only in the new build, each as its own argument (plain text, not a pattern). The build strips comments and renames code, so a comment-only or behaviour-only change has to be checked by reading the deployed code. It matches capitals exactly: text a PDF prints in capitals is written in capitals in the code ("DRAW FROM STORES"). A style-only change is found by its style's name (`reqActionBtnAlertOn`): the keys of `S` survive the build. Text the code builds from pieces (`${days} day${s} waiting`) is never found: prove such a change by the bundle's name moving.
 - A change with no new words on screen (who sees a control, a rule) is proven live by waiting for the bundle's name to change (`CHECK-what-is-live.cjs` prints it as "Live now: App-….js") and then searching the downloaded bundle with a pattern that survives the build: property names and quoted strings do (`isAdmin\?\w+:"newest"`), variable names do not. A commit that puts a file back exactly as an earlier commit had it builds to that earlier bundle's name again (App-r5kOsneM.js on 17 and 18 Sep), which is its own proof. Live's bundle name is never the local build's name for the same commit (19 Sep 2026: App-DLey-lHp.js live, App-DrI4FfZ5.js local), so write down the name that is live before pushing, or the new build already being up reads as "still the old one". The live page's own HTML names only `assets/index-….js`; the App bundle's name is inside that file, which is why the script is used and not a grep of the page.
 - `CHECK-what-is-live.cjs` searches the App bundle only. Wording that lives in the sign-in page's own files (`LoginGate.jsx`, `ErrorBoundary.jsx`: "Please tell Heinrich") is in the entry file, `assets/index-….js`, and the script answers NO for it on a build that has it (27 Sep 2026). Fetch the entry file named in the live page and search that.
 - `node CHECK-live-table.cjs table` — whether a table answers on live. A column can be checked the same way without signing in (`"job_quote_items?select=extra_stages"`): selecting it answers 200 if it exists, 400 if not, and the script says NO with the database's own message. Until 21 Sep 2026 the script added `?select=*` to a column check as well, a broken address that answered 400 whether the column existed or not: every "400, column missing" reading on live before that date proves nothing. When a check matters, run it beside a column known to exist and one made up.

@@ -5991,3 +5991,67 @@ this conversation (a click meant for JOB-0013 landed on it) and now reads
 Customer PO put back to blank. Two test crashes on practice's `app_errors` (20 Oct).
 
 **Next session:** the Invoice/Delivery under Files question, then whatever he names.
+
+## 21 Oct 2026 — Planning (the release gate): state of play at wrap-up
+
+**How it ran, 19 to 21 Oct.** Heinrich made Planning the release gate ("all new commits run
+through this conversation"): every commit from every conversation, app and engine, was checked
+on the committed tree in a separate copy (tests, build, names; the engine's selftest and step
+tests 2 to 6), reported in plain words, and pushed only on his word typed in the gate. The rule
+is now in CLAUDE.md ("Since 19 Oct 2026 the Planning conversation is the release gate"),
+with the pre-push note that building conversations owe the gate.
+
+**Pushed through the gate, app (oldest first):** `80d3712` (Suppliers go-live), `a7e16a8` +
+`1fa9097`, `546b7d4` + `910ca6f`, `82d5975`, `6f4eacc`, `c1e029b` + `b436bee`, `2b62c22`,
+`92ee23c`..`0d2bfa1` (five, email signatures among them), `494923c`, `75b3cff` + `5c6cd30`,
+`adf835c` + `1930fd2`, `64f4068`, `2b6fc63`, `2507853`, `837bf31`, `e64a624`, nine commits to
+`b3dfa18` (money as "R 1,234.56", units in boxes, Invoice & delivery tab, Production card
+menu / days waiting / job link / Batch-Each, Drawings tab), `1e0ce48`, `c50163a` + `21ed4be`.
+**Engine:** `a9963ea` + `0220b1a` (reaming), `8d014c7` (knurling), `1e76464` (Add
+operation). Each push was followed by a live-bundle check (`CHECK-what-is-live.cjs`).
+
+**Pushed by other conversations on his word there, health-checked by the gate on exactly that
+commit:** `2bba078` with `1d22aa6` (Suppliers, 09:29 20 Oct), `e70489d` (Suppliers fork),
+`7397d01` (Suppliers), five Jobs page commits to `3b66218` (20 Oct afternoon), `a3ebb38`
+(Jobs notes). All passed.
+
+**SQL this conversation wrote: none.** SQL it ran through the Supabase connector on his word,
+each read back by the file's own check (practice = stock-control-TEST, live =
+stock-control-01): `setup-procurement-1-access`, `-2-requests`, `-4-quotes`, `-5-po-link`
+and `setup-claude-reader-1-log` on live (19 Oct; practice earlier); `SEED-procurement-live`
+on live (guard and owner changed to `drawings@ersupplies.co.za`, `a7e16a8`; 130 suppliers,
+11 requests); `setup-procurement-6-supplier-categories` + `SEED-supplier-categories` on
+both; `setup-procurement-7-supplier-categories-words` on both (100 suppliers, 121 words);
+`setup-procurement-8-stock-item-quotes` on both; `setup-email-signatures` on both +
+`SEED-email-signatures-live` on live (Heinrich, Andries, Gawie by the seed; Mark
+Bezuidenhout by an exact-name insert, because `%mark%` also finds Mark Cindi);
+`setup-drawings-job` on both, twice (`job_id`, then `quote_item_id`). Edge Function
+`read-document`: live versions 1 (19 Oct), 2 (ex-VAT wording) and 3 (email text, the repo's
+file at `1930fd2`); practice versions 4 and 6 carry the same source as live 2 and 3.
+
+**Built, not yet tried by Heinrich** (feature by feature; "practice" means the builder tried
+it there): Suppliers page — Link to a stock item (practice), Upload quotes (nobody), the
+Raise PO / Add as stock item / Link buttons under a request's quote (practice), Close quote
+and Reopen (practice), a supplier's answer read from the email text and "REPLIED, NO QUOTE"
+(practice), sign-in as sales@ counting as shared (nobody; needs a sales person). Email
+signatures — a real send carrying one, and a reply in a thread (nobody); the signature card
+under User Management (practice). Money as "R 1,234.56" on every screen and units inside
+every size box (nobody looked at the money change; units seen on one screen). Job page —
+Invoice & delivery tab with its Create pickers (practice, JOB-0012); Drawings tab uploads
+(practice, JOB-0009), the description match and This job only (nobody); the Cut to size
+sheets (he said "looks good"). Production cards — the ⋮ menu with Pull from stock, "N days
+waiting", the job number opening the job with Back to Production, the Batch / Each switch
+(all practice). CNC — Holes and threads, the Knurl line, + Add operation (nobody on screen);
+the engine's reaming, knurling and insert action (tests only).
+
+**Waiting on Heinrich:** IT to give his account Full Access to sales@ersupplies.co.za, plus
+Send As (the page says "this sign-in cannot open it"); a look at the money format on live
+(Jobs page, Stock Manager, a PO); PR-004 McNaughtan's quote reads 1000 mm and 350 N against
+1200 mm and 100 N asked — settle that before a pro forma follow-up; JOB-0078's remaining
+steps from 19 Oct (Check back in on DN-0016 and DN-0017, Invoice Now, the two Sage invoices);
+prices for the 8 CNC materials that came across to live at R0.
+
+**Next session:** carry on as the gate. At wrap-up the queue held `8a6b62c` (Jobs page,
+Drawings tab rows with Kept in / take off / Put back), not yet checked, and the engine queue
+was empty. The Suppliers conversations and the Jobs conversation push on his "push from
+here" at times: read the live tip first, every time.
