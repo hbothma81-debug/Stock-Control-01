@@ -11091,6 +11091,50 @@ export default function StockControl() {
     }
   }
 
+  // A job's customer, changed on its Overview (Heinrich, 21 Oct 2026).
+  // The job holds only the name, so this is one update; a name typed new
+  // joins the customer list, as on New Job. The job's shortages carry a
+  // copy of the name for the laser screens and follow it. Lines already
+  // linked to the old customer's Customer Stock parts keep their links:
+  // the person is told how many, and nothing is refused (his answer).
+  async function changeJobCustomer(job, value) {
+    const next = String(value || "").trim();
+    const prev = job.customer || "";
+    if (!next || next === prev) return;
+    // The box takes typed text as a new name when it is left, so half a
+    // name ("Plantcore" for Plantcore Mining) would quietly become a new
+    // customer. A new one is asked about first; a name on the list is not.
+    const known = master.customers || [];
+    const listed = known.find((c) => c.toLowerCase() === next.toLowerCase());
+    if (!listed) {
+      const near = known.filter((c) => c.toLowerCase().includes(next.toLowerCase()));
+      const ask = `Add "${next}" as a new customer?` + (near.length ? `\n\nAlready on the list: ${near.slice(0, 5).join(", ")}` : "");
+      if (!window.confirm(ask)) return;
+    } else if (listed === prev) return;
+    const name = listed || next;
+    try {
+      const { data, error } = await supabase.from("jobs").update({ customer: name }).eq("id", job.id).select("id");
+      if (error) throw error;
+      if (!data || data.length === 0) throw new Error("the job was not found");
+      if (!listed) ensureStringEntry("customers", name);
+      await logJobEvent(job.id, "customer", prev ? `${prev} to ${name}` : `set to ${name}`);
+      const { error: shortageError } = await supabase.from("shortages").update({ customer: name }).eq("job_id", job.id);
+      if (shortageError) console.error("The customer saved, but the job's shortages still show the old name:", shortageError);
+      flashSaved(`job-${job.id}-customer`);
+      const linked = (jobDetail?.job.id === job.id ? jobDetail.quoteItems || [] : []).filter((it) => it.linked_item_id).length;
+      if (linked > 0 && prev) {
+        alert(
+          `Customer changed to ${name}. ${linked} line${linked === 1 ? " is" : "s are"} still linked to ${prev}'s Customer Stock parts.`,
+        );
+      }
+      await fetchJobs();
+      if (jobDetail?.job.id === job.id) refreshJobDetail();
+    } catch (err) {
+      console.error("Failed to change the job's customer:", err);
+      alert("That didn't save — check your connection and try again.");
+    }
+  }
+
   // The plate laser's queue number on a job (jobs.laser_priority): 1 is
   // cut first, two jobs may share a number, blank is ordinary work. The
   // nester and admins set it (canSetLaserPriority). Who and when are
@@ -22683,6 +22727,18 @@ export default function StockControl() {
                 if (!edit && !priority) return null;
                 return (
                   <div className="stk-job-grid" style={{ marginTop: 8 }}>
+                    {/* Keyed on the stored name so the box follows a change
+                        made elsewhere; a name typed new joins the list. */}
+                    {edit && box("Customer", "customer",
+                      <TypeToFind
+                        key={jobDetail.job.customer || "blank"}
+                        options={master.customers || []}
+                        value={jobDetail.job.customer || ""}
+                        onChange={(v) => changeJobCustomer(jobDetail.job, v)}
+                        placeholder="Type to find…"
+                        allowNew
+                      />
+                    )}
                     {edit && box("SigmaNest / laser job number", "laser_job_reference",
                       <input
                         style={S.input}
