@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addressBook, cleanSubject, draftFollowUp, emailAnswers, emailFileName, findExisting, isEmailWithoutPrice, latestCopies, looksLikeDrawing, repliedWithoutQuote, looksLikeQuoteMail, newestFiles, nextPrNumber, quoteFiles, quoteRequestFrom, requestForNewMail, textToHtml, threadUpdate } from "./mailRules.js";
+import { addressBook, cleanSubject, draftFollowUp, isNoReply, isSendingService, matchKey, emailAnswers, emailFileName, findExisting, isEmailWithoutPrice, latestCopies, looksLikeDrawing, repliedWithoutQuote, looksLikeQuoteMail, newestFiles, nextPrNumber, quoteFiles, quoteRequestFrom, requestForNewMail, textToHtml, threadUpdate } from "./mailRules.js";
 
 const to = (address, name = "") => ({ emailAddress: { address, name } });
 const book = addressBook(
@@ -243,4 +243,29 @@ test("a quote by new mail from a free email address goes only with that address'
   const mail = (from) => ({ from: to(from), subject: "Quote", receivedDateTime: "2026-10-20T08:00:00Z" });
   assert.equal(requestForNewMail(mail("boxitlibradenesunette@outlook.com"), rows, () => null), null);
   assert.equal(requestForNewMail(mail("marinapieterse@outlook.com"), rows, () => null)?.id, "allpress");
+});
+
+test("Sage and other sending systems, and their no-reply addresses, never stand for one supplier", () => {
+  assert.equal(isSendingService("quotes@mail.sageone.co.za"), true);
+  assert.equal(isSendingService("invoices@sage.com"), true);
+  assert.equal(isSendingService("bounce@mcsv.net"), true);
+  assert.equal(isSendingService("sales@macsteel.co.za"), false);
+  assert.equal(isNoReply("no-reply@sageone.co.za"), true);
+  assert.equal(isNoReply("DoNotReply@xero.com"), true);
+  assert.equal(isNoReply("noreplyjohn@company.co.za"), false);
+  // A sending system: the whole address; its no-reply: nobody; a company's own no-reply: its domain.
+  assert.equal(matchKey("Neuc@sageone.co.za"), "neuc@sageone.co.za");
+  assert.equal(matchKey("noreply@sageone.co.za"), "");
+  assert.equal(matchKey("noreply@macsteel.co.za"), "macsteel.co.za");
+  // A supplier listed with a Sage no-reply address does not catch other Sage mail.
+  const book = addressBook([{ id: "n", name: "Neuc", email: "noreply@sageone.co.za", contacts: [] }], []);
+  const r = quoteRequestFrom({ subject: "RFQ", bodyPreview: "Please quote", toRecipients: [to("someone@sageone.co.za", "Someone")] }, book);
+  assert.equal(r.supplier_id, null);
+  // A quote through Sage still finds its request by the supplier's name.
+  const rows = [{ id: "pr7", status: "Sent", requested_at: "2026-10-01", contact_email: "cuen@neuc.co.za", supplier_name: "Neuc" }];
+  const viaSage = { from: to("noreply@sageone.co.za", "Neuc via Sage"), subject: "Quotation QUO0001816", receivedDateTime: "2026-10-09T08:00:00Z" };
+  assert.equal(requestForNewMail(viaSage, rows, () => ({ name: "Neuc" }))?.id, "pr7");
+  // A no-reply mail on the supplier's own domain still finds its request.
+  const own = { from: to("noreply@neuc.co.za"), subject: "Quote", receivedDateTime: "2026-10-09T08:00:00Z" };
+  assert.equal(requestForNewMail(own, rows, () => null)?.id, "pr7");
 });

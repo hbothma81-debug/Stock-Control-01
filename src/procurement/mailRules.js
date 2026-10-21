@@ -41,11 +41,32 @@ const FREE_MAIL = new Set([
   "wol.co.za", "polka.co.za", "afrihost.co.za", "cybersmart.co.za", "global.co.za", "netactive.co.za",
 ]);
 export const isFreeMail = (address) => FREE_MAIL.has(domainOf(String(address || "").toLowerCase()));
-// What two addresses must share to be the same company: the domain, or on a
-// free email service the whole address.
+
+// Systems that send mail for many companies (Heinrich, 21 Oct 2026: "be
+// carefull for @gmail and other generic emails like @sage ... cover the
+// basics"): accounting systems that email a supplier's quotes and invoices,
+// and bulk-mail services. Never a supplier by their domain either; a quote
+// sent through one is matched by the supplier's name instead
+// (requestForNewMail). Subdomains count ("mail.sage.com").
+const SENDING_SERVICES = /(^|\.)(sageone\.co\.za|sage\.com|sage\.co\.za|skynamo\.com|intuit\.com|quickbooks\.com|xero\.com|zoho\.com|zohomail\.com|zoho\.in|myob\.com|freshbooks\.com|mailchimp\.com|mcsv\.net|mcdlv\.net|rsgsv\.net|mandrillapp\.com|sendgrid\.net|sendgrid\.com|mailgun\.org|mailgun\.net|amazonses\.com|sparkpostmail\.com|mailjet\.com|sendinblue\.com|brevo\.com|hubspotemail\.net|constantcontact\.com|exacttarget\.com|docusign\.net)$/i;
+export const isSendingService = (address) => SENDING_SERVICES.test(domainOf(String(address || "").toLowerCase()));
+
+// A no-reply address ("noreply@", "do-not-reply@", "notifications@"). On a
+// sending system or free service every company's mail comes from the same
+// one ("noreply@sageone.co.za" on the supplier list would catch all Sage
+// mail), so there it matches nobody. On a company's own domain
+// (noreply@macsteel.co.za) the domain still says who it is.
+const NO_REPLY = /^(no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|notifications?|bounces?)([+._-]|$)/i;
+export const isNoReply = (address) => NO_REPLY.test(String(address || "").trim().split("@")[0]);
+
+// What two addresses must share to be the same company: the domain; the
+// whole address on a free email service or a sending system; nothing at all
+// for a no-reply address there ("" matches no one).
 export const matchKey = (address) => {
   const a = String(address || "").trim().toLowerCase();
-  return isFreeMail(a) ? a : domainOf(a);
+  if (!a.includes("@")) return "";
+  if (!isFreeMail(a) && !isSendingService(a)) return domainOf(a);
+  return isNoReply(a) ? "" : a;
 };
 
 // Subject without RE:/FW:/FWD: in front, for the request's item line.
@@ -280,19 +301,19 @@ export function repliedWithoutQuote(quotes) {
 // (found on practice, 19 Oct 2026: McNaughtan's came from another rep's
 // address, Neuc's through Sage). Heinrich: "yes go ahead". Such a mail goes
 // with the newest open request to the same supplier, sent before it came:
-//   * same supplier = the sender's email domain is the request contact's
-//     domain or one of the supplier's on the supplier list, or
-//   * the mail came through an accounts system (Sage and the like) and the
-//     supplier's name is in the sender's name or the subject.
+//   * same supplier = the sender's matchKey (domain, or whole address on a
+//     free email service) is the request contact's or one of the supplier's
+//     on the supplier list, or
+//   * the mail came through a sending system (Sage and the like,
+//     SENDING_SERVICES above) and the supplier's name is in the sender's
+//     name or the subject.
 // Returns the request, or null.
-const SENDING_SERVICES = /(^|\.)(sageone\.co\.za|sage\.com|accounting\.sageone\.co\.za|skynamo\.com|intuit\.com|quickbooks\.com|xero\.com|zoho\.com|zohomail\.com|myob\.com|freshbooks\.com)$/i;
 const OPEN_FOR_QUOTES = ["Sent", "Reply", "Pro forma", "Paid", "Ordered"];
 
 export function requestForNewMail(message, rows, supplierOf) {
   const sender = addressOf(message.from);
   if (!sender || isOurs(sender)) return null;
-  const domain = domainOf(sender);
-  const viaService = SENDING_SERVICES.test(domain);
+  const viaService = isSendingService(sender);
   const words = `${message.from?.emailAddress?.name || ""} ${message.subject || ""}`.toLowerCase();
   const when = message.receivedDateTime || message.sentDateTime || "";
   const matches = (rows || []).filter((r) => {
