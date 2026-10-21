@@ -64,6 +64,19 @@ export const CNC_FIELDS = [
     kind: "tick",
     blank: "No: the whole part",
   },
+  // Tailstock (Heinrich 21 Oct 2026; engine tailstock.py, turnpath 8a6f31f):
+  // the engine brings it in on a cut-to-size side turned along its length
+  // over 4 x D that can't go through the chuck. Sent only when picked.
+  {
+    key: "tailstock",
+    label: "Tailstock",
+    kind: "yesno",
+    choices: [
+      { value: true, label: "Use it (side 1)" },
+      { value: false, label: "Never" },
+    ],
+    blank: "Automatic: a long side over 4 × D",
+  },
   {
     key: "back_op",
     label: "Back end (bar work)",

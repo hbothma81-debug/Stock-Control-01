@@ -30,7 +30,7 @@ export const HOLDING_OF = { cut: "double-chucked", puller: "bar puller" };
 // gripped too. Inside only belongs to Cut to size (a part held in the
 // chuck, never bar work) and comes first, where it is seen.
 export const PROCESS_BOXES = {
-  cut: ["id_only", "stock_extra", "grip1", "grip2", "side2_own_program"],
+  cut: ["id_only", "stock_extra", "grip1", "grip2", "tailstock", "side2_own_program"],
   puller: ["pulls", "pull_max_ld", "parts_per_pull", "back_op", "grip2", "side2_own_program"],
 };
 
