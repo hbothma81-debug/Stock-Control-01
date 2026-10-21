@@ -137,7 +137,7 @@ import {
   requestedInMonthFigure,
 } from "./jobs/jobFigures.js";
 import { JOBS_ORDER_KEY, JOB_ORDERS, isJobOrder, sortJobs } from "./jobs/jobOrder.js";
-import { jobMatchesSearch, poMatchesSearch, poLabel } from "./jobs/jobSearch.js";
+import { jobMatchesSearch, poLabel } from "./jobs/jobSearch.js";
 import { closingSendsInvoiceRequest, showsRequestInvoiceButton } from "./jobs/invoiceOnClose.js";
 import { makeOneAtATime, stillToSend, invoiceRequestRefusal, linesChangedFromError, sendFunctionMissing } from "./jobs/invoiceRequestOnce.js";
 import {
@@ -16260,19 +16260,15 @@ export default function StockControl() {
                   style={{ ...S.reqCard, width: "100%", textAlign: "left", cursor: "pointer", display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}
                   onClick={() => openJobDetail(job)}
                 >
-                  <span style={{ fontSize: 15, color: C.text }}>{job.job_number}</span>
+                  {/* The customer's PO always sits beside our job number
+                      (Heinrich, 21 Oct 2026); nothing when there is none. */}
+                  <span style={{ fontSize: 15, color: C.text }}>
+                    {job.job_number}
+                    {poLabel(job) && <span title="Customer PO number, from the job's Overview">{"  ·  "}{poLabel(job)}</span>}
+                  </span>
                   <span style={{ fontSize: 15, color: C.text }}>{job.laser_job_reference || "No SigmaNest #"}</span>
                   <span style={{ fontSize: 15, color: C.text }}>{job.customer || "No customer"}</span>
                   <span style={{ fontSize: 15, color: C.text }}>{job.sales_rep || "No sales rep"}</span>
-
-                  {/* The customer's PO, only while it is what the search box
-                      found the job by: otherwise a job comes up and nothing
-                      on its row says why. */}
-                  {poMatchesSearch(job, jobsSearchQuery) && (
-                    <span style={{ ...S.chip, flexShrink: 0 }} title="Customer PO number, from the job's Overview">
-                      {poLabel(job)}
-                    </span>
-                  )}
 
                   {/* The plate laser's queue number, so the sales desk can
                       see what is already pushed forward before asking for
@@ -17769,7 +17765,12 @@ export default function StockControl() {
                           onClick={() => setProductionSelectedProcessId(process.id)}
                         >
                           <div style={S.reqCardTop}>
-                            <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
+                            {/* The customer's PO beside the job number, as on
+                                the Jobs list (Heinrich, 21 Oct 2026). */}
+                            <span style={S.itemName}>
+                              {job.job_number}
+                              {poLabel(job) ? ` · ${poLabel(job)}` : ""} — {job.customer || "No customer"}
+                            </span>
                             {/* Waiting rows say what they wait for, so the
                                 next question is answered without opening
                                 the job. Partly ready ones say how much can
@@ -17807,9 +17808,6 @@ export default function StockControl() {
                             )}
                             {job.sales_rep && <span>Sales: {job.sales_rep}</span>}
                             {job.laser_job_reference && <span>SigmaNest: {job.laser_job_reference}</span>}
-                            {/* The customer's PO, only while the search box
-                                found the job by it, as on the Jobs list. */}
-                            {poMatchesSearch(job, productionSearchQuery) && <span>{poLabel(job)}</span>}
                             {totalQty > 0 ? (
                               <span>Qty: {totalQty}</span>
                             ) : (
