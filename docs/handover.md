@@ -6165,3 +6165,46 @@ Buy-outs division, who sets the supplier).
 **Next session:** nothing half-done. If he asks for more filters here,
 the row already carries supplier, shelf location and the customer's
 revision, and level 2's filter row is the place for them.
+
+---
+
+## 21 Oct 2026 — Jobs page (Invoice & delivery tab, job Drawings tab): state of play at wrap-up
+
+**Done and LIVE** (all five commits pushed today by other conversations):
+`002879c` Invoice & delivery as one job tab with Create invoice / Create
+delivery note pickers; `b3dfa18`, `1e0ce48`, `c50163a`, `8a6b62c` the
+job's Drawings tab. The rules are in CLAUDE.md under "Invoice & delivery
+is one job tab" and "The job's Drawings tab".
+
+**SQL this conversation wrote:** `setup-drawings-job.sql` only
+(drawings.job_id, drawings.quote_item_id, table job_drawings with read /
+add / update rules, no delete). Checked 21 Oct beside made-up names: the
+columns and the table answer on **practice and live**. The table's rules
+came in the same paste and are unproven until the bin is pressed once.
+
+**Built and not yet tested by Heinrich**, feature by feature:
+- Invoice & delivery tab: Create invoice and Create delivery note (tried by
+  this conversation on practice JOB-0012: request R 12.00 with DN-0008).
+- Drawings tab on live: the sheet, Kept in, Lines with no drawing.
+- Dropping files: match by stock code; match by description (never tried
+  on a real line); This job only; the Replace existing / New revision
+  pop-up (tried on practice JOB-0009 by this conversation only).
+- DXF kept on the job, This page only, opened as a download (tried on
+  practice JOB-0009; the download itself never opened).
+- Take off this job (bin) and Put back: never pressed anywhere.
+- Production card: leaving out taken-off drawings and non-PDFs, and a
+  line finding its drawing by its own stock code: never looked at.
+- Stock part attachments shown as "On the stock part": no practice data.
+
+**Test data left on practice:** JOB-0009 has XEL 0127 103 00 rev 1
+(superseded) and rev 2 (current), `XEL 0127 103 00.dxf` and
+`GA layout TEST.pdf` (job only); JOB-0012 has the R 12.00 request and
+DN-0008.
+
+**Waiting on Heinrich:** to try the list above.
+
+**Next session (Jobs page):** step 4 of the drawings plan, choosing the
+stages each drawing goes to (`job_drawings.stages`). Today the Production
+card shows every drawing of a job on every stage; narrowing that is a
+behaviour change to put to him first. His later idea: create a stock item
+from a dropped drawing, for quoting.
