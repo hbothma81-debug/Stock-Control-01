@@ -163,7 +163,7 @@ export default function CostingTab({ program, current, shown, materials, barPric
 
   const unitBox = (unit, value, ph) =>
     mayPrice && size ? (
-      <NumberBox style={S.input} value={value ?? 0} placeholder={ph} title={`Saved as ${program.material} ${sizeLabel(size, pipes)}'s price, ${unit}`} onCommit={(n) => setBarPrice(n, unit)} />
+      <NumberBox prefix="R" style={S.input} value={value ?? 0} placeholder={ph} title={`Saved as ${program.material} ${sizeLabel(size, pipes)}'s price, ${unit}`} onCommit={(n) => setBarPrice(n, unit)} />
     ) : (
       <div style={{ fontSize: 15 }}>{canSeeValue ? (value != null ? rand(value) : ph ? rand(ph) : "–") : "–"}</div>
     );
@@ -213,7 +213,7 @@ export default function CostingTab({ program, current, shown, materials, barPric
                   <div key={which}>
                     <label style={S.label}>{label}</label>
                     {mayPrice ? (
-                      <NumberBox style={S.input} value={markupOf(s, which)} placeholder="60" onCommit={(n) => setMarkup(which, n)} />
+                      <NumberBox suffix="%" style={S.input} value={markupOf(s, which)} placeholder="60" onCommit={(n) => setMarkup(which, n)} />
                     ) : (
                       <div style={{ fontSize: 15 }}>{markupOf(s, which)}%</div>
                     )}
@@ -299,6 +299,7 @@ export default function CostingTab({ program, current, shown, materials, barPric
             <label style={S.label}>Setup price per job (R)</label>
             {mayPrice ? (
               <NumberBox
+                prefix="R"
                 style={S.input}
                 value={s.setup_price}
                 placeholder={`${DEFAULT_SETUP_PRICE} (default)`}
@@ -314,6 +315,8 @@ export default function CostingTab({ program, current, shown, materials, barPric
             {mayPrice ? (
               <div style={{ display: "flex", gap: 6 }}>
                 <NumberBox
+                  prefix="R"
+                  suffix={rateUnit === "R/h" ? "/h" : "/s"}
                   style={{ ...S.input, flex: 1 }}
                   value={s.rate_per_s ? (rateUnit === "R/h" ? Math.round(s.rate_per_s * 3600 * 100) / 100 : s.rate_per_s) : 0}
                   placeholder={rateUnit === "R/h" ? `${Math.round(DEFAULT_RATE_PER_S * 3600)} (default)` : `${DEFAULT_RATE_PER_S} (default)`}
@@ -341,7 +344,7 @@ export default function CostingTab({ program, current, shown, materials, barPric
               <div>
                 <label style={S.label}>Price per piece from the supplier (R)</label>
                 {mayPrice ? (
-                  <NumberBox style={S.input} value={s.piece_price} placeholder="Price a piece" onCommit={(n) => price({ piece_price: n })} />
+                  <NumberBox prefix="R" style={S.input} value={s.piece_price} placeholder="Price a piece" onCommit={(n) => price({ piece_price: n })} />
                 ) : (
                   <div style={{ fontSize: 15 }}>{s.piece_price ? rand(s.piece_price) : "–"}</div>
                 )}
@@ -376,9 +379,9 @@ export default function CostingTab({ program, current, shown, materials, barPric
             <div style={{ fontWeight: 700, fontSize: 14 }}>Stock bar (as bought)</div>
             <div style={S.formGrid}>
               <div>
-                <label style={S.label}>Stock length (mm)</label>
+                <label style={S.label}>Stock length</label>
                 {canEdit ? (
-                  <NumberBox style={S.input} value={s.stock_length} placeholder="6000 (default)" onCommit={(n) => price({ stock_length: n })} />
+                  <NumberBox suffix="mm" style={S.input} value={s.stock_length} placeholder="6000 (default)" onCommit={(n) => price({ stock_length: n })} />
                 ) : (
                   <div style={{ fontSize: 15 }}>{s.stock_length || 6000}</div>
                 )}
@@ -407,9 +410,9 @@ export default function CostingTab({ program, current, shown, materials, barPric
             <div style={{ fontWeight: 700, fontSize: 14 }}>Puller bar (cut from the stock bar)</div>
             <div style={S.formGrid}>
               <div>
-                <label style={S.label}>Puller bar length (mm)</label>
+                <label style={S.label}>Puller bar length</label>
                 {canEdit ? (
-                  <NumberBox style={S.input} value={s.bar_length} placeholder="Engine's choice (998)" onCommit={(n) => price({ bar_length: n })} />
+                  <NumberBox suffix="mm" style={S.input} value={s.bar_length} placeholder="Engine's choice (998)" onCommit={(n) => price({ bar_length: n })} />
                 ) : (
                   <div style={{ fontSize: 15 }}>{s.bar_length || "Engine's choice"}</div>
                 )}
@@ -437,9 +440,9 @@ export default function CostingTab({ program, current, shown, materials, barPric
       ) : (
         <div style={S.formGrid}>
           <div>
-            <label style={S.label}>Bar length (mm)</label>
+            <label style={S.label}>Bar length</label>
             {canEdit ? (
-              <NumberBox style={S.input} value={s.bar_length} placeholder="Engine's choice" onCommit={(n) => price({ bar_length: n })} />
+              <NumberBox suffix="mm" style={S.input} value={s.bar_length} placeholder="Engine's choice" onCommit={(n) => price({ bar_length: n })} />
             ) : (
               <div style={{ fontSize: 15 }}>{s.bar_length || "Engine's choice"}</div>
             )}

@@ -1,3 +1,4 @@
+import UnitInput from "./UnitInput.jsx";
 import MoneyInput from "./MoneyInput.jsx";
 import { useState, useEffect, useMemo, useRef, Fragment } from "react";
 import { supabase } from "./lib/supabaseClient.js";
@@ -97,6 +98,7 @@ import { planBars, barsOnShelf, barsSetAside, barsOnOrder, matchingStock, materi
 import { changesMaterial, pileStillUsed } from "./jobs/cutLineEdit.js";
 import EditableName from "./EditableName.jsx";
 import CardMenu from "./CardMenu.jsx";
+import { daysWaiting, daysWaitingText } from "./jobs/daysWaiting.js";
 import TypeToFind from "./TypeToFind.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import { crashPlace } from "./lib/crashText.js";
@@ -14473,23 +14475,23 @@ export default function StockControl() {
       <div style={{ marginBottom: 10 }}>
         <div style={{ ...S.managerAddRow, flexWrap: "wrap", alignItems: "flex-end" }}>{boxes}</div>
         <div style={{ ...S.managerAddRow, flexWrap: "wrap", marginTop: 6 }}>
-          <input
+          <UnitInput suffix="kg/m"
             style={{ ...S.input, flex: 1, minWidth: 80 }}
             type="number"
             step="0.01"
             value={managerFactor}
             onChange={(e) => setManagerFactor(e.target.value)}
             // Left blank, the worked-out weight is saved.
-            placeholder={built && sectionCalcKgPerM(built.dimensions, grade) ? `kg/m ${sectionCalcKgPerM(built.dimensions, grade)}` : "kg/m"}
+            placeholder={built && sectionCalcKgPerM(built.dimensions, grade) ? `${sectionCalcKgPerM(built.dimensions, grade)}` : ""}
             title="kg/m. Leave blank to use the weight worked out from the size."
           />
-          <MoneyInput
+          <MoneyInput suffix="/m"
             style={{ ...S.input, flex: 1, minWidth: 80 }}
             type="number"
             step="0.01"
             value={managerPrice}
             onChange={(e) => setManagerPrice(e.target.value)}
-            placeholder="per metre"
+            placeholder=""
           />
           <TypeToFind
             style={{ flex: 1, minWidth: 120 }}
@@ -17272,9 +17274,10 @@ export default function StockControl() {
                     })()
                   ) : (
                     (() => {
-                    const renderCard = ({ job, process, isReady, partlyReady, readyQty, totalQty: partTotal, waitingOn, quoteItems, shortage }) => {
+                    const renderCard = ({ job, process, isReady, partlyReady, readyQty, totalQty: partTotal, waitingOn, quoteItems, shortage, jobProcesses }) => {
                       const totalQty = itemsForStage(process.process_name, quoteItems).reduce((sum, it) => sum + Number(it.qty || 0), 0);
                       const standing = standingByProcess[process.id];
+                      const waitedDays = daysWaiting(process, jobProcesses, job, shortage);
                       return (
                         <button
                           key={process.id}
@@ -17344,6 +17347,7 @@ export default function StockControl() {
                               <span style={shortageIsOverdue(shortage) ? { color: C.danger, fontWeight: 600 } : undefined}>{shortageFlaggedLabel(shortage)}</span>
                             )}
                             {process.is_urgent && <span style={{ color: C.danger, fontWeight: 600 }}>Urgent</span>}
+                            {waitedDays !== null && <span>{daysWaitingText(waitedDays)}</span>}
                           </div>
                         </button>
                       );
@@ -18164,22 +18168,22 @@ export default function StockControl() {
               </div>
               <div style={S.formGrid}>
                 <div>
-                  <label style={S.label}>Area min (m²)</label>
-                  <input style={S.input} type="number" min="0" step="0.1" value={filterAreaMin} onChange={(e) => setFilterAreaMin(e.target.value)} placeholder="0" />
+                  <label style={S.label}>Area min</label>
+                  <UnitInput suffix="m²" style={S.input} type="number" min="0" step="0.1" value={filterAreaMin} onChange={(e) => setFilterAreaMin(e.target.value)} placeholder="0" />
                 </div>
                 <div>
-                  <label style={S.label}>Area max (m²)</label>
-                  <input style={S.input} type="number" min="0" step="0.1" value={filterAreaMax} onChange={(e) => setFilterAreaMax(e.target.value)} placeholder="—" />
+                  <label style={S.label}>Area max</label>
+                  <UnitInput suffix="m²" style={S.input} type="number" min="0" step="0.1" value={filterAreaMax} onChange={(e) => setFilterAreaMax(e.target.value)} placeholder="—" />
                 </div>
               </div>
               <div style={S.formGrid}>
                 <div>
-                  <label style={S.label}>Weight min (kg)</label>
-                  <input style={S.input} type="number" min="0" step="0.1" value={filterWeightMin} onChange={(e) => setFilterWeightMin(e.target.value)} placeholder="0" />
+                  <label style={S.label}>Weight min</label>
+                  <UnitInput suffix="kg" style={S.input} type="number" min="0" step="0.1" value={filterWeightMin} onChange={(e) => setFilterWeightMin(e.target.value)} placeholder="0" />
                 </div>
                 <div>
-                  <label style={S.label}>Weight max (kg)</label>
-                  <input style={S.input} type="number" min="0" step="0.1" value={filterWeightMax} onChange={(e) => setFilterWeightMax(e.target.value)} placeholder="—" />
+                  <label style={S.label}>Weight max</label>
+                  <UnitInput suffix="kg" style={S.input} type="number" min="0" step="0.1" value={filterWeightMax} onChange={(e) => setFilterWeightMax(e.target.value)} placeholder="—" />
                 </div>
               </div>
             </>
@@ -18890,8 +18894,8 @@ export default function StockControl() {
                 </div>
                 <div style={S.formGrid}>
                   <div>
-                    <label style={S.label}>Diameter (mm)</label>
-                    <input
+                    <label style={S.label}>Diameter</label>
+                    <UnitInput suffix="mm"
                       style={S.input}
                       type="number"
                       min="0"
@@ -18902,8 +18906,8 @@ export default function StockControl() {
                     />
                   </div>
                   <div>
-                    <label style={S.label}>Length (mm, if applicable)</label>
-                    <input
+                    <label style={S.label}>Length (if applicable)</label>
+                    <UnitInput suffix="mm"
                       style={S.input}
                       type="number"
                       min="0"
@@ -19418,8 +19422,8 @@ export default function StockControl() {
                     {form.stockType === "offcut" ? (
                       <div style={S.formGrid}>
                         <div>
-                          <label style={S.label}>Length (mm)</label>
-                          <input
+                          <label style={S.label}>Length</label>
+                          <UnitInput suffix="mm"
                             style={S.input}
                             type="number"
                             min="0"
@@ -19429,8 +19433,8 @@ export default function StockControl() {
                           />
                         </div>
                         <div>
-                          <label style={S.label}>Width (mm)</label>
-                          <input
+                          <label style={S.label}>Width</label>
+                          <UnitInput suffix="mm"
                             style={S.input}
                             type="number"
                             min="0"
@@ -19524,8 +19528,8 @@ export default function StockControl() {
                       placeholder="e.g. EN8"
                     />
                     <div style={{ marginTop: 10 }}>
-                      <label style={S.label}>Diameter (mm)</label>
-                      <input
+                      <label style={S.label}>Diameter</label>
+                      <UnitInput suffix="mm"
                         style={S.input}
                         type="number"
                         min="0"
@@ -19536,8 +19540,8 @@ export default function StockControl() {
                       />
                     </div>
                     <div style={{ marginTop: 10 }}>
-                      <label style={S.label}>Length per piece (mm)</label>
-                      <input
+                      <label style={S.label}>Length per piece</label>
+                      <UnitInput suffix="mm"
                         style={S.input}
                         type="number"
                         min="0"
@@ -19650,8 +19654,8 @@ export default function StockControl() {
                       </label>
                       {form.trackLength && (
                         <div style={{ marginTop: 8 }}>
-                          <label style={S.label}>Length per piece (m)</label>
-                          <input
+                          <label style={S.label}>Length per piece</label>
+                          <UnitInput suffix="m"
                             style={S.input}
                             type="number"
                             min="0"
@@ -21183,21 +21187,21 @@ export default function StockControl() {
                       onChange={(e) => setManagerInput(e.target.value)}
                       placeholder="Add a new size…"
                     />
-                    <input
+                    <UnitInput suffix="kg/m"
                       style={{ ...S.input, flex: 1 }}
                       type="number"
                       step="0.01"
                       value={managerFactor}
                       onChange={(e) => setManagerFactor(e.target.value)}
-                      placeholder="kg/m"
+                      placeholder=""
                     />
-                    <MoneyInput
+                    <MoneyInput suffix="/m"
                       style={{ ...S.input, flex: 1 }}
                       type="number"
                       step="0.01"
                       value={managerPrice}
                       onChange={(e) => setManagerPrice(e.target.value)}
-                      placeholder="per metre"
+                      placeholder=""
                     />
                     {/* The same size in two grades is two rows with two
                         prices, so the grade has to be chosen here. */}
@@ -21316,7 +21320,7 @@ export default function StockControl() {
                           ) : (
                             <EditableName value={entry.name} onCommit={(v) => renameMasterEntry(managerTab, entry.name, v)} />
                           )}
-                          <NumberBox
+                          <NumberBox suffix="kg/m"
                             value={entry.factor}
                             onCommit={(v) => updateFactorField(entry.name, "factor", v, entry.grade)}
                             style={S.managerFactorInput}
@@ -21342,7 +21346,7 @@ export default function StockControl() {
                               </button>
                             );
                           })()}
-                          <NumberBox
+                          <NumberBox prefix="R" suffix="/m"
                             value={entry.price}
                             onCommit={(v) => updateFactorField(entry.name, "price", v, entry.grade)}
                             style={S.managerFactorInput}
@@ -21438,13 +21442,13 @@ export default function StockControl() {
                         onChange={(e) => setManagerFactor(e.target.value)}
                         placeholder="Density g/cm³"
                       />
-                      <MoneyInput
+                      <MoneyInput suffix="/kg"
                         style={{ ...S.input, flex: 1 }}
                         type="number"
                         step="0.01"
                         value={managerPrice}
                         onChange={(e) => setManagerPrice(e.target.value)}
-                        placeholder="per kg"
+                        placeholder=""
                       />
                       {managerTab === "grades" && (
                         <input
@@ -21487,13 +21491,13 @@ export default function StockControl() {
                         .map((entry) => (
                           <div key={entry.name} style={{ ...S.managerRow, flexWrap: "wrap" }}>
                             <EditableName value={entry.name} onCommit={(v) => renameMasterEntry(managerTab, entry.name, v)} />
-                            <NumberBox
+                            <NumberBox suffix="g/cm³"
                               value={entry.factor}
                               onCommit={(v) => updateFactorField(entry.name, "factor", v)}
                               style={S.managerFactorInput}
                               title="Density g/cm³"
                             />
-                            <NumberBox
+                            <NumberBox prefix="R" suffix="/kg"
                               value={entry.price}
                               onCommit={(v) => updateFactorField(entry.name, "price", v)}
                               style={S.managerFactorInput}
@@ -21808,7 +21812,7 @@ export default function StockControl() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
                   {(useAllocationModal.offcuts || []).map((o, idx) => (
                     <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <input
+                      <UnitInput suffix="m"
                         style={{ ...S.input, flex: 1 }}
                         type="number"
                         step="any"
@@ -21821,7 +21825,7 @@ export default function StockControl() {
                             offcuts: m.offcuts.map((x, i) => (i === idx ? { ...x, length: e.target.value } : x)),
                           }))
                         }
-                        placeholder="Length (m)"
+                        placeholder="Length"
                       />
                       <span style={{ color: C.muted, fontSize: 12.5 }}>×</span>
                       <input
@@ -22105,8 +22109,8 @@ export default function StockControl() {
 
                   <div style={isCncCut ? S.formGrid : { marginTop: 10 }}>
                     <div>
-                      <label style={S.label}>{isCncCut ? "Length per piece (mm)" : "Quantity"}</label>
-                      <input
+                      <label style={S.label}>{isCncCut ? "Length per piece" : "Quantity"}</label>
+                      <UnitInput suffix={isCncCut ? "mm" : undefined}
                         autoFocus
                         type="number"
                         step="any"
@@ -23561,14 +23565,14 @@ export default function StockControl() {
                                       {showLength && (
                                         <td style={cell}>
                                           {edit ? (
-                                            <input
+                                            <UnitInput suffix="mm"
                                               type="number"
                                               min="0"
                                               step="0.01"
                                               defaultValue={c.length_mm ?? ""}
                                               onBlur={(e) => updateJobQuoteItem(jobDetail.job, c, "length_mm", e.target.value)}
                                               style={mmBox}
-                                              placeholder="mm"
+                                              placeholder=""
                                               title="Cut length in millimetres. Leave it blank where a length means nothing."
                                             />
                                           ) : (
@@ -23652,14 +23656,14 @@ export default function StockControl() {
                                     {canSeeValue && <td style={cell}></td>}
                                     {showLength && (
                                       <td style={cell}>
-                                        <input
+                                        <UnitInput suffix="mm"
                                           type="number"
                                           min="0"
                                           step="0.01"
                                           style={mmBox}
                                           value={newPartForm.lengthMm}
                                           onChange={(e) => setNewPartForm((f) => ({ ...f, lengthMm: e.target.value }))}
-                                          placeholder="mm"
+                                          placeholder=""
                                           title="Cut length in millimetres. Leave it blank where a length means nothing."
                                         />
                                       </td>

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { C } from "../theme.js";
+import UnitInput from "../UnitInput.jsx";
 import { readPrice } from "./twoPrice.js";
 
 // A number that is saved once, on leaving the box or pressing Enter:
@@ -15,7 +16,8 @@ import { readPrice } from "./twoPrice.js";
 //
 //   value     the stored number (0 or blank shows empty)
 //   onCommit  called with the new number, only when it differs
-export default function NumberBox({ value, onCommit, style, title, placeholder = "0" }) {
+//   prefix / suffix  a unit shown in grey inside the box ("R", "mm", "kg/m")
+export default function NumberBox({ value, onCommit, style, title, placeholder = "0", prefix, suffix }) {
   const [draft, setDraft] = useState(null);
   const stored = Number(value) || 0;
   const typed = draft == null ? null : readPrice(draft);
@@ -28,7 +30,9 @@ export default function NumberBox({ value, onCommit, style, title, placeholder =
   }
 
   return (
-    <input
+    <UnitInput
+      prefix={prefix}
+      suffix={suffix}
       type="text"
       inputMode="decimal"
       value={draft != null ? draft : stored === 0 ? "" : String(stored)}

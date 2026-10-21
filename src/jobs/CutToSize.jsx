@@ -1,3 +1,4 @@
+import UnitInput from "../UnitInput.jsx";
 import { rand } from "../lib/money.js";
 import { useState } from "react";
 import { Plus, Trash2, AlertTriangle, FileText, Pencil, Check, X, PackagePlus, Lock } from "lucide-react";
@@ -74,17 +75,6 @@ const wideEnough = (text, least, most = 380) => Math.min(most, Math.max(least, S
 // itself it is that much wider and runs over the box beside it.
 const findCell = { fontSize: 14, padding: "4px 26px 4px 6px", boxSizing: "border-box" };
 const linkBtn = { marginTop: 6, padding: 0, border: "none", background: "transparent", color: C.muted, fontSize: 13, textDecoration: "underline", cursor: "pointer" };
-
-// A number box with its unit written after it, so nobody has to guess
-// whether a length is millimetres or metres.
-function UnitInput({ unit, style, ...props }) {
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-      <input type="number" {...props} style={style} />
-      <span style={{ fontSize: 12, color: C.muted }}>{unit}</span>
-    </span>
-  );
-}
 
 export default function CutToSize({
   lines,
@@ -271,7 +261,8 @@ export default function CutToSize({
       ),
       length: (
         <UnitInput
-          unit="mm"
+          type="number"
+          suffix="mm"
           min="1"
           step="1"
           value={d.cutLengthMm}
@@ -283,7 +274,8 @@ export default function CutToSize({
       ),
       qty: (
         <UnitInput
-          unit="off"
+          type="number"
+          suffix="off"
           min="1"
           step="1"
           value={d.qty}
@@ -295,7 +287,8 @@ export default function CutToSize({
       ),
       from: (
         <UnitInput
-          unit="m"
+          type="number"
+          suffix="m"
           min="0.1"
           step="0.1"
           value={d.stockLengthM}

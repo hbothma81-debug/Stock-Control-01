@@ -5,6 +5,7 @@
 // (a click, then its size and end). Rules and the engine's settings:
 // holesThreads.js. The lines live in the form as `holes`.
 
+import UnitInput from "../UnitInput.jsx";
 import { Plus, Trash2 } from "lucide-react";
 import Section from "../Section.jsx";
 import TypeToFind from "../TypeToFind.jsx";
@@ -33,8 +34,8 @@ export default function HolesThreads({ form, setForm }) {
           {l.type === "knurl" && (
             <>
               <div style={{ width: 110 }}>
-                <label style={S.label}>Diameter (mm)</label>
-                <input style={S.input} value={l.dia} inputMode="decimal" onChange={(e) => change(i, "dia", e.target.value)} placeholder="25" />
+                <label style={S.label}>Diameter</label>
+                <UnitInput suffix="mm" style={S.input} value={l.dia} inputMode="decimal" onChange={(e) => change(i, "dia", e.target.value)} placeholder="25" />
               </div>
               <div style={{ width: 150 }}>
                 <label style={S.label}>Pattern</label>
@@ -60,8 +61,8 @@ export default function HolesThreads({ form, setForm }) {
           )}
           {l.type === "ream" && (
             <div style={{ width: 110 }}>
-              <label style={S.label}>Diameter (mm)</label>
-              <input style={S.input} value={l.dia} inputMode="decimal" onChange={(e) => change(i, "dia", e.target.value)} placeholder="12" />
+              <label style={S.label}>Diameter</label>
+              <UnitInput suffix="mm" style={S.input} value={l.dia} inputMode="decimal" onChange={(e) => change(i, "dia", e.target.value)} placeholder="12" />
             </div>
           )}
           {l.type === "starts" && (
@@ -94,8 +95,8 @@ export default function HolesThreads({ form, setForm }) {
           </div>
           {(l.type === "tap" || l.type === "ream" || l.type === "knurl") && (
             <div style={{ width: 120 }}>
-              <label style={S.label}>Length (mm)</label>
-              <input style={S.input} value={l.length} inputMode="decimal" onChange={(e) => change(i, "length", e.target.value)} placeholder={l.type === "knurl" ? "whole dia" : "whole hole"} />
+              <label style={S.label}>Length</label>
+              <UnitInput suffix="mm" style={S.input} value={l.length} inputMode="decimal" onChange={(e) => change(i, "length", e.target.value)} placeholder={l.type === "knurl" ? "whole dia" : "whole hole"} />
             </div>
           )}
           <button type="button" className="stk-btn" style={{ ...S.chip, padding: "6px 8px", color: C.danger }} title="Remove this line" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>

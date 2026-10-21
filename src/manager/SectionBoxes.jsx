@@ -1,3 +1,4 @@
+import UnitInput from "../UnitInput.jsx";
 import { C, S } from "../theme.js";
 import { PIPE_STANDARDS, SCHEDULES, SANS62_CLASSES, pipeSizes } from "./sectionShapes.js";
 
@@ -22,7 +23,7 @@ export function sectionBoxInputs(shape, d, setD) {
   const numBox = (k, label) => (
     <label key={k} style={boxStyle}>
       {caption(label)}
-      <input style={S.input} inputMode="decimal" value={d[k] ?? ""} onChange={(e) => set(k, e.target.value)} />
+      <UnitInput suffix={k === "kgm" ? "kg/m" : "mm"} style={S.input} inputMode="decimal" value={d[k] ?? ""} onChange={(e) => set(k, e.target.value)} />
     </label>
   );
   // A fixed handful of choices, so a plain select.

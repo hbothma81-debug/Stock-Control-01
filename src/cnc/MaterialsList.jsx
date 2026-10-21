@@ -164,7 +164,7 @@ export default function MaterialsList({ materials, barPrices, pipes, canEdit, ca
                   "–"
                 ) : mayChange ? (
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <NumberBox style={{ ...S.input, width: 90 }} value={m.ownPrice} placeholder="30" title="This material's own price, R/kg" onCommit={(n) => onSavePrice(m.fullName, n)} />
+                    <NumberBox prefix="R" suffix="/kg" style={{ ...S.input, width: 90 }} value={m.ownPrice} placeholder="30" title="This material's own price, R/kg" onCommit={(n) => onSavePrice(m.fullName, n)} />
                     {Number(m.price) > 0 && Number(m.price) !== Number(m.ownPrice) && <span style={{ fontSize: 12.5, color: C.muted }}>uses {rand(m.price)} (cheapest supplier)</span>}
                     {!(Number(m.price) > 0) && <span style={{ fontSize: 12.5, color: C.accentRaw }}>not priced: R30</span>}
                   </div>
@@ -188,9 +188,9 @@ export default function MaterialsList({ materials, barPrices, pipes, canEdit, ca
                         {canSeeValue && (
                           <>
                             <span>R/kg</span>
-                            {mayChange ? <NumberBox style={{ ...S.input, width: 80 }} value={u.perKg ?? 0} onCommit={(n) => savePrice(m.name, size, n, "R/kg")} /> : <span>{u.perKg ?? "–"}</span>}
+                            {mayChange ? <NumberBox prefix="R" suffix="/kg" style={{ ...S.input, width: 80 }} value={u.perKg ?? 0} onCommit={(n) => savePrice(m.name, size, n, "R/kg")} /> : <span>{u.perKg ?? "–"}</span>}
                             <span>R/m</span>
-                            {mayChange ? <NumberBox style={{ ...S.input, width: 90 }} value={u.perM ?? 0} onCommit={(n) => savePrice(m.name, size, n, "R/m")} /> : <span>{u.perM ?? "–"}</span>}
+                            {mayChange ? <NumberBox prefix="R" suffix="/m" style={{ ...S.input, width: 90 }} value={u.perM ?? 0} onCommit={(n) => savePrice(m.name, size, n, "R/m")} /> : <span>{u.perM ?? "–"}</span>}
                             <span style={{ color: C.muted, fontSize: 12 }}>typed as {r.unit}</span>
                           </>
                         )}
