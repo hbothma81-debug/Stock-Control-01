@@ -14,7 +14,8 @@ import { C, S } from "./theme.js";
 // figure read as more than it is ("2 of 12 not priced").
 // Boxes go side by side inside FigureRow and wrap on a phone.
 
-export { rand } from "./lib/money.js";
+import { rand } from "./lib/money.js";
+export { rand };
 
 export function FigureRow({ children }) {
   return <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>{children}</div>;
