@@ -1,6 +1,5 @@
 import { useState } from "react";
 import Section from "../Section.jsx";
-import TypeToFind from "../TypeToFind.jsx";
 import { FileText, Upload, X } from "lucide-react";
 import { C, S } from "../theme.js";
 import { noDrawingReason, revisionText } from "./jobDrawings.js";
@@ -11,35 +10,27 @@ import { noDrawingReason, revisionText } from "./jobDrawings.js";
 // Choosing the stages a drawing goes to comes next (step 4).
 //
 // rows: drawingRows() from jobDrawings.js. jobOnly: drawing rows kept for
-// this job only. jobOnlyReady: the database can keep them
-// (setup-drawings-job.sql); without it "This job only" is not offered.
-// loading: the drawings are still being read.
+// this job only. loading: the drawings are still being read.
 // onOpen(partNumber): opens the drawing.
 // canUpload: may add drawings. onFiles(fileList): files dropped or picked.
-// upload: the pop-up's state from App, or null when shut:
-//   { entries: [{ key, file, target, mode, customerRevision }], busy }
-//   target is a part number, "__job__" for This job only, or "" not yet
-//   chosen; mode is "revision" or "replace".
-// partOptions: [{ value: partNumber, label, hint }] for the Goes to box.
-// existingFor(entry): the part already has a current drawing.
+// upload: the pop-up's state from App, or null when shut. It holds only
+// the files that would land on a drawing already there:
+//   { entries: [{ key, file, lineText, mode, customerRevision }], busy }
+//   mode is "revision" or "replace".
 // onUploadChange(key, patch), onUploadRemove(key), onUploadConfirm(),
 // onUploadCancel().
 
-const JOB_ONLY = "__job__";
 const head = { textAlign: "left", padding: "4px 6px", fontSize: 12, color: C.muted, fontWeight: 600, whiteSpace: "nowrap" };
 const cell = { padding: "4px 6px", fontSize: 13, borderTop: `1px solid ${C.border}`, verticalAlign: "top" };
 
 export default function JobDrawings({
   rows,
   jobOnly,
-  jobOnlyReady,
   loading,
   onOpen,
   canUpload,
   onFiles,
   upload,
-  partOptions,
-  existingFor,
   onUploadChange,
   onUploadRemove,
   onUploadConfirm,
@@ -171,15 +162,14 @@ export default function JobDrawings({
     </div>
   );
 
-  // The question asked only of the files that need one: no part number
-  // found in the name, or a part that already has a drawing.
+  // Asked only of the files that would land on a drawing already there.
   function renderUploadPopup() {
-    const ready = upload.entries.length > 0 && upload.entries.every((e) => e.target);
+    const ready = upload.entries.length > 0;
     return (
       <div style={{ ...S.modalOverlay, zIndex: 29 }}>
         <div style={{ ...S.modal, maxWidth: 720 }} onClick={(e) => e.stopPropagation()}>
           <div style={S.modalHead}>
-            <span style={S.modalTitle}>Upload drawings</span>
+            <span style={S.modalTitle}>Already has a drawing</span>
             <button type="button" className="stk-btn" style={S.iconBtn} onClick={onUploadCancel} disabled={upload.busy}>
               <X size={18} />
             </button>
@@ -190,26 +180,18 @@ export default function JobDrawings({
                 <tr>
                   <th style={head}>File</th>
                   <th style={head}>Goes to</th>
-                  <th style={head}>Already has a drawing</th>
+                  <th style={head}>Replace it, or keep it as history?</th>
                   <th style={head}></th>
                 </tr>
               </thead>
               <tbody>
                 {upload.entries.map((entry) => {
-                  const existing = entry.target && existingFor(entry);
                   return (
                     <tr key={entry.key}>
                       <td style={{ ...cell, wordBreak: "break-word" }}>{entry.file.name}</td>
-                      <td style={{ ...cell, minWidth: 200 }}>
-                        <TypeToFind
-                          options={jobOnlyReady ? [{ value: JOB_ONLY, label: "This job only" }, ...partOptions] : partOptions}
-                          value={entry.target}
-                          onChange={(v) => onUploadChange(entry.key, { target: v || "" })}
-                          emptyLabel={jobOnlyReady ? "Pick a line, or This job only" : "Pick a line"}
-                        />
-                      </td>
+                      <td style={cell}>{entry.lineText}</td>
                       <td style={cell}>
-                        {existing ? (
+                        {(
                           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                             <div style={{ display: "flex", gap: 4 }}>
                               {[
@@ -242,8 +224,6 @@ export default function JobDrawings({
                               style={{ ...S.input, padding: "4px 6px", fontSize: 13 }}
                             />
                           </div>
-                        ) : (
-                          <span style={S.roleHint}>{entry.target ? "No: first drawing" : ""}</span>
                         )}
                       </td>
                       <td style={cell}>

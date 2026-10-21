@@ -1,6 +1,36 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { drawingRows, fileStem, jobOnlyPartNumber, matchFileToPart, noDrawingReason, revisionText } from "./jobDrawings.js";
+import { drawingRows, fileStem, jobOnlyPartNumber, matchFileToLine, matchFileToPart, noDrawingReason, revisionText } from "./jobDrawings.js";
+
+const jobLines = [
+  { id: "1", description: "Base plate", code: "ERS-1001" },
+  { id: "2", description: "Base plate stiffener", code: "" },
+  { id: "3", description: "Lug", code: "" },
+  { id: "4", description: "Side panel L", code: "" },
+  { id: "5", description: "Side panel R", code: "" },
+];
+const codeOf = (l) => l.code;
+
+test("a file goes to a line by its stock code first", () => {
+  assert.equal(matchFileToLine("ERS-1001 Rev A.pdf", jobLines, codeOf).id, "1");
+});
+
+test("then by the whole description in its name, the longest winning", () => {
+  assert.equal(matchFileToLine("base plate.dxf", jobLines, codeOf).id, "1");
+  assert.equal(matchFileToLine("Base Plate Stiffener rev2.pdf", jobLines, codeOf).id, "2");
+});
+
+test("short descriptions and ties are not guessed", () => {
+  assert.equal(matchFileToLine("Lug.pdf", jobLines, codeOf), null);
+  assert.equal(matchFileToLine("Side panel L and Side panel R.pdf", jobLines, codeOf), null);
+  assert.equal(matchFileToLine("GA layout.pdf", jobLines, codeOf), null);
+});
+
+test("a line's drawing kept on the job counts when its part has none", () => {
+  const { withDrawing, withoutDrawing } = drawingRows(jobLines.slice(0, 2), codeOf, {}, () => [], { 2: { id: "j" } });
+  assert.deepEqual(withDrawing.map((r) => r.line.id), ["2"]);
+  assert.deepEqual(withoutDrawing.map((r) => r.line.id), ["1"]);
+});
 
 test("a file goes to the longest part number in its name", () => {
   const parts = ["P-1", "P-10", "ERS-1001"];

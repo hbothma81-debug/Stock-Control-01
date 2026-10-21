@@ -74,7 +74,7 @@ import {
 import CutToSize from "./jobs/CutToSize.jsx";
 import BuyOuts from "./jobs/BuyOuts.jsx";
 import JobDrawings from "./jobs/JobDrawings.jsx";
-import { drawingRows, jobOnlyPartNumber, matchFileToPart } from "./jobs/jobDrawings.js";
+import { drawingRows, jobOnlyPartNumber, matchFileToLine } from "./jobs/jobDrawings.js";
 import Materials from "./jobs/Materials.jsx";
 import { addStockFromStores } from "./jobs/stockFromStores.js";
 import { markedStageTakes, jobIsMarked, comesBeforeForLine, orderedByLines, extraStagesOf, routeText, renameInList } from "./jobs/extraStages.js";
@@ -2090,6 +2090,7 @@ export default function StockControl() {
     const parts = drawingPartsKey ? drawingPartsKey.split("\n") : [];
     let stale = false;
     const columns = "id, part_number, file_name, internal_revision, customer_revision, created_at, uploaded_by";
+    const jobColumns = `${columns}, quote_item_id`;
     setJobDrawingFiles((prev) =>
       prev.jobId === jobId ? { ...prev, loading: true } : { jobId, byPart: {}, jobOnly: [], loading: true }
     );
@@ -2100,7 +2101,7 @@ export default function StockControl() {
       // A database without drawings.job_id answers an error: none then.
       supabase
         .from("drawings")
-        .select(columns)
+        .select(jobColumns)
         .eq("job_id", jobId)
         .eq("status", "current")
         .then(({ data, error }) => (error ? null : data || [])),
@@ -7697,34 +7698,56 @@ export default function StockControl() {
   }
 
   // Files dropped or picked on a job's Drawings tab (Heinrich, 21 Oct
-  // 2026). Each goes to the line whose part number its name holds. When
-  // every file found its line and none of those parts has a drawing yet
-  // they go straight in; otherwise the pop-up asks only what it must.
-  function startJobDrawingUpload(job, quoteItems, fileList) {
-    const parts = (quoteItems || []).map(linePartNumber).filter(Boolean);
-    const entries = Array.from(fileList || []).map((file, i) => ({
-      key: `${Date.now()}-${i}-${file.name}`,
-      file,
-      target: matchFileToPart(file.name, parts) || "",
-      mode: "revision",
-      customerRevision: "",
-    }));
+  // 2026: "only have a popup if there is a file to replace"). Each goes in
+  // at once, with nothing to pick: to the line whose stock code or
+  // description its name holds (matchFileToLine), else as This job only.
+  // A line with a part number files it under that part in the library; a
+  // line without one keeps it on this job, tied to the line. Only a file
+  // landing on a drawing already there is held back, for the pop-up's
+  // Replace existing or New revision.
+  function startJobDrawingUpload(job, quoteItems, fileList, jobOnlyReady) {
+    const entries = Array.from(fileList || []).map((file, i) => {
+      const line = matchFileToLine(file.name, quoteItems || [], linePartNumber);
+      const partNumber = line ? linePartNumber(line) : "";
+      return {
+        key: `${Date.now()}-${i}-${file.name}`,
+        file,
+        target: partNumber || "__job__",
+        lineId: line && !partNumber ? line.id : null,
+        lineText: line ? line.description : "This job only",
+        mode: "revision",
+        customerRevision: "",
+      };
+    });
     if (entries.length === 0) return;
-    const needsAnswer = entries.some((e) => !e.target || drawingLookup[e.target]);
-    if (needsAnswer) setJobDrawingUpload({ entries, busy: false });
-    else runJobDrawingUpload(job, quoteItems, entries);
+    // A drawing kept on the job needs setup-drawings-job.sql.
+    const cannot = jobOnlyReady ? [] : entries.filter((e) => e.target === "__job__");
+    const usable = entries.filter((e) => !cannot.includes(e));
+    if (cannot.length) {
+      alert(
+        `${cannot.map((e) => e.file.name).join(", ")}: no line's stock code or description is in the name, and this database ` +
+          "cannot keep a drawing for one job yet (setup-drawings-job.sql). Rename the file after the line, or run that file first."
+      );
+    }
+    const asks = usable.filter((e) => drawingLookup[jobDrawingPartFor(job, e)]);
+    const clean = usable.filter((e) => !asks.includes(e));
+    if (asks.length) setJobDrawingUpload({ entries: asks, busy: false });
+    if (clean.length) runJobDrawingUpload(job, quoteItems, clean, { keepPopup: asks.length > 0 });
   }
 
   // The part number an upload entry is filed under in the library.
   const jobDrawingPartFor = (job, entry) => (entry.target === "__job__" ? jobOnlyPartNumber(job.job_number, entry.file.name) : entry.target);
 
-  async function runJobDrawingUpload(job, quoteItems, entries) {
-    setJobDrawingUpload((u) => (u ? { ...u, busy: true } : u));
+  // keepPopup: these went in beside a pop-up still waiting for its answer.
+  async function runJobDrawingUpload(job, quoteItems, entries, { keepPopup = false } = {}) {
+    if (!keepPopup) setJobDrawingUpload((u) => (u ? { ...u, busy: true } : u));
     const failed = [];
     for (const entry of entries) {
       const jobOnly = entry.target === "__job__";
       const partNumber = jobDrawingPartFor(job, entry);
-      const line = jobOnly ? null : (quoteItems || []).find((it) => linePartNumber(it) === partNumber);
+      const line = jobOnly
+        ? (quoteItems || []).find((it) => it.id === entry.lineId) || null
+        : (quoteItems || []).find((it) => linePartNumber(it) === partNumber);
       try {
         const done = await saveJobDrawing({
           file: entry.file,
@@ -7734,10 +7757,12 @@ export default function StockControl() {
           linkedItemId: line?.linked_item_id || null,
           description: line?.description || entry.file.name.replace(/\.[^.]*$/, ""),
           jobId: jobOnly ? job.id : null,
+          quoteItemId: jobOnly && line ? line.id : null,
           replace: entry.mode === "replace" && !!drawingLookup[partNumber],
         });
         const action = done === "replaced" ? "Drawing replaced" : done === "revision" ? "Drawing: new revision" : "Drawing added";
-        await logJobEvent(job.id, action, `${partNumber}: ${entry.file.name}${jobOnly ? " (this job only)" : ""}`);
+        const where = jobOnly ? (line ? ` (for ${line.description}, this job only)` : " (this job only)") : "";
+        await logJobEvent(job.id, action, `${partNumber}: ${entry.file.name}${where}`);
       } catch (err) {
         console.error(`Couldn't upload ${entry.file.name}:`, err);
         failed.push(`${entry.file.name}: ${err?.message || err}`);
@@ -7746,7 +7771,7 @@ export default function StockControl() {
     await loadDrawingLookup();
     setJobDrawingTick((t) => t + 1);
     refreshJobDetail();
-    setJobDrawingUpload(null);
+    if (!keepPopup) setJobDrawingUpload(null);
     if (failed.length) alert(`${failed.length} of ${entries.length} drawing${entries.length === 1 ? "" : "s"} did not upload:\n\n${failed.join("\n")}`);
   }
 
@@ -24321,28 +24346,28 @@ export default function StockControl() {
                   .map((p) => p.process_name)
                   .filter((name, i, all) => all.indexOf(name) === i && !isInvoicingStage(name));
                 const held = jobDrawingFiles.jobId === jobDetail.job.id ? jobDrawingFiles : { byPart: {}, jobOnly: [], loading: true };
-                // The Goes to box: each part number on the job once.
-                const partOptions = [];
-                for (const line of jobDetail.quoteItems || []) {
-                  const pn = linePartNumber(line);
-                  if (pn && !partOptions.some((o) => o.value === pn)) partOptions.push({ value: pn, label: pn, hint: line.description });
-                }
-                partOptions.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }));
+                // A drawing kept on the job for one of its lines shows on
+                // that line's row; the rest are This job only.
+                const lineIds = new Set((jobDetail.quoteItems || []).map((l) => l.id));
+                const byLine = {};
+                for (const d of held.jobOnly) if (d.quote_item_id && lineIds.has(d.quote_item_id) && !byLine[d.quote_item_id]) byLine[d.quote_item_id] = d;
+                const shownOnLine = new Set(Object.values(byLine).map((d) => d.id));
                 const changeEntries = (fn) => setJobDrawingUpload((u) => (u ? { ...u, entries: fn(u.entries) } : u));
                 return (
                   <JobDrawings
-                    rows={drawingRows(jobDetail.quoteItems, linePartNumber, held.byPart, (line) =>
-                      stageNames.filter((name) => stageTakesItem(name, line, jobDetail.quoteItems))
+                    rows={drawingRows(
+                      jobDetail.quoteItems,
+                      linePartNumber,
+                      held.byPart,
+                      (line) => stageNames.filter((name) => stageTakesItem(name, line, jobDetail.quoteItems)),
+                      byLine
                     )}
-                    jobOnly={held.jobOnly}
-                    jobOnlyReady={!!held.jobOnlyReady}
+                    jobOnly={held.jobOnly.filter((d) => !shownOnLine.has(d.id))}
                     loading={held.loading}
                     onOpen={(partNumber) => openDrawingPreviewByPartNumber(partNumber)}
                     canUpload={canEditThisJob}
-                    onFiles={(files) => startJobDrawingUpload(jobDetail.job, jobDetail.quoteItems, files)}
+                    onFiles={(files) => startJobDrawingUpload(jobDetail.job, jobDetail.quoteItems, files, !!held.jobOnlyReady)}
                     upload={jobDrawingUpload}
-                    partOptions={partOptions}
-                    existingFor={(entry) => !!drawingLookup[jobDrawingPartFor(jobDetail.job, entry)]}
                     onUploadChange={(key, patch) => changeEntries((list) => list.map((e) => (e.key === key ? { ...e, ...patch } : e)))}
                     onUploadRemove={(key) => changeEntries((list) => list.filter((e) => e.key !== key))}
                     onUploadConfirm={() => runJobDrawingUpload(jobDetail.job, jobDetail.quoteItems, jobDrawingUpload.entries)}

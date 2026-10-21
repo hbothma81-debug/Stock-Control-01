@@ -84,10 +84,11 @@ export function useDrawings(deps) {
   // The one function later phases actually call to record a new drawing —
   // handles superseding the old "current" revision and working out the next
   // internal revision number automatically, so callers don't have to.
-  // jobId: a drawing kept for one job only (drawings.job_id,
+  // jobId / quoteItemId: a drawing kept for one job only, and the job
+  // line it is for (drawings.job_id, quote_item_id;
   // setup-drawings-job.sql); left off the row for every other drawing, so
-  // a database without the column still takes them.
-  async function insertDrawingRecord({ partNumber, customer, customerRevision, storagePath, fileName, linkedItemId, description, price, jobId }) {
+  // a database without the columns still takes them.
+  async function insertDrawingRecord({ partNumber, customer, customerRevision, storagePath, fileName, linkedItemId, description, price, jobId, quoteItemId }) {
     if (!supabase) return null;
     const nextRevision = await getNextInternalRevision(partNumber);
     await supersedeOldRevisions(partNumber);
@@ -106,6 +107,7 @@ export function useDrawings(deps) {
         price: price != null ? price : null,
         uploaded_by: roleLabel,
         ...(jobId ? { job_id: jobId } : {}),
+        ...(quoteItemId ? { quote_item_id: quoteItemId } : {}),
       })
       .select()
       .single();
@@ -119,7 +121,7 @@ export function useDrawings(deps) {
   // revision, and the old file is removed from the store. Otherwise it is
   // a new row: the part's first drawing or its next revision, the old one
   // kept as superseded. Returns "replaced", "revision" or "first".
-  async function saveJobDrawing({ file, partNumber, customer, customerRevision, linkedItemId, description, jobId, replace }) {
+  async function saveJobDrawing({ file, partNumber, customer, customerRevision, linkedItemId, description, jobId, quoteItemId, replace }) {
     if (!supabase) throw new Error("No database connection.");
     const { data: current, error: currentError } = await supabase
       .from("drawings")
@@ -169,6 +171,7 @@ export function useDrawings(deps) {
       description,
       price: null,
       jobId,
+      quoteItemId,
     });
     return current ? "revision" : "first";
   }

@@ -11,14 +11,17 @@
 // partNumberOf(line): the linked stock part's part number, or "".
 // drawingsByPart: { [partNumber]: drawing row } for current drawings.
 // stagesOf(line): stage names the line goes to, in flow order.
+// drawingsByLine: { [line id]: drawing row } kept on this job for a line
+// with no part number (drawings.quote_item_id); the part's own drawing
+// wins where there is one.
 // Returns { withDrawing, withoutDrawing }, each a list of rows sorted by
 // part number (numbers read as numbers), then description.
-export function drawingRows(lines, partNumberOf, drawingsByPart, stagesOf) {
+export function drawingRows(lines, partNumberOf, drawingsByPart, stagesOf, drawingsByLine = {}) {
   const withDrawing = [];
   const withoutDrawing = [];
   for (const line of lines || []) {
     const partNumber = (partNumberOf(line) || "").trim();
-    const drawing = partNumber ? drawingsByPart[partNumber] || null : null;
+    const drawing = (partNumber ? drawingsByPart[partNumber] : null) || drawingsByLine[line.id] || null;
     const row = { line, partNumber, drawing, stages: stagesOf(line) };
     (drawing ? withDrawing : withoutDrawing).push(row);
   }
@@ -59,6 +62,32 @@ export function matchFileToPart(fileName, partNumbers) {
       best = pn;
       tie = false;
     } else if (code.length === squash(best).length && code !== squash(best)) {
+      tie = true;
+    }
+  }
+  return tie ? null : best;
+}
+
+// Which job line a dropped file is for (Heinrich, 21 Oct 2026: "if the
+// file name matches the description or stock code they should
+// automatically be linked"). The part number first, by matchFileToPart;
+// failing that the description: the whole description found in the name
+// (four letters or more, so "Lug" finds nothing by accident), the longest
+// one winning and a tie not guessed. null: no line, This job only.
+export function matchFileToLine(fileName, lines, partNumberOf) {
+  const part = matchFileToPart(fileName, (lines || []).map(partNumberOf));
+  if (part) return (lines || []).find((l) => (partNumberOf(l) || "").trim() === part) || null;
+  const stem = squash(fileStem(fileName));
+  let best = null;
+  let tie = false;
+  for (const line of lines || []) {
+    const words = squash(line.description);
+    if (words.length < 4 || !stem.includes(words)) continue;
+    const bestWords = best ? squash(best.description) : "";
+    if (!best || words.length > bestWords.length) {
+      best = line;
+      tie = false;
+    } else if (words.length === bestWords.length && words !== bestWords) {
       tie = true;
     }
   }
