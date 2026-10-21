@@ -248,9 +248,9 @@ with checks (setup_file, looks_for, found) as (
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'stock_item_quotes')),
     ('setup-email-signatures.sql', 'table email_signatures (each person''s own email signature)',
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'email_signatures')),
-    ('setup-drawings-job.sql', 'columns drawings.job_id and quote_item_id (a drawing kept for one job, and its line)',
-      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'drawings' and column_name = 'job_id')
-      and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'drawings' and column_name = 'quote_item_id'))
+    ('setup-drawings-job.sql', 'columns drawings.job_id and quote_item_id, and table job_drawings (a job''s own drawings)',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'drawings' and column_name = 'quote_item_id')
+      and exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'job_drawings'))
 )
 select
   setup_file,

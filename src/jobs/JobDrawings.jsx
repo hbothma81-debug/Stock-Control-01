@@ -1,18 +1,20 @@
 import { useState } from "react";
 import Section from "../Section.jsx";
-import { FileText, Upload, X } from "lucide-react";
+import { FileText, RotateCcw, Trash2, Upload, X } from "lucide-react";
 import { C, S } from "../theme.js";
-import { noDrawingReason, revisionText } from "./jobDrawings.js";
+import { KEPT_IN, noDrawingReason, revisionText } from "./jobDrawings.js";
 
-// The Drawings tab on a job (Heinrich, 21 Oct 2026). Shows the library's
-// current drawing for each line and the drawings kept for this job only,
-// and takes new ones: dropped anywhere on the tab, or through Upload.
-// Choosing the stages a drawing goes to comes next (step 4).
+// The Drawings tab on a job (Heinrich, 21 Oct 2026). Every drawing on the
+// job, one row per file, each saying where it is kept: the library (the
+// part's drawing, on every job with that part), this job only, or the
+// stock part's own attachment. Files dropped anywhere on the tab, or
+// through Upload, go in at once (see App.jsx, startJobDrawingUpload).
 //
-// rows: drawingRows() from jobDrawings.js. jobOnly: drawing rows kept for
-// this job only. loading: the drawings are still being read.
-// onOpen(partNumber): opens the drawing.
+// list: jobDrawingList() from jobDrawings.js. loading: still being read.
+// onOpen(row): opens the file.
 // canUpload: may add drawings. onFiles(fileList): files dropped or picked.
+// canRemove: may take a drawing off this job (never out of the library).
+// onRemove(row), onPutBack(row).
 // upload: the pop-up's state from App, or null when shut. It holds only
 // the files that would land on a drawing already there:
 //   { entries: [{ key, file, lineText, mode, customerRevision }], busy }
@@ -24,23 +26,24 @@ const head = { textAlign: "left", padding: "4px 6px", fontSize: 12, color: C.mut
 const cell = { padding: "4px 6px", fontSize: 13, borderTop: `1px solid ${C.border}`, verticalAlign: "top" };
 
 export default function JobDrawings({
-  rows,
-  jobOnly,
+  list,
   loading,
   onOpen,
   canUpload,
   onFiles,
+  canRemove,
+  onRemove,
+  onPutBack,
   upload,
   onUploadChange,
   onUploadRemove,
   onUploadConfirm,
   onUploadCancel,
 }) {
-  const { withDrawing, withoutDrawing } = rows;
+  const { rows, withoutDrawing, removed } = list;
   // Only the border's colour changes while files are held over the tab:
   // nothing moves under the pointer.
   const [dragOver, setDragOver] = useState(false);
-  const count = withDrawing.length + jobOnly.length;
   const dropProps = canUpload
     ? {
         onDragOver: (e) => {
@@ -57,21 +60,57 @@ export default function JobDrawings({
         },
       }
     : {};
-  const drawingButton = (partNumber, drawing) => (
-    <button
-      type="button"
-      className="stk-btn"
-      style={{ ...S.reqActionBtnMuted, padding: "2px 8px", fontSize: 12, justifyContent: "flex-start" }}
-      onClick={() => onOpen(partNumber)}
-      title="Open the drawing"
-    >
-      <FileText size={12} /> {drawing.file_name || partNumber}
-    </button>
-  );
-  const loaded = (drawing) => (
-    <td style={{ ...cell, whiteSpace: "nowrap" }} title={drawing.uploaded_by ? `by ${drawing.uploaded_by}` : undefined}>
-      {drawing.created_at ? new Date(drawing.created_at).toLocaleDateString() : ""}
-    </td>
+  const goesTo = (r) => (r.everyStage ? "Every stage" : r.onFloor ? r.stages.join(", ") : "This page only");
+  const sheet = (list, action) => (
+    <div style={{ overflowX: "auto" }}>
+      <table className="stk-sheet" style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            <th style={head}>Drawing</th>
+            <th style={head} title="Library: the part's drawing, on every job with that part. This job only: kept here and nowhere else.">Kept in</th>
+            <th style={head}>Line</th>
+            <th style={head}>Revision</th>
+            <th style={head}>Loaded</th>
+            <th style={head} title="Where the floor sees it">Goes to</th>
+            {action && <th style={head}></th>}
+          </tr>
+        </thead>
+        <tbody>
+          {list.map((r) => (
+            <tr key={r.key}>
+              <td style={cell}>
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={{ ...S.reqActionBtnMuted, padding: "2px 8px", fontSize: 12, justifyContent: "flex-start", textAlign: "left" }}
+                  onClick={() => onOpen(r)}
+                  title="Open it"
+                >
+                  <FileText size={12} /> {r.name}
+                </button>
+              </td>
+              <td style={{ ...cell, whiteSpace: "nowrap", color: r.kind === "library" ? C.text : C.muted }}>{KEPT_IN[r.kind]}</td>
+              <td style={cell}>
+                {r.line ? (
+                  <>
+                    {r.line.description}
+                    {r.partNumber && <span style={{ color: C.muted }}> · {r.partNumber}</span>}
+                  </>
+                ) : (
+                  <span style={{ color: C.muted }}>No line</span>
+                )}
+              </td>
+              <td style={{ ...cell, whiteSpace: "nowrap" }}>{revisionText(r.drawing)}</td>
+              <td style={{ ...cell, whiteSpace: "nowrap" }} title={r.drawing?.uploaded_by ? `by ${r.drawing.uploaded_by}` : undefined}>
+                {r.drawing?.created_at ? new Date(r.drawing.created_at).toLocaleDateString() : ""}
+              </td>
+              <td style={{ ...cell, color: r.onFloor ? C.text : C.muted }}>{goesTo(r)}</td>
+              {action && <td style={{ ...cell, whiteSpace: "nowrap" }}>{action(r)}</td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
   return (
     <div {...dropProps} style={{ marginTop: 10 }}>
@@ -103,48 +142,28 @@ export default function JobDrawings({
           </label>
         </div>
       )}
-      <Section title="Drawings" count={count} defaultOpen>
-        {loading && count === 0 ? (
+      <Section title="Drawings" count={rows.length} defaultOpen>
+        {loading && rows.length === 0 ? (
           <div style={S.roleHint}>Loading…</div>
-        ) : count === 0 ? (
-          <div style={S.roleHint}>No line on this job has a drawing on file.</div>
+        ) : rows.length === 0 ? (
+          <div style={S.roleHint}>No drawings on this job yet.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table className="stk-sheet" style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr>
-                  <th style={head}>Drawing</th>
-                  <th style={head}>Part number</th>
-                  <th style={head}>Revision</th>
-                  <th style={head}>Loaded</th>
-                  <th style={head}>Line</th>
-                  <th style={head} title="The stages this line goes to on the floor">Goes to</th>
-                </tr>
-              </thead>
-              <tbody>
-                {withDrawing.map((r) => (
-                  <tr key={r.line.id}>
-                    <td style={cell}>{drawingButton(r.partNumber, r.drawing)}</td>
-                    <td style={{ ...cell, whiteSpace: "nowrap" }}>{r.partNumber}</td>
-                    <td style={{ ...cell, whiteSpace: "nowrap" }}>{revisionText(r.drawing)}</td>
-                    {loaded(r.drawing)}
-                    <td style={cell}>{r.line.description}</td>
-                    <td style={cell}>{r.stages.join(", ")}</td>
-                  </tr>
-                ))}
-                {jobOnly.map((d) => (
-                  <tr key={d.id}>
-                    <td style={cell}>{drawingButton(d.part_number, d)}</td>
-                    <td style={{ ...cell, whiteSpace: "nowrap" }}>{d.part_number}</td>
-                    <td style={{ ...cell, whiteSpace: "nowrap" }}>{revisionText(d)}</td>
-                    {loaded(d)}
-                    <td style={{ ...cell, color: C.muted }}>This job only</td>
-                    <td style={{ ...cell, color: C.muted }}>Every stage</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          sheet(
+            rows,
+            canRemove
+              ? (r) => (
+                  <button
+                    type="button"
+                    className="stk-btn"
+                    style={S.iconBtn}
+                    onClick={() => onRemove(r)}
+                    title={r.kind === "library" ? "Take off this job (it stays in the library)" : "Take off this job (the file is kept)"}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )
+              : null
+          )
         )}
       </Section>
       <Section title="Lines with no drawing" count={withoutDrawing.length} defaultOpen={false}>
@@ -158,6 +177,20 @@ export default function JobDrawings({
           ))
         )}
       </Section>
+      {removed.length > 0 && (
+        <Section title="Taken off this job" count={removed.length} defaultOpen={false}>
+          {sheet(
+            removed,
+            canRemove
+              ? (r) => (
+                  <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, padding: "2px 8px", fontSize: 12 }} onClick={() => onPutBack(r)}>
+                    <RotateCcw size={12} /> Put back
+                  </button>
+                )
+              : null
+          )}
+        </Section>
+      )}
       {upload && renderUploadPopup()}
     </div>
   );
@@ -185,62 +218,58 @@ export default function JobDrawings({
                 </tr>
               </thead>
               <tbody>
-                {upload.entries.map((entry) => {
-                  return (
-                    <tr key={entry.key}>
-                      <td style={{ ...cell, wordBreak: "break-word" }}>{entry.file.name}</td>
-                      <td style={cell}>{entry.lineText}</td>
-                      <td style={cell}>
-                        {(
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            <div style={{ display: "flex", gap: 4 }}>
-                              {[
-                                { mode: "revision", label: "New revision" },
-                                { mode: "replace", label: "Replace existing" },
-                              ].map((o) => (
-                                <button
-                                  key={o.mode}
-                                  type="button"
-                                  className="stk-btn"
-                                  style={{
-                                    ...S.segBtn,
-                                    ...(entry.mode === o.mode ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
-                                  }}
-                                  onClick={() => onUploadChange(entry.key, { mode: o.mode })}
-                                  title={
-                                    o.mode === "replace"
-                                      ? "The old file is removed for good; the revision stays the same"
-                                      : "The old drawing is kept as superseded history"
-                                  }
-                                >
-                                  {o.label}
-                                </button>
-                              ))}
-                            </div>
-                            <input
-                              value={entry.customerRevision}
-                              onChange={(e) => onUploadChange(entry.key, { customerRevision: e.target.value })}
-                              placeholder="Customer rev (optional)"
-                              style={{ ...S.input, padding: "4px 6px", fontSize: 13 }}
-                            />
-                          </div>
-                        )}
-                      </td>
-                      <td style={cell}>
-                        <button
-                          type="button"
-                          className="stk-btn"
-                          style={S.iconBtn}
-                          onClick={() => onUploadRemove(entry.key)}
-                          disabled={upload.busy}
-                          title="Leave this file out"
-                        >
-                          <X size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {upload.entries.map((entry) => (
+                  <tr key={entry.key}>
+                    <td style={{ ...cell, wordBreak: "break-word" }}>{entry.file.name}</td>
+                    <td style={cell}>{entry.lineText}</td>
+                    <td style={cell}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          {[
+                            { mode: "revision", label: "New revision" },
+                            { mode: "replace", label: "Replace existing" },
+                          ].map((o) => (
+                            <button
+                              key={o.mode}
+                              type="button"
+                              className="stk-btn"
+                              style={{
+                                ...S.segBtn,
+                                ...(entry.mode === o.mode ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
+                              }}
+                              onClick={() => onUploadChange(entry.key, { mode: o.mode })}
+                              title={
+                                o.mode === "replace"
+                                  ? "The old file is removed for good; the revision stays the same"
+                                  : "The old drawing is kept as superseded history"
+                              }
+                            >
+                              {o.label}
+                            </button>
+                          ))}
+                        </div>
+                        <input
+                          value={entry.customerRevision}
+                          onChange={(e) => onUploadChange(entry.key, { customerRevision: e.target.value })}
+                          placeholder="Customer rev (optional)"
+                          style={{ ...S.input, padding: "4px 6px", fontSize: 13 }}
+                        />
+                      </div>
+                    </td>
+                    <td style={cell}>
+                      <button
+                        type="button"
+                        className="stk-btn"
+                        style={S.iconBtn}
+                        onClick={() => onUploadRemove(entry.key)}
+                        disabled={upload.busy}
+                        title="Leave this file out"
+                      >
+                        <X size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

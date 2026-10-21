@@ -6,7 +6,7 @@
 // permissions block, because it reads isAdmin; it takes everything it
 // borrows from the rest of the app in one deps object.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient.js";
 
 export function useDrawingsState() {
@@ -34,6 +34,11 @@ export function useDrawings(deps) {
     items, roleLabel, setDrawingLookup, setDrawingSearchFailed, setDrawingSearchLoading,
     setDrawingSearchResults, setDrawingUploadBusy, setDrawingUploadCustomer, setDrawingUploadFiles,
     setDrawingUploadResult, setPreviewData, setPreviewItem, setPreviewLoading, setShowDrawingUpload } = deps;
+
+  // Whether this database has drawings.job_id (setup-drawings-job.sql):
+  // set by the lookup, read by the Drawings tab's search, which leaves a
+  // job's own drawings out of the library's list.
+  const hasJobColumnRef = useRef(false);
 
   // ---- Drawing Management foundation ----
   // A real Postgres table + Storage bucket, not the JSON-blob pattern the
@@ -201,6 +206,8 @@ export function useDrawings(deps) {
           if (term) q = q.or(`part_number.ilike.%${term}%,description.ilike.%${term}%`);
           if (customer === "__internal__") q = q.is("customer", null);
           else if (customer) q = q.eq("customer", customer);
+          // A job's own drawings live on that job's Drawings tab only.
+          if (hasJobColumnRef.current) q = q.is("job_id", null);
           return q;
         },
       });
@@ -248,17 +255,21 @@ export function useDrawings(deps) {
         };
       });
       // Which of them belong to one job only, so that job's Production
-      // cards can show them. A database without drawings.job_id answers
+      // cards can show its PDFs. A database without drawings.job_id answers
       // an error here: then there are none.
       try {
         const jobOnly = await fetchAllRows("drawings", {
-          select: "id, part_number, job_id",
+          select: "id, part_number, job_id, file_name",
           filter: (q) => q.eq("status", "current").not("job_id", "is", null),
         });
         (jobOnly || []).forEach((d) => {
           const entry = map[d.part_number.trim()];
-          if (entry) entry.jobId = d.job_id;
+          if (entry) {
+            entry.jobId = d.job_id;
+            entry.fileName = d.file_name;
+          }
         });
+        hasJobColumnRef.current = true;
       } catch (jobOnlyErr) {
         console.warn("Drawings kept for one job are not read on this database:", jobOnlyErr?.message || jobOnlyErr);
       }
@@ -371,6 +382,23 @@ export function useDrawings(deps) {
     }
   }
 
+  // A PDF opens in the viewer; a DXF or any other file is handed to the
+  // browser to save under its own name, since the viewer draws PDFs only.
+  async function openDrawingFile(drawing) {
+    if (/\.pdf$/i.test(drawing.file_name || "")) return openDrawingPreview(drawing);
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase.storage
+        .from("drawings")
+        .createSignedUrl(drawing.storage_path, 3600, { download: drawing.file_name || true });
+      if (error) throw error;
+      window.open(data.signedUrl, "_blank");
+    } catch (err) {
+      console.error("Couldn't fetch that file:", err);
+      alert("Couldn't fetch that file — check your signal and try again.");
+    }
+  }
+
   async function openDrawingPreview(drawing) {
     setPreviewItem({ id: drawing.id, attachmentType: "pdf", attachmentName: drawing.file_name, restrictDownload: true });
     setPreviewData(null);
@@ -460,6 +488,6 @@ export function useDrawings(deps) {
   }
 
   return { batchDeleteDrawingsForCustomer, closeDrawingUpload, deleteDrawing, handleDrawingFilesSelected,
-    loadDrawingLookup, openDrawingPreview, openDrawingPreviewByPartNumber, refreshDrawings,
+    loadDrawingLookup, openDrawingFile, openDrawingPreview, openDrawingPreviewByPartNumber, refreshDrawings,
     removeDrawingUploadFile, saveJobDrawing, submitDrawingUpload };
 }

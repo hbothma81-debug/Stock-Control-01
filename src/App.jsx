@@ -74,7 +74,7 @@ import {
 import CutToSize from "./jobs/CutToSize.jsx";
 import BuyOuts from "./jobs/BuyOuts.jsx";
 import JobDrawings from "./jobs/JobDrawings.jsx";
-import { drawingRows, jobOnlyPartNumber, matchFileToLine } from "./jobs/jobDrawings.js";
+import { isLibraryFile, jobDrawingList, jobOnlyPartNumber, matchFileToLine, partKey, rowKey } from "./jobs/jobDrawings.js";
 import Materials from "./jobs/Materials.jsx";
 import { addStockFromStores } from "./jobs/stockFromStores.js";
 import { markedStageTakes, jobIsMarked, comesBeforeForLine, orderedByLines, extraStagesOf, routeText, renameInList } from "./jobs/extraStages.js";
@@ -2073,6 +2073,11 @@ export default function StockControl() {
   const [jobDrawingTick, setJobDrawingTick] = useState(0);
   // The Drawings tab's upload pop-up: { entries, busy }, or null.
   const [jobDrawingUpload, setJobDrawingUpload] = useState(null);
+  // Drawings taken off a job: { [jobId]: [drawing_key] } from job_drawings
+  // (setup-drawings-job.sql), or null on a database without the table,
+  // where nothing can be taken off. Read once a session and after a change:
+  // a small table, one row per drawing someone took off a job.
+  const [jobDrawingHidden, setJobDrawingHidden] = useState(null);
   // A line's part number for its drawing: the linked stock part's, else
   // the line's own stock code (its identity). The Production card's
   // Drawings block uses this too.
@@ -2090,7 +2095,7 @@ export default function StockControl() {
     const parts = drawingPartsKey ? drawingPartsKey.split("\n") : [];
     let stale = false;
     const columns = "id, part_number, file_name, internal_revision, customer_revision, created_at, uploaded_by";
-    const jobColumns = `${columns}, quote_item_id`;
+    const jobColumns = `${columns}, quote_item_id, storage_path`;
     setJobDrawingFiles((prev) =>
       prev.jobId === jobId ? { ...prev, loading: true } : { jobId, byPart: {}, jobOnly: [], loading: true }
     );
@@ -3507,7 +3512,10 @@ export default function StockControl() {
   // The part-number → drawing lookup is used on Customer Stock rows and the
   // Add form regardless of which tab is open, so load it once at startup.
   useEffect(() => {
-    if (session?.user) loadDrawingLookup();
+    if (session?.user) {
+      loadDrawingLookup();
+      loadJobDrawingHidden();
+    }
   }, [session]);
 
   // Loaded eagerly, not just when the Jobs tab opens — the Use modal
@@ -7708,7 +7716,9 @@ export default function StockControl() {
   function startJobDrawingUpload(job, quoteItems, fileList, jobOnlyReady) {
     const entries = Array.from(fileList || []).map((file, i) => {
       const line = matchFileToLine(file.name, quoteItems || [], linePartNumber);
-      const partNumber = line ? linePartNumber(line) : "";
+      // Only a PDF becomes the part's drawing in the library; a DXF and
+      // the like stays on this job, tied to its line.
+      const partNumber = line && isLibraryFile(file.name) ? linePartNumber(line) : "";
       return {
         key: `${Date.now()}-${i}-${file.name}`,
         file,
@@ -7733,6 +7743,41 @@ export default function StockControl() {
     const clean = usable.filter((e) => !asks.includes(e));
     if (asks.length) setJobDrawingUpload({ entries: asks, busy: false });
     if (clean.length) runJobDrawingUpload(job, quoteItems, clean, { keepPopup: asks.length > 0 });
+  }
+
+  async function loadJobDrawingHidden() {
+    if (!supabase) return;
+    try {
+      const rows = await fetchAllRows("job_drawings", { select: "id, job_id, drawing_key", filter: (q) => q.eq("hidden", true) });
+      const map = {};
+      for (const r of rows || []) (map[r.job_id] = map[r.job_id] || []).push(r.drawing_key);
+      setJobDrawingHidden(map);
+    } catch (err) {
+      console.warn("Drawings taken off jobs are not read on this database:", err?.message || err);
+      setJobDrawingHidden(null);
+    }
+  }
+
+  // Takes a drawing off one job, or puts it back. Never touches the
+  // library or the file (Heinrich, 21 Oct 2026: "delete should never
+  // remove anything from the library").
+  async function setJobDrawingShown(job, row, shown) {
+    try {
+      const { data, error } = await supabase
+        .from("job_drawings")
+        .upsert(
+          { job_id: job.id, drawing_key: row.key, hidden: !shown, updated_by: roleLabel, updated_at: new Date().toISOString() },
+          { onConflict: "job_id,drawing_key" }
+        )
+        .select("id");
+      if (error) throw error;
+      if (!data || !data.length) throw new Error("The database did not take the change (no row came back).");
+      await logJobEvent(job.id, shown ? "Drawing put back" : "Drawing taken off the job", `${row.name}${row.line ? ` (${row.line.description})` : ""}`);
+    } catch (err) {
+      console.error("Couldn't change the job's drawing:", err);
+      alert(`Couldn't ${shown ? "put back" : "take off"} ${row.name}: ${err?.message || err}`);
+    }
+    await loadJobDrawingHidden();
   }
 
   // The part number an upload entry is filed under in the library.
@@ -12056,7 +12101,7 @@ export default function StockControl() {
 
   // Drawings: src/drawings/useDrawings.jsx
   const { batchDeleteDrawingsForCustomer, closeDrawingUpload, deleteDrawing, handleDrawingFilesSelected,
-    loadDrawingLookup, openDrawingPreview, openDrawingPreviewByPartNumber, refreshDrawings,
+    loadDrawingLookup, openDrawingFile, openDrawingPreview, openDrawingPreviewByPartNumber, refreshDrawings,
     removeDrawingUploadFile, saveJobDrawing, submitDrawingUpload } = useDrawings({
     drawingCustomerFilter, drawingSearchQuery, drawingUploadCustomer, drawingUploadFiles, fetchAllRows, items,
     roleLabel, setDrawingLookup, setDrawingSearchFailed, setDrawingSearchLoading, setDrawingSearchResults,
@@ -16981,17 +17026,20 @@ export default function StockControl() {
                       // Each line's drawing by linePartNumber (the job page's
                       // Drawings tab reads the same), then the drawings kept
                       // for this job only, on every stage.
+                      // A PDF only: a DXF and the like stays on the job page. And
+                      // never one taken off this job on its Drawings tab.
+                      const takenOff = new Set((jobDrawingHidden || {})[job.id] || []);
                       const drawingsForJob = quoteItems
                         .map((it) => {
                           const partNumber = linePartNumber(it);
                           const drawing = partNumber ? drawingLookup[partNumber] : null;
-                          return drawing ? { description: it.description, partNumber, drawing } : null;
+                          return drawing && !takenOff.has(partKey(partNumber)) ? { description: it.description, partNumber, drawing } : null;
                         })
                         .filter(Boolean)
                         .filter((d, i, all) => all.findIndex((o) => o.partNumber === d.partNumber) === i)
                         .concat(
                           Object.entries(drawingLookup)
-                            .filter(([, d]) => d.jobId === job.id)
+                            .filter(([, d]) => d.jobId === job.id && isLibraryFile(d.fileName) && !takenOff.has(rowKey(d)))
                             .map(([partNumber, d]) => ({ description: d.description || partNumber, partNumber, drawing: d }))
                         );
                       // This stage's lines only: a cutting stage counts the
@@ -24323,25 +24371,34 @@ export default function StockControl() {
                   .map((p) => p.process_name)
                   .filter((name, i, all) => all.indexOf(name) === i && !isInvoicingStage(name));
                 const held = jobDrawingFiles.jobId === jobDetail.job.id ? jobDrawingFiles : { byPart: {}, jobOnly: [], loading: true };
-                // A drawing kept on the job for one of its lines shows on
-                // that line's row; the rest are This job only.
-                const lineIds = new Set((jobDetail.quoteItems || []).map((l) => l.id));
-                const byLine = {};
-                for (const d of held.jobOnly) if (d.quote_item_id && lineIds.has(d.quote_item_id) && !byLine[d.quote_item_id]) byLine[d.quote_item_id] = d;
-                const shownOnLine = new Set(Object.values(byLine).map((d) => d.id));
                 const changeEntries = (fn) => setJobDrawingUpload((u) => (u ? { ...u, entries: fn(u.entries) } : u));
+                const linkedItem = (line) => (line?.linked_item_id ? (items || []).find((i) => i.id === line.linked_item_id) : null);
                 return (
                   <JobDrawings
-                    rows={drawingRows(
-                      jobDetail.quoteItems,
-                      linePartNumber,
-                      held.byPart,
-                      (line) => stageNames.filter((name) => stageTakesItem(name, line, jobDetail.quoteItems)),
-                      byLine
-                    )}
-                    jobOnly={held.jobOnly.filter((d) => !shownOnLine.has(d.id))}
+                    list={jobDrawingList({
+                      lines: jobDetail.quoteItems,
+                      partNumberOf: linePartNumber,
+                      libraryByPart: held.byPart,
+                      jobRows: held.jobOnly,
+                      // A file put on the stock part itself counts as its drawing.
+                      attachmentOf: (line) => {
+                        const item = linkedItem(line);
+                        return item?.attachmentName ? { itemId: item.id, name: item.attachmentName } : null;
+                      },
+                      stagesOf: (line) => stageNames.filter((name) => stageTakesItem(name, line, jobDetail.quoteItems)),
+                      hiddenKeys: (jobDrawingHidden || {})[jobDetail.job.id] || [],
+                    })}
                     loading={held.loading}
-                    onOpen={(partNumber) => openDrawingPreviewByPartNumber(partNumber)}
+                    onOpen={(row) => {
+                      if (row.kind === "library") openDrawingPreviewByPartNumber(row.partNumber);
+                      else if (row.kind === "item") {
+                        const item = (items || []).find((i) => i.id === row.itemId);
+                        if (item) openPreview(item);
+                      } else openDrawingFile(row.drawing);
+                    }}
+                    canRemove={canEditThisJob && jobDrawingHidden !== null}
+                    onRemove={(row) => setJobDrawingShown(jobDetail.job, row, false)}
+                    onPutBack={(row) => setJobDrawingShown(jobDetail.job, row, true)}
                     canUpload={canEditThisJob}
                     onFiles={(files) => startJobDrawingUpload(jobDetail.job, jobDetail.quoteItems, files, !!held.jobOnlyReady)}
                     upload={jobDrawingUpload}
