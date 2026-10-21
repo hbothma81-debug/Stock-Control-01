@@ -6096,3 +6096,72 @@ and `setJobLineMaterial` kept for the item builder the quote plan is to design).
 **Gotchas found:** the dev server served a zero-length copy of a file twice after a Python script rewrote it whole (`touch` cures it; in CLAUDE.md). This conversation staged `App.jsx` whole twice and took the Production tab conversation's lines (mended by `9b86578` and `823e4a1`); from `21ed4be` on it staged by filtered patch.
 
 **Next session:** nothing half-done. If he reports a box that lost its figure or a unit in the wrong place, the one place to look is `src/UnitInput.jsx` (padding from the unit's length) and the swap lists in `8e2033f` / `f00d6eb`.
+
+---
+
+## 21 Oct 2026 — Requisitions (Customer Stock): state of play at wrap-up
+
+This conversation did one thing in this stretch: the Customer Stock tab's
+search and filters. Both commits are **LIVE** (`cc964d9` pushed from here
+on his word 13 Oct, live bundle App-CLW7Ni2d.js before and
+App-BUAKajsd.js after; `42b105c` went live in another conversation's
+push since). `docs/handover.md` also has this conversation's 13 Oct
+entry, written before the second commit.
+
+**Done and live.** `src/stock/CustomerStock.jsx` is two levels, pills
+gone (his words: "I dont like pils"; "each customer has his own
+page/folder"):
+
+- Level 1, the customer list the tab opens on: a card per customer A-Z
+  with how many parts and how many have stock, a type-to-find Customer
+  box that jumps straight to one, a search box beside it, and "n
+  matching" on each card while something is typed.
+- Level 2, one customer's screen: All customers back, the customer's
+  name as a heading, then the search box, Has stock only and Sort (stock
+  code A-Z, description A-Z, most on hand) in one row above the rows. No
+  customer picker there, his answer when asked which of the two boxes
+  reading the customer's name he wanted gone.
+- The tick and the sort are remembered per device (`customerStockView`
+  in `localStorage`); the open customer is not.
+- App.jsx leaves the Stock tab's own search box out for this division
+  only (`tab !== "custom"`) and hands `query` / `setQuery` through `ctx`,
+  so the screen draws its own search where the work is and what is typed
+  survives Back. Plate & Sheet, Structural, CNC Bar, Buy-outs, Stores,
+  Fasteners and Assets were checked on practice and still have theirs at
+  the top.
+
+**SQL this conversation wrote: none.** No table, column, function or
+trigger was touched in this stretch; rows on screen only. (The screen's
+own column, `stock_items.customer_revision` from
+`setup-stock-customer-revision.sql`, was confirmed on both databases
+back on 8 Oct and is unchanged.)
+
+**Built and not yet tested by Heinrich**, feature by feature:
+
+- The customer list and its Customer box, on live. He has only seen the
+  pre-13-Oct build on live; on 13 Oct he said "the customer stock is
+  still not what I asked for" while looking at that old build, which is
+  what prompted the push.
+- A customer's screen with the search box moved down and the picker
+  gone (`42b105c`). Driven on practice signed in by this conversation,
+  never by him.
+- The "Show them all (n more)" button under a long list.
+- Everything was exercised on practice with one customer only (HPE,
+  1,677 parts): the customer list with several customers, and the "n
+  matching" tags across customers, are untried on real data. Live has 7
+  customers.
+
+**Found on practice, not touched:** every HPE part is in there twice
+(1,677 rows is two copies of about 838 parts), which looks like the
+sheet imported twice with Replace OFF. Live was never counted. Worth a
+look before anyone works off these counts.
+
+**Waiting on Heinrich:** his word on whether the screen is now what he
+asked for. Also still unanswered from 8 Oct, from
+`docs/CUSTOMER-STOCK-SUPPLIER-PLAN.md`: what a Customer Stock part's
+supplier opens (PO lookup, the job's Buy-outs tab, what becomes of the
+Buy-outs division, who sets the supplier).
+
+**Next session:** nothing half-done. If he asks for more filters here,
+the row already carries supplier, shelf location and the customer's
+revision, and level 2's filter row is the place for them.
