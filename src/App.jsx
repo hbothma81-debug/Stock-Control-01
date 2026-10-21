@@ -23296,7 +23296,10 @@ export default function StockControl() {
                   const all = jobDetail.quoteItems;
                   const lines = inItemsTabOrder(billableLines(all));
                   if (lines.length === 0) return null;
-                  const showMaterial = all.some((q) => q.made_on === "tube_laser");
+                  // The Material column (the words a tube line is cut from) came off
+                  // this sheet on 21 Oct 2026 (Heinrich: "remove for now, we can build
+                  // this into the item builder on the quote plan"). The field,
+                  // job_quote_items.material_type, and setJobLineMaterial stay for that.
                   const showLength = all.some((q) => isChildLine(q)) || addPartUnder != null;
                   const edit = canEditThisJob;
                   const jobMarked = jobIsMarked(all);
@@ -23371,21 +23374,6 @@ export default function StockControl() {
                       ))}
                     </select>
                   );
-                  const materialBox = (q, partRow) =>
-                    q.made_on === "tube_laser" ? (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                        <TypeToFind
-                          style={{ width: 190 }}
-                          inputStyle={{ fontSize: 13, padding: "3px 24px 3px 6px" }}
-                          options={[...new Set([...tubeMaterialList(), q.material_type || ""].filter(Boolean))]}
-                          value={q.material_type || ""}
-                          onChange={(v) => setJobLineMaterial(jobDetail.job, q, v || "")}
-                          emptyLabel="Material type…"
-                          title={`The section and grade this ${partRow ? "part" : ""} is cut from. The tube nesting import matches its sections by this.`}
-                        />
-                        <SavedCheck fieldKey={`quoteitem-material-${q.id}`} />
-                      </span>
-                    ) : null;
                   const thenBox = (q, canEditIt) => (
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
                       <ExtraStagesBox
@@ -23399,7 +23387,7 @@ export default function StockControl() {
                       <SavedCheck fieldKey={`quoteitem-extra-${q.id}`} />
                     </span>
                   );
-                  const cols = 5 + (canSeeValue ? 1 : 0) + (showLength ? 1 : 0) + 1 + (showMaterial ? 1 : 0) + 1 + 1 + 1;
+                  const cols = 5 + (canSeeValue ? 1 : 0) + (showLength ? 1 : 0) + 1 + 1 + 1 + 1;
                   return (
                     <div style={{ overflowX: "auto", marginTop: 6 }}>
                       <table className="stk-sheet" style={{ borderCollapse: "collapse", width: "100%", minWidth: 900 }}>
@@ -23413,7 +23401,6 @@ export default function StockControl() {
                             {canSeeValue && <th style={head}>Each</th>}
                             {showLength && <th style={head}>Length</th>}
                             <th style={head}>Made on</th>
-                            {showMaterial && <th style={head}>Material</th>}
                             <th style={head}>Then</th>
                             <th style={head} title="How many to invoice or deliver now. The Invoice and Delivery tabs act on this.">To invoice</th>
                             <th style={head}></th>
@@ -23537,11 +23524,6 @@ export default function StockControl() {
                                       it.made_on && <span style={S.roleHint}>{madeOnLabel(it.made_on)}</span>
                                     )}
                                   </td>
-                                  {showMaterial && (
-                                    <td style={cell}>
-                                      {edit ? materialBox(it, false) : it.made_on === "tube_laser" && it.material_type ? <span style={S.roleHint}>{it.material_type}</span> : null}
-                                    </td>
-                                  )}
                                   <td style={thenCell}>
                                     {/* Its extra stages, in order. Not on a line
                                         with parts: its parts carry them, and the
@@ -23782,11 +23764,6 @@ export default function StockControl() {
                                           c.made_on && <span style={S.roleHint}>{madeOnLabel(c.made_on)}</span>
                                         )}
                                       </td>
-                                      {showMaterial && (
-                                        <td style={cell}>
-                                          {edit ? materialBox(c, true) : c.made_on === "tube_laser" && c.material_type ? <span style={S.roleHint}>{c.material_type}</span> : null}
-                                        </td>
-                                      )}
                                       {/* Always shown, like the line's own (17 Sep 2026). */}
                                       <td style={thenCell}>{thenBox(c, edit)}</td>
                                       <td style={cell}></td>
