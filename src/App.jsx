@@ -23362,6 +23362,14 @@ export default function StockControl() {
                   const eachBox = { ...box, width: 84 };
                   const mmBox = { ...box, width: 72 };
                   const codeBox = { ...box, width: 120 };
+                  // Code and Description grow with their text as it is typed,
+                  // never narrower than today and at most 70% wider (Heinrich,
+                  // 21 Oct 2026: "auto size, with maximum limit of 70% more";
+                  // "dont shrink"). 7.5px a character at this 13px font, plus
+                  // the padding. Longer text scrolls inside the box as before.
+                  const fitWidth = (text, least) => Math.min(Math.round(least * 1.7), Math.max(least, String(text || "").length * 7.5 + 16));
+                  const fitStyle = (base, text, least) => ({ ...base, width: fitWidth(text, least) });
+                  const growOnInput = (least) => (e) => { e.target.style.width = `${fitWidth(e.target.value, least)}px`; };
                   // Quantities are whole numbers (Heinrich, 20 Oct 2026). A
                   // number box only checks its step on a form submit, so a
                   // typed 2.2 is rounded here, shown back in the box, and
@@ -23492,7 +23500,8 @@ export default function StockControl() {
                                         key={`code-${it.id}-${it.stock_code || ""}-${it.linked_item_id || ""}`}
                                         defaultValue={jobLineCode(it, linkedItem)}
                                         onBlur={(e) => setJobLineStockCode(jobDetail.job, it, linkedItem, e.target.value)}
-                                        style={codeBox}
+                                        onInput={growOnInput(120)}
+                                        style={fitStyle(codeBox, jobLineCode(it, linkedItem), 120)}
                                         placeholder="Stock code"
                                         title={codeHint}
                                       />
@@ -23507,7 +23516,8 @@ export default function StockControl() {
                                           key={`desc-${it.id}-${it.stock_code || ""}-${it.linked_item_id || ""}`}
                                           defaultValue={jobLineDescription(it, linkedItem)}
                                           onBlur={(e) => updateJobQuoteItem(jobDetail.job, it, "description", e.target.value)}
-                                          style={box}
+                                          onInput={growOnInput(220)}
+                                          style={fitStyle(box, jobLineDescription(it, linkedItem), 220)}
                                           placeholder="Description"
                                         />
                                         <SavedCheck fieldKey={`quoteitem-${it.id}`} />
@@ -23740,7 +23750,8 @@ export default function StockControl() {
                                               key={`ccode-${c.id}-${c.stock_code || ""}-${c.linked_item_id || ""}`}
                                               defaultValue={jobLineCode(c, childLinked)}
                                               onBlur={(e) => setJobLineStockCode(jobDetail.job, c, childLinked, e.target.value)}
-                                              style={{ ...box, width: 96 }}
+                                              onInput={growOnInput(96)}
+                                              style={fitStyle(box, jobLineCode(c, childLinked), 96)}
                                               placeholder="Stock code"
                                               title="The part's stock code. Type one to attach the part and pull its description through."
                                             />
@@ -23755,7 +23766,8 @@ export default function StockControl() {
                                             key={`cdesc-${c.id}-${c.stock_code || ""}-${c.linked_item_id || ""}`}
                                             defaultValue={jobLineDescription(c, childLinked)}
                                             onBlur={(e) => updateJobQuoteItem(jobDetail.job, c, "description", e.target.value)}
-                                            style={box}
+                                            onInput={growOnInput(220)}
+                                            style={fitStyle(box, jobLineDescription(c, childLinked), 220)}
                                             title="What the part is"
                                             placeholder="Description"
                                           />
