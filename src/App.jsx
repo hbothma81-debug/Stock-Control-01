@@ -20224,7 +20224,18 @@ export default function StockControl() {
 
             {!managerTab ? (
               <div style={S.managerListFullPage}>
-                {MANAGER_TABS.filter((t) => !ADMIN_ONLY_MANAGER_TABS.includes(t.key) || isAdmin).map((t) => (
+                {MANAGER_TABS.filter((t) => !ADMIN_ONLY_MANAGER_TABS.includes(t.key) || isAdmin)
+                  // A to Z by name, with the two admin buttons pinned to the bottom.
+                  // filter() hands back a fresh array, so sorting it leaves
+                  // MANAGER_TABS itself alone.
+                  .sort((a, b) => {
+                    const pinned = (t) => (ADMIN_ONLY_MANAGER_TABS.includes(t.key) ? 1 : 0);
+                    return (
+                      pinned(a) - pinned(b) ||
+                      a.label.localeCompare(b.label, undefined, { sensitivity: "base" })
+                    );
+                  })
+                  .map((t) => (
                   <button
                     key={t.key}
                     type="button"
