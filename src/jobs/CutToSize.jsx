@@ -194,7 +194,8 @@ export default function CutToSize({
 
   const setEditDraft = (fn) => setEdit((e) => (e ? { ...e, draft: typeof fn === "function" ? fn(e.draft) : fn } : e));
 
-  // The boxes of one line, a new one or one being changed (`was`). A plain
+  // The boxes of one line, a new one or one being changed (`was`), by
+  // name, so the sheet can drop each into its own column. A plain
   // function, not a component: declared in here a component would be made
   // afresh on every keystroke and throw the cursor out of the box.
   function lineBoxes(d, setD, was, onEnter) {
@@ -213,18 +214,20 @@ export default function CutToSize({
       d.section && !sizes.some((s) => sameText(s, d.section))
         ? [...sizes, { value: d.section, label: d.section, hint: offList ? "not on the Sections list" : "not held in this material" }]
         : sizes;
-    return (
-      <>
+    return {
+      drawing: (
         <input
           value={d.drawingNo}
           list="cut-drawing-options"
           placeholder="Drawing no"
           onChange={(e) => setD((p) => ({ ...p, drawingNo: e.target.value }))}
           title={d.drawingNo || "The customer's drawing or part number"}
-          style={{ ...cell(wideEnough(d.drawingNo, 230)), maxWidth: "100%", boxSizing: "border-box" }}
+          style={{ ...cell(wideEnough(d.drawingNo, 150)), maxWidth: "100%", boxSizing: "border-box" }}
         />
-        {/* Three boxes, in the order of the New stock item form. The type
-            and the size are never one box. */}
+      ),
+      // Three boxes, in the order of the New stock item form. The type
+      // and the size are never one box.
+      type: (
         <TypeToFind
           options={types}
           value={d.sectionType}
@@ -237,9 +240,11 @@ export default function CutToSize({
           title="Square Tube, Pipe, Flat Bar: the type first, then a size of it"
           // Every type, not the first twelve: the list is short.
           maxShown={types.length}
-          style={{ width: wideEnough(d.sectionType, 210), maxWidth: "100%" }}
+          style={{ width: wideEnough(d.sectionType, 150), maxWidth: "100%" }}
           inputStyle={findCell}
         />
+      ),
+      material: (
         <TypeToFind
           options={materialOptions}
           value={d.grade}
@@ -247,9 +252,11 @@ export default function CutToSize({
           emptyLabel="Material"
           title="The material. With one picked, the Size box lists the sizes held in it."
           maxShown={Math.max(12, materialOptions.length)}
-          style={{ width: wideEnough(d.grade, 180), maxWidth: "100%" }}
+          style={{ width: wideEnough(d.grade, 130), maxWidth: "100%" }}
           inputStyle={findCell}
         />
+      ),
+      size: (
         <TypeToFind
           options={sizeOptions}
           value={d.section}
@@ -257,9 +264,11 @@ export default function CutToSize({
           emptyLabel={d.sectionType ? "Size" : "Size: type first"}
           title={d.section || (d.sectionType ? `The sizes of ${d.sectionType} on Stock Manager's Sections list` : "Pick the section type first")}
           // As wide as its name needs: a pipe's is forty letters long.
-          style={{ width: wideEnough(d.section, 230), maxWidth: "100%" }}
+          style={{ width: wideEnough(d.section, 170), maxWidth: "100%" }}
           inputStyle={findCell}
         />
+      ),
+      length: (
         <UnitInput
           unit="mm"
           min="1"
@@ -270,7 +279,8 @@ export default function CutToSize({
           style={cell(80)}
           title="Cut length"
         />
-        <span style={{ color: C.muted }}>×</span>
+      ),
+      qty: (
         <UnitInput
           unit="off"
           min="1"
@@ -281,7 +291,8 @@ export default function CutToSize({
           style={cell(58)}
           title="Quantity"
         />
-        <span style={{ color: C.muted }}>from</span>
+      ),
+      from: (
         <UnitInput
           unit="m"
           min="0.1"
@@ -291,26 +302,27 @@ export default function CutToSize({
           style={cell(58)}
           title="Stock length"
         />
-        <label
-          style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: C.muted }}
+      ),
+      trim: (
+        <input
+          type="checkbox"
+          checked={!!d.trimFront}
+          onChange={(e) => setD((p) => ({ ...p, trimFront: e.target.checked }))}
           title={`Take ${TRIM_MM} mm off the front of each bar to square it up`}
-        >
-          <input type="checkbox" checked={!!d.trimFront} onChange={(e) => setD((p) => ({ ...p, trimFront: e.target.checked }))} />
-          trim
-        </label>
+        />
+      ),
+      note: (
         <input
           value={d.note}
           placeholder={was ? "Note" : "Note (optional)"}
           onChange={(e) => setD((p) => ({ ...p, note: e.target.value }))}
           title={d.note || "A note for the saw operator"}
-          // The short one: it no longer takes whatever room is left.
           style={{ ...cell(150), maxWidth: "100%", boxSizing: "border-box" }}
           onKeyDown={(e) => e.key === "Enter" && onEnter()}
         />
-      </>
-    );
+      ),
+    };
   }
-
   // A size that is not on the list, made from its type's fixed boxes as
   // Stock Manager makes it, then picked for the line being typed. The
   // type and the material are the ones the row reads, as on the New stock
@@ -381,9 +393,17 @@ export default function CutToSize({
     );
   }
 
+  // One cell of the sheets below. The sheet's lines come from .stk-sheet
+  // in App.jsx's style block, the same as the Items tab's.
+  const td = { padding: "3px 6px", verticalAlign: "middle", whiteSpace: "nowrap", fontSize: 13 };
+  const th = { ...td, ...S.label, marginTop: 0, marginBottom: 0, textAlign: "left", fontWeight: 400 };
+  const num = { ...td, textAlign: "right" };
+  const rowLine = { borderTop: `1px solid ${C.border}` };
+
   return (
     <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-      {/* The shopping list. One line per section, grade and bar length. */}
+      {/* The shopping list as a sheet (Heinrich, 21 Oct 2026). One row per
+          section, grade and bar length. */}
       {groups.length > 0 && (
         <div style={{ marginBottom: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -406,105 +426,108 @@ export default function CutToSize({
                 );
               })()}
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
-            {groups.map((g) => {
-              const shelf = barsOnShelf(g, items);
-              const setAside = barsSetAside(g, allocations, items);
-              const onOrder = barsOnOrder(g, requisitions, items);
-              // On the floor covers it, or on order covers the rest, or
-              // somebody still has to order some.
-              const short = Math.max(0, g.bars.length - shelf - onOrder);
-              const keepable = g.bars.filter((b) => offcutIsKeepable(b.offcutMm)).length;
-              return (
-                <div key={g.key} style={{ ...S.managerRow, flexWrap: "wrap", gap: 8 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600 }}>
-                    {g.bars.length} × {fmtM(g.stockLengthM)} {materialName(g, findSectionType)}
-                  </span>
-                  <span style={S.roleHint}>
-                    {g.pieceCount} piece{g.pieceCount === 1 ? "" : "s"}, {fmtM(g.metres)}
-                  </span>
-                  <span
-                    style={{ ...S.chip, ...(short > 0 ? { color: C.danger, borderColor: C.danger, fontWeight: 700 } : {}) }}
-                    title={`${shelf} on the floor at ${fmtM(g.stockLengthM)} or longer${short > 0 ? ` — ${short} still to order` : ""}`}
-                  >
-                    {short > 0 ? `${short} to order` : `${shelf} on the floor`}
-                  </span>
-                  {short > 0 && shelf > 0 && (
-                    <span style={S.chip} title="Physically on the floor now">
-                      {shelf} on the floor
-                    </span>
-                  )}
-                  {onOrder > 0 && (
-                    <span style={S.chip} title="Requisitioned or on a purchase order, not on the floor yet">
-                      {onOrder} on order
-                    </span>
-                  )}
-                  {setAside > 0 && (
-                    <span style={S.chip} title="Already set aside for this job">
-                      {setAside} set aside
-                    </span>
-                  )}
-                  {/* The two things a sales person does with this row:
-                      claim what is on the floor, and ask for the rest. */}
-                  {canEdit &&
-                    onSetAside &&
-                    (() => {
-                      const canClaim = Math.min(g.bars.length - setAside, shelf - setAside);
-                      if (!(canClaim > 0)) return null;
-                      return (
-                        <button
-                          type="button"
-                          className="stk-btn"
-                          style={S.reqActionBtnMuted}
-                          onClick={() => onSetAside(g, canClaim)}
-                          title="Reserve these bars for this job, against the Cut To Size stage"
-                        >
-                          Set aside {canClaim}
-                        </button>
-                      );
-                    })()}
-                  {canEdit && onRequisition && short > 0 && (
-                    <button
-                      type="button"
-                      className="stk-btn"
-                      style={S.reqActionBtnMuted}
-                      onClick={() => onRequisition(g, short)}
-                      title="Raise a requisition for the bars not on the floor or on order"
-                    >
-                      Requisition {short}
-                    </button>
-                  )}
-                  {/* Bars that are on the floor and not in the app yet:
-                      booked in from here, the form ready filled. */}
-                  {onAddStock && (
-                    <button
-                      type="button"
-                      className="stk-btn"
-                      style={S.reqActionBtnMuted}
-                      onClick={() => onAddStock(g)}
-                      title={`Book ${fmtM(g.stockLengthM)} bars of ${materialName(g, findSectionType)} into stock, without leaving the job`}
-                    >
-                      <PackagePlus size={13} /> Add stock
-                    </button>
-                  )}
-                  {g.bars.length > 0 && (
-                    <span style={S.roleHint} title={`Offcuts of ${MIN_OFFCUT_MM.toLocaleString()} mm or more go back to stock`}>
-                      offcuts: {g.bars.map((b) => fmtMm(b.offcutMm)).join(", ")}
-                      {keepable > 0 ? ` · ${keepable} back to stock` : " · all scrap"}
-                    </span>
-                  )}
-                  {g.tooLong.length > 0 && (
-                    <span style={{ ...S.chip, color: C.danger, borderColor: C.danger }}>
-                      <AlertTriangle size={12} /> {g.tooLong.length} piece{g.tooLong.length === 1 ? "" : "s"} longer than the bar
-                    </span>
-                  )}
-                </div>
-              );
-            })}
+          <div style={{ overflowX: "auto", marginTop: 6 }}>
+            <table className="stk-sheet" style={{ borderCollapse: "collapse", width: "100%", minWidth: 760 }}>
+              <thead>
+                <tr>
+                  <th style={{ ...th, textAlign: "right" }}>Bars</th>
+                  <th style={th}>Bar</th>
+                  <th style={th}>Section</th>
+                  <th style={{ ...th, textAlign: "right" }}>Pieces</th>
+                  <th style={{ ...th, textAlign: "right" }}>Metres</th>
+                  <th style={{ ...th, textAlign: "right" }} title="Physically on the floor now, at this length or longer">On floor</th>
+                  <th style={{ ...th, textAlign: "right" }} title="Requisitioned or on a purchase order, not on the floor yet">On order</th>
+                  <th style={{ ...th, textAlign: "right" }} title="Already set aside for this job">Set aside</th>
+                  <th style={{ ...th, textAlign: "right" }} title="Not on the floor and not on order: somebody still has to order these">To order</th>
+                  <th style={th} title={`Offcuts of ${MIN_OFFCUT_MM.toLocaleString()} mm or more go back to stock`}>Offcuts</th>
+                  <th style={th}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {groups.map((g) => {
+                  const shelf = barsOnShelf(g, items);
+                  const setAside = barsSetAside(g, allocations, items);
+                  const onOrder = barsOnOrder(g, requisitions, items);
+                  // On the floor covers it, or on order covers the rest, or
+                  // somebody still has to order some.
+                  const short = Math.max(0, g.bars.length - shelf - onOrder);
+                  const keepable = g.bars.filter((b) => offcutIsKeepable(b.offcutMm)).length;
+                  const canClaim = Math.min(g.bars.length - setAside, shelf - setAside);
+                  return (
+                    <tr key={g.key} style={rowLine}>
+                      <td style={{ ...num, fontWeight: 700, fontSize: 14 }}>{g.bars.length}</td>
+                      <td style={td}>{fmtM(g.stockLengthM)}</td>
+                      <td style={{ ...td, fontWeight: 600, fontSize: 14 }}>
+                        {materialName(g, findSectionType)}
+                        {g.tooLong.length > 0 && (
+                          <span style={{ ...S.chip, marginLeft: 6, color: C.danger, borderColor: C.danger }}>
+                            <AlertTriangle size={12} /> {g.tooLong.length} piece{g.tooLong.length === 1 ? "" : "s"} longer than the bar
+                          </span>
+                        )}
+                      </td>
+                      <td style={num}>{g.pieceCount}</td>
+                      <td style={num}>{fmtM(g.metres)}</td>
+                      <td style={num}>{shelf}</td>
+                      <td style={{ ...num, color: onOrder > 0 ? C.text : C.muted }}>{onOrder}</td>
+                      <td style={{ ...num, color: setAside > 0 ? C.text : C.muted }}>{setAside}</td>
+                      <td style={{ ...num, ...(short > 0 ? { color: C.danger, fontWeight: 700 } : { color: C.muted }) }}>{short}</td>
+                      <td style={{ ...td, color: C.muted }}>
+                        {g.bars.length > 0 && (
+                          <>
+                            {g.bars.map((b) => fmtMm(b.offcutMm)).join(", ")}
+                            {keepable > 0 ? ` · ${keepable} back to stock` : " · all scrap"}
+                          </>
+                        )}
+                      </td>
+                      <td style={{ ...td, textAlign: "right" }}>
+                        <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                          {/* The two things a sales person does with this row:
+                              claim what is on the floor, and ask for the rest. */}
+                          {canEdit && onSetAside && canClaim > 0 && (
+                            <button
+                              type="button"
+                              className="stk-btn"
+                              style={S.reqActionBtnMuted}
+                              onClick={() => onSetAside(g, canClaim)}
+                              title="Reserve these bars for this job, against the Cut To Size stage"
+                            >
+                              Set aside {canClaim}
+                            </button>
+                          )}
+                          {canEdit && onRequisition && short > 0 && (
+                            <button
+                              type="button"
+                              className="stk-btn"
+                              style={S.reqActionBtnMuted}
+                              onClick={() => onRequisition(g, short)}
+                              title="Raise a requisition for the bars not on the floor or on order"
+                            >
+                              Requisition {short}
+                            </button>
+                          )}
+                          {/* Bars that are on the floor and not in the app yet:
+                              booked in from here, the form ready filled. */}
+                          {onAddStock && (
+                            <button
+                              type="button"
+                              className="stk-btn"
+                              style={S.reqActionBtnMuted}
+                              onClick={() => onAddStock(g)}
+                              title={`Book ${fmtM(g.stockLengthM)} bars of ${materialName(g, findSectionType)} into stock, without leaving the job`}
+                            >
+                              <PackagePlus size={13} /> Add stock
+                            </button>
+                          )}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
-
       {/* Bar by bar: what the saw operator actually works from. Each bar
           lists its pieces in cutting order, longest first, so the offcut
           is the last thing off the saw. This is the layout the printed
@@ -582,129 +605,221 @@ export default function CutToSize({
         </div>
       )}
 
+      {/* The parts as a sheet (Heinrich, 21 Oct 2026): headings once, one
+          row per part, the pencil turns the row's cells into the boxes a
+          new part is typed in, and Add a part is the bottom row. A size
+          not on the list opens as a row under the one asking for it. */}
       <label style={S.label}>Parts to cut</label>
-      {(lines || []).length === 0 && <div style={S.empty}>Nothing on the cut list yet.</div>}
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-        {(lines || []).map((it) => {
-          const kg = weightOf(it);
-          const cost = costOf(it);
-          const cut = Number(it.qty_cut || 0);
-          const locked = cutHasStarted(it);
-          const editing = canEdit && edit && edit.id === it.id && !locked;
-          const offList = !!String(it.section || "").trim() && !sectionOnList(sections, it.section);
-
-          if (editing) {
-            return (
-              <div key={it.id} style={{ ...S.managerRow, display: "block", border: `1px solid ${C.accentRaw}` }}>
-                <label style={S.label}>
-                  Change {it.qty} × {fmtMm(Number(it.cut_length_mm))} {it.section}
-                </label>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-                  {lineBoxes(edit.draft, setEditDraft, it, () => saveEdit(it))}
-                  <button type="button" className="stk-btn" style={{ ...S.addBtn, opacity: saving ? 0.5 : 1 }} onClick={() => saveEdit(it)} disabled={saving}>
-                    <Check size={15} strokeWidth={2.5} />
-                    {saving ? "Saving…" : "Save"}
-                  </button>
-                  <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={stopEdit} disabled={saving}>
-                    Cancel
-                  </button>
-                </div>
-                {sizeBlock(it.id, edit.draft, setEditDraft)}
-              </div>
-            );
-          }
-
+      {(lines || []).length === 0 && !canEdit && <div style={S.empty}>Nothing on the cut list yet.</div>}
+      {((lines || []).length > 0 || canEdit) &&
+        (() => {
+          const showKg = anyWeight;
+          const showCost = canSeeValue;
+          const cols = 9 + 1 + (showKg ? 1 : 0) + (showCost ? 1 : 0) + 1 + (canEdit ? 1 : 0);
+          // The boxes of a line being typed, in the sheet's columns.
+          const boxRow = (key, boxes, actions, style) => (
+            <tr key={key} style={{ ...rowLine, ...(style || {}) }}>
+              <td style={td}>{boxes.drawing}</td>
+              <td style={td}>{boxes.type}</td>
+              <td style={td}>{boxes.material}</td>
+              <td style={td}>{boxes.size}</td>
+              <td style={td}>{boxes.length}</td>
+              <td style={td}>{boxes.qty}</td>
+              <td style={td}>{boxes.from}</td>
+              <td style={{ ...td, textAlign: "center" }}>{boxes.trim}</td>
+              <td style={td}>{boxes.note}</td>
+              <td style={td}></td>
+              {showKg && <td style={td}></td>}
+              {showCost && <td style={td}></td>}
+              <td style={td}></td>
+              {canEdit && <td style={{ ...td, textAlign: "right" }}>{actions}</td>}
+            </tr>
+          );
           return (
-            <div key={it.id} style={S.managerRow}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                  <span style={{ fontWeight: 600 }}>{it.qty} ×</span>
-                  <span>{fmtMm(Number(it.cut_length_mm))}</span>
-                  <span>
-                    {it.section}
-                    {it.grade ? ` ${it.grade}` : ""}
-                  </span>
-                  {it.drawing_no && <span style={S.roleHint}>{it.drawing_no}</span>}
-                  <span style={S.roleHint}>
-                    from {fmtM(Number(it.stock_length_m))}
-                    {it.trim_front === false ? ", no trim" : ""}
-                  </span>
-                  {it.note && <span style={S.roleHint}>— {it.note}</span>}
-                  {canEdit && offList && (
-                    <span
-                      style={{ ...S.chip, color: C.danger, borderColor: C.danger }}
-                      title="This section is not on Stock Manager's Sections list, so it has no weight, no price and matches no stock. Change the line and pick it from the list."
-                    >
-                      <AlertTriangle size={12} /> not on the Sections list
-                    </span>
-                  )}
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, flexWrap: "wrap" }}>
-                  <span style={S.roleHint}>= {fmtM(lineMetres(it))}</span>
-                  {kg != null && <span style={S.roleHint}>· {fmtKg(kg)}</span>}
-                  {canSeeValue && cost != null && <span style={S.roleHint}>· R {cost.toFixed(2)}</span>}
-                  {Number(it.qty) > 0 && !onCount && (
-                    <span style={{ ...S.roleHint, ...(cut >= Number(it.qty) ? { color: C.accentFinished, fontWeight: 600 } : {}) }}>
-                      · {cut} of {it.qty} cut
-                    </span>
-                  )}
-                  {/* The operator's counter. Big enough for a thumb, one
-                      press per piece, and a Done for when the line is
-                      finished in one go. */}
-                  {Number(it.qty) > 0 && onCount && (
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, marginLeft: 4 }}>
-                      <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, padding: "4px 10px" }} onClick={() => onCount(it, cut - 1)} disabled={cut <= 0} title="One fewer">
-                        −
-                      </button>
-                      <span style={{ fontWeight: 700, color: cut >= Number(it.qty) ? C.accentFinished : C.text, minWidth: 64, textAlign: "center" }}>
-                        {cut} of {it.qty} cut
-                      </span>
-                      <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, padding: "4px 10px" }} onClick={() => onCount(it, cut + 1)} disabled={cut >= Number(it.qty)} title="One more cut">
-                        +
-                      </button>
-                      {cut < Number(it.qty) && (
-                        <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, padding: "4px 10px" }} onClick={() => onCount(it, Number(it.qty))} title="All of this line is cut">
-                          Done
-                        </button>
-                      )}
-                    </span>
-                  )}
-                </div>
-              </div>
-              {canEdit &&
-                (locked ? (
-                  <span
-                    style={{ ...S.roleHint, display: "inline-flex", alignItems: "center", gap: 4 }}
-                    title="Cutting has started on this line, so it cannot be changed or removed. To cut more of the same, add a new line."
-                  >
-                    <Lock size={12} /> Cutting started
-                  </span>
-                ) : (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    {SavedCheck && <SavedCheck fieldKey={`cutitem-${it.id}`} />}
-                    {onSave && (
-                      <button
-                        type="button"
-                        className="stk-btn"
-                        style={{ ...S.reqActionBtnMuted, ...(edit ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}
-                        onClick={() => startEdit(it)}
-                        disabled={!!edit}
-                        title={edit ? "Save or cancel the line that is open first" : "Change this line"}
-                      >
-                        <Pencil size={12} /> Edit
-                      </button>
-                    )}
-                    {onRemove && (
-                      <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => onRemove(it)} disabled={!!edit} title="Remove this line">
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </span>
-                ))}
+            <div style={{ overflowX: "auto", marginTop: 6 }}>
+              <table className="stk-sheet" style={{ borderCollapse: "collapse", width: "100%", minWidth: 1100 }}>
+                <thead>
+                  <tr>
+                    <th style={th}>Drawing</th>
+                    <th style={th}>Type</th>
+                    <th style={th}>Material</th>
+                    <th style={th}>Size</th>
+                    <th style={th}>Length</th>
+                    <th style={{ ...th, textAlign: "right" }}>Qty</th>
+                    <th style={th} title="The bar it is cut from">From</th>
+                    <th style={{ ...th, textAlign: "center" }} title={`${TRIM_MM} mm off the front of each bar to square it up`}>Trim</th>
+                    <th style={th}>Note</th>
+                    <th style={{ ...th, textAlign: "right" }}>Metres</th>
+                    {showKg && <th style={{ ...th, textAlign: "right" }}>kg</th>}
+                    {showCost && <th style={{ ...th, textAlign: "right" }} title="Material, at the section's price per metre">R</th>}
+                    <th style={th}>Cut</th>
+                    {canEdit && <th style={th}></th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(lines || []).map((it) => {
+                    const kg = weightOf(it);
+                    const cost = costOf(it);
+                    const cut = Number(it.qty_cut || 0);
+                    const locked = cutHasStarted(it);
+                    const editing = canEdit && edit && edit.id === it.id && !locked;
+                    const offList = !!String(it.section || "").trim() && !sectionOnList(sections, it.section);
+
+                    if (editing) {
+                      const boxes = lineBoxes(edit.draft, setEditDraft, it, () => saveEdit(it));
+                      const extra = sizeBlock(it.id, edit.draft, setEditDraft);
+                      return [
+                        boxRow(
+                          it.id,
+                          boxes,
+                          <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                            <button type="button" className="stk-btn" style={{ ...S.addBtn, opacity: saving ? 0.5 : 1 }} onClick={() => saveEdit(it)} disabled={saving}>
+                              <Check size={15} strokeWidth={2.5} />
+                              {saving ? "Saving…" : "Save"}
+                            </button>
+                            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={stopEdit} disabled={saving}>
+                              Cancel
+                            </button>
+                          </span>,
+                          { outline: `1px solid ${C.accentRaw}` }
+                        ),
+                        extra && (
+                          <tr key={`${it.id}-size`}>
+                            <td style={{ ...td, whiteSpace: "normal" }} colSpan={cols}>
+                              {extra}
+                            </td>
+                          </tr>
+                        ),
+                      ];
+                    }
+
+                    return (
+                      <tr key={it.id} style={rowLine}>
+                        <td style={{ ...td, color: it.drawing_no ? C.text : C.muted }}>{it.drawing_no || ""}</td>
+                        <td style={td}>{findSectionType ? findSectionType(it.section) : ""}</td>
+                        <td style={td}>{it.grade || ""}</td>
+                        <td style={{ ...td, fontWeight: 600, fontSize: 14 }}>
+                          {it.section}
+                          {canEdit && offList && (
+                            <span
+                              style={{ ...S.chip, marginLeft: 6, color: C.danger, borderColor: C.danger }}
+                              title="This section is not on Stock Manager's Sections list, so it has no weight, no price and matches no stock. Change the line and pick it from the list."
+                            >
+                              <AlertTriangle size={12} /> not on the list
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ ...td, fontSize: 14 }}>{fmtMm(Number(it.cut_length_mm))}</td>
+                        <td style={{ ...num, fontWeight: 700, fontSize: 14 }}>{it.qty}</td>
+                        <td style={td}>
+                          {fmtM(Number(it.stock_length_m))}
+                        </td>
+                        <td style={{ ...td, textAlign: "center", color: C.muted }} title={it.trim_front === false ? "No trim" : `${TRIM_MM} mm trim`}>
+                          {it.trim_front === false ? "" : "✓"}
+                        </td>
+                        <td style={{ ...td, color: C.muted, whiteSpace: "normal", minWidth: 120 }}>{it.note || ""}</td>
+                        <td style={num}>{fmtM(lineMetres(it))}</td>
+                        {showKg && <td style={num}>{kg != null ? fmtKg(kg) : ""}</td>}
+                        {showCost && <td style={num}>{cost != null ? `R ${cost.toFixed(2)}` : ""}</td>}
+                        <td style={td}>
+                          {Number(it.qty) > 0 && !onCount && (
+                            <span style={cut >= Number(it.qty) ? { color: C.accentFinished, fontWeight: 600 } : { color: C.muted }}>
+                              {cut} of {it.qty}
+                            </span>
+                          )}
+                          {/* The operator's counter. Big enough for a thumb, one
+                              press per piece, and a Done for when the line is
+                              finished in one go. */}
+                          {Number(it.qty) > 0 && onCount && (
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, padding: "4px 10px" }} onClick={() => onCount(it, cut - 1)} disabled={cut <= 0} title="One fewer">
+                                −
+                              </button>
+                              <span style={{ fontWeight: 700, color: cut >= Number(it.qty) ? C.accentFinished : C.text, minWidth: 64, textAlign: "center" }}>
+                                {cut} of {it.qty} cut
+                              </span>
+                              <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, padding: "4px 10px" }} onClick={() => onCount(it, cut + 1)} disabled={cut >= Number(it.qty)} title="One more cut">
+                                +
+                              </button>
+                              {cut < Number(it.qty) && (
+                                <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, padding: "4px 10px" }} onClick={() => onCount(it, Number(it.qty))} title="All of this line is cut">
+                                  Done
+                                </button>
+                              )}
+                            </span>
+                          )}
+                        </td>
+                        {canEdit && (
+                          <td style={{ ...td, textAlign: "right" }}>
+                            {locked ? (
+                              <span
+                                style={{ ...S.roleHint, display: "inline-flex", alignItems: "center", gap: 4 }}
+                                title="Cutting has started on this line, so it cannot be changed or removed. To cut more of the same, add a new line."
+                              >
+                                <Lock size={12} /> Cutting started
+                              </span>
+                            ) : (
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+                                {SavedCheck && <SavedCheck fieldKey={`cutitem-${it.id}`} />}
+                                {onSave && (
+                                  <button
+                                    type="button"
+                                    className="stk-btn"
+                                    style={{ ...S.managerDelete, padding: "2px 3px", ...(edit ? { opacity: 0.4, cursor: "not-allowed" } : {}) }}
+                                    onClick={() => startEdit(it)}
+                                    disabled={!!edit}
+                                    title={edit ? "Save or cancel the line that is open first" : "Change this line"}
+                                  >
+                                    <Pencil size={14} />
+                                  </button>
+                                )}
+                                {onRemove && (
+                                  <button
+                                    type="button"
+                                    className="stk-btn"
+                                    style={{ ...S.managerDelete, padding: "2px 3px", ...(edit ? { opacity: 0.4, cursor: "not-allowed" } : {}) }}
+                                    onClick={() => onRemove(it)}
+                                    disabled={!!edit}
+                                    title="Remove this line"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                )}
+                              </span>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                  {/* Add a part: the bottom row, the same columns. */}
+                  {canEdit &&
+                    (() => {
+                      const boxes = lineBoxes(draft, setDraft, null, submitDraft);
+                      const extra = sizeBlock("add", draft, setDraft);
+                      return [
+                        boxRow(
+                          "add",
+                          boxes,
+                          <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={submitDraft} disabled={adding}>
+                            <Plus size={12} /> Add
+                          </button>,
+                          { background: C.bg }
+                        ),
+                        extra && (
+                          <tr key="add-size" style={{ background: C.bg }}>
+                            <td style={{ ...td, whiteSpace: "normal" }} colSpan={cols}>
+                              {extra}
+                            </td>
+                          </tr>
+                        ),
+                      ];
+                    })()}
+                </tbody>
+              </table>
             </div>
           );
-        })}
-      </div>
+        })()}
 
       {(lines || []).length > 0 && (
         <div style={{ ...S.roleHint, marginTop: 8 }}>
@@ -712,19 +827,6 @@ export default function CutToSize({
           {anyWeight ? ` · ${fmtKg(totalKg)}` : ""}
           {canSeeValue && totalCost > 0 ? ` · R ${totalCost.toFixed(2)} material` : ""}
           {` · ${KERF_MM} mm lost per cut`}
-        </div>
-      )}
-
-      {canEdit && (
-        <div style={{ marginTop: 10, padding: 10, background: C.bg, borderRadius: 6, border: `1px solid ${C.border}` }}>
-          <label style={S.label}>Add a part</label>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-            {lineBoxes(draft, setDraft, null, submitDraft)}
-            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={submitDraft} disabled={adding}>
-              <Plus size={12} /> Add
-            </button>
-          </div>
-          {sizeBlock("add", draft, setDraft)}
         </div>
       )}
 
