@@ -75,6 +75,7 @@ import CutToSize from "./jobs/CutToSize.jsx";
 import BuyOuts from "./jobs/BuyOuts.jsx";
 import JobDrawings from "./jobs/JobDrawings.jsx";
 import { isLibraryFile, jobDrawingList, jobOnlyPartNumber, matchFileToLine, partKey, rowKey } from "./jobs/jobDrawings.js";
+import DrawingThumb from "./drawings/DrawingThumb.jsx";
 import Materials from "./jobs/Materials.jsx";
 import { addStockFromStores } from "./jobs/stockFromStores.js";
 import { markedStageTakes, jobIsMarked, comesBeforeForLine, orderedByLines, extraStagesOf, routeText, renameInList } from "./jobs/extraStages.js";
@@ -2078,6 +2079,25 @@ export default function StockControl() {
   // where nothing can be taken off. Read once a session and after a change:
   // a small table, one row per drawing someone took off a job.
   const [jobDrawingHidden, setJobDrawingHidden] = useState(null);
+  // Drawing previews on the Items sheet, on or off per device (Heinrich,
+  // 21 Oct 2026: "a toggle to turn this on and off until we are happy").
+  const [itemDrawingPreviews, setItemDrawingPreviews] = useState(() => {
+    try {
+      return localStorage.getItem("stk-items-drawing-previews") !== "off";
+    } catch {
+      return true;
+    }
+  });
+  const toggleItemDrawingPreviews = () =>
+    setItemDrawingPreviews((on) => {
+      try {
+        localStorage.setItem("stk-items-drawing-previews", on ? "off" : "on");
+      } catch {
+        /* a private window: the choice lasts the visit */
+      }
+      return !on;
+    });
+  const wantsJobDrawings = jobDetailTab === "drawings" || (jobDetailTab === "items" && itemDrawingPreviews);
   // A line's part number for its drawing: the linked stock part's, else
   // the line's own stock code (its identity). The Production card's
   // Drawings block uses this too.
@@ -2086,15 +2106,15 @@ export default function StockControl() {
     return (linked?.partNumber || line?.stock_code || "").trim();
   };
   const drawingPartsKey =
-    jobDetailTab === "drawings" && jobDetail
+    wantsJobDrawings && jobDetail
       ? [...new Set((jobDetail.quoteItems || []).map(linePartNumber).filter(Boolean))].sort().join("\n")
       : "";
   useEffect(() => {
-    if (!supabase || !jobDetail || jobDetailTab !== "drawings") return;
+    if (!supabase || !jobDetail || !wantsJobDrawings) return;
     const jobId = jobDetail.job.id;
     const parts = drawingPartsKey ? drawingPartsKey.split("\n") : [];
     let stale = false;
-    const columns = "id, part_number, file_name, internal_revision, customer_revision, created_at, uploaded_by";
+    const columns = "id, part_number, file_name, internal_revision, customer_revision, created_at, uploaded_by, storage_path";
     const jobColumns = `${columns}, quote_item_id, storage_path`;
     setJobDrawingFiles((prev) =>
       prev.jobId === jobId ? { ...prev, loading: true } : { jobId, byPart: {}, jobOnly: [], loading: true }
@@ -23267,7 +23287,18 @@ export default function StockControl() {
             <>
             {(jobDetail.quoteItems.length > 0 || canEditThisJob) && (
               <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-                <label style={S.label}>Quoted items</label>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <label style={S.label}>Quoted items</label>
+                  <button
+                    type="button"
+                    className="stk-btn"
+                    onClick={toggleItemDrawingPreviews}
+                    style={{ ...S.reqActionBtn, fontSize: 12 }}
+                    title="A small picture of each line's drawing between Code and Description. Off hides the column; the pictures are kept."
+                  >
+                    Drawing previews: {itemDrawingPreviews ? "on" : "off"}
+                  </button>
+                </div>
                 {/* Where each line is made decides which cutting stage
                     lists it. A job with blanks behaves as it always did,
                     every line on every stage, so the count is here to be
@@ -23367,6 +23398,27 @@ export default function StockControl() {
                   // 21 Oct 2026: "auto size, with maximum limit of 70% more";
                   // "dont shrink"). 7.5px a character at this 13px font, plus
                   // the padding. Longer text scrolls inside the box as before.
+                  // The drawing a line previews: the library's current PDF for
+                  // its part number (what the floor sees), else a PDF kept on
+                  // this job only; never a DXF, never one taken off this job
+                  // (Heinrich's answers, 21 Oct 2026).
+                  const heldDrawings = jobDrawingFiles.jobId === jobDetail.job.id ? jobDrawingFiles : { byPart: {}, jobOnly: [] };
+                  const takenOffKeys = new Set((jobDrawingHidden || {})[jobDetail.job.id] || []);
+                  const previewFor = (line) => {
+                    if (!itemDrawingPreviews) return null;
+                    const partNumber = linePartNumber(line);
+                    const library = partNumber ? heldDrawings.byPart[partNumber] : null;
+                    if (library && library.storage_path && !takenOffKeys.has(partKey(partNumber))) {
+                      return { storagePath: library.storage_path, title: `${library.file_name || partNumber}: open the drawing`, open: () => openDrawingPreviewByPartNumber(partNumber) };
+                    }
+                    const own = (heldDrawings.jobOnly || []).find((d) => d.quote_item_id === line.id && isLibraryFile(d.file_name) && !takenOffKeys.has(rowKey(d)));
+                    if (own && own.storage_path) return { storagePath: own.storage_path, title: `${own.file_name}: open the drawing (this job only)`, open: () => openDrawingFile(own) };
+                    return null;
+                  };
+                  const previewCell = (line) => {
+                    const d = previewFor(line);
+                    return <td style={{ ...cell, width: 1 }}>{d ? <DrawingThumb storagePath={d.storagePath} title={d.title} onOpen={d.open} /> : null}</td>;
+                  };
                   const fitWidth = (text, least) => Math.min(Math.round(least * 1.7), Math.max(least, String(text || "").length * 7.5 + 16));
                   const fitStyle = (base, text, least) => ({ ...base, width: fitWidth(text, least) });
                   const growOnInput = (least) => (e) => { e.target.style.width = `${fitWidth(e.target.value, least)}px`; };
@@ -23443,13 +23495,14 @@ export default function StockControl() {
                       <SavedCheck fieldKey={`quoteitem-extra-${q.id}`} />
                     </span>
                   );
-                  const cols = 5 + (canSeeValue ? 1 : 0) + (showLength ? 1 : 0) + 1 + 1 + 1 + 1;
+                  const cols = 5 + (itemDrawingPreviews ? 1 : 0) + (canSeeValue ? 1 : 0) + (showLength ? 1 : 0) + 1 + 1 + 1 + 1;
                   return (
                     <div style={{ overflowX: "auto", marginTop: 6 }}>
                       <table className="stk-sheet" style={{ borderCollapse: "collapse", width: "100%", minWidth: 900 }}>
                         <thead>
                           <tr>
                             <th style={head}>Code</th>
+                            {itemDrawingPreviews && <th style={head} title="The line's drawing; click to open it">Drawing</th>}
                             <th style={head}>Description</th>
                             <th style={{ ...head, paddingRight: 2 }} title="How many the customer ordered">Qty</th>
                             <th style={{ ...head, paddingLeft: 2, paddingRight: 6, textAlign: "right" }} title="How many have been put on an invoice request so far">Complete</th>
@@ -23509,6 +23562,7 @@ export default function StockControl() {
                                       <span style={{ fontWeight: 600, fontSize: 13 }} title={codeHint}>{jobLineCode(it, linkedItem)}</span>
                                     )}
                                   </td>
+                                  {itemDrawingPreviews && previewCell(it)}
                                   <td style={{ ...cell, minWidth: 220 }}>
                                     {edit ? (
                                       <span style={{ display: "flex", alignItems: "center", gap: 2 }}>
@@ -23760,6 +23814,7 @@ export default function StockControl() {
                                           )}
                                         </span>
                                       </td>
+                                      {itemDrawingPreviews && previewCell(c)}
                                       <td style={cell}>
                                         {edit ? (
                                           <input
