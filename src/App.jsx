@@ -17150,6 +17150,25 @@ export default function StockControl() {
                                 {nothingToCutText(process.process_name)}
                               </div>
                             )}
+                            {/* Sales and admins switch the stage between one
+                                tick and a count per item where they see it
+                                (Heinrich, 21 Oct 2026), the same save as the
+                                job page's box. Allowed with counts logged,
+                                by his answer: the counts stay saved. */}
+                            {(isAdmin || profile?.isSalesPerson) && !showsRequestInvoiceButton(process) && (
+                              <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 13, color: C.muted }}>
+                                Count
+                                <select
+                                  style={{ ...S.input, fontSize: 14, padding: "4px 8px", width: 84 }}
+                                  value={process.tracking_mode || "batch"}
+                                  onChange={(e) => updateJobProcessField(process, "tracking_mode", e.target.value)}
+                                  title="Batch: one tick completes the whole line. Each: a running count against the item's quantity."
+                                >
+                                  <option value="batch">Batch</option>
+                                  <option value="each">Each</option>
+                                </select>
+                              </label>
+                            )}
                             <div style={{ marginTop: 6 }}>
                               {process.tracking_mode === "each" && !showsRequestInvoiceButton(process) && !stageHasNothingToCut(process.process_name, quoteItems) ? (
                                 <>
