@@ -9,8 +9,13 @@ import { C, S } from "./theme.js";
 //
 // items: [{ label, icon, onClick }]. Closes on a pick, a click outside or
 // Escape.
-export default function CardMenu({ items, title = "More" }) {
+//
+// fixed: measure the button and pin the list to the window instead of to
+// the card. For a ⋮ inside a sheet that scrolls sideways, where a list
+// hanging off the card is cut off at the edge of the scrolling box.
+export default function CardMenu({ items, title = "More", fixed = false }) {
   const [open, setOpen] = useState(false);
+  const [at, setAt] = useState(null);
   const ref = useRef(null);
   useEffect(() => {
     if (!open) return undefined;
@@ -37,13 +42,27 @@ export default function CardMenu({ items, title = "More" }) {
         title={title}
         aria-label={title}
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          if (!open && fixed && ref.current) {
+            const r = ref.current.getBoundingClientRect();
+            setAt({ top: Math.round(r.bottom + 4), right: Math.max(8, Math.round(window.innerWidth - r.right)) });
+          }
+          setOpen((o) => !o);
+        }}
         style={{ background: "none", border: "none", color: C.muted, padding: 4, cursor: "pointer", display: "flex" }}
       >
         <MoreVertical size={18} />
       </button>
       {open && (
-        <div style={{ ...S.stockDropdown, left: "auto", right: 0, minWidth: 180 }}>
+        <div
+          style={{
+            ...S.stockDropdown,
+            left: "auto",
+            right: 0,
+            minWidth: 180,
+            ...(fixed && at ? { position: "fixed", top: at.top, right: at.right } : {}),
+          }}
+        >
           {items.map((it) => (
             <button
               key={it.label}

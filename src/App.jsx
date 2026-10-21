@@ -13264,7 +13264,11 @@ export default function StockControl() {
     if (listKey === "customers") {
       jobs.push(
         supabase.from("jobs").update({ customer: newValue }).eq("customer", oldValue),
-        supabase.from("shortages").update({ customer: newValue }).eq("customer", oldValue)
+        supabase.from("shortages").update({ customer: newValue }).eq("customer", oldValue),
+        // Drawings are filed under the customer's name too, and the
+        // Drawings tab lists nothing until a customer is picked: left
+        // behind, a renamed customer's drawings could not be found.
+        supabase.from("drawings").update({ customer: newValue }).eq("customer", oldValue)
       );
     }
     if (listKey === "staffDepartments") {
@@ -13368,6 +13372,16 @@ export default function StockControl() {
       // once did.
       const next = { ...prev, [listKey]: updated, supplierPrices };
       if (listKey === "sectionTypes") next.sections = cascaded;
+      // A renamed customer takes its contact people with it. They are
+      // filed under the name, so without this the old name keeps them and
+      // the customer reads as having none (the contacts' own ids do not
+      // change, so the save sees each one modified and moves its row).
+      if (listKey === "customers" && prev.customerContacts?.[oldValue]) {
+        const moved = { ...prev.customerContacts };
+        moved[newValue] = [...(moved[newValue] || []), ...moved[oldValue]];
+        delete moved[oldValue];
+        next.customerContacts = moved;
+      }
       return next;
     });
     setItems((prev) =>
@@ -18823,9 +18837,10 @@ export default function StockControl() {
           <ErrorBoundary box what="the Customer Stock list">
             <CustomerStock
               ctx={{
-                allocationsForItem, canDelete, canEditItems, canEditQty, canRequisition, canSeeValue, canView, drawingLookup,
-                isLowStock, items, master, openDrawingPreviewByPartNumber, openDuplicate, openEdit, openPreview, openRequest,
-                openUsageModal, query, removeItem, setQuery, updateCustomerStockField, openSupplierQuote,
+                addCustomerContact, allocationsForItem, canDelete, canEditItems, canEditQty, canRequisition, canSeeValue,
+                canView, drawingLookup, isLowStock, items, master, openDrawingPreviewByPartNumber, openDuplicate, openEdit,
+                openPreview, openRequest, openUsageModal, query, removeCustomerContact, removeItem, renameMasterEntry,
+                setQuery, updateCustomerContact, updateCustomerStockField, openSupplierQuote,
               }}
             />
           </ErrorBoundary>

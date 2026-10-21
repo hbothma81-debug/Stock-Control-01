@@ -7,26 +7,35 @@
 //   Level 1  every customer, A to Z, one card each with how many parts
 //            and how many have stock, plus a type-to-find box to go
 //            straight to one. Two taps to a customer's parts.
-//   Level 2  that customer's page: Back, the parts A to Z by stock code,
-//            a Has stock only tick and a sort choice. The customer box
-//            stays at the top, so switching customer is one tap, not a
-//            trip back and in again.
+//   Level 2  that customer's page, with two tabs: Items and Customer.
+//
+// Since 21 Oct 2026 the Items tab is a sheet, the same as the job page's
+// Items tab (Heinrich: "I want to change the customer stock codes to the
+// same layout, it reads better"). Headings once, a line between the
+// columns, one row per part, and everything typed straight onto the line:
+// code, description, revision, cost, low at, supplier, shelf. On hand
+// keeps its Use and Add buttons, because a quantity change is a usage
+// record, never a typed number. Request stock and the drawing sit on the
+// right of the line, then a ⋮ ("3 dots on the end", his words) for the
+// rest: Edit, Duplicate, an attachment, Remove, and "The rest of it",
+// which opens one line under the row with what is reserved, what it is
+// worth, its note, its supplier quotes and which customer it belongs to.
+//
+// The Customer tab is the same customer card as Stock Manager -> Customers
+// (Heinrich, 21 Oct 2026: "not 2 separate menus"), plus the counts: the
+// name, how many parts, how many with stock, what is on hand, and the
+// contact people. Filled in here or there, the same rows either way.
 //
 // Zero quantities are included (1,724 of the 1,732 parts on live are at
-// zero, and the old list hid them). A tap opens a row in place with its
-// boxes; no new page.
+// zero, and the old list hid them).
 //
 // Search is the Stock tab's own box (ctx.query), one per screen: on
 // level 1 it narrows the customers and says how many of each one's parts
 // match; on level 2 it narrows that customer's parts.
 //
-// The tick and the sort are remembered between visits in localStorage
-// (STORE below); the open customer is not, so the tab always opens on
-// the customer list.
-//
-// What a row reads: the stock code in its own box, the description in
-// its own box, the customer's revision, the quantity, the cost (Rand
-// values only; it is what we pay, never "price"), the supplier.
+// The tick, the sort and the open tab are remembered between visits in
+// localStorage (STORE below); the open customer is not, so the tab always
+// opens on the customer list.
 //
 // Everything that changes a row goes through the same functions the old
 // list used (ctx): Use / Add through the usage pop-up, Edit, Duplicate,
@@ -34,7 +43,10 @@
 
 import { rand } from "../lib/money.js";
 import { useEffect, useState } from "react";
-import { AlertTriangle, ChevronLeft, ClipboardList, Copy, FileText, ImageIcon, Pencil, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronUp, ClipboardList, Copy, FileText, ImageIcon, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import CardMenu from "../CardMenu.jsx";
+import EditableName from "../EditableName.jsx";
+import MoneyInput from "../MoneyInput.jsx";
 import LastQuoted from "../procurement/LastQuoted.jsx";
 import TypeToFind from "../TypeToFind.jsx";
 import { C, S } from "../theme.js";
@@ -77,9 +89,12 @@ const box = {
 
 // A text box that saves when it is left or on Enter, never per keystroke,
 // and is rebuilt when the stored value changes under it.
-function SaveOnLeave({ value, onSave, style, placeholder, title, type = "text" }) {
+//
+// as: the box to draw instead of a plain input — MoneyInput for a cost, so
+// it carries its grey R like every other price box in the app.
+function SaveOnLeave({ value, onSave, style, placeholder, title, type = "text", as: As = "input", onInput }) {
   return (
-    <input
+    <As
       key={value ?? ""}
       type={type}
       step={type === "number" ? "any" : undefined}
@@ -87,6 +102,7 @@ function SaveOnLeave({ value, onSave, style, placeholder, title, type = "text" }
       placeholder={placeholder}
       title={title}
       style={style}
+      onInput={onInput}
       onBlur={(e) => {
         if (e.target.validity?.badInput) return;
         if (String(e.target.value) !== String(value ?? "")) onSave(e.target.value);
@@ -99,12 +115,14 @@ function SaveOnLeave({ value, onSave, style, placeholder, title, type = "text" }
 }
 
 export default function CustomerStock({ ctx }) {
-  const { allocationsForItem, canDelete, canEditItems, canEditQty, canRequisition, canSeeValue, canView, drawingLookup,
-    isLowStock, items, master, openDrawingPreviewByPartNumber, openDuplicate, openEdit, openPreview, openRequest,
-    openUsageModal, query, removeItem, setQuery, updateCustomerStockField, openSupplierQuote } = ctx;
+  const { addCustomerContact, allocationsForItem, canDelete, canEditItems, canEditQty, canRequisition, canSeeValue,
+    canView, drawingLookup, isLowStock, items, master, openDrawingPreviewByPartNumber, openDuplicate, openEdit,
+    openPreview, openRequest, openUsageModal, query, removeCustomerContact, removeItem, renameMasterEntry, setQuery,
+    updateCustomerContact, updateCustomerStockField, openSupplierQuote } = ctx;
   const saved = readStore();
   const [hasStockOnly, setHasStockOnly] = useState(!!saved.hasStockOnly);
   const [sort, setSort] = useState(SORTS[saved.sort] ? saved.sort : "code");
+  const [custTab, setCustTab] = useState(saved.custTab === "customer" ? "customer" : "items");
   const [customer, setCustomer] = useState(null);
   const [showAll, setShowAll] = useState(false);
   const [openId, setOpenId] = useState(null);
@@ -116,11 +134,11 @@ export default function CustomerStock({ ctx }) {
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORE, JSON.stringify({ hasStockOnly, sort }));
+      localStorage.setItem(STORE, JSON.stringify({ hasStockOnly, sort, custTab }));
     } catch {
       // Storage off: the view simply starts fresh next time.
     }
-  }, [hasStockOnly, sort]);
+  }, [hasStockOnly, sort, custTab]);
 
   const words = searchWords(query);
   const all = (items || []).filter((it) => it.mainCat === "custom");
@@ -182,92 +200,209 @@ export default function CustomerStock({ ctx }) {
     />
   );
 
-  function row(it) {
+  // The sheet's own styles, the job page's Items tab to the pixel: the
+  // lines between the columns come from the shared `stk-sheet` class.
+  const cell = { padding: "3px 4px", verticalAlign: "middle", whiteSpace: "nowrap" };
+  const head = { ...cell, ...S.label, marginTop: 0, marginBottom: 0, textAlign: "left", fontWeight: 400 };
+  const sheetBox = { ...S.input, fontSize: 13, padding: "3px 6px", width: "100%" };
+  const miniBtn = { ...S.reqActionBtnMuted, padding: "2px 6px", fontSize: 11 };
+  // Code and Description grow with their text as it is typed, never
+  // narrower than they start and at most 70% wider — the job sheet's rule.
+  const fitWidth = (text, least) => Math.min(Math.round(least * 1.7), Math.max(least, String(text || "").length * 7.5 + 16));
+  const fitStyle = (base, text, least) => ({ ...base, width: fitWidth(text, least) });
+  const growOnInput = (least) => (e) => { e.target.style.width = `${fitWidth(e.target.value, least)}px`; };
+  const columns = 8 + (canSeeValue ? 1 : 0);
+
+  // One part as a line on the sheet.
+  function sheetRow(it) {
     const isOpen = openId === it.id;
     const low = isLowStock(it);
     const drawing = it.partNumber && drawingLookup?.[it.partNumber.trim()];
     const reserved = allocationsForItem ? allocationsForItem(it.id) : [];
     const held = reserved.reduce((sum, a) => sum + (Number(a.qty_allocated) - Number(a.qty_used)), 0);
+    // The edge the card used to carry on its left: red below the low
+    // mark, green with stock on the shelf, plain at nought.
+    const edge = low ? C.danger : Number(it.qty) > 0 ? C.accentFinished : C.border;
+    const qtyColour = low ? C.danger : Number(it.qty) > 0 ? C.text : C.muted;
+    const menu = [];
+    if (canEditItems) {
+      menu.push({ label: "Edit item", icon: <Pencil size={14} />, onClick: () => openEdit(it) });
+      menu.push({ label: "Duplicate", icon: <Copy size={14} />, onClick: () => openDuplicate(it) });
+    }
+    if (it.attachmentType) {
+      menu.push({
+        label: it.attachmentName || "Attachment",
+        icon: it.attachmentType === "pdf" ? <FileText size={14} /> : <ImageIcon size={14} />,
+        onClick: () => openPreview(it),
+      });
+    }
+    menu.push({
+      label: isOpen ? "Hide the rest" : "The rest of it",
+      icon: isOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />,
+      onClick: () => setOpenId(isOpen ? null : it.id),
+    });
+    if (canDelete) menu.push({ label: "Remove part", icon: <Trash2 size={14} />, onClick: () => removeItem(it.id) });
     return (
-      <div key={it.id} style={{ ...S.reqCard, padding: "8px 10px", borderLeft: `4px solid ${low ? C.danger : Number(it.qty) > 0 ? C.accentFinished : C.border}` }}>
-        <button
-          type="button"
-          className="stk-btn"
-          onClick={() => setOpenId(isOpen ? null : it.id)}
-          style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", background: "transparent", border: "none", color: C.text, cursor: "pointer", padding: 0, textAlign: "left", flexWrap: "wrap", font: "inherit" }}
-        >
-          <span style={{ ...box, fontFamily: "monospace", fontSize: 13, color: C.accentRaw, borderColor: `${C.accentRaw}88` }} title="Stock code">
-            {it.partNumber || "no code"}
-          </span>
-          <span style={{ ...box, flex: "1 1 220px", minWidth: 0, whiteSpace: "normal", fontWeight: 600 }} title="Description">
-            {it.name}
-          </span>
-          {it.customerRevision && <span style={{ ...box, color: C.muted }} title="Customer's revision">rev {it.customerRevision}</span>}
-          <span style={{ ...box, fontWeight: 700, color: low ? C.danger : Number(it.qty) > 0 ? C.text : C.muted }} title="On hand">
-            {it.qty} {it.unit || "ea"}
-          </span>
-          {canSeeValue && <span style={{ ...box, color: C.muted }} title="Cost, what we pay">{rand(it.value || 0)}</span>}
-          {it.supplier && <span style={{ ...box, color: C.muted }} title="Supplier">{it.supplier}</span>}
-          {low && (
-            <span style={S.lowTag}>
-              <AlertTriangle size={11} strokeWidth={2.5} /> below {it.low}
+      <tbody key={it.id}>
+        <tr style={{ borderTop: `1px solid ${C.border}` }}>
+          <td style={{ ...cell, borderLeft: `4px solid ${edge}` }}>
+            {canEditItems ? (
+              <SaveOnLeave
+                value={it.partNumber || ""}
+                onSave={(v) => updateCustomerStockField(it.id, "partNumber", v.trim())}
+                onInput={growOnInput(130)}
+                style={{ ...fitStyle(sheetBox, it.partNumber, 130), fontFamily: "monospace", color: C.accentRaw }}
+                placeholder="Stock code"
+                title="The customer's stock code"
+              />
+            ) : (
+              <span style={{ fontFamily: "monospace", fontSize: 13, color: C.accentRaw }}>{it.partNumber || "no code"}</span>
+            )}
+          </td>
+          <td style={cell}>
+            {canEditItems ? (
+              <SaveOnLeave
+                value={it.name || ""}
+                onSave={(v) => updateCustomerStockField(it.id, "name", v)}
+                onInput={growOnInput(240)}
+                style={fitStyle(sheetBox, it.name, 240)}
+                placeholder="Description"
+                title="What the part is"
+              />
+            ) : (
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{it.name}</span>
+            )}
+          </td>
+          <td style={cell}>
+            {canEditItems ? (
+              <SaveOnLeave
+                value={it.customerRevision || ""}
+                onSave={(v) => updateCustomerStockField(it.id, "customerRevision", v.trim())}
+                style={{ ...sheetBox, width: 58 }}
+                placeholder="rev"
+                title="The customer's own revision"
+              />
+            ) : (
+              <span style={{ fontSize: 13, color: C.muted }}>{it.customerRevision || ""}</span>
+            )}
+          </td>
+          <td style={{ ...cell, textAlign: "right" }} title={held > 0 ? `${held} reserved for jobs` : "On hand"}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}>
+              {canEditQty("custom") && (
+                <button type="button" className="stk-btn" style={miniBtn} onClick={() => openUsageModal(it, "use")} title="Take some off the shelf">
+                  Use
+                </button>
+              )}
+              <span style={{ fontSize: 13, fontWeight: 700, color: qtyColour }}>{it.qty}</span>
+              <span style={{ fontSize: 11, color: C.muted }}>{it.unit || "ea"}</span>
+              {held > 0 && <span style={{ fontSize: 11, color: C.accentRaw }}>({held} res)</span>}
+              {canEditQty("custom") && (
+                <button type="button" className="stk-btn" style={miniBtn} onClick={() => openUsageModal(it, "add")} title="Put some on the shelf">
+                  Add
+                </button>
+              )}
             </span>
+          </td>
+          {canSeeValue && (
+            <td style={cell}>
+              {canEditItems ? (
+                <SaveOnLeave
+                  as={MoneyInput}
+                  type="number"
+                  value={it.value === 0 ? "" : it.value}
+                  onSave={(v) => updateCustomerStockField(it.id, "value", v)}
+                  style={{ ...sheetBox, width: 92 }}
+                  placeholder="0"
+                  title="What we pay, each"
+                />
+              ) : (
+                <span style={{ fontSize: 13, color: C.muted }}>{rand(it.value || 0)}</span>
+              )}
+            </td>
           )}
-        </button>
-        {isOpen && (
-          <div style={{ marginTop: 8 }}>
-            <div className="stk-meta-row" style={S.rowMeta}>
-              {it.customer && <span style={S.customerTag}>{it.customer}</span>}
-              {held > 0 && <span style={{ color: C.accentRaw, fontWeight: 600 }}>{held} reserved for jobs</span>}
-              {canSeeValue && <span>Cost {rand(it.value || 0)} each · {rand(Number(it.value || 0) * Number(it.qty || 0))} on hand</span>}
-              {it.loc && <span>Shelf {it.loc}</span>}
+          <td style={cell}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              {canEditItems ? (
+                <SaveOnLeave
+                  type="number"
+                  value={it.low === 0 ? "" : it.low}
+                  onSave={(v) => updateCustomerStockField(it.id, "low", v)}
+                  style={{ ...sheetBox, width: 64 }}
+                  placeholder="0"
+                  title="Warn when on hand drops below this"
+                />
+              ) : (
+                <span style={{ fontSize: 13, color: C.muted }}>{it.low || ""}</span>
+              )}
+              {low && (
+                <span title={`Below ${it.low}`} style={{ display: "inline-flex" }}>
+                  <AlertTriangle size={12} strokeWidth={2.5} color={C.danger} />
+                </span>
+              )}
+            </span>
+          </td>
+          <td style={cell}>
+            {canEditItems ? (
+              <TypeToFind
+                style={{ width: 150 }}
+                inputStyle={{ ...sheetBox, padding: "3px 22px 3px 6px", boxSizing: "border-box" }}
+                options={(master.suppliers || []).map((s) => s.name)}
+                value={it.supplier || ""}
+                allowNew
+                onChange={(v) => updateCustomerStockField(it.id, "supplier", v)}
+                emptyLabel="None"
+                title="Who we buy it from. None: the customer's own part."
+              />
+            ) : (
+              <span style={{ fontSize: 13, color: C.muted }}>{it.supplier || ""}</span>
+            )}
+          </td>
+          <td style={cell}>
+            {canEditItems ? (
+              <SaveOnLeave
+                value={it.loc || ""}
+                onSave={(v) => updateCustomerStockField(it.id, "loc", v)}
+                style={{ ...sheetBox, width: 80 }}
+                placeholder="Shelf"
+                title="Where it is kept"
+              />
+            ) : (
+              <span style={{ fontSize: 13, color: C.muted }}>{it.loc || ""}</span>
+            )}
+          </td>
+          <td style={{ ...cell, width: 1 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 2, justifyContent: "flex-end" }}>
+              {canRequisition && (
+                <button type="button" className="stk-btn" style={S.iconRowBtn} onClick={() => openRequest({ lines: [{ item: it }] })} title="Request stock for this part">
+                  <ClipboardList size={14} />
+                </button>
+              )}
               {drawing && canView("drawings") && (
-                <button type="button" className="stk-btn" style={S.drawingTag} onClick={() => openDrawingPreviewByPartNumber(it.partNumber.trim())}>
-                  <FileText size={14} /> Drawing
+                <button type="button" className="stk-btn" style={S.iconRowBtn} onClick={() => openDrawingPreviewByPartNumber(it.partNumber.trim())} title="View drawing">
+                  <FileText size={14} />
                 </button>
               )}
-              {it.attachmentType && (
-                <button type="button" className="stk-btn" style={S.drawingTag} onClick={() => openPreview(it)} title={`View ${it.attachmentName || "attachment"}`}>
-                  {it.attachmentType === "pdf" ? <FileText size={14} /> : <ImageIcon size={14} />} {it.attachmentName || "Attachment"}
-                </button>
-              )}
-            </div>
-            {/* Supplier quotes linked to this part on Suppliers -> Items
-                quoted (src/procurement/LastQuoted.jsx); a tap opens the quote. */}
-            {canSeeValue && openSupplierQuote && <LastQuoted itemId={it.id} onOpenQuote={openSupplierQuote} />}
-            {it.comment && <div style={S.itemComment}>{it.comment}</div>}
-            {canEditItems && (
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
-                {canSeeValue && (
-                  <div>
-                    <label style={S.label}>Cost (R)</label>
-                    <SaveOnLeave type="number" value={it.value === 0 ? "" : it.value} placeholder="0" title="What we pay, each" style={{ ...S.managerFactorInput, display: "block" }} onSave={(v) => updateCustomerStockField(it.id, "value", v)} />
-                  </div>
-                )}
-                <div>
-                  <label style={S.label}>Low at</label>
-                  <SaveOnLeave type="number" value={it.low === 0 ? "" : it.low} placeholder="0" title="Warn when on hand drops below this" style={{ ...S.managerFactorInput, display: "block" }} onSave={(v) => updateCustomerStockField(it.id, "low", v)} />
-                </div>
-                <div>
-                  <label style={S.label}>Customer revision</label>
-                  <SaveOnLeave value={it.customerRevision || ""} placeholder="e.g. A" title="The customer's own revision" style={{ ...S.managerFactorInput, width: 70, display: "block" }} onSave={(v) => updateCustomerStockField(it.id, "customerRevision", v.trim())} />
-                </div>
-                <div>
-                  <label style={S.label}>Supplier (optional)</label>
-                  <TypeToFind
-                    style={{ width: 180 }}
-                    inputStyle={{ ...S.managerFactorInput, width: "100%", padding: "5px 24px 5px 7px", boxSizing: "border-box" }}
-                    options={(master.suppliers || []).map((s) => s.name)}
-                    value={it.supplier || ""}
-                    allowNew
-                    onChange={(v) => updateCustomerStockField(it.id, "supplier", v)}
-                    emptyLabel="None: the customer's own part"
-                  />
-                </div>
-                <div>
+              <CardMenu items={menu} fixed />
+            </span>
+          </td>
+        </tr>
+        {isOpen && (
+          <tr>
+            <td colSpan={columns} style={{ ...cell, whiteSpace: "normal", padding: "6px 10px 10px 14px" }}>
+              <div className="stk-meta-row" style={S.rowMeta}>
+                {it.customer && <span style={S.customerTag}>{it.customer}</span>}
+                {held > 0 && <span style={{ color: C.accentRaw, fontWeight: 600 }}>{held} reserved for jobs</span>}
+                {canSeeValue && <span>Cost {rand(it.value || 0)} each · {rand(Number(it.value || 0) * Number(it.qty || 0))} on hand</span>}
+              </div>
+              {/* Supplier quotes linked to this part on Suppliers -> Items
+                  quoted (src/procurement/LastQuoted.jsx); a tap opens the quote. */}
+              {canSeeValue && openSupplierQuote && <LastQuoted itemId={it.id} onOpenQuote={openSupplierQuote} />}
+              {it.comment && <div style={S.itemComment}>{it.comment}</div>}
+              {canEditItems && (
+                <div style={{ marginTop: 6 }}>
                   <label style={S.label}>Customer</label>
                   <TypeToFind
-                    style={{ width: 160 }}
+                    style={{ width: 200 }}
                     inputStyle={{ ...S.managerFactorInput, width: "100%", padding: "5px 24px 5px 7px", boxSizing: "border-box" }}
                     options={master.customers || []}
                     value={it.customer || ""}
@@ -276,53 +411,14 @@ export default function CustomerStock({ ctx }) {
                     allowNew
                     onChange={(v) => updateCustomerStockField(it.id, "customer", v)}
                     emptyLabel="No customer"
+                    title="Move this part to another customer"
                   />
                 </div>
-              </div>
-            )}
-            <div style={{ ...S.rowControls, marginTop: 8 }}>
-              <div style={S.qtyBlock}>
-                {canEditQty("custom") && (
-                  <button type="button" className="stk-btn" style={S.usageBtnUse} onClick={() => openUsageModal(it, "use")}>
-                    Use
-                  </button>
-                )}
-                <div style={S.qtyDisplay}>
-                  <span style={{ ...S.qtyNum, color: low ? C.danger : C.text }}>{it.qty}</span>
-                  <span style={S.qtyUnit}>{it.unit || "ea"}</span>
-                </div>
-                {canEditQty("custom") && (
-                  <button type="button" className="stk-btn" style={S.usageBtnAdd} onClick={() => openUsageModal(it, "add")}>
-                    Add
-                  </button>
-                )}
-              </div>
-              <div style={S.rowActionIcons}>
-                {canRequisition && (
-                  <button type="button" className="stk-btn" style={S.iconRowBtn} onClick={() => openRequest({ lines: [{ item: it }] })} title="Request stock for this part">
-                    <ClipboardList size={14} />
-                  </button>
-                )}
-                {canEditItems && (
-                  <button type="button" className="stk-btn" style={S.iconRowBtn} onClick={() => openEdit(it)} title="Edit item">
-                    <Pencil size={14} />
-                  </button>
-                )}
-                {canEditItems && (
-                  <button type="button" className="stk-btn" style={S.iconRowBtn} onClick={() => openDuplicate(it)} title="Duplicate">
-                    <Copy size={14} />
-                  </button>
-                )}
-                {canDelete && (
-                  <button type="button" className="stk-btn" style={S.deleteBtn} onClick={() => removeItem(it.id)} title="Remove item">
-                    <Trash2 size={15} />
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
+              )}
+            </td>
+          </tr>
         )}
-      </div>
+      </tbody>
     );
   }
 
@@ -386,20 +482,17 @@ export default function CustomerStock({ ctx }) {
 
   // Level 2: one customer's page.
   const mineOnHand = mine.filter((it) => Number(it.qty) > 0).length;
-  return (
-    <div style={S.list}>
-      <button
-        type="button"
-        className="stk-btn"
-        style={{ ...S.prominentBackBtn, marginBottom: 10 }}
-        onClick={() => {
-          setCustomer(null);
-          setOpenId(null);
-        }}
-      >
-        <ChevronLeft size={18} strokeWidth={2.5} /> All customers
-      </button>
-      <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>{customer}</div>
+  const worth = mine.reduce((sum, it) => sum + Number(it.value || 0) * Number(it.qty || 0), 0);
+  // Renaming is the master list's own rename, which carries the parts, the
+  // jobs and the shortages with it. Only offered for a customer the master
+  // list holds: "No customer" is not a name, and a name that only exists
+  // on imported parts would be added to the list by renaming it.
+  const onMasterList = customer !== NO_CUSTOMER && (master.customers || []).includes(customer);
+  const canRename = canEditItems && onMasterList && !!renameMasterEntry;
+  const contacts = master.customerContacts?.[customer] || [];
+
+  const itemsPane = (
+    <>
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
         {searchBox(`${customer}'s parts`)}
         <label style={S.checkRow}>
@@ -418,10 +511,29 @@ export default function CustomerStock({ ctx }) {
           {shown.length} of {mine.length} part{mine.length === 1 ? "" : "s"} match, {mineOnHand} with stock on hand.
         </span>
       </div>
-      {shown.length === 0 && (
+      {shown.length === 0 ? (
         <div style={S.empty}>{mine.length === 0 ? "No parts for this customer yet." : "Nothing here matches that."}</div>
+      ) : (
+        // Narrow screens scroll the sheet sideways, never wrap it.
+        <div style={{ overflowX: "auto" }}>
+          <table className="stk-sheet" style={{ borderCollapse: "collapse", width: "100%", minWidth: 900 }}>
+            <thead>
+              <tr>
+                <th style={head}>Code</th>
+                <th style={head}>Description</th>
+                <th style={head} title="The customer's own revision">Rev</th>
+                <th style={{ ...head, textAlign: "right" }}>On hand</th>
+                {canSeeValue && <th style={head} title="What we pay, each">Cost</th>}
+                <th style={head} title="Warn when on hand drops below this">Low at</th>
+                <th style={head}>Supplier</th>
+                <th style={head} title="Where it is kept">Shelf</th>
+                <th style={head}></th>
+              </tr>
+            </thead>
+            {drawn.map(sheetRow)}
+          </table>
+        </div>
       )}
-      <div style={S.managerListFullPage}>{drawn.map(row)}</div>
       {drawn.length < shown.length && (
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
           <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => setShowAll(true)}>
@@ -430,6 +542,122 @@ export default function CustomerStock({ ctx }) {
           <span style={S.roleHint}>Showing the first {drawn.length}. Type in the search box to narrow it.</span>
         </div>
       )}
+    </>
+  );
+
+  // The customer's own card: the counts, and the same contact people as
+  // Stock Manager -> Customers, so there is one place to keep them.
+  const customerPane = (
+    <div style={S.deptCard}>
+      <div style={S.deptCardHead}>
+        {canRename ? (
+          <EditableName
+            value={customer}
+            onCommit={(v) => {
+              renameMasterEntry("customers", customer, v);
+              setCustomer(v.trim());
+            }}
+            style={{ fontWeight: 600, fontSize: 15 }}
+          />
+        ) : (
+          <span style={{ fontWeight: 600, fontSize: 15 }}>{customer}</span>
+        )}
+      </div>
+      <div className="stk-meta-row" style={{ ...S.rowMeta, marginTop: 4 }}>
+        <span>{mine.length} part{mine.length === 1 ? "" : "s"}</span>
+        <span>{mineOnHand} with stock</span>
+        {canSeeValue && <span>{rand(worth)} on hand</span>}
+      </div>
+      {canRename && (
+        <div style={{ ...S.roleHint, marginTop: 2 }}>
+          Renaming the customer here renames it on every part, job and shortage.
+        </div>
+      )}
+      <div style={{ marginTop: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <label style={S.label}>Contact people</label>
+          {canEditItems && addCustomerContact && (
+            <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => addCustomerContact(customer)}>
+              <Plus size={12} /> Add contact
+            </button>
+          )}
+        </div>
+        {contacts.map((c) => (
+          <div key={c.id} style={{ marginTop: 6 }}>
+            <input
+              style={S.input}
+              value={c.name}
+              onChange={(e) => updateCustomerContact(customer, c.id, "name", e.target.value)}
+              placeholder="Contact name"
+              disabled={!canEditItems}
+            />
+            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+              <input
+                style={{ ...S.input, flex: 1 }}
+                type="email"
+                value={c.email}
+                onChange={(e) => updateCustomerContact(customer, c.id, "email", e.target.value)}
+                placeholder="Email"
+                disabled={!canEditItems}
+              />
+              <input
+                style={{ ...S.input, flex: 1 }}
+                type="tel"
+                value={c.phone || ""}
+                onChange={(e) => updateCustomerContact(customer, c.id, "phone", e.target.value)}
+                placeholder="Phone"
+                disabled={!canEditItems}
+              />
+              {canEditItems && removeCustomerContact && (
+                <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removeCustomerContact(customer, c.id)}>
+                  <Trash2 size={13} />
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+        {contacts.length === 0 && <div style={{ ...S.roleHint, marginTop: 4 }}>No contacts added yet.</div>}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={S.list}>
+      <button
+        type="button"
+        className="stk-btn"
+        style={{ ...S.prominentBackBtn, marginBottom: 10 }}
+        onClick={() => {
+          setCustomer(null);
+          setOpenId(null);
+        }}
+      >
+        <ChevronLeft size={18} strokeWidth={2.5} /> All customers
+      </button>
+      {/* No customer picker here, by his word on 13 Oct 2026: the heading
+          says which customer it is, and All customers is how you reach
+          another. Two boxes reading the same name is what he had taken off. */}
+      <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>{customer}</div>
+      <div style={S.segRow}>
+        {[
+          { key: "items", label: `Items (${mine.length})` },
+          { key: "customer", label: "Customer" },
+        ].map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            className="stk-btn"
+            onClick={() => setCustTab(t.key)}
+            style={{
+              ...S.segBtn,
+              ...(custTab === t.key ? { background: C.accentTint, color: C.accentRaw, border: `1px solid ${C.accentRaw}` } : {}),
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div>{custTab === "customer" ? customerPane : itemsPane}</div>
     </div>
   );
 }
