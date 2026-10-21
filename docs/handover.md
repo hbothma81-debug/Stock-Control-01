@@ -6055,3 +6055,25 @@ prices for the 8 CNC materials that came across to live at R0.
 Drawings tab rows with Kept in / take off / Put back), not yet checked, and the engine queue
 was empty. The Suppliers conversations and the Jobs conversation push on his "push from
 here" at times: read the live tip first, every time.
+
+## 21 Oct 2026 — Money/units conversation: push of `6175eb5` + `a256801` (Items sheet)
+
+On Heinrich's word in this conversation ("push"). Live tip before: `f52b589` (the
+gate's handover). Queue read as its own step: exactly these two, nothing else. The
+gate was told in one line before the push. Checked on the committed tree: build clean,
+614 tests pass, names 0 problems; both seen on practice (JOB-0009). No SQL.
+`6175eb5`: the Items sheet's Code and Description boxes grow with their text as it is
+typed, never narrower than today, at most 70% wider (Code 120–204 px, parts 96–163,
+Description 220–374). `a256801`: a Drawing column between Code and Description with a
+60 px picture of the line's drawing (library PDF, else a job-only PDF, never a DXF,
+honouring Take off this job), click opens the viewer; "Drawing previews: on/off" button
+beside Quoted items, per device (`stk-items-drawing-previews`), on by default. The
+picture is made once (`src/drawings/drawingThumb.js`: PDF.js page one, saved as PNG in
+the drawings bucket under `thumbs/<storage path>.png`) and the sheet then loads only
+tiny images, never PDFs. The job's drawings now load on the Items tab too while
+previews are on (the library query gains `storage_path`). Earlier today from this
+conversation, pushed by the gate: `8e2033f` + `b67026a` (money as "R 1,234.56"
+everywhere through `src/lib/money.js`, grey R inside price boxes), `f00d6eb` (units in
+grey inside size and weight boxes, `src/UnitInput.jsx`; MoneyInput and NumberBox sit on
+it), `21ed4be` (the Material column off the Items sheet; `job_quote_items.material_type`
+and `setJobLineMaterial` kept for the item builder the quote plan is to design).
