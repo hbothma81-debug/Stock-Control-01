@@ -73,6 +73,8 @@ import {
 } from "./manager/materialNames.js";
 import CutToSize from "./jobs/CutToSize.jsx";
 import BuyOuts from "./jobs/BuyOuts.jsx";
+import JobDrawings from "./jobs/JobDrawings.jsx";
+import { drawingRows } from "./jobs/jobDrawings.js";
 import Materials from "./jobs/Materials.jsx";
 import { addStockFromStores } from "./jobs/stockFromStores.js";
 import { markedStageTakes, jobIsMarked, comesBeforeForLine, orderedByLines, extraStagesOf, routeText, renameInList } from "./jobs/extraStages.js";
@@ -2063,6 +2065,45 @@ export default function StockControl() {
   // The Invoice & delivery tab's line picker: { kind: "invoice" |
   // "delivery", qty: { lineId: "3" } }, or null when shut.
   const [pickLinesModal, setPickLinesModal] = useState(null);
+  // The Drawings tab's current drawings for the open job, read when the
+  // tab is opened (never on a timer): { jobId, byPart, loading }.
+  const [jobDrawingFiles, setJobDrawingFiles] = useState({ jobId: null, byPart: {}, loading: false });
+  // The linked stock part's part number: the Production card's rule.
+  const linePartNumber = (line) => {
+    const linked = line?.linked_item_id ? (items || []).find((i) => i.id === line.linked_item_id) : null;
+    return (linked?.partNumber || "").trim();
+  };
+  const drawingPartsKey =
+    jobDetailTab === "drawings" && jobDetail
+      ? [...new Set((jobDetail.quoteItems || []).map(linePartNumber).filter(Boolean))].sort().join("\n")
+      : "";
+  useEffect(() => {
+    if (!supabase || !jobDetail || jobDetailTab !== "drawings") return;
+    const jobId = jobDetail.job.id;
+    const parts = drawingPartsKey ? drawingPartsKey.split("\n") : [];
+    let stale = false;
+    setJobDrawingFiles((prev) => ({ jobId, byPart: prev.jobId === jobId ? prev.byPart : {}, loading: true }));
+    (parts.length
+      ? fetchRowsForIds("drawings", "part_number", parts, {
+          select: "id, part_number, file_name, internal_revision, customer_revision, created_at, uploaded_by",
+          filter: (q) => q.eq("status", "current"),
+        })
+      : Promise.resolve([])
+    )
+      .then((rows) => {
+        if (stale) return;
+        const byPart = {};
+        for (const d of rows || []) byPart[d.part_number.trim()] = d;
+        setJobDrawingFiles({ jobId, byPart, loading: false });
+      })
+      .catch((err) => {
+        console.error("Failed to load the job's drawings:", err);
+        if (!stale) setJobDrawingFiles((prev) => ({ ...prev, loading: false }));
+      });
+    return () => {
+      stale = true;
+    };
+  }, [jobDetail?.job?.id, jobDetailTab, drawingPartsKey]);
   const [newItemForm, setNewItemForm] = useState({ description: "", qty: "", unitPrice: "", linkedItemId: null });
   // Whether the Customer Stock suggestions are open under the "Add an
   // item" box inside a job. The New Job form keeps its own, per row.
@@ -22419,6 +22460,8 @@ export default function StockControl() {
                     : ""
                 }`,
               },
+              // Drawings follow the Drawings view tick, as on the Production card.
+              ...(canView("drawings") ? [{ key: "drawings", label: "Drawings" }] : []),
               {
                 key: "files",
                 label: `Files${visibleJobFiles.length ? ` (${visibleJobFiles.length})` : ""}`,
@@ -24184,6 +24227,28 @@ export default function StockControl() {
                 onRequestAll={canRequisition ? (shorts) => requisitionAllForCutList(jobDetail.job, shorts) : null}
                 SavedCheck={SavedCheck}
               />
+            </ErrorBoundary>
+          )}
+
+          {jobDetailTab === "drawings" && canView("drawings") && (
+            <ErrorBoundary box what="the Drawings tab" where={crashPlace(jobDetail.job)}>
+              {(() => {
+                // Where each line goes: the job's stages in flow order
+                // that take it, Invoicing left out.
+                const stageNames = inFlowOrder((jobDetail.processes || []).filter((p) => !p.shortage_id), jobDetail.job)
+                  .map((p) => p.process_name)
+                  .filter((name, i, all) => all.indexOf(name) === i && !isInvoicingStage(name));
+                const held = jobDrawingFiles.jobId === jobDetail.job.id ? jobDrawingFiles : { byPart: {}, loading: true };
+                return (
+                  <JobDrawings
+                    rows={drawingRows(jobDetail.quoteItems, linePartNumber, held.byPart, (line) =>
+                      stageNames.filter((name) => stageTakesItem(name, line, jobDetail.quoteItems))
+                    )}
+                    loading={held.loading}
+                    onOpen={(partNumber) => openDrawingPreviewByPartNumber(partNumber)}
+                  />
+                );
+              })()}
             </ErrorBoundary>
           )}
 
