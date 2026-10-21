@@ -6077,3 +6077,22 @@ everywhere through `src/lib/money.js`, grey R inside price boxes), `f00d6eb` (un
 grey inside size and weight boxes, `src/UnitInput.jsx`; MoneyInput and NumberBox sit on
 it), `21ed4be` (the Material column off the Items sheet; `job_quote_items.material_type`
 and `setJobLineMaterial` kept for the item builder the quote plan is to design).
+
+## 21 Oct 2026 — Money/units conversation: state of play at wrap-up
+
+**Area:** money and unit boxes across the app, and the job Items sheet's columns (Material off, Code/Description widths, drawing previews). Everything built is LIVE: `8e2033f` + `b67026a` (money as "R 1,234.56" everywhere, `src/lib/money.js`; grey R in price boxes), `f00d6eb` (units in grey inside boxes, `src/UnitInput.jsx`), `21ed4be` (Material column off the Items sheet), `6175eb5` (Code/Description grow with text, max 70%), `a256801` (drawing previews with on/off toggle). Live bundle App-gHFQ4Jfq.js, health-checked by the gate.
+
+**SQL this conversation wrote:** none. The drawing pictures go into the existing drawings bucket under `thumbs/`, which `setup-drawings.sql` already lets every signed-in user write (the gate confirmed on live).
+
+**Built but not yet tested by Heinrich:**
+- Money boxes with the grey R: stock item edit forms, supplier price boxes, Mark invoiced and Sage invoice amount boxes, buy-out costs, PO line prices, CNC Costing prices and rate (R on the left, /s or /h on the right), Stores catalogue price. He saw the Jobs page figures and Stock Manager → Sections only.
+- Unit boxes: stock item lengths/diameters/widths, Cut to size cells, CNC bar lengths, hole and thread sizes, markup %, Settings min/max area and weight rules.
+- Items sheet: the auto-width boxes (seen on practice only), the drawing preview with a real drawing sheet, a job-only PDF, a part under a line, a job with many lines, and the toggle off. Only practice JOB-0009's test drawing (a line of text on white) was seen.
+
+**Decisions:** cents everywhere; CNC machine rates and spreadsheet exports left as they were; Material column removed "for now", `job_quote_items.material_type` and `setJobLineMaterial` kept; drawing preview shows the library PDF else a job-only PDF, never a DXF; rows without a drawing keep their height; previews stay on phones; toggle per device, on by default.
+
+**Waiting on Heinrich:** the planning session "Plan: each job item opens to its quote and parts" (started 21 Oct from this conversation) has its plan and screen questions ready and waits for his answers. The Material column and the drawing belong in that item builder later.
+
+**Gotchas found:** the dev server served a zero-length copy of a file twice after a Python script rewrote it whole (`touch` cures it; in CLAUDE.md). This conversation staged `App.jsx` whole twice and took the Production tab conversation's lines (mended by `9b86578` and `823e4a1`); from `21ed4be` on it staged by filtered patch.
+
+**Next session:** nothing half-done. If he reports a box that lost its figure or a unit in the wrong place, the one place to look is `src/UnitInput.jsx` (padding from the unit's length) and the swap lists in `8e2033f` / `f00d6eb`.
