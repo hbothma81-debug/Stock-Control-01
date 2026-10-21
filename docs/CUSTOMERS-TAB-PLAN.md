@@ -162,11 +162,20 @@ Only two things, both small:
    the line, which is a column and a change to every screen that prints it.
    *Recommendation: leave it on the job for now, and only move it if the
    office says it happens.*
-2. **Who owns this work?** Customer Stock belongs to the Requisitions
-   conversation today. This is big enough to be an area of its own.
-3. **Does the Orders tab show finished orders at all**, or only what is open,
-   with the rest behind a date window? Everything grows fast; a whole-table
-   load is not allowed.
+**Answered 21 Oct 2026:**
+
+2. **Who owns it.** A conversation of its own, started fresh for it. The
+   Claude API conversation built the Suppliers page and the document reader,
+   so step 3 (reading POs from sales@) is written with it, not twice.
+3. **Finished orders stay**, in a filtered tab of their own: *"need data to
+   plan next year production, I want to use all available data for planning,
+   can we filter it like we do now on excel."* So the Orders tab is Open and
+   Finished, and the sheet filters like a spreadsheet does — a filter box
+   under each heading (their PO, code, description, status), a date from / to,
+   and the totals of whatever is showing. Export to Excel on both.
+
+   The load has to be bounded even so: open work always, finished work only
+   for the date window asked for, paged by id. Never the whole table.
 
 ## 7. Order of building
 
