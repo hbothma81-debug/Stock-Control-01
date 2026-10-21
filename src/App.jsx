@@ -5261,6 +5261,9 @@ export default function StockControl() {
   function closeJobDetail() {
     setJobDetail(null);
     setJobDetailTab("overview");
+    // Opened from a Production card: whatever was changed inside the job
+    // shows on the card on the way back. One load, on the person's press.
+    if (tab === "production" && productionQueue !== null) fetchProductionQueue();
   }
 
   async function refreshJobDetail() {
@@ -16859,7 +16862,27 @@ export default function StockControl() {
                           </button>
                           <div style={S.reqCard}>
                             <div style={S.reqCardTop}>
-                              <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
+                              {/* Sales and admins go from here into the job
+                                  and back (Heinrich, 21 Oct 2026: "we are
+                                  going back and forward the whole time").
+                                  The job page lies over this screen, so its
+                                  Back returns to this same card. */}
+                              {isAdmin || profile?.isSalesPerson ? (
+                                <span style={S.itemName}>
+                                  <button
+                                    type="button"
+                                    className="stk-btn"
+                                    title="Open the job"
+                                    onClick={() => openJobDetail(job)}
+                                    style={{ background: "none", border: "none", padding: 0, font: "inherit", color: C.accentRaw, textDecoration: "underline", cursor: "pointer" }}
+                                  >
+                                    {job.job_number}
+                                  </button>{" "}
+                                  — {job.customer || "No customer"}
+                                </span>
+                              ) : (
+                                <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
+                              )}
                               <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
                                 <span style={{ ...S.reqStatusTag, ...(isReady ? S.reqStatus_received : S.reqStatus_ordered) }}>
                                   {isReady ? "Ready" : "Waiting"}
@@ -22241,7 +22264,7 @@ export default function StockControl() {
             style={{ ...S.prominentBackBtn, marginBottom: 10 }}
             onClick={closeJobDetail}
           >
-            <ChevronLeft size={18} strokeWidth={2.5} /> Back to Jobs
+            <ChevronLeft size={18} strokeWidth={2.5} /> {tab === "production" ? "Back to Production" : "Back to Jobs"}
           </button>
           <div style={S.modalHead}>
             <span style={S.modalTitle}>{jobDetail.job.job_number} — {jobDetail.job.customer || "No customer"}</span>
