@@ -127,8 +127,14 @@ function rightOf(items, label) {
 
 // ---------------------------------------------------------------- parsing
 
+// The card's "Quote:" reads "JOB-31728"; the job keeps only the number
+// (Heinrich, 21 Oct 2026: the word is always JOB).
+export function sigmaNestNumber(text) {
+  return String(text || "").trim().replace(/^job[\s-]*/i, "");
+}
+
 export function parseSigmaNestQuote(items) {
-  const quoteNumber = rightOf(items, "Quote:");
+  const quoteNumber = sigmaNestNumber(rightOf(items, "Quote:"));
   const customer = rightOf(items, "Quote To :");
 
   // The notes sit in the right-hand block between the "Notes :" label and
