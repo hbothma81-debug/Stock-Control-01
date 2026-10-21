@@ -2058,6 +2058,9 @@ export default function StockControl() {
   const [newStockItemModal, setNewStockItemModal] = useState(null);
   const [markInvoicedModal, setMarkInvoicedModal] = useState(null);
   const [invoiceQtyInputs, setInvoiceQtyInputs] = useState({});
+  // The Invoice & delivery tab's line picker: { kind: "invoice" |
+  // "delivery", qty: { lineId: "3" } }, or null when shut.
+  const [pickLinesModal, setPickLinesModal] = useState(null);
   const [newItemForm, setNewItemForm] = useState({ description: "", qty: "", unitPrice: "", linkedItemId: null });
   // Whether the Customer Stock suggestions are open under the "Add an
   // item" box inside a job. The New Job form keeps its own, per row.
@@ -7628,12 +7631,14 @@ export default function StockControl() {
     }
   }
 
-  function submitInvoiceForEnteredQuantities(job, quoteItems) {
+  // inputs: line id -> quantity typed. The To invoice boxes on Items, or
+  // the Create invoice / Create delivery note pop-up's own.
+  function submitInvoiceForEnteredQuantities(job, quoteItems, inputs = invoiceQtyInputs) {
     const itemsWithQty = [];
     // Parents only: a part under a line is never invoiced or delivered
     // on its own.
     for (const it of billableLines(quoteItems)) {
-      const raw = invoiceQtyInputs[it.id];
+      const raw = inputs[it.id];
       const qty = Number(raw);
       if (!raw || !qty || qty <= 0) continue;
       const remaining = Number(it.qty) - Number(it.qty_invoiced);
@@ -7650,19 +7655,22 @@ export default function StockControl() {
     return itemsWithQty;
   }
 
-  async function submitSelectedItemsToInvoice(job, quoteItems) {
-    if (invoiceRequestUnderWay(job)) return;
-    const itemsWithQty = submitInvoiceForEnteredQuantities(job, quoteItems);
-    if (!itemsWithQty) return;
+  // True once the request is made, so the pop-up knows to shut.
+  async function submitSelectedItemsToInvoice(job, quoteItems, inputs) {
+    if (invoiceRequestUnderWay(job)) return false;
+    const itemsWithQty = submitInvoiceForEnteredQuantities(job, quoteItems, inputs);
+    if (!itemsWithQty) return false;
     try {
       await submitItemsToInvoice(job, itemsWithQty);
       setInvoiceQtyInputs({});
       await tickInvoicingOnceAllRequested(job);
       refreshJobDetail();
       fetchJobs();
+      return true;
     } catch (err) {
       console.error("Failed to submit invoice:", err);
       alert(invoiceRequestRefusal(err, job.job_number) || "Couldn't submit that — check your connection and try again.");
+      return false;
     }
   }
 
@@ -9879,10 +9887,11 @@ export default function StockControl() {
     }
   }
 
-  function openBatchDeliveryNoteModal(job, quoteItems) {
-    const itemsWithQty = submitInvoiceForEnteredQuantities(job, quoteItems);
-    if (!itemsWithQty) return;
+  function openBatchDeliveryNoteModal(job, quoteItems, inputs) {
+    const itemsWithQty = submitInvoiceForEnteredQuantities(job, quoteItems, inputs);
+    if (!itemsWithQty) return false;
     setDeliveryNoteBatchModal({ job, itemsWithQty, direction: "to_supplier", recipientName: "", notes: "" });
+    return true;
   }
 
   // The next delivery note number, from the database
@@ -22368,8 +22377,7 @@ export default function StockControl() {
                 key: "files",
                 label: `Files${visibleJobFiles.length ? ` (${visibleJobFiles.length})` : ""}`,
               },
-              { key: "invoice", label: "Invoice" },
-              { key: "delivery", label: "Delivery" },
+              { key: "invoicing", label: "Invoice & delivery" },
             ].map((t) => (
               <button
                 key={t.key}
@@ -23941,12 +23949,102 @@ export default function StockControl() {
             </>
           )}
 
-          {jobDetailTab === "delivery" && (
+          {/* Invoice and Delivery in one tab (Heinrich, 21 Oct 2026): the
+              two Create buttons open the job's lines to pick from, the
+              same rules as the To invoice boxes on Items, which stay. */}
+          {jobDetailTab === "invoicing" && (
             <>
-            {jobDetail.deliveryNotes.length > 0 && (
-              <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-                <label style={S.label}>Delivery notes</label>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+            {canEditThisJob && jobDetail.quoteItems.length > 0 && (
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={{ ...S.submitBtn, flex: 1, ...(invoiceSendingFor.includes(jobDetail.job.id) ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}
+                  disabled={invoiceSendingFor.includes(jobDetail.job.id)}
+                  onClick={() => setPickLinesModal({ kind: "invoice", qty: {} })}
+                >
+                  {invoiceSendingFor.includes(jobDetail.job.id) ? "Sending…" : "Create invoice"}
+                </button>
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={{ ...S.submitBtn, flex: 1 }}
+                  onClick={() => setPickLinesModal({ kind: "delivery", qty: {} })}
+                >
+                  <Truck size={13} /> Create delivery note
+                </button>
+              </div>
+            )}
+            {(() => {
+              const requestCount = jobInvoiceRequests.filter((r) => r.job_id === jobDetail.job.id).length;
+              // The Sage invoices accounts uploaded: filed under Invoicing,
+              // so they are on the Files tab too.
+              const sageFiles = visibleJobFiles.filter((f) => f.stage === "Invoicing");
+              return (
+                <div style={{ marginTop: 10 }}>
+                  <Section title="Invoice" count={requestCount + sageFiles.length} defaultOpen>
+            {(() => {
+              const requestsForJob = jobInvoiceRequests.filter((r) => r.job_id === jobDetail.job.id);
+              if (requestsForJob.length === 0) return <div style={S.roleHint}>No invoice requests yet.</div>;
+              return (
+                <div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {requestsForJob.map((req) => (
+                      <div key={req.id} style={S.reqCard}>
+                        <div style={S.reqCardTop}>
+                          <span style={S.itemName}>{req.file_name}</span>
+                          {req.total_amount != null && <span style={S.roleHint}>{rand(req.total_amount)}</span>}
+                        </div>
+                        <div className="stk-meta-row" style={S.rowMeta}>
+                          <span>Submitted by {req.submitted_by}</span>
+                          <span>{new Date(req.submitted_at).toLocaleDateString()}</span>
+                        </div>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                          <button
+                            type="button"
+                            className="stk-btn"
+                            style={S.reqActionBtnMuted}
+                            onClick={() => viewJobInvoiceRequest(req)}
+                          >
+                            <FileText size={13} /> View document
+                          </button>
+                          {renderRequestNote(jobDetail.job, req)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+                    {sageFiles.length > 0 && (
+                      <div style={{ marginTop: 10 }}>
+                        <label style={S.label}>Sage invoices</label>
+                        {sageFiles.map((f) => (
+                          <div key={f.key} style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                            <button
+                              type="button"
+                              className="stk-btn"
+                              style={{ ...S.reqActionBtnMuted, flex: 1, minWidth: 0, justifyContent: "flex-start" }}
+                              onClick={f.open}
+                            >
+                              <Paperclip size={13} /> {f.name}
+                            </button>
+                            {f.doc && renderInvoiceEmailButton(jobDetail.job, f.doc)}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Section>
+                  <Section
+                    title="Delivery notes"
+                    count={new Set(jobDetail.deliveryNotes.map((dn) => dn.delivery_note_number)).size}
+                    defaultOpen
+                  >
+            {jobDetail.deliveryNotes.length === 0 ? (
+              <div style={S.roleHint}>No delivery notes yet.</div>
+            ) : (
+              <div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {Object.values(
                     jobDetail.deliveryNotes.reduce((groups, dn) => {
                       (groups[dn.delivery_note_number] = groups[dn.delivery_note_number] || []).push(dn);
@@ -24003,6 +24101,10 @@ export default function StockControl() {
                 </div>
               </div>
             )}
+                  </Section>
+                </div>
+              );
+            })()}
             </>
           )}
 
@@ -24099,44 +24201,6 @@ export default function StockControl() {
             </ErrorBoundary>
           )}
 
-          {jobDetailTab === "invoice" && (
-            <>
-            {(() => {
-              const requestsForJob = jobInvoiceRequests.filter((r) => r.job_id === jobDetail.job.id);
-              if (requestsForJob.length === 0) return null;
-              return (
-                <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-                  <label style={S.label}>Invoice requests</label>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-                    {requestsForJob.map((req) => (
-                      <div key={req.id} style={S.reqCard}>
-                        <div style={S.reqCardTop}>
-                          <span style={S.itemName}>{req.file_name}</span>
-                          {req.total_amount != null && <span style={S.roleHint}>{rand(req.total_amount)}</span>}
-                        </div>
-                        <div className="stk-meta-row" style={S.rowMeta}>
-                          <span>Submitted by {req.submitted_by}</span>
-                          <span>{new Date(req.submitted_at).toLocaleDateString()}</span>
-                        </div>
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
-                          <button
-                            type="button"
-                            className="stk-btn"
-                            style={S.reqActionBtnMuted}
-                            onClick={() => viewJobInvoiceRequest(req)}
-                          >
-                            <FileText size={13} /> View document
-                          </button>
-                          {renderRequestNote(jobDetail.job, req)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
-            </>
-          )}
 
           {jobDetailTab === "items" && (
             <>
@@ -24789,6 +24853,111 @@ export default function StockControl() {
           </div>
         </div>
       )}
+
+      {pickLinesModal && jobDetail && (() => {
+        // The lines that can go now: what the To invoice boxes on Items
+        // offer (parents only, something still to go, not out with a
+        // supplier). Ticking a line fills in all it has to go.
+        const toGo = (it) => Number(it.qty) - Number(it.qty_invoiced);
+        const lines = billableLines(jobDetail.quoteItems).filter(
+          (it) => toGo(it) > 0 && (it.item_status || "on_floor") !== "out_external"
+        );
+        const picked = (it) => !!pickLinesModal.qty[it.id];
+        const setQty = (id, value) => setPickLinesModal((m) => ({ ...m, qty: { ...m.qty, [id]: value } }));
+        const allPicked = lines.length > 0 && lines.every(picked);
+        const forInvoice = pickLinesModal.kind === "invoice";
+        const sending = invoiceSendingFor.includes(jobDetail.job.id);
+        const head = { textAlign: "left", padding: "4px 6px", fontSize: 12, color: C.muted, fontWeight: 600 };
+        const cell = { padding: "4px 6px", fontSize: 13, borderTop: `1px solid ${C.border}` };
+        return (
+          <div style={{ ...S.modalOverlay, zIndex: 29 }}>
+            <div style={{ ...S.modal, maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+              <div style={S.modalHead}>
+                <span style={S.modalTitle}>{forInvoice ? "Create invoice" : "Create delivery note"}</span>
+                <button type="button" className="stk-btn" style={S.iconBtn} onClick={() => setPickLinesModal(null)}>
+                  <X size={18} />
+                </button>
+              </div>
+              {lines.length === 0 ? (
+                <div style={S.roleHint}>Nothing on this job has anything left to go.</div>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table className="stk-sheet" style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...head, width: 28 }}>
+                          <input
+                            type="checkbox"
+                            checked={allPicked}
+                            title={allPicked ? "Untick every line" : "Tick every line"}
+                            onChange={() =>
+                              setPickLinesModal((m) => ({
+                                ...m,
+                                qty: allPicked ? {} : Object.fromEntries(lines.map((it) => [it.id, String(toGo(it))])),
+                              }))
+                            }
+                          />
+                        </th>
+                        <th style={head}>Code</th>
+                        <th style={head}>Description</th>
+                        <th style={{ ...head, textAlign: "right" }}>To go</th>
+                        <th style={{ ...head, textAlign: "right" }}>Qty</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lines.map((it) => (
+                        <tr key={it.id}>
+                          <td style={cell}>
+                            <input
+                              type="checkbox"
+                              checked={picked(it)}
+                              onChange={() => setQty(it.id, picked(it) ? "" : String(toGo(it)))}
+                            />
+                          </td>
+                          <td style={cell}>{it.stock_code || ""}</td>
+                          <td style={cell}>{it.description}</td>
+                          <td style={{ ...cell, textAlign: "right" }}>{toGo(it)}</td>
+                          <td style={{ ...cell, textAlign: "right" }}>
+                            <input
+                              type="number"
+                              min="1"
+                              max={toGo(it)}
+                              step="1"
+                              value={pickLinesModal.qty[it.id] || ""}
+                              onChange={(e) => setQty(it.id, (String(e.target.value || "").match(/^\d*/) || [""])[0])}
+                              placeholder="Qty"
+                              style={{ ...S.input, width: 70, padding: "4px 6px", textAlign: "right" }}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: 1, justifyContent: "center", alignItems: "center" }} onClick={() => setPickLinesModal(null)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="stk-btn"
+                  style={{ ...S.submitBtn, flex: 1, ...(lines.length === 0 || sending ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}
+                  disabled={lines.length === 0 || sending}
+                  onClick={async () => {
+                    const done = forInvoice
+                      ? await submitSelectedItemsToInvoice(jobDetail.job, jobDetail.quoteItems, pickLinesModal.qty)
+                      : openBatchDeliveryNoteModal(jobDetail.job, jobDetail.quoteItems, pickLinesModal.qty);
+                    if (done) setPickLinesModal(null);
+                  }}
+                >
+                  {sending ? "Sending…" : forInvoice ? "Send invoice request" : "Next"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {deliveryNoteBatchModal && (
         <div style={{ ...S.modalOverlay, zIndex: 30 }}>
