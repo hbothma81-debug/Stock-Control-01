@@ -222,3 +222,25 @@ test("replied with no price only while no real quote is in", () => {
   assert.equal(repliedWithoutQuote([email("other", "waiting")]), false);
   assert.equal(repliedWithoutQuote([pdf("other")]), false);
 });
+
+test("on a free email service a supplier is the whole address, not the domain (PR-043, Boxit filed as Allpress)", () => {
+  const free = addressBook([{ id: "ap", name: "Allpress", email: "marinapieterse@outlook.com", contacts: [] }], ["someone@gmail.com"]);
+  const toBoxit = { subject: "RFQ", bodyPreview: "Please quote", toRecipients: [to("boxitlibradenesunette@outlook.com", "Boxit")] };
+  const r = quoteRequestFrom(toBoxit, free);
+  assert.equal(r.supplier_id, null);
+  assert.equal(r.supplier_name, "Boxit");
+  // No display name: the address itself, not "outlook.com".
+  assert.equal(quoteRequestFrom({ ...toBoxit, toRecipients: [to("boxitlibradenesunette@outlook.com")] }, free).supplier_name, "boxitlibradenesunette@outlook.com");
+  // Allpress's own address still finds Allpress.
+  assert.equal(quoteRequestFrom({ ...toBoxit, toRecipients: [to("MarinaPieterse@outlook.com")] }, free).supplier_id, "ap");
+  // A customer on Gmail does not make every Gmail address a customer.
+  assert.ok(quoteRequestFrom({ ...toBoxit, toRecipients: [to("supplier.joe@gmail.com", "Joe")] }, free));
+  assert.equal(quoteRequestFrom({ ...toBoxit, toRecipients: [to("someone@gmail.com")] }, free), null);
+});
+
+test("a quote by new mail from a free email address goes only with that address's request", () => {
+  const rows = [{ id: "allpress", status: "Sent", requested_at: "2026-10-01", contact_email: "marinapieterse@outlook.com", supplier_name: "Allpress" }];
+  const mail = (from) => ({ from: to(from), subject: "Quote", receivedDateTime: "2026-10-20T08:00:00Z" });
+  assert.equal(requestForNewMail(mail("boxitlibradenesunette@outlook.com"), rows, () => null), null);
+  assert.equal(requestForNewMail(mail("marinapieterse@outlook.com"), rows, () => null)?.id, "allpress");
+});

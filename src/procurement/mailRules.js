@@ -28,24 +28,45 @@ export const domainOf = (address) => (address.split("@")[1] || "").toLowerCase()
 export const isOurs = (address) =>
   !String(address || "").includes("@") || domainOf(address) === OUR_DOMAIN || domainOf(address).endsWith(`.${OUR_DOMAIN}`);
 
+// A free email service: one domain, thousands of unrelated people. On live
+// (20 Oct 2026) PR-043 to boxitlibradenesunette@outlook.com was filed as
+// Allpress, whose address is marinapieterse@outlook.com, because suppliers
+// were matched by the part after the @. On these a supplier (or customer) is
+// matched by the whole address, never the domain.
+const FREE_MAIL = new Set([
+  "gmail.com", "googlemail.com", "outlook.com", "outlook.co.za", "hotmail.com", "hotmail.co.za", "hotmail.co.uk",
+  "live.com", "live.co.za", "msn.com", "yahoo.com", "yahoo.co.za", "yahoo.co.uk", "ymail.com", "icloud.com", "me.com",
+  "mac.com", "aol.com", "protonmail.com", "proton.me", "gmx.com", "gmx.net", "mail.com", "zoho.com",
+  "mweb.co.za", "telkomsa.net", "vodamail.co.za", "webmail.co.za", "iafrica.com", "absamail.co.za", "lantic.net",
+  "wol.co.za", "polka.co.za", "afrihost.co.za", "cybersmart.co.za", "global.co.za", "netactive.co.za",
+]);
+export const isFreeMail = (address) => FREE_MAIL.has(domainOf(String(address || "").toLowerCase()));
+// What two addresses must share to be the same company: the domain, or on a
+// free email service the whole address.
+export const matchKey = (address) => {
+  const a = String(address || "").trim().toLowerCase();
+  return isFreeMail(a) ? a : domainOf(a);
+};
+
 // Subject without RE:/FW:/FWD: in front, for the request's item line.
 export function cleanSubject(subject) {
   return (subject || "").replace(/^\s*((re|fw|fwd|aw)\s*:\s*)+/i, "").trim();
 }
 
-// Supplier and customer address books, keyed by domain, from the app's lists.
+// Supplier and customer address books, keyed by domain (by the whole address
+// on a free email service, matchKey), from the app's lists.
 // suppliers: [{ id, name, email, contacts: [{ email }] }]
 // customerEmails: ["buyer@customer.co.za", ...]
 export function addressBook(suppliers, customerEmails) {
   const supplierByDomain = new Map();
   for (const s of suppliers || []) {
     for (const e of [s.email, ...(s.contacts || []).map((c) => c.email)]) {
-      const d = domainOf((e || "").toLowerCase());
+      const d = matchKey(e);
       if (d && !isOurs(e) && !supplierByDomain.has(d)) supplierByDomain.set(d, s);
     }
   }
   const customerDomains = new Set(
-    (customerEmails || []).map((e) => domainOf((e || "").toLowerCase())).filter((d) => d && !supplierByDomain.has(d))
+    (customerEmails || []).map((e) => matchKey(e)).filter((d) => d && !supplierByDomain.has(d))
   );
   return { supplierByDomain, customerDomains };
 }
@@ -62,13 +83,13 @@ export function quoteRequestFrom(message, book) {
   if (!ASKS_FOR_PRICE.test(text) || IS_ORDER_OR_ACCOUNTS.test(text)) return null;
   const outside = (message.toRecipients || []).filter((r) => addressOf(r) && !isOurs(addressOf(r)));
   if (outside.length === 0) return null; // to colleagues or accounts only
-  const first = outside.find((r) => book.supplierByDomain.has(domainOf(addressOf(r)))) || outside[0];
+  const first = outside.find((r) => book.supplierByDomain.has(matchKey(addressOf(r)))) || outside[0];
   const address = addressOf(first);
-  const supplier = book.supplierByDomain.get(domainOf(address)) || null;
-  if (!supplier && book.customerDomains.has(domainOf(address))) return null; // a quote to a customer
+  const supplier = book.supplierByDomain.get(matchKey(address)) || null;
+  if (!supplier && book.customerDomains.has(matchKey(address))) return null; // a quote to a customer
   return {
     supplier_id: supplier?.id || null,
-    supplier_name: supplier?.name || first.emailAddress?.name || domainOf(address),
+    supplier_name: supplier?.name || first.emailAddress?.name || (isFreeMail(address) ? address : domainOf(address)),
     contact_email: address,
     item: cleanSubject(message.subject) || (message.bodyPreview || "").slice(0, 120),
   };
@@ -281,10 +302,8 @@ export function requestForNewMail(message, rows, supplierOf) {
       const name = (supplier?.name || r.supplier_name || "").toLowerCase().replace(/\(.*?\)/g, "").trim();
       return name.length >= 3 && words.includes(name);
     }
-    const domains = [r.contact_email, supplier?.email, ...(supplier?.contacts || []).map((c) => c.email)]
-      .map((e) => domainOf((e || "").toLowerCase()))
-      .filter(Boolean);
-    return domains.includes(domain);
+    const keys = [r.contact_email, supplier?.email, ...(supplier?.contacts || []).map((c) => c.email)].map(matchKey).filter(Boolean);
+    return keys.includes(matchKey(sender));
   });
   return matches.sort((a, b) => ((a.requested_at || "") < (b.requested_at || "") ? 1 : -1))[0] || null;
 }
