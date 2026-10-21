@@ -5953,3 +5953,41 @@ description or quote number". The Quotes and Items quoted tabs have two boxes on
 (src/procurement/QuoteFilters.jsx): the words, and a type-to-find Supplier box A to Z
 with counts; no pills, by his answer. A supplier's own page keeps only the search box.
 No SQL.
+
+## 21 Oct 2026 — Jobs page conversation: the job page as sheets, state of play at wrap-up
+
+**Done and LIVE (20 Oct, pushed from this conversation, all tried by Heinrich on practice,
+"looks good"):** `2507853` Overview boxes in three columns, saved tick by the label;
+`13140fa` one line per stage; `041b289` + `054e8c0` the Items tab as a sheet (Code,
+Description, Qty, Complete, To go, Each, Length, Made on, Material, Then, To invoice,
+icon actions; whole-number quantities; lines between columns); `90404e5` no page jumps
+(`SavedCheck` holds its space, Refresh fixed width); `3b66218` the checklist's Loading
+line only on a first load. Rules in CLAUDE.md under "The job page reads like a drawing
+sheet", "Job quantities are whole numbers" and the new gotchas.
+
+**Committed, handed to the gate to push (21 Oct):** `e64a624` Cut to size tab: Bars
+needed and Parts to cut as sheets (`src/jobs/CutToSize.jsx` only). He said "looks good"
+on practice. The gate conversation was told; if it has not pushed, the queue is this
+one commit on top of `837bf31`.
+
+**No SQL this conversation.** Nothing to run on either database.
+
+**Built, not yet tried by Heinrich** (he looked, he did not press): on the Items sheet,
+the Move under arrow and its in-place picker, Add part as a bottom row, the SigmaNest
+and Tube nest import icons, Add to Customer Stock icon, the To invoice box feeding the
+Invoice and Delivery tabs; on the Cut to size sheet, the pencil edit in the row, Save,
+Add a part as the bottom row, New size as a row under, Set aside / Requisition / Add
+stock from the Bars needed sheet, the saw operator's counter in the Cut column. The
+read-only view of both sheets (someone who cannot edit the job) seen by nobody.
+
+**Waiting on Heinrich:** the Invoice and Delivery tabs under Files as two pill headings,
+with the To invoice box and its button together — he floated it, one question asked
+(should the box and the button sit together under that pill?), unanswered. JOB-0008
+line 107 on practice holds 2.5 invoiced (data; a one-line SQL if he wants it whole).
+
+**Practice data to know about:** JOB-0011's description was overwritten by a test in
+this conversation (a click meant for JOB-0013 landed on it) and now reads
+"(description overwritten by a Claude test on 20 Oct 2026 - practice only)"; its
+Customer PO put back to blank. Two test crashes on practice's `app_errors` (20 Oct).
+
+**Next session:** the Invoice/Delivery under Files question, then whatever he names.
