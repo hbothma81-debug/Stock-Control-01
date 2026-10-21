@@ -10462,18 +10462,39 @@ export default function StockControl() {
   // note, its number and its date do not change, and nothing is rebuilt
   // that the rows cannot vouch for (noteToRebuild says why not). Read
   // fresh from the database, never from what the screen holds.
+  // The two halves of a rebuild, shared by Rebuild PDF and a change of
+  // the job's customer (changeJobCustomer): the plan read fresh from the
+  // database, then the paper drawn, filed over the stored one and logged.
+  async function readNoteToRebuild(job, number) {
+    const [held, lines] = await Promise.all([
+      supabase.from("delivery_notes").select("*").eq("delivery_note_number", number).eq("job_id", job.id),
+      supabase.from("job_quote_items").select("*").eq("job_id", job.id),
+    ]);
+    if (held.error) throw held.error;
+    if (lines.error) throw lines.error;
+    return noteToRebuild(held.data, lines.data);
+  }
+
+  async function fileRebuiltNote(job, plan, { showPreview, why = "from the database" }) {
+    const number = plan.note.delivery_note_number;
+    const n = plan.itemsWithQty.length;
+    const linkedOf = (item) => (item.linked_item_id ? (items || []).find((i) => i.id === item.linked_item_id) : null);
+    const filed = await buildDeliveryNoteDoc(
+      plan.note,
+      notePdfLines(plan.itemsWithQty, (item) => jobLineCode(item, linkedOf(item)), (item) => jobLineDescription(item, linkedOf(item))),
+      job,
+      { showPreview }
+    );
+    if (filed) await logJobEvent(job.id, "delivery note PDF rebuilt", `${number} — ${n} line${n === 1 ? "" : "s"}, ${why}`);
+    return filed;
+  }
+
   async function rebuildDeliveryNotePdf(job, note) {
     if (!isAdmin || !job || rebuildingNote) return;
     const number = note.delivery_note_number;
     setRebuildingNote(number);
     try {
-      const [held, lines] = await Promise.all([
-        supabase.from("delivery_notes").select("*").eq("delivery_note_number", number).eq("job_id", job.id),
-        supabase.from("job_quote_items").select("*").eq("job_id", job.id),
-      ]);
-      if (held.error) throw held.error;
-      if (lines.error) throw lines.error;
-      const plan = noteToRebuild(held.data, lines.data);
+      const plan = await readNoteToRebuild(job, number);
       if (!plan.ok) {
         alert(plan.why);
         return;
@@ -10485,16 +10506,8 @@ export default function StockControl() {
           `The stored PDF is replaced. The note, its number and its date stay as they are.`
       );
       if (!ok) return;
-      const linkedOf = (item) => (item.linked_item_id ? (items || []).find((i) => i.id === item.linked_item_id) : null);
-      const filed = await buildDeliveryNoteDoc(
-        plan.note,
-        notePdfLines(plan.itemsWithQty, (item) => jobLineCode(item, linkedOf(item)), (item) => jobLineDescription(item, linkedOf(item))),
-        job
-      );
-      if (filed) {
-        await logJobEvent(job.id, "delivery note PDF rebuilt", `${number} — ${n} line${n === 1 ? "" : "s"}, from the database`);
-        if (jobDetail?.job?.id === job.id) refreshJobDetail();
-      }
+      const filed = await fileRebuiltNote(job, plan, { showPreview: true });
+      if (filed && jobDetail?.job?.id === job.id) refreshJobDetail();
     } catch (err) {
       console.error("Failed to rebuild a delivery note's PDF:", err);
       alert("Couldn't rebuild that PDF — check your connection and try again. The stored PDF is as it was.");
@@ -10601,7 +10614,8 @@ export default function StockControl() {
   // work from rather than nothing at all.
   // deliveryNoteNumber: the note made with this request, printed under the
   // job's other notes so accounts can match the two papers.
-  async function buildDraftInvoiceDoc(job, lines, deliveryNoteNumber = null) {
+  // printedDate: the day the request was sent, when an old one is remade.
+  async function buildDraftInvoiceDoc(job, lines, deliveryNoteNumber = null, printedDate = new Date()) {
     const { jsPDF, autoTable } = await getPdf();
     const doc = new jsPDF();
     const company = master.companyDetails || {};
@@ -10627,7 +10641,7 @@ export default function StockControl() {
     doc.setFont(undefined, "normal");
     doc.text(`Job: ${job.job_number}`, rightX, y, { align: "right" });
     y += 5;
-    doc.text(`Date: ${new Date().toLocaleDateString()}`, rightX, y, { align: "right" });
+    doc.text(`Date: ${printedDate.toLocaleDateString()}`, rightX, y, { align: "right" });
     y += 8;
     doc.setFont(undefined, "bold");
     doc.text("Customer:", leftX, y);
@@ -11091,16 +11105,84 @@ export default function StockControl() {
     }
   }
 
+  // An invoice request's PDF drawn again from what the request was sent
+  // with (its rows in job_quote_item_invoices, since 27 Sep 2026), with
+  // its own date and delivery note number, for the job as it now reads.
+  // Filed under a new name and the request pointed at it: the invoice
+  // files' bucket lets a file be added, never replaced. Refused, with the
+  // reason, when the request kept no lines, a line has left the job, or
+  // the lines' prices no longer add up to what was sent, because the
+  // paper would then print other money than accounts was asked for.
+  async function remakeInvoiceRequestPdf(job, request, jobLines) {
+    const label = `the invoice request of ${new Date(request.submitted_at).toLocaleDateString()}`;
+    const { data: sent, error } = await supabase
+      .from("job_quote_item_invoices")
+      .select("quote_item_id, qty_added")
+      .eq("request_id", request.id);
+    if (error) throw error;
+    if (!sent || sent.length === 0) return { ok: false, why: `${label}: sent before 27 Sep 2026, it kept no list of its lines` };
+    const byId = new Map((jobLines || []).map((q) => [q.id, q]));
+    if (sent.some((r) => !byId.has(r.quote_item_id))) return { ok: false, why: `${label}: a line on it is no longer on the job` };
+    const linkedOf = (it) => (it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null);
+    const lines = sent
+      .map((r) => ({ it: byId.get(r.quote_item_id), qty: Number(r.qty_added) }))
+      .sort((a, b) => (Number(a.it.sort_order) || 0) - (Number(b.it.sort_order) || 0))
+      .map(({ it, qty }) => ({
+        partNumber: jobLineCode(it, linkedOf(it)),
+        description: jobLineDescription(it, linkedOf(it)),
+        qty,
+        unitPrice: Number(it.unit_price),
+      }));
+    const total = Math.round(lines.reduce((s, li) => s + li.qty * li.unitPrice, 0) * 100) / 100;
+    if (Math.abs(total - Number(request.total_amount)) > 0.005) {
+      return { ok: false, why: `${label}: a price on it has changed since it was sent` };
+    }
+    const { data: note } = await supabase
+      .from("delivery_notes")
+      .select("delivery_note_number")
+      .eq("invoice_request_id", request.id)
+      .limit(1);
+    const doc = await buildDraftInvoiceDoc(job, lines, note?.[0]?.delivery_note_number || null, new Date(request.submitted_at));
+    const fileName = `Invoice-Request-${job.job_number}-${Date.now()}.pdf`;
+    const path = `${job.id}/${fileName}`;
+    const stored = await generateAndStoreDocument({
+      doc,
+      documentType: "invoice_request",
+      bucket: "job-invoices",
+      path,
+      fileName,
+      jobId: job.id,
+      showPreview: false,
+    });
+    if (!stored) return { ok: false, why: `${label}: the new PDF could not be stored` };
+    const { data: moved, error: moveError } = await supabase
+      .from("job_invoice_requests")
+      .update({ storage_path: path, file_name: fileName })
+      .eq("id", request.id)
+      .eq("storage_path", request.storage_path)
+      .select("id");
+    if (moveError) throw moveError;
+    if (!moved || moved.length === 0) return { ok: false, why: `${label}: it could not be pointed at the new PDF` };
+    await logJobEvent(job.id, "invoice request PDF remade", `${label}, for customer ${job.customer}`);
+    return { ok: true };
+  }
+
   // A job's customer, changed on its Overview (Heinrich, 21 Oct 2026).
   // The job holds only the name, so this is one update; a name typed new
   // joins the customer list, as on New Job. The job's shortages carry a
   // copy of the name for the laser screens and follow it. Lines already
   // linked to the old customer's Customer Stock parts keep their links:
   // the person is told how many, and nothing is refused (his answer).
+  // The paper already made is remade with the new name in the same save
+  // (his answer): customer delivery notes that read the old name, and
+  // every invoice request; what cannot be remade is named, never refused.
+  // Once a job has such paper only admins and sales people may change its
+  // customer. Sage invoices are Sage's, and emails sent stay sent.
+  const changingCustomerRef = useRef(false);
   async function changeJobCustomer(job, value) {
     const next = String(value || "").trim();
     const prev = job.customer || "";
-    if (!next || next === prev) return;
+    if (!next || next === prev || changingCustomerRef.current) return;
     // The box takes typed text as a new name when it is left, so half a
     // name ("Plantcore" for Plantcore Mining) would quietly become a new
     // customer. A new one is asked about first; a name on the list is not.
@@ -11112,7 +11194,26 @@ export default function StockControl() {
       if (!window.confirm(ask)) return;
     } else if (listed === prev) return;
     const name = listed || next;
+    changingCustomerRef.current = true;
     try {
+      // The paper is read first: it decides who may make the change.
+      const [notesQ, requestsQ, linesQ] = await Promise.all([
+        supabase.from("delivery_notes").select("delivery_note_number, recipient_name").eq("job_id", job.id).eq("recipient_type", "customer"),
+        supabase.from("job_invoice_requests").select("*").eq("job_id", job.id).order("submitted_at"),
+        supabase.from("job_quote_items").select("*").eq("job_id", job.id),
+      ]);
+      if (notesQ.error) throw notesQ.error;
+      if (requestsQ.error) throw requestsQ.error;
+      if (linesQ.error) throw linesQ.error;
+      const noteNumbers = [...new Set((notesQ.data || []).filter((r) => (r.recipient_name || "") === prev).map((r) => r.delivery_note_number))];
+      const requests = requestsQ.data || [];
+      if ((noteNumbers.length || requests.length) && !(isAdmin || profile?.isSalesPerson)) {
+        alert(
+          "This job already has delivery notes or invoice requests, so only admins and sales people can change its customer.",
+        );
+        return;
+      }
+
       const { data, error } = await supabase.from("jobs").update({ customer: name }).eq("id", job.id).select("id");
       if (error) throw error;
       if (!data || data.length === 0) throw new Error("the job was not found");
@@ -11121,17 +11222,72 @@ export default function StockControl() {
       const { error: shortageError } = await supabase.from("shortages").update({ customer: name }).eq("job_id", job.id);
       if (shortageError) console.error("The customer saved, but the job's shortages still show the old name:", shortageError);
       flashSaved(`job-${job.id}-customer`);
-      const linked = (jobDetail?.job.id === job.id ? jobDetail.quoteItems || [] : []).filter((it) => it.linked_item_id).length;
-      if (linked > 0 && prev) {
-        alert(
-          `Customer changed to ${name}. ${linked} line${linked === 1 ? " is" : "s are"} still linked to ${prev}'s Customer Stock parts.`,
-        );
+
+      // The paper, one piece at a time; a piece that fails is named and
+      // the rest go on. The customer is already changed by now.
+      const renamed = { ...job, customer: name };
+      const remade = [];
+      const left = [];
+      for (const number of noteNumbers) {
+        try {
+          const { data: moved, error: moveError } = await supabase
+            .from("delivery_notes")
+            .update({ recipient_name: name })
+            .eq("job_id", job.id)
+            .eq("delivery_note_number", number)
+            .eq("recipient_type", "customer")
+            .eq("recipient_name", prev)
+            .select("id");
+          if (moveError) throw moveError;
+          if (!moved || moved.length === 0) {
+            left.push(`${number}: its name could not be changed`);
+            continue;
+          }
+          const plan = await readNoteToRebuild(renamed, number);
+          if (!plan.ok) {
+            left.push(plan.why);
+            continue;
+          }
+          const filed = await fileRebuiltNote(renamed, plan, { showPreview: false, why: `for customer ${name}` });
+          if (filed) remade.push(number);
+          else left.push(`${number}: name changed, but the new PDF could not be stored`);
+        } catch (err) {
+          console.error(`Failed to remake ${number} for the new customer:`, err);
+          left.push(`${number}: could not be remade (connection)`);
+        }
       }
+      let requestsRemade = 0;
+      for (const request of requests) {
+        try {
+          const done = await remakeInvoiceRequestPdf(renamed, request, linesQ.data);
+          if (done.ok) requestsRemade += 1;
+          else left.push(done.why);
+        } catch (err) {
+          console.error("Failed to remake an invoice request for the new customer:", err);
+          left.push(`the invoice request of ${new Date(request.submitted_at).toLocaleDateString()}: could not be remade (connection)`);
+        }
+      }
+
+      const said = [];
+      if (remade.length || requestsRemade) {
+        const parts = [];
+        if (remade.length) parts.push(`${remade.length === 1 ? "delivery note" : "delivery notes"} ${remade.join(", ")}`);
+        if (requestsRemade) parts.push(`${requestsRemade} invoice request${requestsRemade === 1 ? "" : "s"}`);
+        said.push(`Remade with ${name}: ${parts.join(" and ")}.`);
+      }
+      if (left.length) said.push(`Left as they were:\n- ${left.join("\n- ")}`);
+      const linked = (linesQ.data || []).filter((it) => it.linked_item_id).length;
+      if (linked > 0 && prev) {
+        said.push(`${linked} line${linked === 1 ? " is" : "s are"} still linked to ${prev}'s Customer Stock parts.`);
+      }
+      if (said.length) alert(`Customer changed to ${name}.\n\n${said.join("\n\n")}`);
       await fetchJobs();
       if (jobDetail?.job.id === job.id) refreshJobDetail();
     } catch (err) {
       console.error("Failed to change the job's customer:", err);
       alert("That didn't save — check your connection and try again.");
+    } finally {
+      changingCustomerRef.current = false;
     }
   }
 
