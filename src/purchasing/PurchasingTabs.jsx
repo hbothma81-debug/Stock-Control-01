@@ -1,6 +1,7 @@
 // The Requisitions, Purchase Orders, Receiving and PO Reports tabs, moved word
 // for word out of App.jsx on 2026-10-05. Each gets what it reads from App in ctx.
 
+import { rand } from "../lib/money.js";
 import ErrorBoundary from "../ErrorBoundary.jsx";
 import RecordRow from "../RecordRow.jsx";
 import Section from "../Section.jsx";
@@ -237,7 +238,6 @@ export function PurchaseOrdersTab({ ctx }) {
         const openTotal = open.reduce((s, po) => s + poExclusive(po), 0);
         const monthTotal = raisedThisMonth.reduce((s, po) => s + poExclusive(po), 0);
         const receivedTotal = receivedThisMonth.reduce((s, po) => s + poExclusive(po), 0);
-        const money = (n) => `R ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
         const figure = (label, value, count, noun) => (
           <div
@@ -250,7 +250,7 @@ export function PurchaseOrdersTab({ ctx }) {
           >
             <div style={S.label}>{label}</div>
             <div style={{ fontSize: 20, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-              {money(value)}
+              {rand(value)}
             </div>
             <div style={S.roleHint}>
               {count} {count === 1 ? noun : `${noun}s`} · excluding VAT
@@ -431,7 +431,7 @@ export function ReceivingTab({ ctx }) {
                         is the one place "Can see Rand values" can be honoured
                         without stopping anybody doing their job. */}
                     {canSeeValue && (
-                      <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>R{po.totalValue.toFixed(2)}</span>
+                      <span style={{ ...S.reqStatusTag, ...S.reqStatus_ordered }}>{rand(po.totalValue)}</span>
                     )}
                     <ChevronDown size={16} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
                   </span>
@@ -459,7 +459,7 @@ export function ReceivingTab({ ctx }) {
                             <span style={{ fontWeight: 600, minWidth: 40 }}>{li.qty}</span>
                             <span style={{ flex: "1 1 200px" }}>{li.description}</span>
                             {canSeeValue && (
-                              <span style={{ color: C.muted }}>R {Number(li.unitPrice || 0).toFixed(2)} each</span>
+                              <span style={{ color: C.muted }}>{rand(li.unitPrice || 0)} each</span>
                             )}
                           </div>
                         ))}
@@ -648,7 +648,7 @@ export function PoCard({ ctx, po, showMoney = true }) {
                 : {}),
             }}
           >
-            {showMoney ? `R${po.totalValue.toFixed(2)}` : po.status}
+            {showMoney ? rand(po.totalValue) : po.status}
           </span>
           <ChevronDown size={16} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
         </span>
@@ -700,9 +700,9 @@ export function PoCard({ ctx, po, showMoney = true }) {
                       {li.partNumber && <span style={{ color: C.muted }}>{li.partNumber}</span>}
                       <span style={{ flex: "1 1 160px", minWidth: 0 }}>{li.description}</span>
                       <span style={{ fontWeight: 600 }}>{li.qty}</span>
-                      <span style={{ color: C.muted }}>@ R {Number(li.unitPrice || 0).toFixed(2)}</span>
+                      <span style={{ color: C.muted }}>@ {rand(li.unitPrice || 0)}</span>
                       <span style={{ fontWeight: 600, minWidth: 74, textAlign: "right" }}>
-                        R {(Number(li.qty) * Number(li.unitPrice)).toFixed(2)}
+                        {rand(Number(li.qty) * Number(li.unitPrice))}
                       </span>
                     </div>
                   ))}
@@ -719,9 +719,9 @@ export function PoCard({ ctx, po, showMoney = true }) {
                     fontSize: 14,
                   }}
                 >
-                  <span style={{ color: C.muted }}>Excl. R {excl.toFixed(2)}</span>
-                  <span style={{ color: C.muted }}>VAT ({rate}%) R {vat.toFixed(2)}</span>
-                  <span style={{ fontWeight: 700 }}>Total R {po.totalValue.toFixed(2)}</span>
+                  <span style={{ color: C.muted }}>Excl. {rand(excl)}</span>
+                  <span style={{ color: C.muted }}>VAT ({rate}%) {rand(vat)}</span>
+                  <span style={{ fontWeight: 700 }}>Total {rand(po.totalValue)}</span>
                 </div>
               </div>
             );

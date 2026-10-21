@@ -7,13 +7,11 @@
 // Read only when an item is opened, never the whole table. Shows nothing on
 // a database without the table, or when nothing is linked.
 
+import { rand } from "../lib/money.js";
 import { useEffect, useState } from "react";
 import { FileText } from "lucide-react";
 import { supabase } from "../lib/supabaseClient.js";
 import { S } from "../theme.js";
-
-const money = (n) =>
-  n == null ? "" : `R ${Number(n).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function LastQuoted({ itemId, onOpenQuote }) {
   const [links, setLinks] = useState(null);
@@ -46,7 +44,7 @@ export default function LastQuoted({ itemId, onOpenQuote }) {
         >
           <FileText size={14} />
           {i === 0 ? "Last quoted: " : "Quoted: "}
-          {[l.supplier_name, money(l.unit_price), l.quote_date].filter(Boolean).join(", ")}
+          {[l.supplier_name, rand(l.unit_price), l.quote_date].filter(Boolean).join(", ")}
           {l.quote_number ? ` (${l.quote_number})` : ""}
           {l.used_as_price ? " · price used" : ""}
         </button>

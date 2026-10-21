@@ -1,3 +1,4 @@
+import { rand } from "../lib/money.js";
 import { useState } from "react";
 import { Plus, Trash2, AlertTriangle, FileText, Pencil, Check, X, PackagePlus, Lock } from "lucide-react";
 import { C, S } from "../theme.js";
@@ -720,7 +721,7 @@ export default function CutToSize({
                         <td style={{ ...td, color: C.muted, whiteSpace: "normal", minWidth: 120 }}>{it.note || ""}</td>
                         <td style={num}>{fmtM(lineMetres(it))}</td>
                         {showKg && <td style={num}>{kg != null ? fmtKg(kg) : ""}</td>}
-                        {showCost && <td style={num}>{cost != null ? `R ${cost.toFixed(2)}` : ""}</td>}
+                        {showCost && <td style={num}>{cost != null ? rand(cost) : ""}</td>}
                         <td style={td}>
                           {Number(it.qty) > 0 && !onCount && (
                             <span style={cut >= Number(it.qty) ? { color: C.accentFinished, fontWeight: 600 } : { color: C.muted }}>
@@ -825,7 +826,7 @@ export default function CutToSize({
         <div style={{ ...S.roleHint, marginTop: 8 }}>
           {totalPieces} piece{totalPieces === 1 ? "" : "s"} · {fmtM(totalMetres)}
           {anyWeight ? ` · ${fmtKg(totalKg)}` : ""}
-          {canSeeValue && totalCost > 0 ? ` · R ${totalCost.toFixed(2)} material` : ""}
+          {canSeeValue && totalCost > 0 ? ` · ${rand(totalCost)} material` : ""}
           {` · ${KERF_MM} mm lost per cut`}
         </div>
       )}

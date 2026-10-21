@@ -14,6 +14,7 @@
 // Loads open work plus anything finished in the last 90 days, never the
 // whole table: the register will keep growing.
 
+import { rand } from "../lib/money.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, Send } from "lucide-react";
 import { draftFollowUp, isEmailQuote, isEmailWithoutPrice, latestCopies, repliedWithoutQuote } from "./mailRules.js";
@@ -72,9 +73,6 @@ function Detail({ label, children }) {
 }
 
 const fmtDate = (d) => (d ? String(d).slice(0, 10) : "");
-const fmtMoney = (n) =>
-  n == null || n === "" ? "" : `R ${Number(n).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
 // Close quote: a request that will not be ordered (Heinrich, 19 Oct 2026:
 // "Just a close quote button. Basic"; the reason "Optional"). It goes to
 // Done as Closed, "No order" and the reason first in its notes; its quotes
@@ -662,7 +660,7 @@ export default function ProcurementPage({ suppliers, currentUserId, userName, cu
                             : q.doc_type === "other"
                               ? `not a quote: ${q.file_name}`
                               : `quote ${q.quote_number || (isEmailQuote(q) ? "in the email" : q.file_name)}`,
-                        q.total_ex_vat != null ? `${fmtMoney(q.total_ex_vat)} ex VAT` : "",
+                        q.total_ex_vat != null ? `${rand(q.total_ex_vat)} ex VAT` : "",
                         fmtDate(q.quote_date || q.received_at),
                       ]
                         .filter(Boolean)

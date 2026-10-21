@@ -7,6 +7,7 @@
 // its figures are blank and the line says so; a PDF Claude could not read
 // says "not read: totals not checked", never shown as checked.
 
+import { rand } from "../lib/money.js";
 import { useMemo, useState } from "react";
 import { FileText, ShoppingCart } from "lucide-react";
 import Section from "../Section.jsx";
@@ -15,8 +16,6 @@ import { C, S } from "../theme.js";
 import { ItemButtons, itemFigures } from "./ItemsList.jsx";
 import QuoteFilters, { isSupplier, supplierOptions } from "./QuoteFilters.jsx";
 
-const money = (n) =>
-  n == null || n === "" ? "" : `R ${Number(n).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const day = (d) => (d ? String(d).slice(0, 10) : "");
 
 const STATUS = {
@@ -49,7 +48,7 @@ export function QuoteLines({ quotes, onOpen, onReadAgain, raisePoFor, showSuppli
     const summary = [
       showSupplier ? q.supplier_name : "",
       q.quote_number,
-      money(q.total_ex_vat) && `${money(q.total_ex_vat)} ex VAT`,
+      rand(q.total_ex_vat) && `${rand(q.total_ex_vat)} ex VAT`,
       q.lead_time,
       q.pr_number,
     ]
@@ -99,8 +98,8 @@ export function QuoteLines({ quotes, onOpen, onReadAgain, raisePoFor, showSuppli
         <Line label="Document">{q.doc_type}</Line>
         <Line label="Quote no">{q.quote_number}</Line>
         <Line label="Quote date">{day(q.quote_date)}</Line>
-        <Line label="Total ex VAT">{money(q.total_ex_vat)}</Line>
-        <Line label="Total incl VAT">{money(q.total_incl_vat)}</Line>
+        <Line label="Total ex VAT">{rand(q.total_ex_vat)}</Line>
+        <Line label="Total incl VAT">{rand(q.total_incl_vat)}</Line>
         <Line label="Lead time">{q.lead_time}</Line>
         <Line label="Valid until">{day(q.valid_until)}</Line>
         <Line label="Received">{day(q.received_at)}</Line>

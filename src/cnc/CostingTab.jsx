@@ -165,7 +165,7 @@ export default function CostingTab({ program, current, shown, materials, barPric
     mayPrice && size ? (
       <NumberBox style={S.input} value={value ?? 0} placeholder={ph} title={`Saved as ${program.material} ${sizeLabel(size, pipes)}'s price, ${unit}`} onCommit={(n) => setBarPrice(n, unit)} />
     ) : (
-      <div style={{ fontSize: 15 }}>{canSeeValue ? (value != null ? `R ${value}` : ph ? `R ${ph}` : "–") : "–"}</div>
+      <div style={{ fontSize: 15 }}>{canSeeValue ? (value != null ? rand(value) : ph ? rand(ph) : "–") : "–"}</div>
     );
 
   return (
@@ -192,7 +192,7 @@ export default function CostingTab({ program, current, shown, materials, barPric
           {canSeeValue && (
             <div style={{ fontSize: 14 }}>
               Batch cost {rand(f.batchTotal)}{sell ? ` · selling ${rand(sell.batch.sell)}` : ""} · material at{" "}
-              {f.materialPrice != null ? (f.materialUnit === "billet" ? `R ${f.materialPrice} a piece` : `R ${f.materialPrice}${f.materialUnit ? f.materialUnit.replace(/^R/, "") : ""}`) : "–"}
+              {f.materialPrice != null ? (f.materialUnit === "billet" ? `${rand(f.materialPrice)} a piece` : `${rand(f.materialPrice)}${f.materialUnit ? f.materialUnit.replace(/^R/, "") : ""}`) : "–"}
               {f.barsNeeded != null ? ` · ${f.barsNeeded} bar${f.barsNeeded === 1 ? "" : "s"}` : ""}
             </div>
           )}
@@ -306,7 +306,7 @@ export default function CostingTab({ program, current, shown, materials, barPric
                 onCommit={(n) => price({ setup_price: n })}
               />
             ) : (
-              <div style={{ fontSize: 15 }}>R {s.setup_price || DEFAULT_SETUP_PRICE}</div>
+              <div style={{ fontSize: 15 }}>{rand(s.setup_price || DEFAULT_SETUP_PRICE)}</div>
             )}
           </div>
           <div>
@@ -343,7 +343,7 @@ export default function CostingTab({ program, current, shown, materials, barPric
                 {mayPrice ? (
                   <NumberBox style={S.input} value={s.piece_price} placeholder="Price a piece" onCommit={(n) => price({ piece_price: n })} />
                 ) : (
-                  <div style={{ fontSize: 15 }}>{s.piece_price ? `R ${s.piece_price}` : "–"}</div>
+                  <div style={{ fontSize: 15 }}>{s.piece_price ? rand(s.piece_price) : "–"}</div>
                 )}
               </div>
             </div>

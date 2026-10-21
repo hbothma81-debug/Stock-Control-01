@@ -32,6 +32,7 @@
 // list used (ctx): Use / Add through the usage pop-up, Edit, Duplicate,
 // Remove, Request stock, and updateCustomerStockField for the boxes.
 
+import { rand } from "../lib/money.js";
 import { useEffect, useState } from "react";
 import { AlertTriangle, ChevronLeft, ClipboardList, Copy, FileText, ImageIcon, Pencil, Search, Trash2 } from "lucide-react";
 import LastQuoted from "../procurement/LastQuoted.jsx";
@@ -205,7 +206,7 @@ export default function CustomerStock({ ctx }) {
           <span style={{ ...box, fontWeight: 700, color: low ? C.danger : Number(it.qty) > 0 ? C.text : C.muted }} title="On hand">
             {it.qty} {it.unit || "ea"}
           </span>
-          {canSeeValue && <span style={{ ...box, color: C.muted }} title="Cost, what we pay">R{Number(it.value || 0).toFixed(2)}</span>}
+          {canSeeValue && <span style={{ ...box, color: C.muted }} title="Cost, what we pay">{rand(it.value || 0)}</span>}
           {it.supplier && <span style={{ ...box, color: C.muted }} title="Supplier">{it.supplier}</span>}
           {low && (
             <span style={S.lowTag}>
@@ -218,7 +219,7 @@ export default function CustomerStock({ ctx }) {
             <div className="stk-meta-row" style={S.rowMeta}>
               {it.customer && <span style={S.customerTag}>{it.customer}</span>}
               {held > 0 && <span style={{ color: C.accentRaw, fontWeight: 600 }}>{held} reserved for jobs</span>}
-              {canSeeValue && <span>Cost R{Number(it.value || 0).toFixed(2)} each · R{(Number(it.value || 0) * Number(it.qty || 0)).toFixed(2)} on hand</span>}
+              {canSeeValue && <span>Cost {rand(it.value || 0)} each · {rand(Number(it.value || 0) * Number(it.qty || 0))} on hand</span>}
               {it.loc && <span>Shelf {it.loc}</span>}
               {drawing && canView("drawings") && (
                 <button type="button" className="stk-btn" style={S.drawingTag} onClick={() => openDrawingPreviewByPartNumber(it.partNumber.trim())}>

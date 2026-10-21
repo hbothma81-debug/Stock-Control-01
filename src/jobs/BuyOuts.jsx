@@ -1,3 +1,5 @@
+import MoneyInput from "../MoneyInput.jsx";
+import { rand } from "../lib/money.js";
 import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { C, S } from "../theme.js";
@@ -22,8 +24,6 @@ import { C, S } from "../theme.js";
 const blankLine = () => ({ query: "", itemId: null, partNumber: "", description: "", supplier: "", qty: "", unitCost: "", note: "" });
 
 const cell = (width) => ({ ...S.input, width, fontSize: 14, padding: "4px 6px" });
-
-const money = (n) => `R ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function BuyOuts({
   lines,
@@ -134,7 +134,7 @@ export default function BuyOuts({
                 <span style={{ ...S.roleHint, fontWeight: 400 }}>
                   {" "}
                   · {group.length} line{group.length === 1 ? "" : "s"}
-                  {canSeeValue ? ` · ${money(group.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unit_cost) || 0), 0))}` : ""}
+                  {canSeeValue ? ` · ${rand(group.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unit_cost) || 0), 0))}` : ""}
                 </span>
               </div>
               {/* A supplier typed on a line but not in the suppliers list
@@ -207,7 +207,7 @@ export default function BuyOuts({
                             style={cell(130)}
                           />
                           {canSeeValue && (
-                            <input
+                            <MoneyInput
                               type="number"
                               min="0"
                               step="0.01"
@@ -240,7 +240,7 @@ export default function BuyOuts({
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, flexWrap: "wrap" }}>
                       {canSeeValue && (
                         <span style={S.roleHint}>
-                          {money(it.unit_cost)} each · {money((Number(it.qty) || 0) * (Number(it.unit_cost) || 0))}
+                          {rand(it.unit_cost)} each · {rand((Number(it.qty) || 0) * (Number(it.unit_cost) || 0))}
                         </span>
                       )}
                       {(() => {
@@ -260,7 +260,7 @@ export default function BuyOuts({
       </div>
 
       {(lines || []).length > 0 && canSeeValue && (
-        <div style={{ ...S.roleHint, marginTop: 8, fontWeight: 600 }}>Buy-in cost for this job: {money(total)} excluding VAT</div>
+        <div style={{ ...S.roleHint, marginTop: 8, fontWeight: 600 }}>Buy-in cost for this job: {rand(total)} excluding VAT</div>
       )}
 
       {canEdit && (
@@ -307,7 +307,7 @@ export default function BuyOuts({
                       <span style={{ fontWeight: 600 }}>{c.partNumber || "—"}</span>
                       <span style={{ color: C.muted }}> — {c.name}</span>
                       <span style={{ color: C.muted }}> · {c.supplier || "no supplier"}</span>
-                      {canSeeValue && c.value != null && c.value !== "" && <span style={{ color: C.muted }}> · {money(c.value)}</span>}
+                      {canSeeValue && c.value != null && c.value !== "" && <span style={{ color: C.muted }}> · {rand(c.value)}</span>}
                     </button>
                   ))}
                 </div>
@@ -321,7 +321,7 @@ export default function BuyOuts({
               style={cell(130)}
             />
             {canSeeValue && (
-              <input
+              <MoneyInput
                 type="number"
                 min="0"
                 step="0.01"
@@ -386,7 +386,7 @@ export default function BuyOuts({
                     {po.dateCreated ? ` · raised ${new Date(po.dateCreated).toLocaleDateString()}` : ""}
                     {po.createdBy ? ` by ${po.createdBy}` : ""}
                   </span>
-                  {canSeeValue && <span style={S.roleHint}>{money(po.totalValue)} incl. VAT</span>}
+                  {canSeeValue && <span style={S.roleHint}>{rand(po.totalValue)} incl. VAT</span>}
                   <span
                     style={{
                       ...S.chip,

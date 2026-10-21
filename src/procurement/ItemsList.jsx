@@ -9,6 +9,7 @@
 // Link to a stock item (a Customer Stock item remembers this quote, and
 // with the tick takes its price; Heinrich, 20 Oct 2026), and the quote's PDF.
 
+import { rand } from "../lib/money.js";
 import { useMemo, useState } from "react";
 import TypeToFind from "../TypeToFind.jsx";
 import { FileText, Link2, PackagePlus, ShoppingCart } from "lucide-react";
@@ -20,8 +21,6 @@ import QuoteFilters, { isSupplier, supplierOptions } from "./QuoteFilters.jsx";
 // Items shown at once; the search finds the rest.
 const SHOWN = 300;
 
-const money = (n) =>
-  n == null || n === "" ? "" : `R ${Number(n).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const day = (d) => (d ? String(d).slice(0, 10) : "");
 
 // Picks a Customer Stock item and saves the link. Open item (1), Link to a
@@ -57,7 +56,7 @@ function LinkToStock({ q, line, lineIndex, stockItems, onLinkStock }) {
       <TypeToFind options={options} value={itemId} onChange={setItemId} placeholder="Type a Customer Stock code or description…" autoFocus />
       {chosen && (
         <div style={{ fontSize: 13, color: C.muted, marginTop: 4 }}>
-          Its cost now R{Number(chosen.value || 0).toFixed(2)}
+          Its cost now {rand(chosen.value || 0)}
           {chosen.supplier ? ` from ${chosen.supplier}` : ""}
         </div>
       )}
@@ -121,7 +120,7 @@ export function ItemButtons({ q, line, lineIndex, raiseItemPo, addStock, stockIt
 // "qty 2 · R 91,00 each ex VAT", the line's numbers in words.
 export function itemFigures(line) {
   const unit = line.unit_price_ex_vat != null ? line.unit_price_ex_vat : null;
-  return [line.qty != null ? `qty ${line.qty}` : "", unit != null ? `${money(unit)} each ex VAT` : money(line.line_total_ex_vat)]
+  return [line.qty != null ? `qty ${line.qty}` : "", unit != null ? `${rand(unit)} each ex VAT` : rand(line.line_total_ex_vat)]
     .filter(Boolean)
     .join(" · ");
 }
@@ -180,7 +179,7 @@ export default function ItemsList({ quotes, showSupplier = true, onOpenQuote, ra
                 <div style={{ fontSize: 14, color: C.muted }}>
                   {q.supplier_name} · quote {q.quote_number || q.file_name}
                   {q.pr_number ? ` · ${q.pr_number}` : ""}
-                  {line.line_total_ex_vat != null ? ` · line ${money(line.line_total_ex_vat)} ex VAT` : ""}
+                  {line.line_total_ex_vat != null ? ` · line ${rand(line.line_total_ex_vat)} ex VAT` : ""}
                 </div>
                 <ItemButtons q={q} line={line} lineIndex={lineIndex} raiseItemPo={raiseItemPo} addStock={addStock} stockItems={stockItems} onLinkStock={onLinkStock}>
                   <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => onOpenQuote(q)}>

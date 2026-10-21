@@ -21,6 +21,8 @@
 // without it reads red and can't be used for a program. Shown only once the
 // database keeps the link (setup-cnc-17-grade-cutting-data.sql).
 
+import MoneyInput from "../MoneyInput.jsx";
+import { rand } from "../lib/money.js";
 import { Fragment, useEffect, useState } from "react";
 import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import NumberBox from "../manager/NumberBox.jsx";
@@ -163,11 +165,11 @@ export default function MaterialsList({ materials, barPrices, pipes, canEdit, ca
                 ) : mayChange ? (
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <NumberBox style={{ ...S.input, width: 90 }} value={m.ownPrice} placeholder="30" title="This material's own price, R/kg" onCommit={(n) => onSavePrice(m.fullName, n)} />
-                    {Number(m.price) > 0 && Number(m.price) !== Number(m.ownPrice) && <span style={{ fontSize: 12.5, color: C.muted }}>uses R {m.price} (cheapest supplier)</span>}
+                    {Number(m.price) > 0 && Number(m.price) !== Number(m.ownPrice) && <span style={{ fontSize: 12.5, color: C.muted }}>uses {rand(m.price)} (cheapest supplier)</span>}
                     {!(Number(m.price) > 0) && <span style={{ fontSize: 12.5, color: C.accentRaw }}>not priced: R30</span>}
                   </div>
                 ) : Number(m.price) > 0 ? (
-                  `R ${m.price}`
+                  rand(m.price)
                 ) : (
                   <span style={{ color: C.accentRaw }}>R 30 (not priced)</span>
                 )}
@@ -204,7 +206,7 @@ export default function MaterialsList({ materials, barPrices, pipes, canEdit, ca
                     <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: 13.5 }}>
                       <input style={{ ...S.input, width: 80 }} placeholder="OD" inputMode="decimal" value={d.od ?? ""} onChange={(e) => setNewSize((x) => ({ ...x, [m.name]: { ...d, od: e.target.value } }))} />
                       <input style={{ ...S.input, width: 80 }} placeholder="ID (tube)" inputMode="decimal" value={d.id ?? ""} onChange={(e) => setNewSize((x) => ({ ...x, [m.name]: { ...d, id: e.target.value } }))} />
-                      <input style={{ ...S.input, width: 90 }} placeholder="Price" inputMode="decimal" value={d.price ?? ""} onChange={(e) => setNewSize((x) => ({ ...x, [m.name]: { ...d, price: e.target.value } }))} />
+                      <MoneyInput style={{ ...S.input, width: 90 }} placeholder="Price" inputMode="decimal" value={d.price ?? ""} onChange={(e) => setNewSize((x) => ({ ...x, [m.name]: { ...d, price: e.target.value } }))} />
                       <select style={{ ...S.input, width: 90 }} value={d.unit || "R/kg"} onChange={(e) => setNewSize((x) => ({ ...x, [m.name]: { ...d, unit: e.target.value } }))}>
                         <option value="R/kg">R/kg</option>
                         <option value="R/m">R/m</option>
@@ -243,7 +245,7 @@ export default function MaterialsList({ materials, barPrices, pipes, canEdit, ca
             </div>
             <div>
               <label style={S.label}>R/kg</label>
-              <input style={S.input} value={adding.price} inputMode="decimal" onChange={(e) => setAdding((a) => ({ ...a, price: e.target.value }))} placeholder="30" />
+              <MoneyInput style={S.input} value={adding.price} inputMode="decimal" onChange={(e) => setAdding((a) => ({ ...a, price: e.target.value }))} placeholder="30" />
             </div>
             <button type="button" className="stk-btn" style={S.addBtn} onClick={add} disabled={!adding.name.trim() || (links && !adding.cutting)}>
               <Plus size={14} /> Add

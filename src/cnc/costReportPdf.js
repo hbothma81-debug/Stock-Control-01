@@ -133,7 +133,7 @@ export function drawCostReport({ doc, autoTable, data }) {
   // ---- material
   y = heading(doc, y, "Material");
   const mat = [
-    ["Priced at", c.material_price != null ? (c.material_unit === "billet" ? `R ${c.material_price} a piece` : `R ${c.material_price}${String(c.material_unit || "").replace(/^R/, "")}`) : "-"],
+    ["Priced at", c.material_price != null ? (c.material_unit === "billet" ? `${rand(c.material_price)} a piece` : `${rand(c.material_price)}${String(c.material_unit || "").replace(/^R/, "")}`) : "-"],
     ["Charged", data.chargeAll ? "all material bought, to this job" : "what the job uses"],
   ];
   if (c.stock) {

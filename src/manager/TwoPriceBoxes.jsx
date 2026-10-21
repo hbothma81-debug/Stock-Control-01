@@ -1,3 +1,4 @@
+import MoneyInput from "../MoneyInput.jsx";
 import { useState } from "react";
 import { C, S } from "../theme.js";
 import { readPrice, bothPrices, showPrice } from "./twoPrice.js";
@@ -49,7 +50,7 @@ export default function TwoPriceBoxes({ unitLabel, kgPerUnit, perUnit, perKg, on
   const box = (which, label, off) => (
     <div style={{ flex: 1, minWidth: 0 }}>
       <label style={S.label}>{label}</label>
-      <input
+      <MoneyInput
         type="text"
         inputMode="decimal"
         style={{ ...S.input, ...(off ? { opacity: 0.5 } : {}) }}

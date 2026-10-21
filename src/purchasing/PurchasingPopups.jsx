@@ -2,6 +2,8 @@
 // They are drawn in two places, as before, so the Request stock pop-up still
 // sits on top of the Low stock list it can be opened from.
 
+import MoneyInput from "../MoneyInput.jsx";
+import { rand } from "../lib/money.js";
 import TypeToFind from "../TypeToFind.jsx";
 import RequestStock from "./RequestStock.jsx";
 import { mixedJobsWords } from "./poJob.js";
@@ -109,7 +111,7 @@ export function PurchasingPopups({ ctx }) {
               </button>
             </div>
             <div style={S.roleHint}>
-              {cancelPoModal.po.supplierName || "No supplier"} · R{Number(cancelPoModal.po.totalValue || 0).toFixed(2)}
+              {cancelPoModal.po.supplierName || "No supplier"} · {rand(cancelPoModal.po.totalValue || 0)}
             </div>
             <div style={{ ...S.roleHint, marginTop: 8 }}>
               The order stays on the books with the reason against it — it is not deleted. If the supplier has already
@@ -304,14 +306,14 @@ export function PurchasingPopups({ ctx }) {
                     onChange={(e) => updatePoLineItem(idx, "qty", e.target.value)}
                     placeholder="Qty"
                   />
-                  <input
+                  <MoneyInput
                     style={{ ...S.input, flex: 1 }}
                     type="number"
                     step="0.01"
                     min="0"
                     value={li.unitPrice}
                     onChange={(e) => updatePoLineItem(idx, "unitPrice", e.target.value)}
-                    placeholder="R each"
+                    placeholder="each"
                   />
                   <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => removePoLineItem(idx)}>
                     <Trash2 size={13} />
@@ -460,7 +462,7 @@ export function PurchasingPopups({ ctx }) {
               const vatTotal = exclusiveTotal * (vatRate / 100);
               return (
                 <div style={S.poTotalRow}>
-                  Exclusive: R{exclusiveTotal.toFixed(2)} &nbsp;+&nbsp; VAT: R{vatTotal.toFixed(2)} &nbsp;=&nbsp; Total: R{(exclusiveTotal + vatTotal).toFixed(2)}
+                  Exclusive: {rand(exclusiveTotal)} &nbsp;+&nbsp; VAT: {rand(vatTotal)} &nbsp;=&nbsp; Total: {rand(exclusiveTotal + vatTotal)}
                 </div>
               );
             })()}

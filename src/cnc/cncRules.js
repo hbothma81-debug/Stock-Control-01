@@ -2,6 +2,7 @@
 // what the questionnaire sends the engine. No React, no database: tested
 // in cncRules.test.js.
 
+import { rand as money } from "../lib/money.js";
 import { CNC_FIELDS } from "./cncFields.js";
 import { holesToSettings, settingsToHoles } from "./holesThreads.js";
 
@@ -511,7 +512,7 @@ export function costingFigures(costing) {
 
 export function rand(v) {
   if (v == null) return "–";
-  return "R " + Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return money(v);
 }
 
 // The batch run time for machine planning (Heinrich, 11 Oct 2026: "a time

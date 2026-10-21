@@ -6,6 +6,7 @@
 // usePurchasing() holds the functions and runs where they used to be; it
 // takes everything it borrows from the rest of the app in one deps object.
 
+import { rand } from "../lib/money.js";
 import { useState, useMemo } from "react";
 import NumberBox from "../manager/NumberBox.jsx";
 import TypeToFind from "../TypeToFind.jsx";
@@ -523,10 +524,10 @@ export function usePurchasing(deps) {
           li.partNumber || "",
           li.description,
           String(li.qty),
-          `R ${Number(li.unitPrice).toFixed(2)}`,
+          rand(li.unitPrice),
           `${vatRate}%`,
-          `R ${exclTotal.toFixed(2)}`,
-          `R ${inclTotal.toFixed(2)}`,
+          rand(exclTotal),
+          rand(inclTotal),
         ];
       }),
       theme: "grid",
@@ -555,13 +556,13 @@ export function usePurchasing(deps) {
     doc.setFontSize(9);
     doc.setFont(undefined, "normal");
     doc.text("Total Exclusive:", rightX - 45, afterTableY);
-    doc.text(`R ${exclusiveTotal.toFixed(2)}`, rightX, afterTableY, { align: "right" });
+    doc.text(rand(exclusiveTotal), rightX, afterTableY, { align: "right" });
     doc.text(`Total VAT (${vatRate}%):`, rightX - 45, afterTableY + 5);
-    doc.text(`R ${vatTotal.toFixed(2)}`, rightX, afterTableY + 5, { align: "right" });
+    doc.text(rand(vatTotal), rightX, afterTableY + 5, { align: "right" });
     doc.setFontSize(11);
     doc.setFont(undefined, "bold");
     doc.text("Total:", rightX - 45, afterTableY + 12);
-    doc.text(`R ${grandTotal.toFixed(2)}`, rightX, afterTableY + 12, { align: "right" });
+    doc.text(rand(grandTotal), rightX, afterTableY + 12, { align: "right" });
 
     let stampBottomY = afterTableY + 12;
 
@@ -907,11 +908,6 @@ export function usePurchasing(deps) {
     // Same formatting as the figures on the screen. R 1234567.00 is a
     // number you have to count the digits of; R 1 234 567.00 is one you
     // can read.
-    const money = (n) =>
-      `R ${Number(n || 0).toLocaleString(undefined, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })}`;
     let y = 32;
     let allEx = 0;
     let allInc = 0;
@@ -949,9 +945,9 @@ export function usePurchasing(deps) {
             new Date(po.dateCreated).toLocaleDateString(),
             po.supplierName || "—",
             po.status === "received" ? "Received" : po.status === "cancelled" ? "Cancelled" : "Outstanding",
-            money(poEx),
-            money(poInc - poEx),
-            money(poInc),
+            rand(poEx),
+            rand(poInc - poEx),
+            rand(poInc),
           ];
         }),
         foot: [[
@@ -961,11 +957,11 @@ export function usePurchasing(deps) {
           // Whether anything is still out, not whether it is worth
           // anything. An order for nothing is still an order not received.
           open.length
-            ? `${open.length} still on order · ${money(openEx)}`
+            ? `${open.length} still on order · ${rand(openEx)}`
             : "all received",
-          money(ex),
-          money(inc - ex),
-          money(inc),
+          rand(ex),
+          rand(inc - ex),
+          rand(inc),
         ]],
         theme: "grid",
         styles: { fontSize: 8 },
@@ -983,8 +979,8 @@ export function usePurchasing(deps) {
       startY: y,
       head: [[months.size > 1 ? `All ${months.size} months` : "Total", "Excl VAT", "VAT", "Incl VAT"]],
       body: [
-        ["Ordered", money(allEx), money(allInc - allEx), money(allInc)],
-        ["Of that, still on order", money(stillOnOrderEx), "", ""],
+        ["Ordered", rand(allEx), rand(allInc - allEx), rand(allInc)],
+        ["Of that, still on order", rand(stillOnOrderEx), "", ""],
       ],
       theme: "grid",
       headStyles: { fillColor: [27, 29, 31] },

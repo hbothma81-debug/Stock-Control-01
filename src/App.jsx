@@ -1,3 +1,4 @@
+import MoneyInput from "./MoneyInput.jsx";
 import { useState, useEffect, useMemo, useRef, Fragment } from "react";
 import { supabase } from "./lib/supabaseClient.js";
 import {
@@ -95,6 +96,7 @@ import { materialText } from "./laser/stockOptions.js";
 import { planBars, barsOnShelf, barsSetAside, barsOnOrder, matchingStock, materialName, offcutIsKeepable, KERF_MM, TRIM_MM, MIN_OFFCUT_MM } from "./jobs/cutToSize.js";
 import { changesMaterial, pileStillUsed } from "./jobs/cutLineEdit.js";
 import EditableName from "./EditableName.jsx";
+import CardMenu from "./CardMenu.jsx";
 import TypeToFind from "./TypeToFind.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import { crashPlace } from "./lib/crashText.js";
@@ -10445,10 +10447,10 @@ export default function StockControl() {
         li.partNumber || "—",
         li.description,
         String(li.qty),
-        `R ${li.unitPrice.toFixed(2)}`,
-        `R ${(li.qty * li.unitPrice).toFixed(2)}`,
+        rand(li.unitPrice),
+        rand(li.qty * li.unitPrice),
       ]),
-      foot: [["", "", "", "Total", `R ${grandTotal.toFixed(2)}`]],
+      foot: [["", "", "", "Total", rand(grandTotal)]],
       // The part number is a code, not prose -- it should not wrap or
       // steal width from the description it sits next to.
       columnStyles: { 0: { cellWidth: 30 } },
@@ -12609,7 +12611,7 @@ export default function StockControl() {
                   border: `1px solid ${on ? C.text : C.border}`, color: old ? C.danger : C.text, fontWeight: on ? 600 : 400,
                 }}
               >
-                {name} R{Number(p.price).toFixed(2)}
+                {name} {rand(p.price)}
                 {unit}
                 {best && best.id === p.id && lines.length > 1 ? " · cheapest" : ""}
                 {thisRow && sameText(name, thisRow) ? " · this row" : ""}
@@ -12657,7 +12659,7 @@ export default function StockControl() {
     }
     const unit = formMat.listKey === "sections" ? "/m" : "/kg";
     const what = [formMat.name, formMat.grade].filter(Boolean).join(" ");
-    setPriceSavedNote(`Saved: ${effectiveSupplier || "no supplier"}, ${what}, R${price.toFixed(2)}${unit}. Nothing was added to stock.`);
+    setPriceSavedNote(`Saved: ${effectiveSupplier || "no supplier"}, ${what}, ${rand(price)}${unit}. Nothing was added to stock.`);
     setFormNewSize(null);
     setForm((f) => ({
       ...emptyForm,
@@ -14472,13 +14474,13 @@ export default function StockControl() {
             placeholder={built && sectionCalcKgPerM(built.dimensions, grade) ? `kg/m ${sectionCalcKgPerM(built.dimensions, grade)}` : "kg/m"}
             title="kg/m. Leave blank to use the weight worked out from the size."
           />
-          <input
+          <MoneyInput
             style={{ ...S.input, flex: 1, minWidth: 80 }}
             type="number"
             step="0.01"
             value={managerPrice}
             onChange={(e) => setManagerPrice(e.target.value)}
-            placeholder="R/m"
+            placeholder="per metre"
           />
           <TypeToFind
             style={{ flex: 1, minWidth: 120 }}
@@ -15328,7 +15330,7 @@ export default function StockControl() {
               kind of number and stays with the owner. */}
           {isAdmin && grandTotalValue > 0 && (
             <div style={S.totalValueBadge} title="Total stock value on hand across every division">
-              R {grandTotalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              {rand(grandTotalValue)}
             </div>
           )}
           {lowCount > 0 && (
@@ -15898,12 +15900,12 @@ export default function StockControl() {
                           }}
                           title={
                             worth > 0
-                              ? `R ${worth.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} — the quoted lines on this job, before VAT`
+                              ? `${rand(worth)} — the quoted lines on this job, before VAT`
                               : "Nothing priced on this job yet, so it counts for nothing in the total above"
                           }
                         >
                           {worth > 0
-                            ? `R ${worth.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                            ? rand(worth)
                             : "not priced"}
                         </span>
                       );
@@ -16847,8 +16849,19 @@ export default function StockControl() {
                           <div style={S.reqCard}>
                             <div style={S.reqCardTop}>
                               <span style={S.itemName}>{job.job_number} — {job.customer || "No customer"}</span>
-                              <span style={{ ...S.reqStatusTag, ...(isReady ? S.reqStatus_received : S.reqStatus_ordered) }}>
-                                {isReady ? "Ready" : "Waiting"}
+                              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                <span style={{ ...S.reqStatusTag, ...(isReady ? S.reqStatus_received : S.reqStatus_ordered) }}>
+                                  {isReady ? "Ready" : "Waiting"}
+                                </span>
+                                <CardMenu
+                                  items={[
+                                    {
+                                      label: "Pull from stock",
+                                      icon: <PackagePlus size={13} />,
+                                      onClick: () => setPullStockModal({ job, process, dept: null, search: "" }),
+                                    },
+                                  ]}
+                                />
                               </span>
                             </div>
                             {/* An open Info Request on this stage: what was
@@ -17094,14 +17107,6 @@ export default function StockControl() {
                                 </ErrorBoundary>
                               </div>
                             )}
-                            <button
-                              type="button"
-                              className="stk-btn"
-                              style={{ ...S.reqActionBtnMuted, width: "100%", marginTop: 6 }}
-                              onClick={() => setPullStockModal({ job, process, dept: null, search: "" })}
-                            >
-                              <PackagePlus size={13} /> Pull from stock
-                            </button>
                             {/* A cutting stage lists only the lines tagged
                                 for its machine (and untagged ones). With
                                 nothing to cut it says so and keeps a single
@@ -17490,7 +17495,7 @@ export default function StockControl() {
                   </div>
                   <div className="stk-meta-row" style={S.rowMeta}>
                     <span>Sales rep: {job.sales_rep}</span>
-                    {job.quoted_value != null && <span>Quoted: R {Number(job.quoted_value).toFixed(2)}</span>}
+                    {job.quoted_value != null && <span>Quoted: {rand(job.quoted_value)}</span>}
                     {/* How long accounts has been sitting on it. The list is
                         newest first, so the last entry is the first time this
                         job was sent over -- that is the date that matters when
@@ -17697,7 +17702,7 @@ export default function StockControl() {
                       key={r.id}
                       title={r.file_name}
                       summary={job ? `${job.job_number} — ${job.customer || "No customer"}` : "Job not found"}
-                      right={r.total_amount != null ? <span style={S.roleHint}>R {Number(r.total_amount).toFixed(2)}</span> : null}
+                      right={r.total_amount != null ? <span style={S.roleHint}>{rand(r.total_amount)}</span> : null}
                     >
                       <div className="stk-meta-row" style={S.rowMeta}>
                         <span>Submitted by {r.submitted_by}</span>
@@ -17896,7 +17901,7 @@ export default function StockControl() {
                         <div key={u.id} style={S.reqCard}>
                           <div style={S.reqCardTop}>
                             <span style={S.itemName}>{u.itemName}</span>
-                            {canSeeValue && <span style={S.itemName}>R{(u.lineCost || 0).toFixed(2)}</span>}
+                            {canSeeValue && <span style={S.itemName}>{rand(u.lineCost || 0)}</span>}
                           </div>
                           <div className="stk-meta-row" style={S.rowMeta}>
                             <span>Qty: {u.qty}</span>
@@ -17909,7 +17914,7 @@ export default function StockControl() {
                       ))}
                     </div>
                     {canSeeValue && matches.length > 0 && (
-                      <div style={S.poTotalRow}>Total material cost: R{total.toFixed(2)}</div>
+                      <div style={S.poTotalRow}>Total material cost: {rand(total)}</div>
                     )}
                   </div>
                 );
@@ -18056,7 +18061,7 @@ export default function StockControl() {
           )}
           {tab !== "custom" && tab !== "stores" && tabWeightTotal > 0 && canSeeValue && tabValueTotal > 0 && <span> · </span>}
           {canSeeValue && tabValueTotal > 0 && (
-            <span>R {tabValueTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} in view</span>
+            <span>{rand(tabValueTotal)} in view</span>
           )}
         </div>
       )}
@@ -18457,7 +18462,7 @@ export default function StockControl() {
                       {it.purchaseDate && <span>Bought {new Date(it.purchaseDate).toLocaleDateString()}</span>}
                       {it.supplier && <span>Supplier: {it.supplier}</span>}
                       {it.loc && <span>{it.loc}</span>}
-                      {canSeeValue && Number(it.value || 0) > 0 && <span>R{Number(it.value).toFixed(2)}</span>}
+                      {canSeeValue && Number(it.value || 0) > 0 && <span>{rand(it.value)}</span>}
                     </div>
                     {svc && (
                       <div
@@ -18702,33 +18707,33 @@ export default function StockControl() {
                             {it.loc && <span>{it.loc}</span>}
                             {it.supplier && <span>Supplier: {it.supplier}</span>}
                             {(tab === "custom" || tab === "stores" || tab === "fasteners") && canSeeValue && (
-                              <span>R{Number(it.value || 0).toFixed(2)} ea · R{(Number(it.value || 0) * Number(it.qty || 0)).toFixed(2)} total</span>
+                              <span>{rand(it.value || 0)} ea · {rand(Number(it.value || 0) * Number(it.qty || 0))} total</span>
                             )}
                             {/* Cost only. The selling price is being done
                                 separately, so nothing here pretends to know it. */}
                             {tab === "buyouts" && canSeeValue && (
                               <span>
-                                R{Number(it.value || 0).toFixed(2)} ea · R
+                                {rand(it.value || 0)} ea · R
                                 {(Number(it.value || 0) * Number(it.qty || 0)).toFixed(2)} total
                               </span>
                             )}
                             {/* Whatever the supplier calls it -- the number somebody
                                 will actually be searching for. */}
                             {tab === "buyouts" && it.partNumber && <span>{it.partNumber}</span>}
-                            {tab === "assets" && canSeeValue && Number(it.value || 0) > 0 && <span>R{Number(it.value).toFixed(2)}</span>}
+                            {tab === "assets" && canSeeValue && Number(it.value || 0) > 0 && <span>{rand(it.value)}</span>}
                             {tab === "plate" && canSeeValue && pw && (
                               <span>
-                                R{paidOr(it, findPrice("grades", it.grade)).toFixed(2)}/kg · R{(plateValue(it)?.total || 0).toFixed(2)} value
+                                {rand(paidOr(it, findPrice("grades", it.grade)))}/kg · {rand(plateValue(it)?.total || 0)} value
                               </span>
                             )}
                             {tab === "structural" && canSeeValue && sw && (
                               <span>
-                                R{paidOr(it, findSectionPrice(it.name, it.grade)).toFixed(2)}/m · R{(structuralValue(it)?.total || 0).toFixed(2)} value
+                                {rand(paidOr(it, findSectionPrice(it.name, it.grade)))}/m · {rand(structuralValue(it)?.total || 0)} value
                               </span>
                             )}
                             {tab === "cncBar" && canSeeValue && cw && (
                               <span>
-                                R{paidOr(it, findPrice("cncGrades", it.grade)).toFixed(2)}/kg · R{(cncBarValue(it)?.total || 0).toFixed(2)} value
+                                {rand(paidOr(it, findPrice("cncGrades", it.grade)))}/kg · {rand(cncBarValue(it)?.total || 0)} value
                               </span>
                             )}
                             {low && (
@@ -18974,8 +18979,8 @@ export default function StockControl() {
                     />
                   </div>
                   <div>
-                    <label style={S.label}>Price each (R)</label>
-                    <input
+                    <label style={S.label}>Price each</label>
+                    <MoneyInput
                       style={S.input}
                       type="number"
                       min="0"
@@ -19049,8 +19054,8 @@ export default function StockControl() {
                   />
                 </div>
                 <div style={{ marginTop: 10 }}>
-                  <label style={S.label}>Value (R, optional)</label>
-                  <input
+                  <label style={S.label}>Value (optional)</label>
+                  <MoneyInput
                     style={S.input}
                     type="number"
                     min="0"
@@ -19711,8 +19716,8 @@ export default function StockControl() {
                   />
                 </div>
                 <div>
-                  <label style={S.label}>Cost per unit (R)</label>
-                  <input
+                  <label style={S.label}>Cost per unit</label>
+                  <MoneyInput
                     style={S.input}
                     type="number"
                     min="0"
@@ -19737,8 +19742,8 @@ export default function StockControl() {
                   />
                 </div>
                 <div>
-                  <label style={S.label}>Value per unit (R)</label>
-                  <input
+                  <label style={S.label}>Value per unit</label>
+                  <MoneyInput
                     style={S.input}
                     type="number"
                     min="0"
@@ -19988,7 +19993,7 @@ export default function StockControl() {
                         onChange={(e) => setBoForm({ ...boForm, name: e.target.value })}
                         placeholder="Description"
                       />
-                      <input
+                      <MoneyInput
                         style={{ ...S.input, flex: "0 1 110px" }}
                         type="number"
                         step="0.01"
@@ -20043,8 +20048,8 @@ export default function StockControl() {
                                 />
                               </div>
                               <div>
-                                <label style={S.label}>Cost (R)</label>
-                                <input
+                                <label style={S.label}>Cost</label>
+                                <MoneyInput
                                   type="number"
                                   step="0.01"
                                   value={it.value === 0 ? "" : it.value}
@@ -20156,15 +20161,15 @@ export default function StockControl() {
                             />
                           </div>
                           <div>
-                            <label style={S.label}>Cost (R)</label>
-                            <input
+                            <label style={S.label}>Cost</label>
+                            <MoneyInput
                               type="number"
                               step="0.01"
                               value={it.value === 0 ? "" : it.value}
                               placeholder="0"
                               onChange={(e) => updateCustomerStockField(it.id, "value", e.target.value)}
                               style={{ ...S.managerFactorInput, display: "block" }}
-                              title="What we pay, each (R)"
+                              title="What we pay, each"
                             />
                           </div>
                           <div>
@@ -20251,13 +20256,13 @@ export default function StockControl() {
                     onChange={(v) => setScCatalogForm((f) => ({ ...f, supplier: v }))}
                     emptyLabel="Supplier…"
                   />
-                  <input
+                  <MoneyInput
                     style={{ ...S.input, flex: 1 }}
                     type="number"
                     step="0.01"
                     value={scCatalogForm.price}
                     onChange={(e) => setScCatalogForm({ ...scCatalogForm, price: e.target.value })}
-                    placeholder="Unit price (R)"
+                    placeholder="Unit price"
                   />
                   <button type="button" className="stk-btn" style={S.addBtn} onClick={addStoresCatalogRow}>
                     <Plus size={15} />
@@ -20346,14 +20351,14 @@ export default function StockControl() {
                               onChange={(v) => updateStoresCatalogRow(r.id, "supplier", v)}
                               emptyLabel="No supplier"
                             />
-                            <input
+                            <MoneyInput
                               type="number"
                               step="0.01"
                               value={r.price === 0 ? "" : r.price}
                               placeholder="0"
                               onChange={(e) => updateStoresCatalogRow(r.id, "price", e.target.value)}
                               style={S.managerFactorInput}
-                              title="Unit price (R)"
+                              title="Unit price"
                             />
                             <button type="button" className="stk-btn" style={S.managerDelete} onClick={() => duplicateStoresCatalogRow(r.id)} title="Duplicate">
                               <Copy size={13} />
@@ -21177,13 +21182,13 @@ export default function StockControl() {
                       onChange={(e) => setManagerFactor(e.target.value)}
                       placeholder="kg/m"
                     />
-                    <input
+                    <MoneyInput
                       style={{ ...S.input, flex: 1 }}
                       type="number"
                       step="0.01"
                       value={managerPrice}
                       onChange={(e) => setManagerPrice(e.target.value)}
-                      placeholder="R/m"
+                      placeholder="per metre"
                     />
                     {/* The same size in two grades is two rows with two
                         prices, so the grade has to be chosen here. */}
@@ -21424,13 +21429,13 @@ export default function StockControl() {
                         onChange={(e) => setManagerFactor(e.target.value)}
                         placeholder="Density g/cm³"
                       />
-                      <input
+                      <MoneyInput
                         style={{ ...S.input, flex: 1 }}
                         type="number"
                         step="0.01"
                         value={managerPrice}
                         onChange={(e) => setManagerPrice(e.target.value)}
-                        placeholder="R/kg"
+                        placeholder="per kg"
                       />
                       {managerTab === "grades" && (
                         <input
@@ -22457,7 +22462,7 @@ export default function StockControl() {
                     )}
                     {edit && (canSeeValue
                       ? box("Quoted value", "quoted_value",
-                          <input
+                          <MoneyInput
                             type="number"
                             min="0"
                             step="0.01"
@@ -23300,7 +23305,7 @@ export default function StockControl() {
                                           "Can see Rand values" in User Manager. */}
                                       {edit ? (
                                         <span style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                                          <input
+                                          <MoneyInput
                                             type="number"
                                             min="0"
                                             step="0.01"
@@ -23313,7 +23318,7 @@ export default function StockControl() {
                                           <SavedCheck fieldKey={`quoteitem-price-${it.id}`} />
                                         </span>
                                       ) : (
-                                        <span style={{ fontSize: 13 }}>R{Number(it.unit_price).toFixed(2)}</span>
+                                        <span style={{ fontSize: 13 }}>{rand(it.unit_price)}</span>
                                       )}
                                     </td>
                                   )}
@@ -23811,7 +23816,7 @@ export default function StockControl() {
                                       <span style={{ fontWeight: 600 }}>{si.partNumber || "—"}</span>
                                       <span style={{ color: C.muted }}> — {si.name}</span>
                                       {canSeeValue && si.value != null && si.value !== "" && (
-                                        <span style={{ color: C.muted }}> · R{Number(si.value).toFixed(2)}</span>
+                                        <span style={{ color: C.muted }}> · {rand(si.value)}</span>
                                       )}
                                     </button>
                                   ))}
@@ -23819,14 +23824,14 @@ export default function StockControl() {
                               )}
                             </div>
                             {canSeeValue && (
-                              <input
+                              <MoneyInput
                                 type="number"
                                 min="0"
                                 step="0.01"
                                 style={{ ...S.input, width: 96 }}
                                 value={newItemForm.unitPrice}
                                 onChange={(e) => setNewItemForm((f) => ({ ...f, unitPrice: e.target.value }))}
-                                placeholder="R each"
+                                placeholder="each"
                               />
                             )}
                             <button
@@ -23929,7 +23934,7 @@ export default function StockControl() {
                   </div>
                 )}
                 {canSeeValue && jobDetail.job.quoted_value != null && (
-                  <div style={{ ...S.roleHint, marginTop: 6 }}>Quoted value: R {Number(jobDetail.job.quoted_value).toFixed(2)}</div>
+                  <div style={{ ...S.roleHint, marginTop: 6 }}>Quoted value: {rand(jobDetail.job.quoted_value)}</div>
                 )}
               </div>
             )}
@@ -24107,7 +24112,7 @@ export default function StockControl() {
                       <div key={req.id} style={S.reqCard}>
                         <div style={S.reqCardTop}>
                           <span style={S.itemName}>{req.file_name}</span>
-                          {req.total_amount != null && <span style={S.roleHint}>R {Number(req.total_amount).toFixed(2)}</span>}
+                          {req.total_amount != null && <span style={S.roleHint}>{rand(req.total_amount)}</span>}
                         </div>
                         <div className="stk-meta-row" style={S.rowMeta}>
                           <span>Submitted by {req.submitted_by}</span>
@@ -24150,19 +24155,19 @@ export default function StockControl() {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 14 }}>{u.itemName}</div>
                           <div style={S.roleHint}>
-                            {u.qty} — R{Number(u.lineCost || 0).toFixed(2)} — {u.by} on {new Date(u.timestamp).toLocaleDateString()}
+                            {u.qty} — {rand(u.lineCost || 0)} — {u.by} on {new Date(u.timestamp).toLocaleDateString()}
                           </div>
                         </div>
                       </div>
                     ))}
                   </div>
-                  <div style={{ ...S.roleHint, marginTop: 6, fontWeight: 600 }}>Total actual cost: R {totalCost.toFixed(2)}</div>
+                  <div style={{ ...S.roleHint, marginTop: 6, fontWeight: 600 }}>Total actual cost: {rand(totalCost)}</div>
                   {jobDetail.job.quoted_value != null && (
                     <div style={S.roleHint}>
-                      Quoted R {Number(jobDetail.job.quoted_value).toFixed(2)} vs actual R {totalCost.toFixed(2)} — {" "}
+                      Quoted {rand(jobDetail.job.quoted_value)} vs actual {rand(totalCost)} — {" "}
                       {totalCost <= Number(jobDetail.job.quoted_value)
-                        ? `R ${(Number(jobDetail.job.quoted_value) - totalCost).toFixed(2)} under`
-                        : `R ${(totalCost - Number(jobDetail.job.quoted_value)).toFixed(2)} over`}
+                        ? `${rand(Number(jobDetail.job.quoted_value) - totalCost)} under`
+                        : `${rand(totalCost - Number(jobDetail.job.quoted_value))} over`}
                     </div>
                   )}
                 </div>
@@ -24192,8 +24197,8 @@ export default function StockControl() {
             </div>
             <div style={S.formGrid}>
               <div>
-                <label style={S.label}>Unit price (R)</label>
-                <input style={S.input} type="number" step="0.01" value={scForm.price} onChange={(e) => setScForm({ ...scForm, price: e.target.value })} />
+                <label style={S.label}>Unit price</label>
+                <MoneyInput style={S.input} type="number" step="0.01" value={scForm.price} onChange={(e) => setScForm({ ...scForm, price: e.target.value })} />
               </div>
               <div>
                 <label style={S.label}>Low stock warning at</label>
@@ -24683,8 +24688,8 @@ export default function StockControl() {
                 request's total. */}
             {jobHasInvoicedAmount(markInvoicedModal.job) && (
               <div style={{ marginTop: 10 }}>
-                <label style={S.label}>Invoice amount, excluding VAT (R)</label>
-                <input
+                <label style={S.label}>Invoice amount, excluding VAT</label>
+                <MoneyInput
                   type="number"
                   min="0"
                   step="0.01"
@@ -24763,8 +24768,8 @@ export default function StockControl() {
               />
             </div>
             <div style={{ marginTop: 10 }}>
-              <label style={S.label}>Invoice amount, excluding VAT (R)</label>
-              <input
+              <label style={S.label}>Invoice amount, excluding VAT</label>
+              <MoneyInput
                 type="number"
                 min="0"
                 step="0.01"
@@ -25015,7 +25020,7 @@ export default function StockControl() {
             <div style={S.formGrid}>
               <div>
                 <label style={S.label}>Price</label>
-                <input
+                <MoneyInput
                   style={S.input}
                   type="number"
                   min="0"
