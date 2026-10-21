@@ -247,7 +247,9 @@ with checks (setup_file, looks_for, found) as (
     ('setup-procurement-8-stock-item-quotes.sql', 'table stock_item_quotes (a quoted item linked to a stock item)',
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'stock_item_quotes')),
     ('setup-email-signatures.sql', 'table email_signatures (each person''s own email signature)',
-      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'email_signatures'))
+      exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'email_signatures')),
+    ('setup-drawings-job.sql', 'column drawings.job_id (a drawing kept for one job only)',
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'drawings' and column_name = 'job_id'))
 )
 select
   setup_file,

@@ -84,7 +84,10 @@ export function useDrawings(deps) {
   // The one function later phases actually call to record a new drawing —
   // handles superseding the old "current" revision and working out the next
   // internal revision number automatically, so callers don't have to.
-  async function insertDrawingRecord({ partNumber, customer, customerRevision, storagePath, fileName, linkedItemId, description, price }) {
+  // jobId: a drawing kept for one job only (drawings.job_id,
+  // setup-drawings-job.sql); left off the row for every other drawing, so
+  // a database without the column still takes them.
+  async function insertDrawingRecord({ partNumber, customer, customerRevision, storagePath, fileName, linkedItemId, description, price, jobId }) {
     if (!supabase) return null;
     const nextRevision = await getNextInternalRevision(partNumber);
     await supersedeOldRevisions(partNumber);
@@ -102,11 +105,72 @@ export function useDrawings(deps) {
         description: description || null,
         price: price != null ? price : null,
         uploaded_by: roleLabel,
+        ...(jobId ? { job_id: jobId } : {}),
       })
       .select()
       .single();
     if (error) throw error;
     return data;
+  }
+
+  // One drawing dropped on a job's Drawings tab (Heinrich, 21 Oct 2026).
+  // replace: the part already has a current drawing and the person chose
+  // Replace existing: the file is swapped on the same row, the same
+  // revision, and the old file is removed from the store. Otherwise it is
+  // a new row: the part's first drawing or its next revision, the old one
+  // kept as superseded. Returns "replaced", "revision" or "first".
+  async function saveJobDrawing({ file, partNumber, customer, customerRevision, linkedItemId, description, jobId, replace }) {
+    if (!supabase) throw new Error("No database connection.");
+    const { data: current, error: currentError } = await supabase
+      .from("drawings")
+      .select("id, internal_revision, storage_path")
+      .eq("part_number", partNumber)
+      .eq("status", "current")
+      .maybeSingle();
+    if (currentError) throw currentError;
+    if (replace && current) {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      // A path of its own, so the old file is still there if anything
+      // below fails.
+      const path = `${partNumber}/rev${current.internal_revision}-${Date.now()}-${safeName}`;
+      const { error: upError } = await supabase.storage.from("drawings").upload(path, file);
+      if (upError) throw upError;
+      const { data: changed, error: changeError } = await supabase
+        .from("drawings")
+        .update({
+          storage_path: path,
+          file_name: file.name,
+          created_at: new Date().toISOString(),
+          uploaded_by: roleLabel,
+          ...(customerRevision ? { customer_revision: customerRevision } : {}),
+        })
+        .eq("id", current.id)
+        .select("id");
+      if (changeError) throw changeError;
+      if (!changed || !changed.length) {
+        await supabase.storage.from("drawings").remove([path]);
+        throw new Error("The database did not take the change (no row came back).");
+      }
+      if (current.storage_path && current.storage_path !== path) {
+        const { error: removeError } = await supabase.storage.from("drawings").remove([current.storage_path]);
+        if (removeError) console.warn("The replaced file could not be removed from the store:", removeError.message);
+      }
+      return "replaced";
+    }
+    const nextRevision = await getNextInternalRevision(partNumber);
+    const path = await uploadDrawingFile(file, partNumber, nextRevision);
+    await insertDrawingRecord({
+      partNumber,
+      customer,
+      customerRevision,
+      storagePath: path,
+      fileName: file.name,
+      linkedItemId,
+      description,
+      price: null,
+      jobId,
+    });
+    return current ? "revision" : "first";
   }
 
   // ---- Drawings tab: search, view, and bulk upload ----
@@ -180,6 +244,21 @@ export function useDrawings(deps) {
           customerRevision: d.customer_revision,
         };
       });
+      // Which of them belong to one job only, so that job's Production
+      // cards can show them. A database without drawings.job_id answers
+      // an error here: then there are none.
+      try {
+        const jobOnly = await fetchAllRows("drawings", {
+          select: "id, part_number, job_id",
+          filter: (q) => q.eq("status", "current").not("job_id", "is", null),
+        });
+        (jobOnly || []).forEach((d) => {
+          const entry = map[d.part_number.trim()];
+          if (entry) entry.jobId = d.job_id;
+        });
+      } catch (jobOnlyErr) {
+        console.warn("Drawings kept for one job are not read on this database:", jobOnlyErr?.message || jobOnlyErr);
+      }
       setDrawingLookup(map);
     } catch (err) {
       console.error("Failed to load drawing lookup:", err);
@@ -379,5 +458,5 @@ export function useDrawings(deps) {
 
   return { batchDeleteDrawingsForCustomer, closeDrawingUpload, deleteDrawing, handleDrawingFilesSelected,
     loadDrawingLookup, openDrawingPreview, openDrawingPreviewByPartNumber, refreshDrawings,
-    removeDrawingUploadFile, submitDrawingUpload };
+    removeDrawingUploadFile, saveJobDrawing, submitDrawingUpload };
 }

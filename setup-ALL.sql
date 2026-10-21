@@ -1,7 +1,7 @@
 -- ============================================================
 -- setup-ALL.sql — complete database setup, generated file
 --
--- Created by build-test-database.sh on 2026-10-20.
+-- Created by build-test-database.sh on 2026-10-21.
 -- Do not edit by hand; edit the individual setup-*.sql files
 -- and re-run the script instead.
 --
@@ -7333,4 +7333,30 @@ select 'email signatures' as step,
        case when to_regclass('public.email_signatures') is not null
             then 'ready - ' || (select count(*) from public.email_signatures) || ' signatures saved'
             else 'SOMETHING IS MISSING - tell Claude' end as result;
+
+
+-- ============================================================
+-- setup-drawings-job.sql
+-- ============================================================
+-- Drawings that belong to one job only (Heinrich, 21 Oct 2026).
+--
+-- A drawing uploaded on a job's Drawings tab whose file name matches none
+-- of the job's part numbers can be kept as "This job only" (a general
+-- arrangement, say). It is still a row in the drawings library, filed
+-- under the job's customer, so every drawing has a backup and a history;
+-- job_id says which job it belongs to. Blank for every other drawing.
+--
+-- Safe to run twice. Adds one column and one index; changes no rows.
+
+alter table public.drawings
+  add column if not exists job_id uuid references public.jobs(id) on delete set null;
+
+create index if not exists drawings_job_id_idx
+  on public.drawings (job_id)
+  where job_id is not null;
+
+-- Shows the column: one row, job_id, uuid.
+select column_name, data_type
+from information_schema.columns
+where table_schema = 'public' and table_name = 'drawings' and column_name = 'job_id';
 

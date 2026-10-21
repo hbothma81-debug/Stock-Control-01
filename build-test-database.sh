@@ -140,6 +140,7 @@ ORDER=(
   setup-procurement-7-supplier-categories-words.sql
   setup-procurement-8-stock-item-quotes.sql
   setup-email-signatures.sql
+  setup-drawings-job.sql
 )
 
 OUT=setup-ALL.sql

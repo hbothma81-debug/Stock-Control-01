@@ -1,6 +1,25 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { drawingRows, noDrawingReason, revisionText } from "./jobDrawings.js";
+import { drawingRows, fileStem, jobOnlyPartNumber, matchFileToPart, noDrawingReason, revisionText } from "./jobDrawings.js";
+
+test("a file goes to the longest part number in its name", () => {
+  const parts = ["P-1", "P-10", "ERS-1001"];
+  assert.equal(matchFileToPart("P-10 Rev B.pdf", parts), "P-10");
+  assert.equal(matchFileToPart("p1.dxf", parts), "P-1");
+  assert.equal(matchFileToPart("ers_1001-revC.PDF", parts), "ERS-1001");
+  assert.equal(matchFileToPart("GA layout.pdf", parts), null);
+});
+
+test("two part numbers of the same length in one name: no guess", () => {
+  assert.equal(matchFileToPart("A-11 and B-22.pdf", ["A-11", "B-22"]), null);
+  assert.equal(matchFileToPart("A-11.pdf", ["A-11", " A-11 "]), "A-11");
+});
+
+test("the extension is not part of the name", () => {
+  assert.equal(fileStem("GA layout.v2.pdf"), "GA layout.v2");
+  assert.equal(matchFileToPart("X.PDF", ["PDF"]), null);
+  assert.equal(jobOnlyPartNumber("JOB-0012", "GA layout.pdf"), "JOB-0012-GA layout");
+});
 
 const lines = [
   { id: "a", description: "Bracket", part: "P-10" },

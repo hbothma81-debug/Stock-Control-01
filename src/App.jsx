@@ -74,7 +74,7 @@ import {
 import CutToSize from "./jobs/CutToSize.jsx";
 import BuyOuts from "./jobs/BuyOuts.jsx";
 import JobDrawings from "./jobs/JobDrawings.jsx";
-import { drawingRows } from "./jobs/jobDrawings.js";
+import { drawingRows, jobOnlyPartNumber, matchFileToPart } from "./jobs/jobDrawings.js";
 import Materials from "./jobs/Materials.jsx";
 import { addStockFromStores } from "./jobs/stockFromStores.js";
 import { markedStageTakes, jobIsMarked, comesBeforeForLine, orderedByLines, extraStagesOf, routeText, renameInList } from "./jobs/extraStages.js";
@@ -2067,11 +2067,18 @@ export default function StockControl() {
   const [pickLinesModal, setPickLinesModal] = useState(null);
   // The Drawings tab's current drawings for the open job, read when the
   // tab is opened (never on a timer): { jobId, byPart, loading }.
-  const [jobDrawingFiles, setJobDrawingFiles] = useState({ jobId: null, byPart: {}, loading: false });
-  // The linked stock part's part number: the Production card's rule.
+  // jobOnly: the drawings kept for this job only (drawings.job_id).
+  const [jobDrawingFiles, setJobDrawingFiles] = useState({ jobId: null, byPart: {}, jobOnly: [], loading: false });
+  // Bumped after an upload, so the tab reads its drawings again.
+  const [jobDrawingTick, setJobDrawingTick] = useState(0);
+  // The Drawings tab's upload pop-up: { entries, busy }, or null.
+  const [jobDrawingUpload, setJobDrawingUpload] = useState(null);
+  // A line's part number for its drawing: the linked stock part's, else
+  // the line's own stock code (its identity). The Production card's
+  // Drawings block uses this too.
   const linePartNumber = (line) => {
     const linked = line?.linked_item_id ? (items || []).find((i) => i.id === line.linked_item_id) : null;
-    return (linked?.partNumber || "").trim();
+    return (linked?.partNumber || line?.stock_code || "").trim();
   };
   const drawingPartsKey =
     jobDetailTab === "drawings" && jobDetail
@@ -2082,19 +2089,31 @@ export default function StockControl() {
     const jobId = jobDetail.job.id;
     const parts = drawingPartsKey ? drawingPartsKey.split("\n") : [];
     let stale = false;
-    setJobDrawingFiles((prev) => ({ jobId, byPart: prev.jobId === jobId ? prev.byPart : {}, loading: true }));
-    (parts.length
-      ? fetchRowsForIds("drawings", "part_number", parts, {
-          select: "id, part_number, file_name, internal_revision, customer_revision, created_at, uploaded_by",
-          filter: (q) => q.eq("status", "current"),
-        })
-      : Promise.resolve([])
-    )
-      .then((rows) => {
+    const columns = "id, part_number, file_name, internal_revision, customer_revision, created_at, uploaded_by";
+    setJobDrawingFiles((prev) =>
+      prev.jobId === jobId ? { ...prev, loading: true } : { jobId, byPart: {}, jobOnly: [], loading: true }
+    );
+    Promise.all([
+      parts.length
+        ? fetchRowsForIds("drawings", "part_number", parts, { select: columns, filter: (q) => q.eq("status", "current") })
+        : Promise.resolve([]),
+      // A database without drawings.job_id answers an error: none then.
+      supabase
+        .from("drawings")
+        .select(columns)
+        .eq("job_id", jobId)
+        .eq("status", "current")
+        .then(({ data, error }) => (error ? null : data || [])),
+    ])
+      .then(([rows, jobOnlyRows]) => {
         if (stale) return;
         const byPart = {};
         for (const d of rows || []) byPart[d.part_number.trim()] = d;
-        setJobDrawingFiles({ jobId, byPart, loading: false });
+        // null: the database has no drawings.job_id yet, so "This job
+        // only" is not offered (setup-drawings-job.sql).
+        const jobOnly = jobOnlyRows || [];
+        jobOnly.sort((a, b) => a.part_number.localeCompare(b.part_number, undefined, { numeric: true, sensitivity: "base" }));
+        setJobDrawingFiles({ jobId, byPart, jobOnly, jobOnlyReady: jobOnlyRows !== null, loading: false });
       })
       .catch((err) => {
         console.error("Failed to load the job's drawings:", err);
@@ -2103,7 +2122,7 @@ export default function StockControl() {
     return () => {
       stale = true;
     };
-  }, [jobDetail?.job?.id, jobDetailTab, drawingPartsKey]);
+  }, [jobDetail?.job?.id, jobDetailTab, drawingPartsKey, jobDrawingTick]);
   const [newItemForm, setNewItemForm] = useState({ description: "", qty: "", unitPrice: "", linkedItemId: null });
   // Whether the Customer Stock suggestions are open under the "Add an
   // item" box inside a job. The New Job form keeps its own, per row.
@@ -7677,6 +7696,60 @@ export default function StockControl() {
     }
   }
 
+  // Files dropped or picked on a job's Drawings tab (Heinrich, 21 Oct
+  // 2026). Each goes to the line whose part number its name holds. When
+  // every file found its line and none of those parts has a drawing yet
+  // they go straight in; otherwise the pop-up asks only what it must.
+  function startJobDrawingUpload(job, quoteItems, fileList) {
+    const parts = (quoteItems || []).map(linePartNumber).filter(Boolean);
+    const entries = Array.from(fileList || []).map((file, i) => ({
+      key: `${Date.now()}-${i}-${file.name}`,
+      file,
+      target: matchFileToPart(file.name, parts) || "",
+      mode: "revision",
+      customerRevision: "",
+    }));
+    if (entries.length === 0) return;
+    const needsAnswer = entries.some((e) => !e.target || drawingLookup[e.target]);
+    if (needsAnswer) setJobDrawingUpload({ entries, busy: false });
+    else runJobDrawingUpload(job, quoteItems, entries);
+  }
+
+  // The part number an upload entry is filed under in the library.
+  const jobDrawingPartFor = (job, entry) => (entry.target === "__job__" ? jobOnlyPartNumber(job.job_number, entry.file.name) : entry.target);
+
+  async function runJobDrawingUpload(job, quoteItems, entries) {
+    setJobDrawingUpload((u) => (u ? { ...u, busy: true } : u));
+    const failed = [];
+    for (const entry of entries) {
+      const jobOnly = entry.target === "__job__";
+      const partNumber = jobDrawingPartFor(job, entry);
+      const line = jobOnly ? null : (quoteItems || []).find((it) => linePartNumber(it) === partNumber);
+      try {
+        const done = await saveJobDrawing({
+          file: entry.file,
+          partNumber,
+          customer: job.customer || null,
+          customerRevision: entry.customerRevision.trim() || null,
+          linkedItemId: line?.linked_item_id || null,
+          description: line?.description || entry.file.name.replace(/\.[^.]*$/, ""),
+          jobId: jobOnly ? job.id : null,
+          replace: entry.mode === "replace" && !!drawingLookup[partNumber],
+        });
+        const action = done === "replaced" ? "Drawing replaced" : done === "revision" ? "Drawing: new revision" : "Drawing added";
+        await logJobEvent(job.id, action, `${partNumber}: ${entry.file.name}${jobOnly ? " (this job only)" : ""}`);
+      } catch (err) {
+        console.error(`Couldn't upload ${entry.file.name}:`, err);
+        failed.push(`${entry.file.name}: ${err?.message || err}`);
+      }
+    }
+    await loadDrawingLookup();
+    setJobDrawingTick((t) => t + 1);
+    refreshJobDetail();
+    setJobDrawingUpload(null);
+    if (failed.length) alert(`${failed.length} of ${entries.length} drawing${entries.length === 1 ? "" : "s"} did not upload:\n\n${failed.join("\n")}`);
+  }
+
   // inputs: line id -> quantity typed. The To invoice boxes on Items, or
   // the Create invoice / Create delivery note pop-up's own.
   function submitInvoiceForEnteredQuantities(job, quoteItems, inputs = invoiceQtyInputs) {
@@ -11959,7 +12032,7 @@ export default function StockControl() {
   // Drawings: src/drawings/useDrawings.jsx
   const { batchDeleteDrawingsForCustomer, closeDrawingUpload, deleteDrawing, handleDrawingFilesSelected,
     loadDrawingLookup, openDrawingPreview, openDrawingPreviewByPartNumber, refreshDrawings,
-    removeDrawingUploadFile, submitDrawingUpload } = useDrawings({
+    removeDrawingUploadFile, saveJobDrawing, submitDrawingUpload } = useDrawings({
     drawingCustomerFilter, drawingSearchQuery, drawingUploadCustomer, drawingUploadFiles, fetchAllRows, items,
     roleLabel, setDrawingLookup, setDrawingSearchFailed, setDrawingSearchLoading, setDrawingSearchResults,
     setDrawingUploadBusy, setDrawingUploadCustomer, setDrawingUploadFiles, setDrawingUploadResult,
@@ -16880,13 +16953,22 @@ export default function StockControl() {
                       const { job, process, isReady, quoteItems, documents, itemProgress, shortage } = selected;
                       const stagesOnJob = selected.jobProcesses || [];
                       const progressOnJob = selected.jobItemProgress || [];
+                      // Each line's drawing by linePartNumber (the job page's
+                      // Drawings tab reads the same), then the drawings kept
+                      // for this job only, on every stage.
                       const drawingsForJob = quoteItems
                         .map((it) => {
-                          const linkedItem = it.linked_item_id ? (items || []).find((i) => i.id === it.linked_item_id) : null;
-                          const drawing = linkedItem?.partNumber ? drawingLookup[linkedItem.partNumber.trim()] : null;
-                          return drawing ? { description: it.description, partNumber: linkedItem.partNumber, drawing } : null;
+                          const partNumber = linePartNumber(it);
+                          const drawing = partNumber ? drawingLookup[partNumber] : null;
+                          return drawing ? { description: it.description, partNumber, drawing } : null;
                         })
-                        .filter(Boolean);
+                        .filter(Boolean)
+                        .filter((d, i, all) => all.findIndex((o) => o.partNumber === d.partNumber) === i)
+                        .concat(
+                          Object.entries(drawingLookup)
+                            .filter(([, d]) => d.jobId === job.id)
+                            .map(([partNumber, d]) => ({ description: d.description || partNumber, partNumber, drawing: d }))
+                        );
                       // This stage's lines only: a cutting stage counts the
                       // parts, not the parent they sit under, and the
                       // other way round.
@@ -24238,14 +24320,33 @@ export default function StockControl() {
                 const stageNames = inFlowOrder((jobDetail.processes || []).filter((p) => !p.shortage_id), jobDetail.job)
                   .map((p) => p.process_name)
                   .filter((name, i, all) => all.indexOf(name) === i && !isInvoicingStage(name));
-                const held = jobDrawingFiles.jobId === jobDetail.job.id ? jobDrawingFiles : { byPart: {}, loading: true };
+                const held = jobDrawingFiles.jobId === jobDetail.job.id ? jobDrawingFiles : { byPart: {}, jobOnly: [], loading: true };
+                // The Goes to box: each part number on the job once.
+                const partOptions = [];
+                for (const line of jobDetail.quoteItems || []) {
+                  const pn = linePartNumber(line);
+                  if (pn && !partOptions.some((o) => o.value === pn)) partOptions.push({ value: pn, label: pn, hint: line.description });
+                }
+                partOptions.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }));
+                const changeEntries = (fn) => setJobDrawingUpload((u) => (u ? { ...u, entries: fn(u.entries) } : u));
                 return (
                   <JobDrawings
                     rows={drawingRows(jobDetail.quoteItems, linePartNumber, held.byPart, (line) =>
                       stageNames.filter((name) => stageTakesItem(name, line, jobDetail.quoteItems))
                     )}
+                    jobOnly={held.jobOnly}
+                    jobOnlyReady={!!held.jobOnlyReady}
                     loading={held.loading}
                     onOpen={(partNumber) => openDrawingPreviewByPartNumber(partNumber)}
+                    canUpload={canEditThisJob}
+                    onFiles={(files) => startJobDrawingUpload(jobDetail.job, jobDetail.quoteItems, files)}
+                    upload={jobDrawingUpload}
+                    partOptions={partOptions}
+                    existingFor={(entry) => !!drawingLookup[jobDrawingPartFor(jobDetail.job, entry)]}
+                    onUploadChange={(key, patch) => changeEntries((list) => list.map((e) => (e.key === key ? { ...e, ...patch } : e)))}
+                    onUploadRemove={(key) => changeEntries((list) => list.filter((e) => e.key !== key))}
+                    onUploadConfirm={() => runJobDrawingUpload(jobDetail.job, jobDetail.quoteItems, jobDrawingUpload.entries)}
+                    onUploadCancel={() => setJobDrawingUpload(null)}
                   />
                 );
               })()}
