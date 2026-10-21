@@ -154,15 +154,15 @@ Only two things, both small:
 2. **An order date**, if it must be separate from the date the job was booked
    in. Probably not: the job's own date is the order date in practice.
 
-## 6. Open, still to answer
+## 6. Answered, all of it (21 Oct 2026)
 
-1. **Can one job carry lines from two of the customer's POs?** Today the PO
-   sits on the job (`jobs.customer_po`), one per job, while HPE's own book has
-   an Order No per line. If two POs can share a job, the PO has to move onto
-   the line, which is a column and a change to every screen that prints it.
-   *Recommendation: leave it on the job for now, and only move it if the
-   office says it happens.*
-**Answered 21 Oct 2026:**
+1. **One job per PO, always.** His word: *"our jobs will always be per PO."*
+   A PO carries anything from 1 to 30 items, and the same item can sit on five
+   different POs, but each PO becomes a job of its own. So the order number
+   stays where it is typed today, on the job (`jobs.customer_po`), and needs
+   no column of its own on the line: the order sheet reads it off the job.
+   It also means a line's order number can never disagree with its job's, so
+   the sheet can group and total by PO safely.
 
 2. **Who owns it.** A conversation of its own, started fresh for it. The
    Claude API conversation built the Suppliers page and the document reader,
