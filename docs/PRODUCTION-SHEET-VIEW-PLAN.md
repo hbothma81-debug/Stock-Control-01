@@ -71,13 +71,16 @@ Customers tab work.
 3. Filters under the headings, and sorting by heading.
 4. Saturday: switch on, push with the Customers tab, check live.
 
-## 6. Questions for Heinrich
+## 6. Answered (22 Oct 2026)
 
-1. Where is the switch: on the **department list** (one sheet with every
-   department, a Stage column to filter), or **inside a department** (one
-   sheet per department, like the cards)?
-2. In a sheet row, does the operator **log the count or tick it right there**,
-   or does a tap on the row open today's card to do it?
-3. Who gets the Sheet: everyone, or office people (sales, admins) with the
-   floor kept on Cards?
-4. The columns in section 2: anything to add or drop?
+1. **A sheet per department**, inside the department, like the cards. So the
+   Stage column is left out: every row is that department's stage.
+2. **A tap on a row opens a pop-up for that item**: its drawing larger, easy
+   to read on a busy page, the item's count and Log, and Flag shortage. On a
+   stage counted per item (Each) the pop-up counts that item. On a stage
+   ticked once (Batch) one tick completes the whole job at that stage, so
+   the pop-up shows that tick and says so (decided, not asked).
+3. **Everyone gets both, on the switch**, "until we see what works the
+   best. It will work for certain departments and not others." So the
+   choice is remembered per device and per department (decided).
+4. Columns as in section 2, less Stage.

@@ -102,6 +102,8 @@ import { changesMaterial, pileStillUsed } from "./jobs/cutLineEdit.js";
 import EditableName from "./EditableName.jsx";
 import CardMenu from "./CardMenu.jsx";
 import { daysWaiting, daysWaitingText } from "./jobs/daysWaiting.js";
+import ProductionSheet, { sheetViewOffered } from "./production/ProductionSheet.jsx";
+import { readViews, viewFor, VIEW_STORE_KEY } from "./production/sheetRows.js";
 import TypeToFind from "./TypeToFind.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import { crashPlace } from "./lib/crashText.js";
@@ -1907,6 +1909,25 @@ export default function StockControl() {
     }
   }
   const [productionSelectedDept, setProductionSelectedDept] = useState(null);
+  // Cards or Sheet, per department, kept on the device (src/production).
+  const [productionViews, setProductionViews] = useState(() => {
+    try {
+      return readViews(window.localStorage);
+    } catch {
+      return {};
+    }
+  });
+  const setProductionView = (dept, view) => {
+    setProductionViews((prev) => {
+      const next = { ...prev, [dept]: view };
+      try {
+        window.localStorage.setItem(VIEW_STORE_KEY, JSON.stringify(next));
+      } catch {
+        // A browser that keeps nothing still switches, for this visit.
+      }
+      return next;
+    });
+  };
   // Which specific job card is open within the current department — null
   // shows the compact list (job number, SigmaNest number, customer, sales
   // rep only); selecting a card opens that one job's full management view
@@ -17822,8 +17843,194 @@ export default function StockControl() {
                         </button>
                       );
                     };
+                    // Cards or Sheet (Heinrich, 22 Oct 2026; plan in
+                    // docs/PRODUCTION-SHEET-VIEW-PLAN.md). Both on a switch
+                    // "until we see what works the best", remembered per
+                    // department. The pills are the same three either way.
+                    const sheetMode = sheetViewOffered() && viewFor(productionViews, procType) === "sheet";
+                    const viewSwitch = sheetViewOffered() ? (
+                      <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+                        {[["cards", "Cards"], ["sheet", "Sheet"]].map(([v, label]) => {
+                          const on = (sheetMode ? "sheet" : "cards") === v;
+                          return (
+                            <button
+                              key={v}
+                              type="button"
+                              className="stk-btn"
+                              style={{ ...S.productionPill, ...(on ? S.mainTabActive : {}) }}
+                              onClick={() => setProductionView(procType, v)}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null;
+                    if (sheetMode) {
+                      // One row per item at this stage, from the queue
+                      // already held: nothing new is loaded.
+                      const sheetRowsFor = (e) => {
+                        const { job, process, quoteItems, itemProgress, shortage, jobProcesses } = e;
+                        const lines = itemsForStage(process.process_name, quoteItems);
+                        const each = process.tracking_mode === "each";
+                        const standing = standingByProcess[process.id];
+                        const waited = daysWaiting(process, jobProcesses, job, shortage);
+                        const takenOff = new Set((jobDrawingHidden || {})[job.id] || []);
+                        const base = {
+                          entry: e,
+                          job: job.job_number,
+                          jobLink: isAdmin || profile?.isSalesPerson ? () => openJobDetail(job) : null,
+                          customer: job.customer || "",
+                          days: waited,
+                          daysText: waited === null ? "" : String(waited),
+                          due: job.due_date || "",
+                          dueText: job.due_date ? new Date(job.due_date).toLocaleDateString("en-ZA", { day: "numeric", month: "short" }) : "",
+                          rep: job.sales_rep || "",
+                          status: standing
+                            ? "Standing: waiting on office"
+                            : readinessLabel(e) + (shortage ? " · Re-cut" : "") + (process.is_urgent ? " · Urgent" : ""),
+                          alert: !!(standing || shortage || process.is_urgent),
+                        };
+                        if (lines.length === 0) {
+                          return [{ ...base, key: process.id, item: null, code: "", description: job.description || "No items listed", qty: null, done: null, toGo: null, drawing: null }];
+                        }
+                        return lines.map((it) => {
+                          const progress = itemProgress.find((ip) => ip.job_quote_item_id === it.id);
+                          const qty = Number(it.qty) || 0;
+                          const done = each ? Number(progress?.qty_complete) || 0 : process.is_complete ? qty : 0;
+                          const partNumber = linePartNumber(it);
+                          const d = partNumber ? drawingLookup[partNumber] : null;
+                          const drawing =
+                            canView("drawings") && d && d.storagePath && isLibraryFile(d.storagePath) && (!d.jobId || d.jobId === job.id) && !takenOff.has(partKey(partNumber))
+                              ? { storagePath: d.storagePath, title: `${partNumber}: open the drawing`, open: () => openDrawingPreviewByPartNumber(partNumber) }
+                              : null;
+                          return {
+                            ...base,
+                            key: `${process.id}:${it.id}`,
+                            item: it,
+                            code: it.stock_code || partNumber || "",
+                            description: (it.description || "Item") + (it.length_mm ? ` · ${Number(it.length_mm)} mm` : ""),
+                            qty,
+                            done,
+                            toGo: Math.max(qty - done, 0),
+                            drawing,
+                          };
+                        });
+                      };
+                      const groups = [
+                        ...(standingEntries.length > 0
+                          ? [{ key: "standing", title: "Standing — waiting on office", danger: true, rows: standingEntries.flatMap(sheetRowsFor) }]
+                          : []),
+                        ...(entries.length > 0
+                          ? [{
+                              key: "ready",
+                              title: "Ready now",
+                              rows: readyEntries.flatMap(sheetRowsFor),
+                              empty: waitingEntries.length === 0 ? "Nothing else can start right now." : "Nothing can start yet — everything here is waiting on an earlier stage.",
+                            }]
+                          : []),
+                        ...(waitingEntries.length > 0
+                          ? [{ key: "waiting", title: "Waiting on earlier stages", defaultOpen: false, quiet: true, rows: waitingEntries.flatMap(sheetRowsFor) }]
+                          : []),
+                      ];
+                      // The pop-up for one item: its drawing larger, its
+                      // count or the stage's tick, and Flag shortage.
+                      const renderSheetPopup = (row, close) => {
+                        const { job, process, quoteItems, itemProgress, isReady, jobProcesses, jobItemProgress } = row.entry;
+                        const each = process.tracking_mode === "each";
+                        return (
+                          <>
+                            <div style={S.modalHead}>
+                              <span style={S.modalTitle}>{job.job_number} — {job.customer || "No customer"}</span>
+                              <button type="button" className="stk-btn" style={S.iconBtn} onClick={close} title="Close">
+                                <X size={18} />
+                              </button>
+                            </div>
+                            <div style={{ fontSize: 15, fontWeight: 600 }}>{row.description}</div>
+                            <div className="stk-meta-row" style={S.rowMeta}>
+                              {row.code && <span>Code: {row.code}</span>}
+                              {row.qty !== null && <span>Qty: {row.qty}</span>}
+                              {row.qty !== null && <span>Done: {row.done}</span>}
+                              {row.daysText !== "" && <span>{daysWaitingText(row.days)}</span>}
+                              {row.dueText && <span>Due {row.dueText}</span>}
+                            </div>
+                            <div style={{ ...S.roleHint, marginTop: 2, ...(row.alert ? { color: C.danger, fontWeight: 600 } : {}) }}>
+                              {process.process_name}: {row.status}
+                            </div>
+                            {row.drawing && (
+                              <div style={{ margin: "10px 0" }}>
+                                <DrawingThumb storagePath={row.drawing.storagePath} title={row.drawing.title} onOpen={row.drawing.open} height={120} />
+                              </div>
+                            )}
+                            <div style={{ marginTop: 8 }}>
+                              {showsRequestInvoiceButton(process) ? (
+                                <div style={S.roleHint}>Invoicing is requested from the job's card.</div>
+                              ) : each && row.item ? (
+                                <SafeQtyProgressControl
+                                  process={process}
+                                  job={job}
+                                  quoteItems={[row.item]}
+                                  jobItems={quoteItems}
+                                  itemProgress={itemProgress}
+                                  limitFor={(item) => itemFlowLimit(process, jobProcesses || [], jobItemProgress || [], item, quoteItems)}
+                                  onSubmit={submitProcessItemProgress}
+                                />
+                              ) : (
+                                <>
+                                  <label style={{ ...S.checkRow, fontWeight: 600 }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={process.is_complete}
+                                      disabled={!isReady}
+                                      onChange={() => toggleJobProcessComplete(process, job)}
+                                    />
+                                    Complete
+                                  </label>
+                                  <div style={S.roleHint}>
+                                    This stage is ticked once for the whole job, every item at {process.process_name} together.
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                              <button
+                                type="button"
+                                className="stk-btn"
+                                style={{ ...S.reqActionBtnAlert, flex: 1 }}
+                                onClick={() => {
+                                  close();
+                                  openShortageFlagModal(job, process);
+                                }}
+                              >
+                                Flag shortage
+                              </button>
+                              <button
+                                type="button"
+                                className="stk-btn"
+                                style={{ ...S.reqActionBtnMuted, flex: 1 }}
+                                onClick={() => {
+                                  close();
+                                  setProductionSelectedProcessId(process.id);
+                                }}
+                              >
+                                Open the job's card
+                              </button>
+                            </div>
+                          </>
+                        );
+                      };
+                      return (
+                        <>
+                          {viewSwitch}
+                          <ErrorBoundary box what="the Production sheet" key={procType}>
+                            <ProductionSheet groups={groups} renderPopup={renderSheetPopup} />
+                          </ErrorBoundary>
+                        </>
+                      );
+                    }
                     return (
                       <>
+                        {viewSwitch}
                         {standingEntries.length > 0 && (
                           <Section title="Standing — waiting on office" count={standingEntries.length} danger>
                             {standingEntries.map(renderCard)}

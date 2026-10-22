@@ -242,7 +242,7 @@ export function useDrawings(deps) {
       // In pages: past 1000 current drawings a single request would leave
       // parts off, and their rows would lose the drawing button.
       const data = await fetchAllRows("drawings", {
-        select: "id, part_number, description, internal_revision, customer_revision",
+        select: "id, part_number, description, internal_revision, customer_revision, storage_path",
         filter: (q) => q.eq("status", "current"),
       });
       const map = {};
@@ -252,6 +252,8 @@ export function useDrawings(deps) {
           description: d.description,
           internalRevision: d.internal_revision,
           customerRevision: d.customer_revision,
+          // For the picture on the Production sheet (DrawingThumb).
+          storagePath: d.storage_path,
         };
       });
       // Which of them belong to one job only, so that job's Production
