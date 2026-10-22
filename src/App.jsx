@@ -17857,7 +17857,7 @@ export default function StockControl() {
                               key={v}
                               type="button"
                               className="stk-btn"
-                              style={{ ...S.productionPill, ...(on ? S.mainTabActive : {}) }}
+                              style={{ ...S.productionPill, width: "auto", padding: "5px 16px", fontSize: 14, ...(on ? S.mainTabActive : {}) }}
                               onClick={() => setProductionView(procType, v)}
                             >
                               {label}
