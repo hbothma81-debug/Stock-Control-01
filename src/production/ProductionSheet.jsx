@@ -19,9 +19,10 @@ import { FILTER_COLUMNS, filterRows, sortRows, nextSort } from "./sheetRows.js";
 //   customer, code, description, qty, done, toGo, days, daysText, due,
 //   dueText, rep, status, alert }
 
-// Off on the live site until Saturday 24 Oct 2026 (plan section 4); on
-// everywhere else, so practice can be tried. Saturday is this one word.
-export const PRODUCTION_SHEET_VIEW_ON = false;
+// Switched on for the live site on Friday 23 Oct 2026 (Heinrich: "add the
+// production view switch", a day before the planned Saturday). Was false
+// since 22 Oct; practice always had it.
+export const PRODUCTION_SHEET_VIEW_ON = true;
 const LIVE_HOST = "stock-control-01.vercel.app";
 export const sheetViewOffered = () =>
   PRODUCTION_SHEET_VIEW_ON || (typeof window !== "undefined" && window.location.hostname !== LIVE_HOST);
