@@ -23,6 +23,14 @@ export const TABS = [
 // Jobs and Notifications deliberately aren't in here — they get their own
 // prominent header buttons instead of getting lost in this already-long
 // wrapped tab row.
+// Assets is left out of the ...TABS spread below and added at the end, so
+// it draws as its own button at the far right of the bar rather than
+// inside the Stock menu (Heinrich, 23 Oct 2026: "move the Assets out of
+// the Stock Tab into its own bar on top next to records on the right
+// side"). It stays a stock division in TABS, so the Add item form, the
+// exports and its permission tick are unchanged.
+const ASSETS_TAB = TABS.find((t) => t.key === "assets");
+
 export const NAV_TABS = [
   { key: "jobs", label: "Jobs" },
   { key: "production", label: "Production" },
@@ -33,7 +41,7 @@ export const NAV_TABS = [
   // the database asks the same three questions in cnc_may
   // (setup-cnc-1-access.sql).
   { key: "cnc", label: "CNC" },
-  ...TABS,
+  ...TABS.filter((t) => t.key !== "assets"),
   { key: "requisitions", label: "Requisitions" },
   { key: "purchaseOrders", label: "Purchase Orders" },
   { key: "receiving", label: "Receiving" },
@@ -48,6 +56,8 @@ export const NAV_TABS = [
   { key: "poReports", label: "PO Reports" },
   { key: "usageLog", label: "Usage Log" },
   { key: "drawings", label: "Drawings" },
+  // Last, so it is the button on the far right, after Records.
+  ...(ASSETS_TAB ? [ASSETS_TAB] : []),
 ];
 
 // The tab bar groups related divisions under a shared dropdown instead of
@@ -55,7 +65,9 @@ export const NAV_TABS = [
 // top-level buttons (Jobs and Production stay standalone since they're
 // used the most) with everything else folded into a few logical groups.
 export const TAB_GROUPS = [
-  { label: "Stock", keys: ["plate", "structural", "cncBar", "custom", "buyouts", "fasteners", "stores", "assets"] },
+  // Assets is deliberately not in here: it is its own button at the far
+  // right of the bar (23 Oct 2026).
+  { label: "Stock", keys: ["plate", "structural", "cncBar", "custom", "buyouts", "fasteners", "stores"] },
   // Shortages used to be their own top-level button here. They now live
   // inside the Laser 4kw tab beside Nesting and Cutting, because that is
   // where one is dealt with: a re-cut goes on a program like any other
