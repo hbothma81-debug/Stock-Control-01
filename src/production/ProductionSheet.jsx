@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronUp, ChevronDown, X } from "lucide-react";
+import { ChevronUp, ChevronDown } from "lucide-react";
 import { C, S } from "../theme.js";
 import Section from "../Section.jsx";
 import DrawingThumb from "../drawings/DrawingThumb.jsx";
@@ -42,9 +42,14 @@ const COLUMNS = [
   { key: "status", label: "Status" },
 ];
 
-export default function ProductionSheet({ groups, renderPopup }) {
-  const [filters, setFilters] = useState({});
-  const [sort, setSort] = useState(null);
+// filters and sort are held by the page, per department, so they are still
+// set after a job or a card is opened and closed (Heinrich, 23 Oct 2026:
+// "filters stay on last view"); setView({ filters, sort }) changes them.
+export default function ProductionSheet({ groups, renderPopup, view, setView }) {
+  const filters = view?.filters || {};
+  const sort = view?.sort || null;
+  const setFilters = (fn) => setView({ filters: fn(filters), sort });
+  const setSort = (fn) => setView({ filters, sort: fn(sort) });
   const [openKey, setOpenKey] = useState(null);
 
   const cell = { padding: "4px 6px", verticalAlign: "middle", whiteSpace: "nowrap", fontSize: 13 };
@@ -138,13 +143,6 @@ export default function ProductionSheet({ groups, renderPopup }) {
 
   return (
     <>
-      {filtering && (
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
-          <button type="button" className="stk-btn" style={S.reqActionBtnMuted} onClick={() => setFilters({})}>
-            <X size={12} /> Clear filters
-          </button>
-        </div>
-      )}
       {groups.map((g) => {
         const shown = sortRows(filterRows(g.rows, filters), sort?.key, sort?.dir);
         return (

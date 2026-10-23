@@ -1940,6 +1940,17 @@ export default function StockControl() {
   const [productionCustomerFilter, setProductionCustomerFilter] = useState("");
   const [productionSalesRepFilter, setProductionSalesRepFilter] = useState("");
   const productionFiltering = !!(productionSearchQuery.trim() || productionCustomerFilter || productionSalesRepFilter);
+  // The Sheet view's column filters and sort, per department, held here so
+  // they are still set after a job or a card is opened and closed
+  // (Heinrich, 23 Oct 2026: "filters stay on last view").
+  const [productionSheetViews, setProductionSheetViews] = useState({});
+  const sheetFiltering = Object.values(productionSheetViews).some((v) => Object.values(v?.filters || {}).some((f) => String(f || "").trim()));
+  const clearProductionFilters = () => {
+    setProductionSearchQuery("");
+    setProductionCustomerFilter("");
+    setProductionSalesRepFilter("");
+    setProductionSheetViews((prev) => Object.fromEntries(Object.entries(prev).map(([k, v]) => [k, { ...v, filters: {} }])));
+  };
   // One place for what the Production tab's search and dropdowns mean,
   // read by the department list and by the department itself, so the
   // count on the pill and the length of the list can never disagree.
@@ -1991,6 +2002,11 @@ export default function StockControl() {
           onChange={setProductionSalesRepFilter}
           emptyLabel="All sales reps"
         />
+        {(productionFiltering || sheetFiltering) && (
+          <button type="button" className="stk-btn" style={{ ...S.reqActionBtnMuted, flex: "0 0 auto" }} onClick={clearProductionFilters}>
+            <X size={12} /> Clear filters
+          </button>
+        )}
       </div>
     );
   };
@@ -3543,7 +3559,8 @@ export default function StockControl() {
     setSelectedGradeGroup(null);
     setAssetManufacturerOpen(null);
     setAssetDetailOpen(null);
-    setProductionSearchQuery("");
+    // The Production search is kept, like its other filters, until Clear
+    // filters (Heinrich, 23 Oct 2026: "filters stay on last view").
     setExpandedReqId(null);
     setExpandedPoId(null);
     setReceivingSearchQuery("");
@@ -18026,7 +18043,12 @@ export default function StockControl() {
                         <>
                           {viewSwitch}
                           <ErrorBoundary box what="the Production sheet" key={procType}>
-                            <ProductionSheet groups={groups} renderPopup={renderSheetPopup} />
+                            <ProductionSheet
+                              groups={groups}
+                              renderPopup={renderSheetPopup}
+                              view={productionSheetViews[procType]}
+                              setView={(v) => setProductionSheetViews((prev) => ({ ...prev, [procType]: v }))}
+                            />
                           </ErrorBoundary>
                         </>
                       );
