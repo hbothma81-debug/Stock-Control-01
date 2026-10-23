@@ -17124,10 +17124,13 @@ export default function StockControl() {
                 const aShort = a.shortage && a.shortage.is_priority !== false ? 1 : 0;
                 const bShort = b.shortage && b.shortage.is_priority !== false ? 1 : 0;
                 if (aShort !== bShort) return bShort - aShort;
-                const rank = (e) =>
-                  e.process.assigned_to === currentUser?.id ? 0 : !e.process.assigned_to ? 1 : 2;
-                if (rank(a) !== rank(b)) return rank(a) - rank(b);
-                return new Date(a.job.due_date || "2999-01-01") - new Date(b.job.due_date || "2999-01-01");
+                // Then oldest booked-in first, newest at the bottom, on the
+                // cards and the sheet alike (Heinrich, 23 Oct 2026; it was
+                // yours, unassigned, others', then due date). Ties by job
+                // number, which follows booking-in.
+                const booked = (e) => Date.parse(e.job.created_at) || 0;
+                if (booked(a) !== booked(b)) return booked(a) - booked(b);
+                return String(a.job.job_number || "").localeCompare(String(b.job.job_number || ""), "en", { numeric: true });
               };
               // Standing work (an open Info Request on this stage) gets
               // its own red pill on top and leaves the other two, so the
